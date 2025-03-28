@@ -172,7 +172,7 @@ class SmallWebRTCClient:
             logger.debug("Client connection closed.")
             await self._handle_client_closed()
 
-        @self._webrtc_connection.event_handler("appMessage")
+        @self._webrtc_connection.event_handler("app-message")
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
             await self._handle_app_message(message)
 
