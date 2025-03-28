@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `GladiaSTTService` now uses Gladia's default values.
+- Refactored `GladiaSTTService` into a modular structure with separate
+  configuration classes. Also, `GladiaSTTService` now uses Gladia's default
+  values.
 
 ### Fixed
 
@@ -47,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Deprecated the `language` parameter in `GladiaSTTService.InputParams` in
   favor of `language_config`, which better aligns with Gladia's API.
+
+- Deprecated using `GladiaSTTService.InputParams` directly. Use the new
+  `GladiaInputParams` class instead.
 
 ## [0.0.61] - 2025-03-26
 
