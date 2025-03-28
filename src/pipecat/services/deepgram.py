@@ -102,10 +102,10 @@ class DeepgramTTSService(TTSService):
                 await self.stop_ttfb_metrics()
                 chunk = audio_buffer.read(chunk_size)
                 if not chunk:
-                    yield TTSStoppedFrame()
                     break
                 frame = TTSAudioRawFrame(audio=chunk, sample_rate=self.sample_rate, num_channels=1)
                 yield frame
+            yield TTSStoppedFrame()
 
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
