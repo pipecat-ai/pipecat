@@ -436,7 +436,7 @@ async def main(
     # Register terminate function with the human conversation LLM
     human_conversation_llm.register_function(
         "terminate_call",
-        terminate_call,
+        terminate_call(*args, **kwargs, session_manager=session_manager),
     )
 
     # Build human conversation pipeline

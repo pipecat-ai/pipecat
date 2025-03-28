@@ -169,7 +169,7 @@ async def main(
     transport = DailyTransport(
         room_url,
         token,
-        "Call Transfer Chatbot",
+        "Call Transfer Bot",
         transport_params,
     )
 
