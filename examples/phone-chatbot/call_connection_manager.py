@@ -544,3 +544,61 @@ class CallConfigManager:
             Boolean indicating if voicemail detection is enabled
         """
         return bool(self.body.get("voicemail_detection"))
+
+    def customize_prompt(self, prompt: str, customer_name: Optional[str] = None) -> str:
+        """Insert customer name into prompt template if available.
+
+        Args:
+            prompt: The prompt template containing optional {customer_name} placeholders
+            customer_name: Optional customer name to insert
+
+        Returns:
+            Customized prompt with customer name inserted
+        """
+        if customer_name and prompt:
+            return prompt.replace("{customer_name}", customer_name)
+        return prompt
+
+    def create_system_message(self, content: str) -> Dict[str, str]:
+        """Create a properly formatted system message.
+
+        Args:
+            content: The message content
+
+        Returns:
+            Dictionary with role and content for the system message
+        """
+        return {"role": "system", "content": content}
+
+    def create_user_message(self, content: str) -> Dict[str, str]:
+        """Create a properly formatted user message.
+
+        Args:
+            content: The message content
+
+        Returns:
+            Dictionary with role and content for the user message
+        """
+        return {"role": "user", "content": content}
+
+    def get_customer_info_suffix(
+        self, customer_name: Optional[str] = None, preposition: str = "for"
+    ) -> str:
+        """Create a consistent customer info suffix.
+
+        Args:
+            customer_name: Optional customer name
+            preposition: Preposition to use before the name (e.g., "for", "to", "")
+
+        Returns:
+            String with formatted customer info suffix
+        """
+        if not customer_name:
+            return ""
+
+        # Add a space before the preposition if it's not empty
+        space_prefix = " " if preposition else ""
+        # For non-empty prepositions, add a space after it
+        space_suffix = " " if preposition else ""
+
+        return f"{space_prefix}{preposition}{space_suffix}{customer_name}"
