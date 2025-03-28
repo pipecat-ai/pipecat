@@ -464,6 +464,10 @@ class ElevenLabsHttpTTSService(TTSService):
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
+        context: Optional[List[dict]] = None
+        """Optionally provide a context for previous_text parameter for "context-aware" TTS resulting in more consistant TTS output"""
+        context_max_previous_text: int = 3
+        """The max number of previous assistant messages that will be used for the previous_text parameter"""
 
     def __init__(
         self,
@@ -530,6 +534,22 @@ class ElevenLabsHttpTTSService(TTSService):
 
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
+
+        if self._params.context:
+            # Get the previous assistant messages
+            previous_assistant_messages = []
+            if self._params.context is not None:
+                previous_assistant_messages = [
+                    msg.get("content")
+                    for msg in self._params.context
+                    if msg.get("role") == "assistant" and isinstance(msg.get("content"), str)
+                ]
+                previous_assistant_messages = previous_assistant_messages[
+                    -self._params.context_max_previous_text :
+                ]
+
+            if len(previous_assistant_messages) > 0:
+                payload["previous_text"] = " ".join(previous_assistant_messages)
 
         language = self._settings["language"]
         if self._model_name in ELEVENLABS_MULTILINGUAL_MODELS and language:
