@@ -82,12 +82,9 @@ def determine_room_capabilities(config_body: Optional[Dict[str, Any]] = None) ->
 
     # Check if there's a transfer to an operator configured
     has_call_transfer = "call_transfer" in config_body
-    has_operator_number = has_call_transfer and "operatorNumber" in config_body.get(
-        "call_transfer", {}
-    )
 
     # Enable dialout if any condition requires it
-    capabilities["enable_dialout"] = has_dialout_settings or has_operator_number
+    capabilities["enable_dialout"] = has_dialout_settings or has_call_transfer
 
     return capabilities
 
@@ -125,32 +122,14 @@ def validate_body(body: Dict[str, Any]) -> None:
     has_call_transfer = "call_transfer" in body
     has_voicemail = "voicemail_detection" in body
 
-    # Test in Prebuilt flags
-    call_transfer_test = has_call_transfer and body.get("call_transfer", {}).get(
-        "testInPrebuilt", False
-    )
-    voicemail_test = has_voicemail and body.get("voicemail_detection", {}).get(
-        "testInPrebuilt", False
-    )
-
     # Error scenarios
     errors = []
-
-    # The restriction for having both dialin and dialout settings has been removed
-    # This allows for future functionality that might use both simultaneously
 
     # Cannot have both call_transfer and voicemail_detection
     if has_call_transfer and has_voicemail:
         errors.append(
             "Cannot have both 'call_transfer' and 'voicemail_detection' in the same configuration"
         )
-
-    # The restriction that dialin_settings can only be used with call_transfer has been removed
-    # This allows greater flexibility for future scenarios
-
-    # The restriction that dialout_settings can only be used with voicemail_detection has been removed
-    # This allows call_transfer to work with dialout_settings for future functionality
-    # where the bot might need to dial out to customers
 
     # If we have any errors, raise an exception with all the problems
     if errors:
@@ -183,10 +162,6 @@ def create_call_transfer_settings(body: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Call transfer settings dictionary
     """
-    # Return existing settings if already specified
-    if "call_transfer" in body:
-        return body["call_transfer"]
-
     # Default transfer settings
     transfer_settings = {
         "mode": DEFAULT_MODE,
@@ -195,22 +170,30 @@ def create_call_transfer_settings(body: Dict[str, Any]) -> Dict[str, Any]:
         "testInPrebuilt": DEFAULT_TEST_IN_PREBUILT,
     }
 
-    # Check if we have dialin settings
-    if "dialin_settings" in body:
-        # Create a temporary routing manager just for customer lookup
-        call_config_manager = CallConfigManager(body)
+    # If call_transfer already exists, merge the defaults with the existing settings
+    # This ensures all required fields exist while preserving user-specified values
+    if "call_transfer" in body:
+        existing_settings = body["call_transfer"]
+        # Update defaults with existing settings (existing values will override defaults)
+        for key, value in existing_settings.items():
+            transfer_settings[key] = value
+    else:
+        # No existing call_transfer - check if we have dialin settings for customer lookup
+        if "dialin_settings" in body:
+            # Create a temporary routing manager just for customer lookup
+            call_config_manager = CallConfigManager(body)
 
-        # Get caller info
-        caller_info = call_config_manager.get_caller_info()
-        from_number = caller_info.get("caller_number")
+            # Get caller info
+            caller_info = call_config_manager.get_caller_info()
+            from_number = caller_info.get("caller_number")
 
-        if from_number:
-            # Get customer name from phone number
-            customer_name = call_config_manager.get_customer_name(from_number)
+            if from_number:
+                # Get customer name from phone number
+                customer_name = call_config_manager.get_customer_name(from_number)
 
-            # If we know the customer name, add it to the config for the bot to use
-            if customer_name:
-                transfer_settings["customerName"] = customer_name
+                # If we know the customer name, add it to the config for the bot to use
+                if customer_name:
+                    transfer_settings["customerName"] = customer_name
 
     return transfer_settings
 
@@ -473,8 +456,11 @@ async def handle_start_request(request: Request) -> JSONResponse:
             if "llm" not in body:
                 body["llm"] = DEFAULT_LLM
 
-            # Add call_transfer if dealing with dialin settings - handled by bot_runner
+            # Add call_transfer if dealing with dialin settings
             if "dialin_settings" in body and "call_transfer" not in body:
+                body["call_transfer"] = create_call_transfer_settings(body)
+            # Handle existing call_transfer by merging with defaults
+            elif "call_transfer" in body:
                 body["call_transfer"] = create_call_transfer_settings(body)
 
             # Validate the body
