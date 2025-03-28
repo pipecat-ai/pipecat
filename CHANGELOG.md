@@ -9,19 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
-  - Created two examples in `p2p-webrtc`:
-    - **video-transform**: Demonstrates sending and receiving audio/video with `SmallWebRTCTransport` using `TypeScript`. 
-      Includes video frame processing with OpenCV.
-    - **voice-agent**: A minimal example of creating a voice agent with `SmallWebRTCTransport`.
+- `GladiaSTTService` now have comprehensive support for the latest API config
+  options, including model, language detection, preprocessing, custom
+  vocabulary, custom spelling, translation, and message filtering options.
 
-- Added support to `ProtobufFrameSerializer` to send the messages from `TransportMessageFrame` and `TransportMessageUrgentFrame`.
+- Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
+
+  - Created two examples in `p2p-webrtc`:
+    - **video-transform**: Demonstrates sending and receiving audio/video with
+      `SmallWebRTCTransport` using `TypeScript`. Includes video frame
+      processing with OpenCV.
+    - **voice-agent**: A minimal example of creating a voice agent with
+      `SmallWebRTCTransport`.
+
+- Added support to `ProtobufFrameSerializer` to send the messages from
+  `TransportMessageFrame` and `TransportMessageUrgentFrame`.
 
 - Added support for a new TTS service, `PiperTTSService`.
   (see https://github.com/rhasspy/piper/)
 
 - It is now possible to tell whether `UserStartedSpeakingFrame` or
   `UserStoppedSpeakingFrame` have been generated because of emulation frames.
+
+### Changed
+
+- `GladiaSTTService` now uses Gladia's default values.
 
 ### Fixed
 
@@ -30,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalid transcriptions.
 
 - Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
+### Deprecated
+
+- Deprecated the `language` parameter in `GladiaSTTService.InputParams` in
+  favor of `language_config`, which better aligns with Gladia's API.
 
 ## [0.0.61] - 2025-03-26
 
