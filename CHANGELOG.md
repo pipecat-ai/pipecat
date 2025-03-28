@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - **voice-agent**: A minimal example of creating a voice agent with
       `SmallWebRTCTransport`.
 
+- `GladiaSTTService` now have comprehensive support for the latest API config
+  options, including model, language detection, preprocessing, custom
+  vocabulary, custom spelling, translation, and message filtering options.
+
 - Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
 
   - Created two examples in `p2p-webrtc`:
@@ -52,20 +56,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pipecat services have been reorganized into packages. Each package can have
   one or more of the following modules (in the future new module names might be
   needed) depending on the services implemented:
-    -  image: for image generation services
-    -    llm: for LLM services
-    - memory: for memory services
-    -    stt: for Speech-To-Text services
-    -    tts: for Text-To-Speech services
-    -  video: for video generation services
-    - vision: for video recognition services
 
-### Deprecated
+  - image: for image generation services
+  - llm: for LLM services
+  - memory: for memory services
+  - stt: for Speech-To-Text services
+  - tts: for Text-To-Speech services
+  - video: for video generation services
+  - vision: for video recognition services
 
-- All Pipecat services imports have been deprecated and a warning will be shown
-  when using the old import. The new import should be
-  `pipecat.services.[service].[image,llm,memory,stt,tts,video,vision]`. For
-  example, `from pipecat.services.openai.llm import OpenAILLMService`.
+- `GladiaSTTService` now uses Gladia's default values.
 
 ### Fixed
 
@@ -74,6 +74,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalid transcriptions.
 
 - Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
+### Deprecated
+
+- All Pipecat services imports have been deprecated and a warning will be shown
+  when using the old import. The new import should be
+  `pipecat.services.[service].[image,llm,memory,stt,tts,video,vision]`. For
+  example, `from pipecat.services.openai.llm import OpenAILLMService`.
+
+- Deprecated the `language` parameter in `GladiaSTTService.InputParams` in
+  favor of `language_config`, which better aligns with Gladia's API.
+
+- Deprecated using `GladiaSTTService.InputParams` directly. Use the new
+  `GladiaInputParams` class instead.
 
 ### Other
 
