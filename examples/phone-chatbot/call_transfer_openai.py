@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -99,7 +101,7 @@ async def terminate_call(
 ):
     """Function the bot can call to terminate the call upon completion of a voicemail message."""
     await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-    await result_callback("Thank you for chatting. Goodbye!")
+    # await result_callback("Thank you for chatting. Goodbye!")
 
 
 async def main(
@@ -201,9 +203,9 @@ async def main(
                 await call_config_manager.start_dialout(transport, [dialout_setting])
 
             else:
-                await result_callback("No operator dialout settings available")
+                logger.info("No operator dialout settings available")
         else:
-            await result_callback("Other mode not supported")
+            logger.info("Other mode not supported")
 
     # Get prompts from routing manager
     call_transfer_initial_prompt = call_config_manager.get_prompt("call_transfer_initial_prompt")
@@ -255,22 +257,33 @@ async def main(
     llm.register_function("terminate_call", terminate_call)
     llm.register_function("dial_operator", dial_operator)
 
-    tools = [
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "terminate_call",
-                "description": "Call this function to terminate the call.",
-            },
-        ),
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "dial_operator",
-                "description": "Call this function when the user asks to speak with a human",
-            },
-        ),
-    ]
+    # tools = [
+    #     ChatCompletionToolParam(
+    #         type="function",
+    #         function={
+    #             "name": "terminate_call",
+    #             "description": "Call this function to terminate the call.",
+    #         },
+    #     ),
+    #     ChatCompletionToolParam(
+    #         type="function",
+    #         function={
+    #             "name": "dial_operator",
+    #             "description": "Call this function when the user asks to speak with a human",
+    #         },
+    #     ),
+    # ]
+
+    terminate_call_function = FunctionSchema(
+        name="terminate_call",
+        description="Call this function to terminate the call.",
+    )
+    dial_operator_function = FunctionSchema(
+        name="dial_operator",
+        description="Call this function when the user asks to speak with a human",
+    )
+
+    tools = ToolsSchema(standard_tools=[terminate_call_function, dial_operator_function])
 
     # Initialize LLM context and aggregator
     context = OpenAILLMContext(messages, tools)
