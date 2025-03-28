@@ -11,8 +11,9 @@ import sys
 from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -34,28 +35,14 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
-async def terminate_call(
-    function_name,
-    tool_call_id,
-    args,
-    llm: LLMService,
-    context,
-    result_callback,
-    session_manager=None,
-):
-    """Function the bot can call to terminate the call upon completion of a voicemail message."""
-    if session_manager:
-        # Mark that the call was terminated by the bot
-        session_manager.call_flow_state.set_call_terminated()
-
-    await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-
-
 async def main(
     room_url: str,
     token: str,
     body: dict,
 ):
+    # ------------ CONFIGURATION AND SETUP ------------
+
+    # Create a config manager using the provided body
     call_config_manager = CallConfigManager.from_json_string(body) if body else CallConfigManager()
 
     # Get important configuration values
@@ -69,6 +56,9 @@ async def main(
     # Initialize the session manager
     session_manager = SessionManager()
 
+    # ------------ TRANSPORT SETUP ------------
+
+    # Initialize transport with Daily
     transport = DailyTransport(
         room_url,
         token,
@@ -85,31 +75,48 @@ async def main(
         ),
     )
 
+    # Initialize text-to-speech service
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="af346552-54bf-4c2b-a4d4-9d2820f51b6c",
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-    # Pass the session_manager to the terminate_call function
-    llm.register_function(
-        "terminate_call",
-        lambda *args, **kwargs: terminate_call(*args, **kwargs, session_manager=session_manager),
+    # ------------ FUNCTION DEFINITIONS ------------
+
+    async def terminate_call(
+        function_name, tool_call_id, args, llm: LLMService, context, result_callback
+    ):
+        """Function the bot can call to terminate the call upon completion of a voicemail message."""
+        if session_manager:
+            # Mark that the call was terminated by the bot
+            session_manager.call_flow_state.set_call_terminated()
+
+        # Then end the call
+        await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+
+    # Define function schemas for tools
+    terminate_call_function = FunctionSchema(
+        name="terminate_call",
+        description="Call this function to terminate the call.",
+        properties={},
+        required=[],
     )
 
-    tools = [
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "terminate_call",
-                "description": "Terminate the call",
-            },
-        )
-    ]
+    # Create tools schema
+    tools = ToolsSchema(standard_tools=[terminate_call_function])
+
+    # ------------ LLM AND CONTEXT SETUP ------------
+
+    # Initialize LLM
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+
+    # Register functions with the LLM
+    llm.register_function("terminate_call", terminate_call)
 
     # Check for custom voicemail detection prompt
     voicemail_detection_prompt = call_config_manager.get_prompt("voicemail_detection_prompt")
 
+    # Build system instruction
     if voicemail_detection_prompt:
         system_instruction = voicemail_detection_prompt
     else:
@@ -158,23 +165,31 @@ async def main(
                 - Your output will be converted to audio, so **do not include special characters or formatting.**
                 """
 
-    messages = [{"role": "system", "content": system_instruction}]
+    # Create system message and initialize messages list
+    messages = [call_config_manager.create_system_message(system_instruction)]
 
+    # Initialize LLM context and aggregator
     context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
+    # ------------ PIPELINE SETUP ------------
+
+    # Build pipeline
     pipeline = Pipeline(
         [
-            transport.input(),
-            context_aggregator.user(),
-            llm,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
+            transport.input(),  # Transport user input
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
+    # Create pipeline task
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+
+    # ------------ EVENT HANDLERS ------------
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
@@ -183,7 +198,6 @@ async def main(
             logger.debug("Dialout settings detected; starting dialout")
             await call_config_manager.start_dialout(transport, dialout_settings)
 
-    # Configure handlers for dialing out
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
         logger.debug(f"Dial-out connected: {data}")
@@ -193,6 +207,8 @@ async def main(
         logger.debug(f"Dial-out answered: {data}")
         # Set the customer session ID in the session manager
         session_manager.set_session_id("customer", data["sessionId"])
+        # Automatically start capturing transcription for the participant
+        await transport.capture_participant_transcription(data["sessionId"])
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
@@ -200,9 +216,6 @@ async def main(
         await transport.capture_participant_transcription(participant["id"])
         # Track the customer if it's the first participant
         session_manager.set_session_id("customer", participant["id"])
-
-    if test_mode:
-        logger.debug("Running in test mode (can be tested in Daily Prebuilt)")
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
@@ -215,8 +228,12 @@ async def main(
 
         await task.cancel()
 
-    runner = PipelineRunner()
+    # ------------ RUN PIPELINE ------------
 
+    if test_mode:
+        logger.debug("Running in test mode (can be tested in Daily Prebuilt)")
+
+    runner = PipelineRunner()
     await runner.run(task)
 
 

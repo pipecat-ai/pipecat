@@ -294,7 +294,7 @@ async def main(
             else:
                 # Create a message to add
                 content = "Indicate that there are no operator dialout settings available."
-                message = call_config_manager.create_system_message(content)
+                message = call_config_manager.create_user_message(content)
 
                 # Add the message to the context
                 context_aggregator.user().add_messages([message])
@@ -305,7 +305,7 @@ async def main(
         else:
             # Create a message to add
             content = "Indicate that the current mode is not supported."
-            message = call_config_manager.create_system_message(content)
+            message = call_config_manager.create_user_message(content)
 
             # Add the message to the context
             context_aggregator.user().add_messages([message])
@@ -463,7 +463,7 @@ async def main(
                 Let the customer know the operator has left and ask if they need further assistance."""
 
         # Create and queue system message
-        message = call_config_manager.create_system_message(content)
+        message = call_config_manager.create_user_message(content)
         context_aggregator.user().add_messages([message])
         await task.queue_frames([context_aggregator.user().get_context_frame()])
         logger.info("Operator has left the call")
