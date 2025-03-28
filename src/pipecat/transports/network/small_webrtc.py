@@ -6,22 +6,14 @@
 
 import asyncio
 import fractions
-import logging
 import time
 from collections import deque
 from typing import Any, Awaitable, Callable, Optional
 
-import cv2
 import numpy as np
-from aiortc import VideoStreamTrack
-from aiortc.mediastreams import AudioStreamTrack, MediaStreamError, VideoFrame
-from av import AudioFrame, AudioResampler
 from loguru import logger
 from pydantic import BaseModel
 
-# Get the logger for aiortc
-# aiortc_logger = logging.getLogger("aiortc")
-# aiortc_logger.setLevel(logging.DEBUG)
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -36,6 +28,16 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+
+try:
+    import cv2
+    from aiortc import VideoStreamTrack
+    from aiortc.mediastreams import AudioStreamTrack, MediaStreamError
+    from av import AudioFrame, AudioResampler, VideoFrame
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class SmallWebRTCCallbacks(BaseModel):
@@ -137,7 +139,7 @@ class RawVideoTrack(VideoStreamTrack):
 
 class SmallWebRTCClient:
     def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
-        self._webrtcConnection = webrtc_connection
+        self._webrtc_connection = webrtc_connection
         self._closing = False
         self._callbacks = callbacks
 
@@ -155,23 +157,23 @@ class SmallWebRTCClient:
         # otherwise we face issues with Silero VAD
         self._pipecat_resampler = AudioResampler("s16", "mono", 16000)
 
-        @self._webrtcConnection.on("connected")
+        @self._webrtc_connection.event_handler("connected")
         async def on_connected(connection: SmallWebRTCConnection):
-            logger.info("Peer connection established.")
+            logger.debug("Peer connection established.")
             await self._handle_client_connected()
 
-        @self._webrtcConnection.on("disconnected")
+        @self._webrtc_connection.event_handler("disconnected")
         async def on_disconnected(connection: SmallWebRTCConnection):
-            logger.info("Peer connection lost.")
+            logger.debug("Peer connection lost.")
             await self._handle_client_disconnected()
 
-        @self._webrtcConnection.on("closed")
+        @self._webrtc_connection.event_handler("closed")
         async def on_closed(connection: SmallWebRTCConnection):
-            logger.info("Client connection closed.")
+            logger.debug("Client connection closed.")
             await self._handle_client_closed()
 
-        @self._webrtcConnection.on("appMessage")
-        async def on_app_message(message: Any):
+        @self._webrtc_connection.event_handler("app-message")
+        async def on_app_message(connection: SmallWebRTCConnection, message: Any):
             await self._handle_app_message(message)
 
     async def read_video_frame(self):
@@ -187,9 +189,9 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(self._video_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtcConnection.is_connected():
+                if self._webrtc_connection.is_connected():
                     logger.warning("Timeout: No video frame received within the specified time.")
-                    # self._webrtcConnection.ask_to_renegotiate()
+                    # self._webrtc_connection.ask_to_renegotiate()
                 frame = None
             except MediaStreamError:
                 logger.warning("Received an unexpected media stream error while reading the audio.")
@@ -237,7 +239,7 @@ class SmallWebRTCClient:
             try:
                 frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
-                if self._webrtcConnection.is_connected():
+                if self._webrtc_connection.is_connected():
                     logger.warning("Timeout: No audio frame received within the specified time.")
                 frame = None
             except MediaStreamError:
@@ -285,56 +287,56 @@ class SmallWebRTCClient:
         self._params = _params
 
     async def connect(self):
-        if self._webrtcConnection.is_connected():
+        if self._webrtc_connection.is_connected():
             # already initialized
             return
 
         logger.info(f"Connecting to Small WebRTC")
-        await self._webrtcConnection.connect()
+        await self._webrtc_connection.connect()
 
     async def disconnect(self):
         if self.is_connected and not self.is_closing:
             logger.info(f"Disconnecting to Small WebRTC")
             self._closing = True
-            await self._webrtcConnection.close()
+            await self._webrtc_connection.close()
             await self._handle_client_disconnected()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if self._can_send():
-            self._webrtcConnection.send_app_message(frame.message)
+            self._webrtc_connection.send_app_message(frame.message)
 
     async def _handle_client_connected(self):
         # There is nothing to do here yet, the pipeline is still not ready
         if not self._params:
             return
 
-        self._audio_input_track = self._webrtcConnection.audio_input_track()
-        self._video_input_track = self._webrtcConnection.video_input_track()
+        self._audio_input_track = self._webrtc_connection.audio_input_track()
+        self._video_input_track = self._webrtc_connection.video_input_track()
         if self._params.audio_out_enabled:
             self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
-            self._webrtcConnection.replace_audio_track(self._audio_output_track)
+            self._webrtc_connection.replace_audio_track(self._audio_output_track)
 
         if self._params.camera_out_enabled:
             self._video_output_track = RawVideoTrack(
                 width=self._params.camera_out_width, height=self._params.camera_out_height
             )
-            self._webrtcConnection.replace_video_track(self._video_output_track)
+            self._webrtc_connection.replace_video_track(self._video_output_track)
 
-        await self._callbacks.on_client_connected(self._webrtcConnection)
+        await self._callbacks.on_client_connected(self._webrtc_connection)
 
     async def _handle_client_disconnected(self):
         self._audio_input_track = None
         self._video_input_track = None
         self._audio_output_track = None
         self._video_output_track = None
-        await self._callbacks.on_client_disconnected(self._webrtcConnection)
+        await self._callbacks.on_client_disconnected(self._webrtc_connection)
 
     async def _handle_client_closed(self):
         self._audio_input_track = None
         self._video_input_track = None
         self._audio_output_track = None
         self._video_output_track = None
-        await self._callbacks.on_client_closed(self._webrtcConnection)
+        await self._callbacks.on_client_closed(self._webrtc_connection)
 
     async def _handle_app_message(self, message: Any):
         await self._callbacks.on_app_message(message)
@@ -344,7 +346,7 @@ class SmallWebRTCClient:
 
     @property
     def is_connected(self) -> bool:
-        return self._webrtcConnection.is_connected()
+        return self._webrtc_connection.is_connected()
 
     @property
     def is_closing(self) -> bool:
@@ -412,7 +414,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
     async def push_app_message(self, message: Any):
-        logger.info(f"Received app message inside SmallWebRTCInputTransport  {message}")
+        logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
         frame = TransportMessageUrgentFrame(message=message)
         await self.push_frame(frame)
 
