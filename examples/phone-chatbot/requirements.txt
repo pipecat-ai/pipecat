@@ -1,4 +1,4 @@
-pipecat-ai[daily,elevenlabs,openai,silero]
+pipecat-ai[daily,cartesia,openai,google,silero]
 fastapi
 uvicorn
 python-dotenv
