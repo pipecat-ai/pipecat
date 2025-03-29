@@ -64,6 +64,7 @@ langchain = [ "langchain~=0.3.20", "langchain-community~=0.3.20", "langchain-ope
 livekit = [ "livekit~=0.22.0", "livekit-api~=0.8.2", "tenacity~=9.0.0" ]
 lmnt = [ "websockets~=13.1" ]
 local = [ "pyaudio~=0.2.14" ]
+mem0 = [ "mem0ai~=0.1.76" ]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
 moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers~=4.48.0" ]
 nim = []
@@ -86,7 +87,6 @@ ultravox = [ "transformers~=4.48.0", "vllm~=0.7.3" ]
 webrtc = [ "aiortc~=1.10.1", "opencv-python~=4.11.0.86" ]
 websocket = [ "websockets~=13.1", "fastapi~=0.115.6" ]
 whisper = [ "faster-whisper~=1.1.1" ]
-mem0 = [ "mem0ai~=0.1.76" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:
