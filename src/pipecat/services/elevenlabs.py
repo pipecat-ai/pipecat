@@ -178,6 +178,61 @@ def calculate_word_times(
     return word_times
 
 
+class SharedTTSCache:
+    def __init__(self, max_size: int = 1000):
+        self._cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._cache_order: List[str] = []
+        self._cache_size = max_size
+        self._cache_lock = asyncio.Lock()
+
+    async def add(self, key: str, messages: List[Dict[str, Any]]):
+        """Adiciona mensagens ao cache com política LRU."""
+        async with self._cache_lock:
+            if key in self._cache:
+                self._cache_order.remove(key)
+            
+            self._cache[key] = messages
+            self._cache_order.append(key)
+            
+            if len(self._cache_order) > self._cache_size:
+                oldest_key = self._cache_order.pop(0)
+                del self._cache[oldest_key]
+
+    async def get(self, key: str) -> Optional[List[Dict[str, Any]]]:
+        """Obtém mensagens do cache e atualiza seu status LRU."""
+        async with self._cache_lock:
+            if key in self._cache:
+                self._cache_order.remove(key)
+                self._cache_order.append(key)
+                return self._cache[key]
+            return None
+
+    async def clear(self):
+        """Limpa todo o cache."""
+        async with self._cache_lock:
+            self._cache.clear()
+            self._cache_order.clear()
+
+    async def remove(self, key: str):
+        """Remove uma entrada específica do cache."""
+        async with self._cache_lock:
+            if key in self._cache:
+                del self._cache[key]
+                self._cache_order.remove(key)
+
+    def get_stats(self):
+        """Retorna estatísticas sobre o cache."""
+        return {
+            "size": len(self._cache),
+            "max_size": self._cache_size,
+            "memory_usage_estimate": sum(
+                len(str(msg)) for msgs in self._cache.values() for msg in msgs
+            ),
+        }
+
+# Criar uma única instância compartilhada do cache
+SHARED_TTS_CACHE = SharedTTSCache(max_size=1000)  # Aumentei para 1000 entradas
+
 class ElevenLabsTTSService(InterruptibleWordTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = None
@@ -208,7 +263,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
-        cache_size: int = 100,
         **kwargs,
     ):
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -261,11 +315,8 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         self._receive_task = None
         self._keepalive_task = None
 
-        # Adicione o sistema de cache
-        self._cache: Dict[str, List[Dict[str, Any]]] = {}
-        self._cache_order: List[str] = []
-        self._cache_size = cache_size
-        self._cache_lock = asyncio.Lock()
+        # Usar o cache compartilhado ao invés do cache por instância
+        self._cache = SHARED_TTS_CACHE
 
         self._receive_lock = asyncio.Lock()  # Adicionar um lock para recebimento de mensagens
 
@@ -438,53 +489,13 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             str(self._settings.get("language", "")),
         ]
         key_string = "_".join([str(comp) for comp in key_components])
-        return hashlib.md5(key_string.encode()).hexdigest()
-
-    async def _add_to_cache(self, key: str, messages: List[Dict[str, Any]]):
-        """Adiciona mensagens ao cache com política LRU."""
-        async with self._cache_lock:
-            if key in self._cache:
-                self._cache_order.remove(key)
-            
-            self._cache[key] = messages
-            self._cache_order.append(key)
-            
-            if len(self._cache_order) > self._cache_size:
-                oldest_key = self._cache_order.pop(0)
-                del self._cache[oldest_key]
-
-    async def _get_from_cache(self, key: str) -> Optional[List[Dict[str, Any]]]:
-        """Obtém mensagens do cache e atualiza seu status LRU."""
-        async with self._cache_lock:
-            if key in self._cache:
-                self._cache_order.remove(key)
-                self._cache_order.append(key)
-                return self._cache[key]
-            return None
-
-    async def clear_cache(self):
-        """Limpa todo o cache."""
-        async with self._cache_lock:
-            self._cache.clear()
-            self._cache_order.clear()
-
-    async def remove_from_cache(self, text: str):
-        """Remove uma entrada específica do cache."""
-        key = self._generate_cache_key(text)
-        async with self._cache_lock:
-            if key in self._cache:
-                del self._cache[key]
-                self._cache_order.remove(key)
-
-    def get_cache_stats(self):
-        """Retorna estatísticas sobre o cache."""
-        return {
-            "size": len(self._cache),
-            "max_size": self._cache_size,
-            "memory_usage_estimate": sum(
-                len(str(msg)) for msgs in self._cache.values() for msg in msgs
-            ),
-        }
+        cache_key = hashlib.md5(key_string.encode()).hexdigest()
+        
+        # Adicionar este log para debug
+        logger.debug(f"Cache key components: {key_components}")
+        logger.debug(f"Generated cache key: {cache_key}")
+        
+        return cache_key
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Gera fala a partir do texto usando cache quando possível."""
@@ -495,7 +506,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                 await self._connect()
 
             cache_key = self._generate_cache_key(text)
-            cached_messages = await self._get_from_cache(cache_key)
+            cached_messages = await self._cache.get(cache_key)  # Usar get() do cache compartilhado
 
             if cached_messages:
                 logger.debug(f"{self}: Cache hit for text '{text}'")
@@ -548,7 +559,8 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                                 await self.add_word_timestamps(word_times)
                                 self._cumulative_time = word_times[-1][1]
 
-                    await self._add_to_cache(cache_key, messages_to_cache)
+                    # Armazenar no cache compartilhado
+                    await self._cache.add(cache_key, messages_to_cache)
 
                 except Exception as e:
                     logger.error(f"{self} error sending message: {e}")
