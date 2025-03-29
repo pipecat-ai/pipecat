@@ -56,6 +56,8 @@ autodoc_mock_imports = [
     "cv2",
     "av",
     "pyneuphonic",
+    "mem0",
+    "mlx_whisper",
     "anthropic",
     "assemblyai",
     "boto3",
