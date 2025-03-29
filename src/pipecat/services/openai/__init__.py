@@ -9,15 +9,11 @@ import warnings
 with warnings.catch_warnings():
     warnings.simplefilter("always")
     warnings.warn(
-        "Module `pipecat.services.google` is deprecated, use `pipecat.services.google.[frames,image,llm,llm_openai,llm_vertex,rtvi,stt,tts]` instead",
+        "Module `pipecat.services.openai` is deprecated, use `pipecat.services.openai.[image,llm,stt,tts]` instead",
         DeprecationWarning,
     )
 
-from .frames import *
 from .image import *
 from .llm import *
-from .llm_openai import *
-from .llm_vertex import *
-from .rtvi import *
 from .stt import *
 from .tts import *
