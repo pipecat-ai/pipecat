@@ -506,9 +506,10 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                 await self._connect()
 
             cache_key = self._generate_cache_key(text)
-            cached_messages = await self._cache.get(cache_key)  # Usar get() do cache compartilhado
+            cached_messages = await self._cache.get(cache_key)
 
             if cached_messages:
+                # Cache hit - processa diretamente do cache
                 logger.debug(f"{self}: Cache hit for text '{text}'")
                 
                 if not self._started:
@@ -517,7 +518,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                     self._started = True
                     self._cumulative_time = 0
 
-                # Processa mensagens do cache
                 for msg in cached_messages:
                     if msg.get("audio"):
                         await self.stop_ttfb_metrics()
@@ -530,6 +530,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                         self._cumulative_time = word_times[-1][1]
 
             else:
+                # Cache miss - processa em streaming
                 logger.debug(f"{self}: Cache miss for text '{text}'")
                 messages_to_cache = []
 
@@ -540,15 +541,19 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                         self._started = True
                         self._cumulative_time = 0
 
+                    # Envia o texto atual
                     await self._send_text(text)
                     await self.start_tts_usage_metrics(text)
 
-                    # Usar o lock para receber mensagens
+                    # Processa as mensagens em streaming
                     async with self._receive_lock:
                         async for message in self._get_websocket():
                             msg = json.loads(message)
+                            
+                            # Armazena para o cache
                             messages_to_cache.append(msg)
 
+                            # Processa o áudio/alinhamento em tempo real
                             if msg.get("audio"):
                                 await self.stop_ttfb_metrics()
                                 audio = base64.b64decode(msg["audio"])
@@ -559,8 +564,13 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                                 await self.add_word_timestamps(word_times)
                                 self._cumulative_time = word_times[-1][1]
 
-                    # Armazenar no cache compartilhado
-                    await self._cache.add(cache_key, messages_to_cache)
+                            # Se recebeu end_of_stream, podemos parar
+                            if msg.get("end_of_stream", False):
+                                break
+
+                    # Armazena no cache após receber tudo
+                    if messages_to_cache:
+                        await self._cache.add(cache_key, messages_to_cache)
 
                 except Exception as e:
                     logger.error(f"{self} error sending message: {e}")
