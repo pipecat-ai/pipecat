@@ -267,6 +267,8 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         self._cache_size = cache_size
         self._cache_lock = asyncio.Lock()
 
+        self._receive_lock = asyncio.Lock()  # Adicionar um lock para recebimento de mensagens
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -396,19 +398,20 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         raise Exception("Websocket not connected")
 
     async def _receive_messages(self):
-        async for message in self._get_websocket():
-            msg = json.loads(message)
-            if msg.get("audio"):
-                await self.stop_ttfb_metrics()
-                self.start_word_timestamps()
+        async with self._receive_lock:  # Usar o lock para garantir acesso exclusivo
+            async for message in self._get_websocket():
+                msg = json.loads(message)
+                if msg.get("audio"):
+                    await self.stop_ttfb_metrics()
+                    self.start_word_timestamps()
 
-                audio = base64.b64decode(msg["audio"])
-                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
-                await self.push_frame(frame)
-            if msg.get("alignment"):
-                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                await self.add_word_timestamps(word_times)
-                self._cumulative_time = word_times[-1][1]
+                    audio = base64.b64decode(msg["audio"])
+                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                    await self.push_frame(frame)
+                if msg.get("alignment"):
+                    word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                    await self.add_word_timestamps(word_times)
+                    self._cumulative_time = word_times[-1][1]
 
     async def _keepalive_task_handler(self):
         while True:
@@ -529,22 +532,22 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                     await self._send_text(text)
                     await self.start_tts_usage_metrics(text)
 
-                    # Coleta mensagens para cache enquanto processa
-                    async for message in self._get_websocket():
-                        msg = json.loads(message)
-                        messages_to_cache.append(msg)
+                    # Usar o lock para receber mensagens
+                    async with self._receive_lock:
+                        async for message in self._get_websocket():
+                            msg = json.loads(message)
+                            messages_to_cache.append(msg)
 
-                        if msg.get("audio"):
-                            await self.stop_ttfb_metrics()
-                            audio = base64.b64decode(msg["audio"])
-                            yield TTSAudioRawFrame(audio, self.sample_rate, 1)
-                        
-                        if msg.get("alignment"):
-                            word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                            await self.add_word_timestamps(word_times)
-                            self._cumulative_time = word_times[-1][1]
+                            if msg.get("audio"):
+                                await self.stop_ttfb_metrics()
+                                audio = base64.b64decode(msg["audio"])
+                                yield TTSAudioRawFrame(audio, self.sample_rate, 1)
+                            
+                            if msg.get("alignment"):
+                                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                                await self.add_word_timestamps(word_times)
+                                self._cumulative_time = word_times[-1][1]
 
-                    # Armazena no cache após conclusão bem-sucedida
                     await self._add_to_cache(cache_key, messages_to_cache)
 
                 except Exception as e:
