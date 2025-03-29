@@ -12,7 +12,6 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, model_validator
-import hashlib
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -178,61 +177,6 @@ def calculate_word_times(
     return word_times
 
 
-class SharedTTSCache:
-    def __init__(self, max_size: int = 1000):
-        self._cache: Dict[str, List[Dict[str, Any]]] = {}
-        self._cache_order: List[str] = []
-        self._cache_size = max_size
-        self._cache_lock = asyncio.Lock()
-
-    async def add(self, key: str, messages: List[Dict[str, Any]]):
-        """Adiciona mensagens ao cache com política LRU."""
-        async with self._cache_lock:
-            if key in self._cache:
-                self._cache_order.remove(key)
-            
-            self._cache[key] = messages
-            self._cache_order.append(key)
-            
-            if len(self._cache_order) > self._cache_size:
-                oldest_key = self._cache_order.pop(0)
-                del self._cache[oldest_key]
-
-    async def get(self, key: str) -> Optional[List[Dict[str, Any]]]:
-        """Obtém mensagens do cache e atualiza seu status LRU."""
-        async with self._cache_lock:
-            if key in self._cache:
-                self._cache_order.remove(key)
-                self._cache_order.append(key)
-                return self._cache[key]
-            return None
-
-    async def clear(self):
-        """Limpa todo o cache."""
-        async with self._cache_lock:
-            self._cache.clear()
-            self._cache_order.clear()
-
-    async def remove(self, key: str):
-        """Remove uma entrada específica do cache."""
-        async with self._cache_lock:
-            if key in self._cache:
-                del self._cache[key]
-                self._cache_order.remove(key)
-
-    def get_stats(self):
-        """Retorna estatísticas sobre o cache."""
-        return {
-            "size": len(self._cache),
-            "max_size": self._cache_size,
-            "memory_usage_estimate": sum(
-                len(str(msg)) for msgs in self._cache.values() for msg in msgs
-            ),
-        }
-
-# Criar uma única instância compartilhada do cache
-SHARED_TTS_CACHE = SharedTTSCache(max_size=1000)  # Aumentei para 1000 entradas
-
 class ElevenLabsTTSService(InterruptibleWordTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = None
@@ -314,11 +258,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
         self._receive_task = None
         self._keepalive_task = None
-
-        # Usar o cache compartilhado ao invés do cache por instância
-        self._cache = SHARED_TTS_CACHE
-
-        self._receive_lock = asyncio.Lock()  # Adicionar um lock para recebimento de mensagens
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -449,20 +388,19 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         raise Exception("Websocket not connected")
 
     async def _receive_messages(self):
-        async with self._receive_lock:  # Usar o lock para garantir acesso exclusivo
-            async for message in self._get_websocket():
-                msg = json.loads(message)
-                if msg.get("audio"):
-                    await self.stop_ttfb_metrics()
-                    self.start_word_timestamps()
+        async for message in self._get_websocket():
+            msg = json.loads(message)
+            if msg.get("audio"):
+                await self.stop_ttfb_metrics()
+                self.start_word_timestamps()
 
-                    audio = base64.b64decode(msg["audio"])
-                    frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
-                    await self.push_frame(frame)
-                if msg.get("alignment"):
-                    word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                    await self.add_word_timestamps(word_times)
-                    self._cumulative_time = word_times[-1][1]
+                audio = base64.b64decode(msg["audio"])
+                frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                await self.push_frame(frame)
+            if msg.get("alignment"):
+                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                await self.add_word_timestamps(word_times)
+                self._cumulative_time = word_times[-1][1]
 
     async def _keepalive_task_handler(self):
         while True:
@@ -478,115 +416,31 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             msg = {"text": text + " "}
             await self._websocket.send(json.dumps(msg))
 
-    def _generate_cache_key(self, text: str) -> str:
-        """Gera uma chave única baseada no texto e configurações atuais."""
-        key_components = [
-            text,
-            self._voice_id,
-            self.model_name,
-            self._output_format,
-            str(self._voice_settings),
-            str(self._settings.get("language", "")),
-        ]
-        key_string = "_".join([str(comp) for comp in key_components])
-        cache_key = hashlib.md5(key_string.encode()).hexdigest()
-        
-        # Adicionar este log para debug
-        logger.debug(f"Cache key components: {key_components}")
-        logger.debug(f"Generated cache key: {cache_key}")
-        
-        return cache_key
-
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Gera fala a partir do texto usando cache quando possível."""
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket:
                 await self._connect()
 
-            cache_key = self._generate_cache_key(text)
-            cached_messages = await self._cache.get(cache_key)
-
-            if cached_messages:
-                # Cache hit - processa diretamente do cache
-                logger.debug(f"{self}: Cache hit for text '{text}'")
-                
+            try:
                 if not self._started:
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
 
-                for msg in cached_messages:
-                    if msg.get("audio"):
-                        await self.stop_ttfb_metrics()
-                        audio = base64.b64decode(msg["audio"])
-                        yield TTSAudioRawFrame(audio, self.sample_rate, 1)
-                    
-                    if msg.get("alignment"):
-                        word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                        await self.add_word_timestamps(word_times)
-                        self._cumulative_time = word_times[-1][1]
-
-            else:
-                # Cache miss - processa em streaming
-                logger.debug(f"{self}: Cache miss for text '{text}'")
-                messages_to_cache = []
-
-                try:
-                    if not self._started:
-                        await self.start_ttfb_metrics()
-                        yield TTSStartedFrame()
-                        self._started = True
-                        self._cumulative_time = 0
-
-                    # Envia o texto atual
-                    await self._send_text(text)
-                    await self.start_tts_usage_metrics(text)
-
-                    # Processa as mensagens em streaming
-                    async with self._receive_lock:
-                        async for message in self._get_websocket():
-                            msg = json.loads(message)
-                            
-                            # Armazena para o cache
-                            messages_to_cache.append(msg)
-
-                            # Processa o áudio/alinhamento em tempo real
-                            if msg.get("audio"):
-                                await self.stop_ttfb_metrics()
-                                audio = base64.b64decode(msg["audio"])
-                                yield TTSAudioRawFrame(audio, self.sample_rate, 1)
-                            
-                            if msg.get("alignment"):
-                                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                                await self.add_word_timestamps(word_times)
-                                self._cumulative_time = word_times[-1][1]
-
-                            # Se recebeu end_of_stream, podemos parar
-                            if msg.get("end_of_stream", False):
-                                break
-
-                    # Armazena no cache após receber tudo
-                    if messages_to_cache:
-                        await self._cache.add(cache_key, messages_to_cache)
-
-                except Exception as e:
-                    logger.error(f"{self} error sending message: {e}")
-                    yield TTSStoppedFrame()
-                    await self._disconnect()
-                    await self._connect()
-                    return
-
+                await self._send_text(text)
+                await self.start_tts_usage_metrics(text)
+            except Exception as e:
+                logger.error(f"{self} error sending message: {e}")
+                yield TTSStoppedFrame()
+                await self._disconnect()
+                await self._connect()
+                return
             yield None
-
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-
-    def get_cache_stats(self):
-        """Retorna estatísticas sobre o cache compartilhado."""
-        return self._cache.get_stats()
 
 
 class ElevenLabsHttpTTSService(TTSService):
