@@ -9,14 +9,13 @@ import os
 import uuid
 import wave
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import aiohttp
 from loguru import logger
 
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_services import AIService
 
@@ -62,30 +61,26 @@ class CanonicalMetricsService(AIService):
         self,
         *,
         aiohttp_session: aiohttp.ClientSession,
+        context: OpenAILLMContext,
         call_id: str,
         assistant: str,
         api_key: str,
         api_url: str = "https://voiceapp.canonical.chat/api/v1",
         assistant_speaks_first: bool = True,
         output_dir: str = "recordings",
-        audio_buffer_processor: Optional[AudioBufferProcessor] = None,
-        context: Optional[OpenAILLMContext] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        # Validate that at least one of audio_buffer_processor or context is provided
-        if audio_buffer_processor is None and context is None:
-            raise ValueError("At least one of audio_buffer_processor or context must be specified")
-
         self._aiohttp_session = aiohttp_session
-        self._audio_buffer_processor = audio_buffer_processor
         self._api_key = api_key
         self._api_url = api_url
         self._call_id = call_id
         self._assistant = assistant
         self._assistant_speaks_first = assistant_speaks_first
         self._output_dir = output_dir
+        self._sub_dir = uuid.uuid4().hex
         self._context = context
+        self._chunk_counter = 0  # Add a counter for naming chunks sequentially
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -99,11 +94,39 @@ class CanonicalMetricsService(AIService):
         await super().process_frame(frame, direction)
         await self.push_frame(frame, direction)
 
+    async def process_audio_buffer(self, audio_buffer: bytes, sample_rate: int, num_channels: int):
+        # Create output directory if it doesn't exist
+        os.makedirs(self._output_dir, exist_ok=True)
+        os.makedirs(f"{self._output_dir}/{self._sub_dir}", exist_ok=True)
+
+        # Use sequential numbering for chunk filenames
+        self._chunk_counter += 1
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        audio_chunk_filename = (
+            f"{self._output_dir}/{self._sub_dir}/{timestamp}_{self._chunk_counter:06d}.wav"
+        )
+
+        try:
+            with io.BytesIO() as buffer:
+                with wave.open(buffer, "wb") as wf:
+                    wf.setsampwidth(2)  # 16-bit audio
+                    wf.setnchannels(num_channels)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(audio_buffer)
+                async with aiofiles.open(audio_chunk_filename, "wb") as file:
+                    await file.write(buffer.getvalue())
+        except Exception as e:
+            logger.error(f"Failed to write audio buffer: {e}")
+
     async def _process_completion(self):
-        if self._audio_buffer_processor is not None:
+        logger.debug("Processing completion")
+        if self._has_audio():
             await self._process_audio()
         elif self._context is not None:
             await self._process_transcript()
+        else:
+            logger.error("No audio or transcript to process")
+        logger.debug("Processing completion complete")
 
     async def _process_transcript(self):
         params = {
@@ -120,31 +143,60 @@ class CanonicalMetricsService(AIService):
             logger.error(f"Failed to process transcript: {await response.text()}")
 
     async def _process_audio(self):
-        audio_buffer_processor = self._audio_buffer_processor
-
-        if not audio_buffer_processor.has_audio():
+        if not self._has_audio():
+            logger.error(f"No audio chunks, nothing to upload.")
             return
-
-        os.makedirs(self._output_dir, exist_ok=True)
-        filename = self._get_output_filename()
-        audio = audio_buffer_processor.merge_audio_buffers()
-
-        with io.BytesIO() as buffer:
-            with wave.open(buffer, "wb") as wf:
-                wf.setsampwidth(2)
-                wf.setnchannels(audio_buffer_processor.num_channels)
-                wf.setframerate(audio_buffer_processor.sample_rate)
-                wf.writeframes(audio)
-            async with aiofiles.open(filename, "wb") as file:
-                await file.write(buffer.getvalue())
-
         try:
-            await self._multipart_upload(filename)
-            await aiofiles.os.remove(filename)
-        except FileNotFoundError:
-            pass
+            # Combine all audio chunks into a single file
+            audio_filename = await self._combine_audio_chunks()
+            await self._multipart_upload(audio_filename)
+            # Clean up temporary files after successful upload
+            await aiofiles.os.remove(audio_filename)
         except Exception as e:
             logger.error(f"Failed to upload recording: {e}")
+
+    async def _combine_audio_chunks(self):
+        """Combine all audio chunks in the sub_dir into a single WAV file."""
+        logger.debug("Combining audio chunks into a single file")
+        audio_filename = self._get_output_filename()
+        chunks_dir = f"{self._output_dir}/{self._sub_dir}"
+        audio_chunks = sorted(os.listdir(chunks_dir))
+
+        if not audio_chunks:
+            raise Exception("No audio chunks found to combine")
+
+        # Read the first chunk to get audio parameters
+        first_chunk_path = f"{chunks_dir}/{audio_chunks[0]}"
+        with wave.open(first_chunk_path, "rb") as wf:
+            params = wf.getparams()
+
+        # Create a new WAV file with the same parameters
+        with wave.open(audio_filename, "wb") as output_wav:
+            output_wav.setparams(params)
+
+            # Append each chunk's audio data
+            for chunk_file in audio_chunks:
+                chunk_path = f"{chunks_dir}/{chunk_file}"
+                with wave.open(chunk_path, "rb") as chunk_wav:
+                    output_wav.writeframes(chunk_wav.readframes(chunk_wav.getnframes()))
+
+        logger.debug(f"Combined {len(audio_chunks)} audio chunks into {audio_filename}")
+
+        for chunk_file in audio_chunks:
+            await aiofiles.os.remove(f"{chunks_dir}/{chunk_file}")
+        await aiofiles.os.rmdir(chunks_dir)
+        return audio_filename
+
+    def _has_audio(self):
+        sub_dir_exists = os.path.exists(f"{self._output_dir}/{self._sub_dir}")
+        if not sub_dir_exists:
+            logger.error(f"No audio chunks, nothing to upload.")
+            return False
+        audio_chunks = os.listdir(f"{self._output_dir}/{self._sub_dir}")
+        if len(audio_chunks) == 0:
+            logger.error(f"No audio chunks, nothing to upload.")
+            return False
+        return True
 
     def _get_output_filename(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
