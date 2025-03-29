@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `Mem0MemoryService`. Mem0 is a self-improving memory layer for LLM applications. (see https://mem0.ai/)
+
 - Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
   - Created two examples in `p2p-webrtc`:
     - **video-transform**: Demonstrates sending and receiving audio/video with `SmallWebRTCTransport` using `TypeScript`. 
