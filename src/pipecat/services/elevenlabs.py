@@ -12,6 +12,7 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, model_validator
+import hashlib
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -207,6 +208,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
+        cache_size: int = 100,
         **kwargs,
     ):
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -258,6 +260,12 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
         self._receive_task = None
         self._keepalive_task = None
+
+        # Adicione o sistema de cache
+        self._cache: Dict[str, List[Dict[str, Any]]] = {}
+        self._cache_order: List[str] = []
+        self._cache_size = cache_size
+        self._cache_lock = asyncio.Lock()
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -416,29 +424,138 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             msg = {"text": text + " "}
             await self._websocket.send(json.dumps(msg))
 
+    def _generate_cache_key(self, text: str) -> str:
+        """Gera uma chave única baseada no texto e configurações atuais."""
+        key_components = [
+            text,
+            self._voice_id,
+            self.model_name,
+            self._output_format,
+            str(self._voice_settings),
+            str(self._settings.get("language", "")),
+        ]
+        key_string = "_".join([str(comp) for comp in key_components])
+        return hashlib.md5(key_string.encode()).hexdigest()
+
+    async def _add_to_cache(self, key: str, messages: List[Dict[str, Any]]):
+        """Adiciona mensagens ao cache com política LRU."""
+        async with self._cache_lock:
+            if key in self._cache:
+                self._cache_order.remove(key)
+            
+            self._cache[key] = messages
+            self._cache_order.append(key)
+            
+            if len(self._cache_order) > self._cache_size:
+                oldest_key = self._cache_order.pop(0)
+                del self._cache[oldest_key]
+
+    async def _get_from_cache(self, key: str) -> Optional[List[Dict[str, Any]]]:
+        """Obtém mensagens do cache e atualiza seu status LRU."""
+        async with self._cache_lock:
+            if key in self._cache:
+                self._cache_order.remove(key)
+                self._cache_order.append(key)
+                return self._cache[key]
+            return None
+
+    async def clear_cache(self):
+        """Limpa todo o cache."""
+        async with self._cache_lock:
+            self._cache.clear()
+            self._cache_order.clear()
+
+    async def remove_from_cache(self, text: str):
+        """Remove uma entrada específica do cache."""
+        key = self._generate_cache_key(text)
+        async with self._cache_lock:
+            if key in self._cache:
+                del self._cache[key]
+                self._cache_order.remove(key)
+
+    def get_cache_stats(self):
+        """Retorna estatísticas sobre o cache."""
+        return {
+            "size": len(self._cache),
+            "max_size": self._cache_size,
+            "memory_usage_estimate": sum(
+                len(str(msg)) for msgs in self._cache.values() for msg in msgs
+            ),
+        }
+
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Gera fala a partir do texto usando cache quando possível."""
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
             if not self._websocket:
                 await self._connect()
 
-            try:
+            cache_key = self._generate_cache_key(text)
+            cached_messages = await self._get_from_cache(cache_key)
+
+            if cached_messages:
+                logger.debug(f"{self}: Cache hit for text '{text}'")
+                
                 if not self._started:
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
 
-                await self._send_text(text)
-                await self.start_tts_usage_metrics(text)
-            except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
-                yield TTSStoppedFrame()
-                await self._disconnect()
-                await self._connect()
-                return
+                # Processa mensagens do cache
+                for msg in cached_messages:
+                    if msg.get("audio"):
+                        await self.stop_ttfb_metrics()
+                        audio = base64.b64decode(msg["audio"])
+                        yield TTSAudioRawFrame(audio, self.sample_rate, 1)
+                    
+                    if msg.get("alignment"):
+                        word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                        await self.add_word_timestamps(word_times)
+                        self._cumulative_time = word_times[-1][1]
+
+            else:
+                logger.debug(f"{self}: Cache miss for text '{text}'")
+                messages_to_cache = []
+
+                try:
+                    if not self._started:
+                        await self.start_ttfb_metrics()
+                        yield TTSStartedFrame()
+                        self._started = True
+                        self._cumulative_time = 0
+
+                    await self._send_text(text)
+                    await self.start_tts_usage_metrics(text)
+
+                    # Coleta mensagens para cache enquanto processa
+                    async for message in self._get_websocket():
+                        msg = json.loads(message)
+                        messages_to_cache.append(msg)
+
+                        if msg.get("audio"):
+                            await self.stop_ttfb_metrics()
+                            audio = base64.b64decode(msg["audio"])
+                            yield TTSAudioRawFrame(audio, self.sample_rate, 1)
+                        
+                        if msg.get("alignment"):
+                            word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
+                            await self.add_word_timestamps(word_times)
+                            self._cumulative_time = word_times[-1][1]
+
+                    # Armazena no cache após conclusão bem-sucedida
+                    await self._add_to_cache(cache_key, messages_to_cache)
+
+                except Exception as e:
+                    logger.error(f"{self} error sending message: {e}")
+                    yield TTSStoppedFrame()
+                    await self._disconnect()
+                    await self._connect()
+                    return
+
             yield None
+
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
