@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `Mem0MemoryService`. Mem0 is a self-improving memory layer for LLM
   applications. Learn more at: https://mem0.ai/.
 
-- Added `WhisperSTTServiceMLX` for whisper transcription on Apple Silicon.
+- Added `WhisperSTTServiceMLX` for Whisper transcription on Apple Silicon.
   See example in `examples/foundational/13e-whisper-mlx.py`. Latency of
-  completed transcription using whisper large-v3-turbo on an M4 macbook is
+  completed transcription using Whisper large-v3-turbo on an M4 macbook is
   ~500ms.
 
 - Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
@@ -51,6 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   invalid transcriptions.
 
 - Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
+### Other
+
+- Added foundational example `37-mem0.py` demonstrating how to use the
+  `Mem0MemoryService`.
+
+- Added foundational example `13e-whisper-mlx.py` demonstrating how to use the
+  `WhisperSTTServiceMLX`.
 
 ## [0.0.61] - 2025-03-26
 
