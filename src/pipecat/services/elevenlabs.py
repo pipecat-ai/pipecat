@@ -574,6 +574,10 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
+    def get_cache_stats(self):
+        """Retorna estatísticas sobre o cache compartilhado."""
+        return self._cache.get_stats()
+
 
 class ElevenLabsHttpTTSService(TTSService):
     """ElevenLabs Text-to-Speech service using HTTP streaming with caching.
