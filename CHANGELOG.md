@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `QwenLLMService` for Qwen integration with an OpenAI-compatible
+  interface. Added foundational example `14q-function-calling-qwen.py`.
+
 - Added `Mem0MemoryService`. Mem0 is a self-improving memory layer for LLM
   applications. Learn more at: https://mem0.ai/.
 
