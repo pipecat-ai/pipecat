@@ -9,10 +9,10 @@
 import asyncio
 from enum import Enum
 from typing import AsyncGenerator, Optional
-from typing_extensions import TYPE_CHECKING, override
 
 import numpy as np
 from loguru import logger
+from typing_extensions import TYPE_CHECKING, override
 
 from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.ai_services import SegmentedSTTService
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
         logger.error(f"Exception: {e}")
         logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
         raise Exception(f"Missing module: {e}")
-    
+
     try:
         import mlx_whisper
     except ModuleNotFoundError as e:
@@ -332,6 +332,7 @@ class WhisperSTTService(SegmentedSTTService):
         """
         try:
             from faster_whisper import WhisperModel
+
             logger.debug("Loading Whisper model...")
             self._model = WhisperModel(
                 self.model_name, device=self._device, compute_type=self._compute_type
@@ -414,7 +415,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
     ):
         # Skip WhisperSTTService.__init__ and call its parent directly
         SegmentedSTTService.__init__(self, **kwargs)
-        
+
         self.set_model_name(model if isinstance(model, str) else model.value)
         self._no_speech_prob = no_speech_prob
         self._temperature = temperature
@@ -422,14 +423,14 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         self._settings = {
             "language": language,
         }
-        
+
         # No need to call _load() as MLX Whisper loads models on demand
 
     @override
     def _load(self):
         """MLX Whisper loads models on demand, so this is a no-op."""
         pass
-    
+
     @override
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes given audio using MLX Whisper.
@@ -447,7 +448,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         """
         try:
             import mlx_whisper
-            
+
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
 
@@ -456,10 +457,11 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
             whisper_lang = self.language_to_service_language(self._settings["language"])
             chunk = await asyncio.to_thread(
-                mlx_whisper.transcribe, audio_float,
+                mlx_whisper.transcribe,
+                audio_float,
                 path_or_hf_repo=self.model_name,
                 temperature=self._temperature,
-                language=whisper_lang
+                language=whisper_lang,
             )
             text: str = ""
             for segment in chunk.get("segments", []):
@@ -475,11 +477,11 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
             await self.stop_ttfb_metrics()
             await self.stop_processing_metrics()
-            
+
             if text:
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
-            
+
         except Exception as e:
             logger.exception(f"MLX Whisper transcription error: {e}")
             yield ErrorFrame(f"MLX Whisper transcription error: {str(e)}")
