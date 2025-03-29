@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `Mem0MemoryService`. Mem0 is a self-improving memory layer for LLM
   applications. Learn more at: https://mem0.ai/.
 
+- Added `WhisperSTTServiceMLX` for whisper transcription on Apple Silicon.
+  See example in `examples/foundational/13e-whisper-mlx.py`. Latency of
+  completed transcription using whisper large-v3-turbo on an M4 macbook is
+  ~500ms.
+
+- Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
+
+  - Created two examples in `p2p-webrtc`:
+    - **video-transform**: Demonstrates sending and receiving audio/video with
+      `SmallWebRTCTransport` using `TypeScript`. Includes video frame
+      processing with OpenCV.
+    - **voice-agent**: A minimal example of creating a voice agent with
+      `SmallWebRTCTransport`.
+
 - Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
 
   - Created two examples in `p2p-webrtc`:
