@@ -50,6 +50,12 @@ autodoc_mock_imports = [
     "pyht.protos",
     "pyht.protos.api_pb2",
     "pipecat_ai_playht",  # PlayHT wrapper
+    "vllm",
+    "aiortc",
+    "aiortc.mediastreams",
+    "cv2",
+    "av",
+    "pyneuphonic",
     "anthropic",
     "assemblyai",
     "boto3",
