@@ -6,16 +6,24 @@
 
 from typing import Any, Dict
 
+# Track which modules we've already warned about
+_warned_modules = set()
+
 
 def _warn_deprecated_access(globals: Dict[str, Any], attr, old: str, new: str):
     import warnings
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("always")
-        warnings.warn(
-            f"Module `pipecat.services.{old}` is deprecated, use `pipecat.services.{new}` instead",
-            DeprecationWarning,
-        )
+    # Only warn once per old->new module pair
+    module_key = (old, new)
+    if module_key not in _warned_modules:
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                f"Module `pipecat.services.{old}` is deprecated, use `pipecat.services.{new}` instead.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+        _warned_modules.add(module_key)
 
     return globals[attr]
 
