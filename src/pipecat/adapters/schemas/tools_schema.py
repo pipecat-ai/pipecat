@@ -44,6 +44,6 @@ class ToolsSchema:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "standard_tools": [tool.to_dict() for tool in self._standard_tools],
+            "standard_tools": [tool.to_default_dict() for tool in self._standard_tools],
             "custom_tools": self._custom_tools,
         }
