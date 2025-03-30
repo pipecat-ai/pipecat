@@ -51,3 +51,4 @@ pipecat/examples/bot-ready-signalling/client/react-native/web-build/
 # Documentation
 docs/api/_build/
 docs/api/api
+examples/bookCritic/bookCritic.log

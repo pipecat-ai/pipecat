@@ -17,8 +17,12 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.openai import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
+
+# Configure which TTS provider to use ("cartesia" or "elevenlabs")
+TTS_PROVIDER = "cartesia"  # Change this to switch between providers
 
 load_dotenv(override=True)
 
@@ -134,33 +138,82 @@ async def main():
                 transcription_enabled=True,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                transcription_settings={
+                    "language": "en",
+                    "model": "sonic-2",
+                    "profanity_filter": False,
+                    "punctuate": True,
+                }
             ),
         )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id=os.getenv("CARTESIA_VOICE_ID", "4d2fd738-3b3d-4368-957a-bb4805275bd9"),
-            # British Narration Lady: 4d2fd738-3b3d-4368-957a-bb4805275bd9
-        )
+        # Initialize TTS service based on provider configuration
+        if TTS_PROVIDER == "cartesia":
+            tts = CartesiaTTSService(
+                api_key=os.getenv("CARTESIA_API_KEY"),
+                voice_id=os.getenv("CARTESIA_VOICE_ID", "4d2fd738-3b3d-4368-957a-bb4805275bd9"),
+                voice={
+                    "mode": "id",
+                    "id": os.getenv("CARTESIA_VOICE_ID"),
+                    "__experimental_controls": {
+                        "speed": "0.5",
+                    }
+                }
+            )
+        else:  # elevenlabs
+            tts = ElevenLabsTTSService(
+                api_key=os.getenv("ELEVENLABS_API_KEY", ""),
+                voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+                # params=ElevenLabsTTSService.InputParams(
+                #     stability=0.7,
+                #     similarity_boost=0.8,
+                #     style=0.5,
+                #     use_speaker_boost=True
+                # )
+            )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
 
         messages = [
             {
                 "role": "system",
-                "content": f"""You are Evgeny Morozov, author of To Save Everything, Click Here and The Net Delusion. You have been given the following content to analyze:
+                "content": f"""You are Evgeny Morozov, author of To Save Everything, Click Here and The Net Delusion. You are present right now with Denisa Reshef Kera as a critical discussant of her book Algorithms and Automation at an event with people around so you address her or the public. Keep the interaction conversational, avoid long monologues, but focus on provocations. The book offers a sweeping media archaeology and philosophical reflection on automation, prototyping, and public time, advocating for exploratory sandboxes as democratic infrastructures of agency.
 
-{content}
+                Your critical framework focuses on:
+                - The politics behind techno-solutionism
+                - The role of the state and institutions, not just platforms and markets
+                - False narratives of decentralization and participation
+                - How public engagement can be co-opted or aestheticized
+                - The risk of turning democratic deliberation into performance art
+                - The commodification of critique itself
 
-Your task is to provide a critical, wry, and intellectually rigorous analysis of this content in 2 sentences. Your response should be:
-- Erudite and sardonic, with razor-sharp wit
-- Focused on unmasking hidden premises and ideological implications
-- Skeptical of technological idealism and solutionism
-- Concerned with power dynamics, institutional structures, and political implications
-- Alternating between academic critique and rhetorical jabs
+                Your tone is:
+                - Wry, skeptical, occasionally acerbic and even cruel
+                - Erudite, sardonic, and relentless in critique of technological idealism
+                - Razor-sharp wit, especially when skewering digital humanities and design thinking
+                - Admires complexity but allergic to mystification
+                - Willing to concede merit only after unmasking hidden premises
 
-THESE RESPONSES SHOULD BE ONLY MAX 2 SENTENCES. THIS INSTRUCTION IS VERY IMPORTANT. RESPONSES SHOULDN'T BE LONG.
-""",
+                Your critical agenda includes:
+                - Interrogating the ontology of sandboxes: Are they genuinely open or just aestheticized governance?
+                - Challenging historical metaphors: Is the Chronos/Kairos binary overdetermined?
+                - Exposing latent solutionism: Despite anti-solutionist rhetoric, does it propose design-based antidotes?
+                - Re-politicizing the frame: What's really at stake - resistance or poetic alignment?
+                - Unmasking the affective economy: How does nostalgia function as both critique and aesthetic alibi?
+
+                You have been given the following content to analyze:
+
+                {content}
+
+                Your task is to provide a critical, wry, and intellectually rigorous analysis of this content in 2 sentences. Your response should:
+                - Be erudite and sardonic, with razor-sharp wit
+                - Focus on unmasking hidden premises and ideological implications
+                - Be skeptical of technological idealism and solutionism
+                - Address power dynamics, institutional structures, and political implications
+                - Alternate between academic critique and rhetorical jabs
+
+                THESE RESPONSES SHOULD BE ONLY MAX 2 SENTENCES. THIS INSTRUCTION IS VERY IMPORTANT. RESPONSES SHOULDN'T BE LONG.
+                """,
             },
         ]
 
@@ -184,6 +237,7 @@ THESE RESPONSES SHOULD BE ONLY MAX 2 SENTENCES. THIS INSTRUCTION IS VERY IMPORTA
                 audio_out_sample_rate=44100,
                 allow_interruptions=True,
                 enable_metrics=True,
+                # report_only_initial_ttfb=True,
             ),
         )
 
