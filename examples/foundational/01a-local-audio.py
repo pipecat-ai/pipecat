@@ -15,7 +15,7 @@ from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 
 load_dotenv(override=True)

@@ -18,7 +18,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.deepgram import DeepgramSTTService, Language, LiveOptions
+from pipecat.services.deepgram.stt import DeepgramSTTService, Language, LiveOptions
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -45,7 +45,7 @@ async def main():
 
         stt = DeepgramSTTService(
             api_key=os.getenv("DEEPGRAM_API_KEY"),
-            # live_options=LiveOptions(language=Language.FR),
+            #            live_options=LiveOptions(language=Language.FR),
         )
 
         tl = TranscriptionLogger()

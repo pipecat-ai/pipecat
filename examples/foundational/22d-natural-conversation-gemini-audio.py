@@ -43,8 +43,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.google import GoogleLLMContext, GoogleLLMService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.services.daily import DailyParams, DailyTransport

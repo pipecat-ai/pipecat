@@ -17,7 +17,7 @@ from pipecat.frames.frames import EndFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.google import GoogleImageGenService
+from pipecat.services.google.image import GoogleImageGenService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
