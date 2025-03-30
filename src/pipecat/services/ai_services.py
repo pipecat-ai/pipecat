@@ -227,6 +227,9 @@ class LLMService(AIService):
             return True
         return function_name in self._functions.keys()
 
+    def list_registered_functions(self) -> List[str]:
+        return list(self._functions.keys())
+
     async def call_function(
         self,
         *,
