@@ -1,0 +1,5 @@
+beautifulsoup4==4.12.3
+pypdf==4.3.1
+tiktoken==0.7.0
+pipecat-ai[daily,cartesia,openai,silero]
+python-dotenv==1.0.1
