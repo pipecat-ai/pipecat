@@ -20,9 +20,10 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.groq import GroqLLMService, GroqSTTService
-from pipecat.services.openai import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.groq.llm import GroqLLMService
+from pipecat.services.groq.stt import GroqSTTService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)

@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024-2025 Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 """Tests for PiperTTSService."""
 
 import asyncio
@@ -14,7 +20,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
-from pipecat.services.piper import PiperTTSService
+from pipecat.services.piper.tts import PiperTTSService
 from pipecat.tests.utils import run_test
 
 

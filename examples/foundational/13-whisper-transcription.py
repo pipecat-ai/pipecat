@@ -12,12 +12,13 @@ from dotenv import load_dotenv
 from loguru import logger
 from runner import configure
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.whisper import WhisperSTTService
+from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -39,7 +40,15 @@ async def main():
         (room_url, _) = await configure(session)
 
         transport = DailyTransport(
-            room_url, None, "Transcription bot", DailyParams(audio_in_enabled=True)
+            room_url,
+            None,
+            "Transcription bot",
+            DailyParams(
+                audio_in_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                vad_audio_passthrough=True,
+            ),
         )
 
         stt = WhisperSTTService()
