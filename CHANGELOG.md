@@ -47,6 +47,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It is now possible to tell whether `UserStartedSpeakingFrame` or
   `UserStoppedSpeakingFrame` have been generated because of emulation frames.
 
+### Changed
+
+- Pipecat services have been reorganized into packages. Each package can have
+  one or more of the following modules (in the future new module names might be
+  needed) depending on the services implemented:
+    -  image: for image generation services
+    -    llm: for LLM services
+    - memory: for memory services
+    -    stt: for Speech-To-Text services
+    -    tts: for Text-To-Speech services
+    -  video: for video generation services
+    - vision: for video recognition services
+
+### Deprecated
+
+- All Pipecat services imports have been deprecated and a warning will be shown
+  when using the old import. The new import should be
+  `pipecat.services.[service].[image,llm,memory,stt,tts,video,vision]`. For
+  example, `from pipecat.services.openai.llm import OpenAILLMService`.
+
 ### Fixed
 
 - Fixed an issue that would cause `SegmentedSTTService` based services

@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     LLMFullResponseEndFrame,
-    MetricsFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -36,8 +35,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.google import GoogleLLMContext, GoogleLLMService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
