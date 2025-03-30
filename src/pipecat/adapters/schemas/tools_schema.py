@@ -41,3 +41,9 @@ class ToolsSchema:
     @custom_tools.setter
     def custom_tools(self, value: Dict[AdapterType, List[Dict[str, Any]]]) -> None:
         self._custom_tools = value
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "standard_tools": [tool.to_dict() for tool in self._standard_tools],
+            "custom_tools": self._custom_tools,
+        }
