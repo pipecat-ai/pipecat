@@ -27,9 +27,9 @@ from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.cartesia import CartesiaHttpTTSService
-from pipecat.services.fal import FalImageGenService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.cartesia.tts import CartesiaHttpTTSService
+from pipecat.services.fal.image import FalImageGenService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 load_dotenv(override=True)

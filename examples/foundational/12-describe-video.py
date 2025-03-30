@@ -22,8 +22,8 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
 from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.moondream import MoondreamService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.moondream.vision import MoondreamService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)

@@ -31,12 +31,12 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.services.anthropic import (
+from pipecat.services.anthropic.llm import (
     AnthropicAssistantContextAggregator,
     AnthropicLLMContext,
     AnthropicUserContextAggregator,
 )
-from pipecat.services.google.google import (
+from pipecat.services.google.llm import (
     GoogleAssistantContextAggregator,
     GoogleLLMContext,
     GoogleUserContextAggregator,

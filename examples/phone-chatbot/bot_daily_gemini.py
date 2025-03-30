@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
 import argparse
 import asyncio
 import os
@@ -27,10 +28,9 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ai_services import LLMService
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.google import GoogleLLMService
-from pipecat.services.google.google import GoogleLLMContext
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
 from pipecat.transports.services.daily import (
     DailyDialinSettings,
     DailyParams,
