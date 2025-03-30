@@ -478,6 +478,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # logger.debug(f"Sending message to websocket: {message}")
         try:
             if self._websocket:
+                logger.debug(f"[DEBUG] Enviando mensagem para websocket: {message}")
                 await self._websocket.send(json.dumps(message))
         except Exception as e:
             if self._disconnecting:
