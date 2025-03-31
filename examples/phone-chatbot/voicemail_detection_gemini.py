@@ -6,6 +6,7 @@
 
 import argparse
 import asyncio
+import functools
 import os
 import sys
 
@@ -206,10 +207,10 @@ async def main(
         ),
     )
 
-    # Initialize text-to-speech service
+    # Initialize TTS
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="af346552-54bf-4c2b-a4d4-9d2820f51b6c",
+        api_key=os.getenv("CARTESIA_API_KEY", ""),
+        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
     )
 
     # Initialize speech-to-text service (for human conversation phase)
@@ -314,8 +315,7 @@ async def main(
         "switch_to_human_conversation", handlers.human_conversation
     )
     voicemail_detection_llm.register_function(
-        "terminate_call",
-        lambda *args, **kwargs: terminate_call(*args, **kwargs, session_manager=session_manager),
+        "terminate_call", functools.partial(terminate_call, session_manager=session_manager)
     )
 
     # Set up audio collector for handling audio input
@@ -347,7 +347,7 @@ async def main(
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
         # Start dialout if needed
-        if dialout_settings:
+        if not test_mode and dialout_settings:
             logger.debug("Dialout settings detected; starting dialout")
             await call_config_manager.start_dialout(transport, dialout_settings)
 
@@ -366,9 +366,10 @@ async def main(
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
-        await transport.capture_participant_transcription(participant["id"])
+        # await transport.capture_participant_transcription(participant["id"])
         # Track the customer if it's the first participant
         session_manager.set_session_id("customer", participant["id"])
+        await transport.capture_participant_transcription(participant["id"])
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
@@ -384,7 +385,13 @@ async def main(
     runner = PipelineRunner()
 
     print("!!! starting voicemail detection pipeline")
-    await runner.run(voicemail_detection_pipeline_task)
+    try:
+        await runner.run(voicemail_detection_pipeline_task)
+    except Exception as e:
+        logger.error(f"Error in voicemail detection pipeline: {e}")
+        import traceback
+
+        logger.error(traceback.format_exc())
     print("!!! Done with voicemail detection pipeline")
 
     # Check if we should exit early
@@ -435,8 +442,7 @@ async def main(
 
     # Register terminate function with the human conversation LLM
     human_conversation_llm.register_function(
-        "terminate_call",
-        terminate_call(*args, **kwargs, session_manager=session_manager),
+        "terminate_call", functools.partial(terminate_call, session_manager=session_manager)
     )
 
     # Build human conversation pipeline
@@ -461,7 +467,6 @@ async def main(
     # Update participant left handler for human conversation phase
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        session_manager.call_flow_state.set_participant_left_early()
         await voicemail_detection_pipeline_task.queue_frame(EndFrame())
         await human_conversation_pipeline_task.queue_frame(EndFrame())
 
@@ -480,7 +485,13 @@ async def main(
     )
 
     # Run the human conversation pipeline
-    await runner.run(human_conversation_pipeline_task)
+    try:
+        await runner.run(human_conversation_pipeline_task)
+    except Exception as e:
+        logger.error(f"Error in voicemail detection pipeline: {e}")
+        import traceback
+
+        logger.error(traceback.format_exc())
 
     print("!!! Done with human conversation pipeline")
 

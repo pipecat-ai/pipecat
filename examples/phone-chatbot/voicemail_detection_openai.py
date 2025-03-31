@@ -75,10 +75,10 @@ async def main(
         ),
     )
 
-    # Initialize text-to-speech service
+    # Initialize TTS
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="af346552-54bf-4c2b-a4d4-9d2820f51b6c",
+        api_key=os.getenv("CARTESIA_API_KEY", ""),
+        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
     )
 
     # ------------ FUNCTION DEFINITIONS ------------
