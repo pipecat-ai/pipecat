@@ -11,7 +11,7 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, TextFrame, VisionImageRawFrame
-from pipecat.services.ai_services import VisionService
+from pipecat.services.vision_service import VisionService
 
 try:
     import torch

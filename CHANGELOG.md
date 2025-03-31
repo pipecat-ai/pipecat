@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - video: for video generation services
   - vision: for video recognition services
 
+- Base classes for AI services have been reorganized into modules. They can now
+  be found in
+  `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
+
 - `GladiaSTTService` now uses Gladia's default values.
 
 ### Fixed
@@ -81,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when using the old import. The new import should be
   `pipecat.services.[service].[image,llm,memory,stt,tts,video,vision]`. For
   example, `from pipecat.services.openai.llm import OpenAILLMService`.
+
+- Import for AI services base classes from `pipecat.services.ai_services` is now
+  deprecated, use one of
+  `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
 
 - Deprecated the `language` parameter in `GladiaSTTService.InputParams` in
   favor of `language_config`, which better aligns with Gladia's API.

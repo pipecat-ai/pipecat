@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 # The server below can connect to XTTS through a local running docker
