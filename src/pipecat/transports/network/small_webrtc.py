@@ -138,6 +138,13 @@ class RawVideoTrack(VideoStreamTrack):
 
 
 class SmallWebRTCClient:
+    FORMAT_CONVERSIONS = {
+        "yuv420p": cv2.COLOR_YUV2RGB_I420,
+        "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
+        "nv12": cv2.COLOR_YUV2RGB_NV12,
+        "gray": cv2.COLOR_GRAY2RGB,
+    }
+
     def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
         self._webrtc_connection = webrtc_connection
         self._closing = False
@@ -176,6 +183,30 @@ class SmallWebRTCClient:
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
             await self._handle_app_message(message)
 
+    def _convert_frame(self, frame_array: np.ndarray, format_name: str) -> np.ndarray:
+        """
+        Convert a given frame to RGB format based on the input format.
+
+        Args:
+            frame_array (np.ndarray): The input frame.
+            format_name (str): The format of the input frame.
+
+        Returns:
+            np.ndarray: The converted RGB frame.
+
+        Raises:
+            ValueError: If the format is unsupported.
+        """
+        if format_name.startswith("rgb"):  # Already in RGB, no conversion needed
+            return frame_array
+
+        conversion_code = SmallWebRTCClient.FORMAT_CONVERSIONS.get(format_name)
+
+        if conversion_code is None:
+            raise ValueError(f"Unsupported format: {format_name}")
+
+        return cv2.cvtColor(frame_array, conversion_code)
+
     async def read_video_frame(self):
         """
         Reads a video frame from the given MediaStreamTrack, converts it to RGB,
@@ -203,21 +234,9 @@ class SmallWebRTCClient:
                 continue
 
             format_name = frame.format.name
-
             # Convert frame to NumPy array in its native format
             frame_array = frame.to_ndarray(format=format_name)
-
-            # Handle different formats dynamically
-            if format_name == "yuv420p":
-                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_YUV2RGB_I420)
-            elif format_name == "nv12":
-                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_YUV2RGB_NV12)
-            elif format_name == "gray":
-                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_GRAY2RGB)
-            elif format_name.startswith("rgb"):  # Already RGB, no conversion needed
-                frame_rgb = frame_array
-            else:
-                raise ValueError(f"Unsupported format: {format_name}")
+            frame_rgb = self._convert_frame(frame_array, format_name)
 
             image_frame = InputImageRawFrame(
                 image=frame_rgb.tobytes(),
