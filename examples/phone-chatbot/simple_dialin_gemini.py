@@ -111,16 +111,17 @@ async def main(
         # Then end the call
         await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
-    # Define function schemas for tools
-    terminate_call_function = FunctionSchema(
-        name="terminate_call",
-        description="Call this function to terminate the call.",
-        properties={},
-        required=[],
-    )
-
     # Create tools schema
-    tools = ToolsSchema(standard_tools=[terminate_call_function])
+    tools = [
+        {
+            "function_declarations": [
+                {
+                    "name": "terminate_call",
+                    "description": "Call this function to terminate the call.",
+                },
+            ]
+        }
+    ]
 
     # ------------ LLM AND CONTEXT SETUP ------------
 

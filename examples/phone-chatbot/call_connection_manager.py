@@ -535,6 +535,10 @@ class CallConfigManager:
             return bool(self.body["voicemail_detection"].get("testInPrebuilt"))
         if "call_transfer" in self.body:
             return bool(self.body["call_transfer"].get("testInPrebuilt"))
+        if "simple_dialin" in self.body:
+            return bool(self.body["simple_dialin"].get("testInPrebuilt"))
+        if "simple_dialout" in self.body:
+            return bool(self.body["simple_dialout"].get("testInPrebuilt"))
         return False
 
     def is_voicemail_detection_enabled(self) -> bool:

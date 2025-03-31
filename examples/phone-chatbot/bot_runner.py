@@ -4,10 +4,20 @@ import os
 import shlex
 import subprocess
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import aiohttp
-from call_connection_manager import CallConfigManager
+from bot_constants import (
+    DEFAULT_LLM,
+    MAX_SESSION_TIME,
+    REQUIRED_ENV_VARS,
+)
+from bot_definitions import bot_registry
+from bot_runner_helpers import (
+    determine_room_capabilities,
+    ensure_prompt_config,
+    process_dialin_request,
+)
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +26,6 @@ from twilio.twiml.voice_response import VoiceResponse
 
 from pipecat.transports.services.helpers.daily_rest import (
     DailyRESTHelper,
-    DailyRoomObject,
     DailyRoomParams,
     DailyRoomProperties,
     DailyRoomSipParams,
@@ -24,184 +33,13 @@ from pipecat.transports.services.helpers.daily_rest import (
 
 load_dotenv(override=True)
 
-# ----------------- Constants ----------------- #
-
-# Maximum session time
-MAX_SESSION_TIME = 5 * 60  # 5 minutes
-
-# Required environment variables
-REQUIRED_ENV_VARS = [
-    "OPENAI_API_KEY",
-    "GOOGLE_API_KEY",
-    "DAILY_API_KEY",
-    "CARTESIA_API_KEY",
-    "DEEPGRAM_API_KEY",
-]
-
-# Default LLM to use when none is specified - this determines which bot file to execute
-DEFAULT_LLM = "openai"
-
-# Call transfer configuration constants
-DEFAULT_MODE = "dialout"  # Call transfer dialout mode. Options: dialout, pstn_transfer, sip_transfer, dialout_warm_transfer, sip_refer
-DEFAULT_SPEAK_SUMMARY = True  # Speak a summary of the call to the operator
-DEFAULT_STORE_SUMMARY = False  # Store summary of the call (for future implementation)
-DEFAULT_TEST_IN_PREBUILT = False  # Test in prebuilt mode (bypasses need to dial in/out)
-
 daily_helpers = {}
-
-
-# ----------------- Configuration Helpers ----------------- #
-
-
-def determine_room_capabilities(config_body: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
-    """Determine room capabilities based on the configuration.
-
-    This function examines the configuration to determine which capabilities
-    the Daily room should have enabled.
-
-    Args:
-        config_body: Configuration dictionary that determines room capabilities
-
-    Returns:
-        Dictionary of capability flags
-    """
-    capabilities = {
-        "enable_dialin": False,
-        "enable_dialout": False,
-        # Add more capabilities here in the future as needed
-    }
-
-    if not config_body:
-        return capabilities
-
-    # Check for dialin capability
-    capabilities["enable_dialin"] = "dialin_settings" in config_body
-
-    # Check for dialout capability - needed for outbound calls or transfers
-    has_dialout_settings = "dialout_settings" in config_body
-
-    # Check if there's a transfer to an operator configured
-    has_call_transfer = "call_transfer" in config_body
-
-    # Enable dialout if any condition requires it
-    capabilities["enable_dialout"] = has_dialout_settings or has_call_transfer
-
-    return capabilities
-
-
-def ensure_dialout_settings_array(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensures dialout_settings is an array of objects.
-
-    Args:
-        body: The configuration dictionary
-
-    Returns:
-        Updated configuration with dialout_settings as an array
-    """
-    if "dialout_settings" in body:
-        # Convert to array if it's not already one
-        if not isinstance(body["dialout_settings"], list):
-            body["dialout_settings"] = [body["dialout_settings"]]
-
-    return body
-
-
-def validate_body(body: Dict[str, Any]) -> None:
-    """Validates the body to ensure it doesn't contain contradictory options.
-
-    Args:
-        body: The configuration dictionary
-
-    Raises:
-        HTTPException: If the configuration is invalid or ambiguous
-    """
-    # Ensure dialout_settings is an array
-    body = ensure_dialout_settings_array(body)
-
-    # Check for incompatible scenario combinations
-    has_call_transfer = "call_transfer" in body
-    has_voicemail = "voicemail_detection" in body
-
-    # Error scenarios
-    errors = []
-
-    # Cannot have both call_transfer and voicemail_detection
-    if has_call_transfer and has_voicemail:
-        errors.append(
-            "Cannot have both 'call_transfer' and 'voicemail_detection' in the same configuration"
-        )
-
-    # If we have any errors, raise an exception with all the problems
-    if errors:
-        error_message = "Invalid configuration: " + "; ".join(errors)
-        raise HTTPException(status_code=400, detail=error_message)
-
-
-def ensure_prompt_config(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensures the body has appropriate prompts settings, but doesn't add defaults.
-
-    Only makes sure the prompt section exists, allowing the bot script to handle defaults.
-
-    Args:
-        body: The configuration dictionary
-
-    Returns:
-        Updated configuration with prompt settings section
-    """
-    if "prompts" not in body:
-        body["prompts"] = []
-    return body
-
-
-def create_call_transfer_settings(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Create call transfer settings based on configuration and customer mapping.
-
-    Args:
-        body: The configuration dictionary
-
-    Returns:
-        Call transfer settings dictionary
-    """
-    # Default transfer settings
-    transfer_settings = {
-        "mode": DEFAULT_MODE,
-        "speakSummary": DEFAULT_SPEAK_SUMMARY,
-        "storeSummary": DEFAULT_STORE_SUMMARY,
-        "testInPrebuilt": DEFAULT_TEST_IN_PREBUILT,
-    }
-
-    # If call_transfer already exists, merge the defaults with the existing settings
-    # This ensures all required fields exist while preserving user-specified values
-    if "call_transfer" in body:
-        existing_settings = body["call_transfer"]
-        # Update defaults with existing settings (existing values will override defaults)
-        for key, value in existing_settings.items():
-            transfer_settings[key] = value
-    else:
-        # No existing call_transfer - check if we have dialin settings for customer lookup
-        if "dialin_settings" in body:
-            # Create a temporary routing manager just for customer lookup
-            call_config_manager = CallConfigManager(body)
-
-            # Get caller info
-            caller_info = call_config_manager.get_caller_info()
-            from_number = caller_info.get("caller_number")
-
-            if from_number:
-                # Get customer name from phone number
-                customer_name = call_config_manager.get_customer_name(from_number)
-
-                # If we know the customer name, add it to the config for the bot to use
-                if customer_name:
-                    transfer_settings["customerName"] = customer_name
-
-    return transfer_settings
 
 
 # ----------------- Daily Room Management ----------------- #
 
 
-async def create_daily_room(room_url: Optional[str], config_body: Optional[Dict[str, Any]] = None):
+async def create_daily_room(room_url: str = None, config_body: Dict[str, Any] = None):
     """Create or retrieve a Daily room with appropriate properties based on the configuration.
 
     Args:
@@ -256,37 +94,6 @@ async def create_daily_room(room_url: Optional[str], config_body: Optional[Dict[
 
 
 # ----------------- Bot Process Management ----------------- #
-
-
-async def process_dialin_request(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Process incoming dial-in request data to create a properly formatted body.
-
-    Converts camelCase fields received from webhook to snake_case format
-    for internal consistency across the codebase.
-
-    Args:
-        data: Raw dialin data from webhook
-
-    Returns:
-        Properly formatted configuration with snake_case keys
-    """
-    # Create base body with dialin settings
-    body = {
-        "dialin_settings": {
-            "to": data.get("To", ""),
-            "from": data.get("From", ""),
-            "call_id": data.get("callId", data.get("CallSid", "")),  # Convert to snake_case
-            "call_domain": data.get("callDomain", ""),  # Convert to snake_case
-        }
-    }
-
-    # Set the default LLM model - this determines which bot file to run
-    body["llm"] = DEFAULT_LLM
-
-    # Create call transfer settings (handled in bot_runner)
-    body["call_transfer"] = create_call_transfer_settings(body)
-
-    return body
 
 
 async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], example: str) -> bool:
@@ -447,134 +254,47 @@ async def handle_start_request(request: Request) -> JSONResponse:
             body = await process_dialin_request(data)
         # Handle body-based request
         elif "config" in data:
-            body = data["config"]
-
-            # Ensure dialout_settings is an array if present
-            body = ensure_dialout_settings_array(body)
-
-            # Set default LLM if not specified (this will be used to determine which bot file to run)
-            if "llm" not in body:
-                body["llm"] = DEFAULT_LLM
-
-            # Add call_transfer if dealing with dialin settings
-            if "dialin_settings" in body and "call_transfer" not in body:
-                body["call_transfer"] = create_call_transfer_settings(body)
-            # Handle existing call_transfer by merging with defaults
-            elif "call_transfer" in body:
-                body["call_transfer"] = create_call_transfer_settings(body)
-
-            # Validate the body
-            validate_body(body)
+            # Use the registry to set up the bot configuration
+            body = bot_registry.setup_configuration(data["config"])
         else:
             raise HTTPException(status_code=400, detail="Invalid request format")
 
-        # Process based on body type
+        # Ensure prompt configuration
+        body = ensure_prompt_config(body)
 
-        # Special case for call_transfer with testInPrebuilt
-        if "call_transfer" in body and body["call_transfer"].get("testInPrebuilt", False):
-            # Auto-add empty dialin_settings if not present
-            if "dialin_settings" not in body:
-                body["dialin_settings"] = {}
-
-            # Ensure prompt configuration
-            body = ensure_prompt_config(body)
-
-            # Handle call transfer test scenario
-            room_details = await create_daily_room(room_url, body)
-            await start_bot(room_details, body, "call_transfer")
-
-            return JSONResponse(
-                {
-                    "status": "Bot started",
-                    "room_url": room_details["room"],
-                    "bot_type": "call_transfer",
-                    "llm_model": body["llm"],
-                }
+        # Detect which bot type to use
+        bot_type_name = bot_registry.detect_bot_type(body)
+        if not bot_type_name:
+            raise HTTPException(
+                status_code=400, detail="Configuration doesn't match any supported scenario"
             )
 
-        # Regular dialin with call transfer scenario
-        elif "dialin_settings" in body and "call_transfer" in body:
-            # Ensure prompt configuration
-            body = ensure_prompt_config(body)
+        # Create the Daily room
+        room_details = await create_daily_room(room_url, body)
 
-            # Handle dialin call transfer scenario
-            room_details = await create_daily_room(room_url, body)
-            await start_bot(room_details, body, "call_transfer")
+        # Start the bot
+        await start_bot(room_details, body, bot_type_name)
 
-            if body.get("call_transfer", {}).get("testInPrebuilt", False):
-                return JSONResponse(
-                    {
-                        "status": "Bot started",
-                        "room_url": room_details["room"],
-                        "bot_type": "call_transfer",
-                        "llm_model": body["llm"],
-                    }
-                )
-            return JSONResponse({"status": "Bot started", "bot_type": "call_transfer"})
+        # Get the bot type
+        bot_type = bot_registry.get_bot(bot_type_name)
 
-        # Special case for voicemail detection with testInPrebuilt
-        elif "voicemail_detection" in body and body["voicemail_detection"].get(
-            "testInPrebuilt", False
-        ):
-            # Auto-add empty dialout_settings if not present
-            if "dialout_settings" not in body:
-                body["dialout_settings"] = [{}]  # Empty array with one object
+        # Build the response
+        response = {"status": "Bot started", "bot_type": bot_type_name}
 
-            # Ensure prompt configuration
-            body = ensure_prompt_config(body)
+        # Add room URL for test mode
+        if bot_type.has_test_mode(body):
+            response["room_url"] = room_details["room"]
+            response["llm_model"] = body["llm"]
 
-            # Handle voicemail detection test scenario
-            room_details = await create_daily_room(room_url, body)
-            await start_bot(room_details, body, "voicemail_detection")
+        # Add dialout info for dialout scenarios
+        if "dialout_settings" in body and len(body["dialout_settings"]) > 0:
+            first_setting = body["dialout_settings"][0]
+            if "phoneNumber" in first_setting:
+                response["dialing_to"] = f"phone:{first_setting['phoneNumber']}"
+            elif "sipUri" in first_setting:
+                response["dialing_to"] = f"sip:{first_setting['sipUri']}"
 
-            return JSONResponse(
-                {
-                    "status": "Bot started",
-                    "room_url": room_details["room"],
-                    "bot_type": "voicemail_detection",
-                    "llm_model": body["llm"],
-                }
-            )
-
-        # Regular voicemail detection scenario
-        elif "dialout_settings" in body and "voicemail_detection" in body:
-            # Ensure prompt configuration
-            body = ensure_prompt_config(body)
-
-            # Handle dialout voicemail detection scenario
-            room_details = await create_daily_room(room_url, body)
-            await start_bot(room_details, body, "voicemail_detection")
-
-            # Get the first dialout info for logging (if available)
-            dialout_info = "unknown"
-            if body["dialout_settings"] and len(body["dialout_settings"]) > 0:
-                first_setting = body["dialout_settings"][0]
-                if "phoneNumber" in first_setting:
-                    dialout_info = f"phone:{first_setting['phoneNumber']}"
-                elif "sipUri" in first_setting:
-                    dialout_info = f"sip:{first_setting['sipUri']}"
-
-            if body.get("voicemail_detection", {}).get("testInPrebuilt", False):
-                return JSONResponse(
-                    {
-                        "status": "Bot started",
-                        "room_url": room_details["room"],
-                        "bot_type": "voicemail_detection",
-                        "llm_model": body["llm"],
-                    }
-                )
-            return JSONResponse(
-                {
-                    "status": "Bot started",
-                    "dialing_to": dialout_info,
-                    "bot_type": "voicemail_detection",
-                }
-            )
-
-        # If we got here with a valid body but didn't match any scenario
-        raise HTTPException(
-            status_code=400, detail="Configuration doesn't match any supported scenario"
-        )
+        return JSONResponse(response)
 
     except json.JSONDecodeError:
         # Check if this might be form data from Twilio

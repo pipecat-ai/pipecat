@@ -47,6 +47,7 @@ async def main(
     # Get important configuration values
     dialout_settings = call_config_manager.get_dialout_settings()
     test_mode = call_config_manager.is_test_mode()
+    logger.info(f"++++ Test mode: {test_mode}")
 
     # ------------ TRANSPORT SETUP ------------
 
@@ -83,16 +84,17 @@ async def main(
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
         await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
-    # Define function schemas for tools
-    terminate_call_function = FunctionSchema(
-        name="terminate_call",
-        description="Call this function to terminate the call.",
-        properties={},
-        required=[],
-    )
-
     # Create tools schema
-    tools = ToolsSchema(standard_tools=[terminate_call_function])
+    tools = [
+        {
+            "function_declarations": [
+                {
+                    "name": "terminate_call",
+                    "description": "Call this function to terminate the call.",
+                },
+            ]
+        }
+    ]
 
     # ------------ LLM AND CONTEXT SETUP ------------
 
