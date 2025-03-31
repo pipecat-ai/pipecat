@@ -358,17 +358,12 @@ async def main(
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
         logger.debug(f"Dial-out answered: {data}")
-        # Set the customer session ID in the session manager
-        session_manager.set_session_id("customer", data["sessionId"])
         # Start capturing transcription
         await transport.capture_participant_transcription(data["sessionId"])
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
-        # await transport.capture_participant_transcription(participant["id"])
-        # Track the customer if it's the first participant
-        session_manager.set_session_id("customer", participant["id"])
         await transport.capture_participant_transcription(participant["id"])
 
     @transport.event_handler("on_participant_left")
