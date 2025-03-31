@@ -17,7 +17,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
-from pipecat.services.ai_services import ImageGenService
+from pipecat.services.image_service import ImageGenService
 
 try:
     from google import genai

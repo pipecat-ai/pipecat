@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AIService
+from pipecat.services.ai_service import AIService
 
 try:
     from transformers import AutoTokenizer
