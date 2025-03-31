@@ -133,6 +133,6 @@ async def test_run_piper_tts_error(aiohttp_client):
         up_frames = frames_received[1]
 
         assert isinstance(up_frames[0], ErrorFrame), "Must receive an ErrorFrame for 404"
-        assert "status: 404" in up_frames[0].error, (
-            "ErrorFrame should contain details about the 404"
-        )
+        assert (
+            "status: 404" in up_frames[0].error
+        ), "ErrorFrame should contain details about the 404"
