@@ -86,9 +86,9 @@ class TestUserIdleProcessor(unittest.IsolatedAsyncioTestCase):
             expected_down_frames=expected_down_frames,
         )
 
-        assert not callback_called.is_set(), (
-            "Idle callback was called even though bot speaking frames reset the timer"
-        )
+        assert (
+            not callback_called.is_set()
+        ), "Idle callback was called even though bot speaking frames reset the timer"
 
     async def test_idle_retry_callback(self):
         """Test that retry count increases until user activity resets it."""
