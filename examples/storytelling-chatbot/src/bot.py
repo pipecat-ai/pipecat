@@ -22,8 +22,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.elevenlabs import ElevenLabsTTSService
-from pipecat.services.google import GoogleImageGenService, GoogleLLMService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.google.image import GoogleImageGenService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,

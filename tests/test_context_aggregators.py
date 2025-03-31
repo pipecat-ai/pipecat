@@ -4,13 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
+from typing import Any
 
 import google.ai.generativelanguage as glm
 
 from pipecat.frames.frames import (
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallResultProperties,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -21,20 +26,17 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
-)
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.services.anthropic import (
+from pipecat.services.anthropic.llm import (
     AnthropicAssistantContextAggregator,
     AnthropicLLMContext,
     AnthropicUserContextAggregator,
 )
-from pipecat.services.google.google import (
+from pipecat.services.google.llm import (
     GoogleAssistantContextAggregator,
     GoogleLLMContext,
     GoogleUserContextAggregator,
@@ -423,6 +425,9 @@ class BaseTestAssistantContextAggreagator:
     ):
         assert context.messages[index]["content"] == content
 
+    def check_function_call_result(self, context: OpenAILLMContext, index: int, content: str):
+        assert json.loads(context.messages[index]["content"]) == content
+
     async def test_empty(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
@@ -556,23 +561,82 @@ class BaseTestAssistantContextAggreagator:
         self.check_message_multi_content(context, 0, 0, "Hello Pipecat.")
         self.check_message_multi_content(context, 0, 1, "How are you?")
 
+    async def test_function_call(self):
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+        ]
+        expected_down_frames = []
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.check_function_call_result(context, -1, {"conditions": "Sunny"})
+
+    async def test_function_call_on_context_updated(self):
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context_updated = False
+
+        async def on_context_updated():
+            nonlocal context_updated
+            context_updated = True
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+                properties=FunctionCallResultProperties(on_context_updated=on_context_updated),
+            ),
+            SleepFrame(),
+        ]
+        expected_down_frames = []
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.check_function_call_result(context, -1, {"conditions": "Sunny"})
+        assert context_updated
+
 
 #
-# LLMUserContextAggregator, LLMAssistantContextAggregator
+# LLMUserContextAggregator
 #
 
 
 class TestLLMUserContextAggregator(BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase):
     CONTEXT_CLASS = OpenAILLMContext
     AGGREGATOR_CLASS = LLMUserContextAggregator
-
-
-class TestLLMAssistantContextAggregator(
-    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
-):
-    CONTEXT_CLASS = OpenAILLMContext
-    AGGREGATOR_CLASS = LLMAssistantContextAggregator
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
 
 #
@@ -626,6 +690,9 @@ class TestAnthropicAssistantContextAggregator(
         messages = context.messages[content_index]
         assert messages["content"][index]["text"] == content
 
+    def check_function_call_result(self, context: OpenAILLMContext, index: int, content: Any):
+        assert context.messages[index]["content"][0]["content"] == json.dumps(content)
+
 
 #
 # Google
@@ -665,3 +732,7 @@ class TestGoogleAssistantContextAggregator(
     ):
         obj = glm.Content.to_dict(context.messages[index])
         assert obj["parts"][0]["text"] == content
+
+    def check_function_call_result(self, context: OpenAILLMContext, index: int, content: Any):
+        obj = glm.Content.to_dict(context.messages[index])
+        assert obj["parts"][0]["function_response"]["response"]["value"] == json.dumps(content)
