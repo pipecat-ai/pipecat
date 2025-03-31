@@ -1,5 +1,6 @@
 import logging
-from typing import Optional, Union
+from functools import wraps
+from typing import Any, Callable, Optional, Union
 
 from fastapi import WebSocket
 from pipecatcloud.agent import DailySessionArguments, WebsocketSessionArguments
@@ -104,6 +105,19 @@ class PipecatCloudTransport(BaseTransport):
     This transport will instantiate one of the three underlying transports based on the
     session arguments provided to the constructor.
 
+    Event handlers:
+        @event_handler("on_client_connected"): Called when a client connects. Maps to:
+            - FastAPIWebsocketTransport.event_handler("on_client_connected")
+            - SmallWebRTCTransport.event_handler("on_client_connected")
+            - DailyTransport.event_handler("on_first_participant_joined")
+
+        @event_handler("on_client_disconnected"): Called when a client disconnects. Maps to:
+            - FastAPIWebsocketTransport.event_handler("on_client_disconnected")
+            - SmallWebRTCTransport.event_handler("on_client_disconnected")
+            - DailyTransport.event_handler("on_participant_left")
+
+        Other event handlers are passed through directly to the underlying transport.
+
     Args:
         session_args: Arguments for creating the session. The type of arguments determines
             which transport will be used.
@@ -112,6 +126,15 @@ class PipecatCloudTransport(BaseTransport):
         input_name: Optional name for the input transport.
         output_name: Optional name for the output transport.
     """
+
+    # Event name mappings for each transport type
+    # Only include events that need to be mapped differently
+    _EVENT_MAPPINGS = {
+        DailyTransport: {
+            "on_client_connected": "on_first_participant_joined",
+            "on_client_disconnected": "on_participant_left",
+        },
+    }
 
     def __init__(
         self,
@@ -125,6 +148,7 @@ class PipecatCloudTransport(BaseTransport):
         logger.debug(f"SessionArguments: {session_args}")
 
         params = params or PipecatCloudParams()
+        self._pending_handlers = {}
 
         # Create the appropriate transport based on session arguments type
         if isinstance(session_args, WebsocketSessionArguments):
@@ -158,6 +182,52 @@ class PipecatCloudTransport(BaseTransport):
             )
         else:
             raise ValueError(f"Unsupported session arguments type: {type(session_args)}")
+
+        # Register any handlers that were added before transport creation
+        for event_name, handlers in self._pending_handlers.items():
+            for handler in handlers:
+                self._register_handler(event_name, handler)
+
+    def _register_handler(self, event_name: str, handler: Callable[..., Any]) -> None:
+        """Register a handler with the appropriate transport method."""
+        transport_type = type(self._transport)
+
+        # If the transport type has mappings and the event needs to be mapped
+        if (
+            transport_type in self._EVENT_MAPPINGS
+            and event_name in self._EVENT_MAPPINGS[transport_type]
+        ):
+            mapped_event = self._EVENT_MAPPINGS[transport_type][event_name]
+        else:
+            # Pass through the event name directly if no mapping exists
+            mapped_event = event_name
+
+        self._transport.event_handler(mapped_event)(handler)
+
+    def event_handler(self, event_name: str) -> Callable[..., Any]:
+        """Register an event handler.
+
+        Args:
+            event_name: The name of the event to handle. Common events:
+                - "on_client_connected": Called when a client connects
+                - "on_client_disconnected": Called when a client disconnects
+                Other event names are passed through to the underlying transport.
+
+        Returns:
+            A decorator that registers the handler function.
+        """
+
+        def decorator(handler: Callable[..., Any]) -> Callable[..., Any]:
+            if not hasattr(self, "_transport"):
+                # Store the handler to be registered when the transport is created
+                if event_name not in self._pending_handlers:
+                    self._pending_handlers[event_name] = []
+                self._pending_handlers[event_name].append(handler)
+            else:
+                self._register_handler(event_name, handler)
+            return handler
+
+        return decorator
 
     async def start(self, frame):
         """Start the transport."""
