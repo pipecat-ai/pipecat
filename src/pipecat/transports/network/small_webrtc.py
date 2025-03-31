@@ -138,7 +138,6 @@ class RawVideoTrack(VideoStreamTrack):
 
 
 class SmallWebRTCClient:
-
     FORMAT_CONVERSIONS = {
         "yuv420p": cv2.COLOR_YUV2RGB_I420,
         "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
