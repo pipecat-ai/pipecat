@@ -69,7 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be found in
   `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
 
-- `GladiaSTTService` now uses Gladia's default values.
+- `GladiaSTTService` now uses the `solaria-1` model by default. Other params
+  use Gladia's default values.
 
 ### Fixed
 
