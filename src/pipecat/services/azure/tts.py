@@ -18,8 +18,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
 from pipecat.services.azure.common import language_to_azure_language
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 try:

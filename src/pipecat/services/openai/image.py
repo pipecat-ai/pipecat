@@ -17,7 +17,7 @@ from pipecat.frames.frames import (
     Frame,
     URLImageRawFrame,
 )
-from pipecat.services.ai_services import ImageGenService
+from pipecat.services.image_service import ImageGenService
 
 
 class OpenAIImageGenService(ImageGenService):

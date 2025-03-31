@@ -25,7 +25,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import InterruptibleWordTTSService, TTSService
+from pipecat.services.tts_service import InterruptibleWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 
 # See .env.example for ElevenLabs configuration needed
