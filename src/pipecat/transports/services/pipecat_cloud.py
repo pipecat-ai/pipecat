@@ -1,9 +1,11 @@
 import logging
+from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Optional, Union
 
 from fastapi import WebSocket
-from pipecatcloud.agent import DailySessionArguments, WebsocketSessionArguments
+from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
+from pipecatcloud.agent import SessionArguments as PCCSessionArguments
 from pydantic import BaseModel, ConfigDict, create_model
 
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -20,12 +22,46 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class WebRTCSessionArguments(PCCSessionArguments):
+    """WebRTC based agent session arguments. The arguments are received by the
+    bot() entry point.
+    """
+
+    webrtc_connection: SmallWebRTCConnection
+
+
 def _get_model_fields(model_class):
-    """Get all fields from a Pydantic model class."""
-    return {
-        field_name: (field_info.annotation, field_info.default)
-        for field_name, field_info in model_class.model_fields.items()
-    }
+    """Get all fields from a Pydantic model class with their default values.
+
+    If a field doesn't have a default value, we'll use a sensible default based on the type.
+    """
+    fields = {}
+    for field_name, field_info in model_class.model_fields.items():
+        # Get the field type and default value
+        field_type = field_info.annotation
+        field_default = field_info.default
+
+        # If there's no default value, use a sensible default based on the type
+        if field_default is None and not field_info.is_required():
+            if field_type == bool:
+                field_default = False
+            elif field_type == int:
+                field_default = 0
+            elif field_type == str:
+                field_default = ""
+            elif field_type == float:
+                field_default = 0.0
+            # For Optional types, use None as the default
+            elif hasattr(field_type, "__origin__") and field_type.__origin__ is Union:
+                field_default = None
+            # For any other type without a default, make it Optional with None default
+            else:
+                field_type = Optional[field_type]
+                field_default = None
+
+        fields[field_name] = (field_type, field_default)
+    return fields
 
 
 # Dynamically create PipecatCloudParams by combining fields from all parameter classes
@@ -86,17 +122,45 @@ setattr(PipecatCloudParams, "to_websocket_params", to_websocket_params)
 setattr(PipecatCloudParams, "to_daily_params", to_daily_params)
 
 
-class WebRTCSessionArguments:
-    """Arguments for creating a SmallWebRTCTransport session."""
+class SessionArguments:
+    """Arguments for creating a PipecatCloudTransport session.
+
+    This class can be initialized with arguments for any of the supported transport types:
+    - WebSocket: Pass websocket=WebSocket
+    - Daily: Pass room_url=str, token=str, bot_name=str
+    - WebRTC: Pass webrtc_connection=SmallWebRTCConnection
+    """
 
     def __init__(
         self,
-        webrtc_connection: SmallWebRTCConnection,
+        *,
+        websocket: Optional[WebSocket] = None,
+        room_url: Optional[str] = None,
+        token: Optional[str] = None,
+        bot_name: Optional[str] = None,
+        webrtc_connection: Optional[SmallWebRTCConnection] = None,
+        session_id: Optional[str] = None,
     ):
-        self.webrtc_connection = webrtc_connection
+        """Initialize session arguments for any supported transport type."""
+        if websocket is not None:
+            self._args = WebSocketSessionArguments(websocket=websocket, session_id=session_id)
+        elif all(x is not None for x in (room_url, token, bot_name)):
+            self._args = DailySessionArguments(
+                room_url=room_url, token=token, bot_name=bot_name, session_id=session_id
+            )
+        elif webrtc_connection is not None:
+            self._args = WebRTCSessionArguments(
+                webrtc_connection=webrtc_connection, session_id=session_id
+            )
+        else:
+            raise ValueError(
+                "Must provide either websocket, (room_url, token, bot_name), or webrtc_connection"
+            )
 
-
-SessionArguments = Union[WebsocketSessionArguments, DailySessionArguments, WebRTCSessionArguments]
+    @property
+    def args(self):
+        """Get the underlying session arguments."""
+        return self._args
 
 
 class PipecatCloudTransport(BaseTransport):
@@ -139,7 +203,7 @@ class PipecatCloudTransport(BaseTransport):
     def __init__(
         self,
         session_args: SessionArguments,
-        params: Optional[PipecatCloudParams] = None,
+        params: Optional[Union[PipecatCloudParams, TransportParams]] = None,
         *,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
@@ -147,41 +211,50 @@ class PipecatCloudTransport(BaseTransport):
         super().__init__(input_name=input_name, output_name=output_name)
         logger.debug(f"SessionArguments: {session_args}")
 
-        params = params or PipecatCloudParams()
+        # Convert TransportParams to PipecatCloudParams if needed
+        if isinstance(params, TransportParams):
+            cloud_params = PipecatCloudParams()
+            for field_name, field_value in params.model_dump().items():
+                setattr(cloud_params, field_name, field_value)
+            params = cloud_params
+        else:
+            params = params or PipecatCloudParams()
+
         self._pending_handlers = {}
 
         # Create the appropriate transport based on session arguments type
-        if isinstance(session_args, WebsocketSessionArguments):
+        args = session_args.args
+        if isinstance(args, WebSocketSessionArguments):
             logger.info("Using FastAPIWebsocketTransport")
             websocket_params = params.to_websocket_params()
             self._transport = FastAPIWebsocketTransport(
-                session_args.websocket,
+                args.websocket,
                 websocket_params,
                 input_name=input_name,
                 output_name=output_name,
             )
-        elif isinstance(session_args, DailySessionArguments):
+        elif isinstance(args, DailySessionArguments):
             logger.info("Using DailyTransport")
             daily_params = params.to_daily_params()
             self._transport = DailyTransport(
-                session_args.room_url,
-                session_args.token,
-                session_args.bot_name,
+                args.room_url,
+                args.token,
+                args.bot_name,
                 params=daily_params,
                 input_name=input_name,
                 output_name=output_name,
             )
-        elif isinstance(session_args, WebRTCSessionArguments):
+        elif isinstance(args, WebRTCSessionArguments):
             logger.info("Using SmallWebRTCTransport")
             transport_params = params.to_transport_params()
             self._transport = SmallWebRTCTransport(
-                session_args.webrtc_connection,
+                args.webrtc_connection,
                 transport_params,
                 input_name=input_name,
                 output_name=output_name,
             )
         else:
-            raise ValueError(f"Unsupported session arguments type: {type(session_args)}")
+            raise ValueError(f"Unsupported session arguments type: {type(args)}")
 
         # Register any handlers that were added before transport creation
         for event_name, handlers in self._pending_handlers.items():
