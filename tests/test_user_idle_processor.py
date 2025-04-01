@@ -71,6 +71,10 @@ class TestUserIdleProcessor(unittest.IsolatedAsyncioTestCase):
             SleepFrame(sleep=0.1),
             # Another bot speaking frame resets timer again
             BotSpeakingFrame(),
+            # Give some time for the idle timeout task to start (Python 3.10
+            # doesn't really like when you create a task and then cancel it
+            # right away).
+            SleepFrame(sleep=0.1),
         ]
 
         expected_down_frames = [
