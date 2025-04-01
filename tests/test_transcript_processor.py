@@ -238,8 +238,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             TTSTextFrame(text="world!"),
             SleepFrame(sleep=0.1),
             StartInterruptionFrame(),  # User interrupts here
-            BotStartedSpeakingFrame(),
             SleepFrame(sleep=0.1),
+            BotStartedSpeakingFrame(),
             TTSTextFrame(text="New"),
             TTSTextFrame(text="response"),
             SleepFrame(sleep=0.1),
@@ -251,8 +251,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "Hello"
             TTSTextFrame,  # "world!"
+            StartInterruptionFrame,
             TranscriptionUpdateFrame,  # First message (emitted due to interruption)
-            StartInterruptionFrame,  # Interruption frame comes after the update
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "New"
             TTSTextFrame,  # "response"
