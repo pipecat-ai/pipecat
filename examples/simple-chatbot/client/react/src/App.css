@@ -56,6 +56,12 @@ button:disabled {
   align-items: center;
 }
 
+.local-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
 .video-container {
   width: 640px;
   height: 360px;

@@ -2,21 +2,34 @@ import {
   RTVIClientAudio,
   RTVIClientVideo,
   useRTVIClientTransportState,
-} from '@pipecat-ai/client-react';
-import { RTVIProvider } from './providers/RTVIProvider';
-import { ConnectButton } from './components/ConnectButton';
-import { StatusDisplay } from './components/StatusDisplay';
-import { DebugDisplay } from './components/DebugDisplay';
-import './App.css';
+} from "@pipecat-ai/client-react";
+import { RTVIProvider } from "./providers/RTVIProvider";
+import { ConnectButton } from "./components/ConnectButton";
+import { StatusDisplay } from "./components/StatusDisplay";
+import { DebugDisplay } from "./components/DebugDisplay";
+import "./App.css";
 
 function BotVideo() {
   const transportState = useRTVIClientTransportState();
-  const isConnected = transportState !== 'disconnected';
+  const isConnected = transportState !== "disconnected";
 
   return (
     <div className="bot-container">
       <div className="video-container">
         {isConnected && <RTVIClientVideo participant="bot" fit="cover" />}
+      </div>
+    </div>
+  );
+}
+
+function LocalVideo() {
+  const transportState = useRTVIClientTransportState();
+  const isConnected = transportState !== "disconnected";
+
+  return (
+    <div className="local-container">
+      <div className="video-container">
+        {isConnected && <RTVIClientVideo participant="local" fit="cover" />}
       </div>
     </div>
   );
@@ -32,6 +45,7 @@ function AppContent() {
 
       <div className="main-content">
         <BotVideo />
+        <LocalVideo />
       </div>
 
       <DebugDisplay />
