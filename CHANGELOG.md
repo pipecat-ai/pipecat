@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `TransportParams.audio_out_10ms_chunks` parameter to allow controlling
+  the amount of audio being sent by the output transport. It defaults to 2, so
+  20ms audio chunks are sent.
+
 - Added `QwenLLMService` for Qwen integration with an OpenAI-compatible
   interface. Added foundational example `14q-function-calling-qwen.py`.
 
