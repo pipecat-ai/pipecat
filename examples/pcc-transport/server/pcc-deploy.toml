@@ -1,0 +1,6 @@
+agent_name = "simple-chatbot"
+image = "your-docker-hub-username/simple-chatbot:0.1"
+secret_set = "simple-chatbot-secrets"
+
+[scaling]
+  min_instances = 0

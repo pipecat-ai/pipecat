@@ -105,7 +105,7 @@ class SessionArguments:
         """Initialize session arguments for any supported transport type."""
         if websocket is not None:
             self._args = WebSocketSessionArguments(websocket=websocket, session_id=session_id)
-        elif all(x is not None for x in (room_url, token, bot_name)):
+        elif any(x is not None for x in (room_url, token, bot_name)):
             self._args = DailySessionArguments(
                 room_url=room_url, token=token, bot_name=bot_name, session_id=session_id
             )
