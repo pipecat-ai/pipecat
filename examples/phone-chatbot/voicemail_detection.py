@@ -326,7 +326,8 @@ async def main(
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
-        await transport.capture_participant_transcription(participant["id"])
+        if test_mode:
+            await transport.capture_participant_transcription(participant["id"])
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
