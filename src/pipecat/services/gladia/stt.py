@@ -169,7 +169,7 @@ class GladiaSTTService(STTService):
         url: str = "https://api.gladia.io/v2/live",
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
-        model: str = "fast",
+        model: str = "solaria-1",
         params: GladiaInputParams = GladiaInputParams(),
         **kwargs,
     ):
@@ -180,7 +180,8 @@ class GladiaSTTService(STTService):
             url: Gladia API URL
             confidence: Minimum confidence threshold for transcriptions
             sample_rate: Audio sample rate in Hz
-            model: Model to use ("fast" or "accurate")
+            model: Model to use ("solaria-1", "solaria-mini-1", "fast",
+                or "accurate")
             params: Additional configuration parameters
             **kwargs: Additional arguments passed to the STTService
         """
