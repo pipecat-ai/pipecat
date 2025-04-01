@@ -194,6 +194,8 @@ class AnthropicLLMService(LLMService):
 
             params.update(self._settings["extra"])
 
+            logger.debug(f"Calling Anthropic model with: {params}")
+
             response = await api_call(**params)
 
             await self.stop_ttfb_metrics()
