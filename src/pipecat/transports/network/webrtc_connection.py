@@ -216,6 +216,9 @@ class SmallWebRTCConnection(BaseObject):
 
     async def _handle_new_connection_state(self):
         state = self._pc.connectionState
+        if state == "connected" and not self._connect_invoked:
+            # We are going to wait until the pipeline is ready before triggering the event
+            return
         logger.debug(f"Connection state changed to: {state}")
         await self._call_event_handler(state)
         if state == "failed":
