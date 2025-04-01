@@ -336,13 +336,22 @@ class BaseOutputTransport(FrameProcessor):
             return without_mixer(BOT_VAD_STOP_SECS)
 
     async def _sink_task_handler(self):
+        # Push a BotSpeakingFrame every 200ms, we don't really need to push it
+        # at every audio chunk. If the audio chunk is bigger than 200ms, push at
+        # every audio chunk.
+        TOTAL_CHUNK_MS = self._params.audio_out_10ms_chunks * 10
+        BOT_SPEAKING_CHUNK_PERIOD = max(int(200 / TOTAL_CHUNK_MS), 1)
+        bot_speaking_counter = 0
         async for frame in self._next_frame():
             # Notify the bot started speaking upstream if necessary and that
             # it's actually speaking.
             if isinstance(frame, TTSAudioRawFrame):
                 await self._bot_started_speaking()
-                await self.push_frame(BotSpeakingFrame())
-                await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                if bot_speaking_counter % BOT_SPEAKING_CHUNK_PERIOD == 0:
+                    await self.push_frame(BotSpeakingFrame())
+                    await self.push_frame(BotSpeakingFrame(), FrameDirection.UPSTREAM)
+                    bot_speaking_counter = 0
+                bot_speaking_counter += 1
 
             # No need to push EndFrame, it's pushed from process_frame().
             if isinstance(frame, EndFrame):
