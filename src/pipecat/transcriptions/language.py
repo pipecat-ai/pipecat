@@ -182,6 +182,9 @@ class Language(StrEnum):
     GA = "ga"
     GA_IE = "ga-IE"
 
+    # Gaelic
+    GD = "gd"
+
     # Galician
     GL = "gl"
     GL_ES = "gl-ES"
@@ -192,6 +195,9 @@ class Language(StrEnum):
 
     # Hausa
     HA = "ha"
+
+    # Hawaiian
+    HAW = "haw"
 
     # Hebrew
     HE = "he"
@@ -288,6 +294,9 @@ class Language(StrEnum):
     # Malagasy
     MG = "mg"
 
+    # Maori
+    MI = "mi"
+
     # Macedonian
     MK = "mk"
     MK_MK = "mk-MK"
@@ -299,9 +308,6 @@ class Language(StrEnum):
     # Mongolian
     MN = "mn"
     MN_MN = "mn-MN"
-
-    # Maori
-    MI = "mi"
 
     # Marathi
     MR = "mr"
@@ -318,6 +324,7 @@ class Language(StrEnum):
     # Burmese
     MY = "my"
     MY_MM = "my-MM"
+    MY_MR = "mymr"
 
     # Norwegian
     NB = "nb"  # Norwegian Bokmål
@@ -414,9 +421,6 @@ class Language(StrEnum):
     SW_KE = "sw-KE"
     SW_TZ = "sw-TZ"
 
-    # Tagalog
-    TL = "tl"
-
     # Tamil
     TA = "ta"
     TA_IN = "ta-IN"
@@ -437,6 +441,9 @@ class Language(StrEnum):
 
     # Turkmen
     TK = "tk"
+
+    # Tagalog
+    TL = "tl"
 
     # Turkish
     TR = "tr"
@@ -489,7 +496,7 @@ class Language(StrEnum):
     ZH_TW = "zh-TW"
 
     # Xhosa
-    XH = "xh"
+    XH = "xh-ZA"
 
     # Zulu
     ZU = "zu"
