@@ -6,18 +6,24 @@ from typing import Any, Callable, Optional, Union
 from fastapi import WebSocket
 from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
 from pipecatcloud.agent import SessionArguments as PCCSessionArguments
-from pydantic import BaseModel, ConfigDict, create_model
+from pydantic import BaseModel, ConfigDict
 
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
+    FrameSerializer,
 )
 from pipecat.transports.network.small_webrtc import (
     SmallWebRTCConnection,
     SmallWebRTCTransport,
 )
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.daily import (
+    DailyDialinSettings,
+    DailyParams,
+    DailyTranscriptionSettings,
+    DailyTransport,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,95 +37,50 @@ class WebRTCSessionArguments(PCCSessionArguments):
     webrtc_connection: SmallWebRTCConnection
 
 
-def _get_model_fields(model_class):
-    """Get all fields from a Pydantic model class with their default values.
+class PipecatCloudParams(TransportParams):
+    """Parameters for PipecatCloudTransport.
 
-    If a field doesn't have a default value, we'll use a sensible default based on the type.
-    """
-    fields = {}
-    for field_name, field_info in model_class.model_fields.items():
-        # Get the field type and default value
-        field_type = field_info.annotation
-        field_default = field_info.default
-
-        # If there's no default value, use a sensible default based on the type
-        if field_default is None and not field_info.is_required():
-            if field_type == bool:
-                field_default = False
-            elif field_type == int:
-                field_default = 0
-            elif field_type == str:
-                field_default = ""
-            elif field_type == float:
-                field_default = 0.0
-            # For Optional types, use None as the default
-            elif hasattr(field_type, "__origin__") and field_type.__origin__ is Union:
-                field_default = None
-            # For any other type without a default, make it Optional with None default
-            else:
-                field_type = Optional[field_type]
-                field_default = None
-
-        fields[field_name] = (field_type, field_default)
-    return fields
-
-
-# Dynamically create PipecatCloudParams by combining fields from all parameter classes
-PipecatCloudParams = create_model(
-    "PipecatCloudParams",
-    __config__=ConfigDict(arbitrary_types_allowed=True),
-    __doc__="""Parameters for PipecatCloudTransport.
-
-    This class combines parameters from all transport types. When a specific transport
-    is created, it will extract only the parameters relevant to that transport type.
-    
-    The fields are automatically inherited from:
-    - TransportParams
+    This class combines parameters from all transport types:
+    - TransportParams (inherited)
     - FastAPIWebsocketParams
     - DailyParams
-    """,
-    **{
-        **_get_model_fields(TransportParams),
-        **_get_model_fields(FastAPIWebsocketParams),
-        **_get_model_fields(DailyParams),
-    },
-)
+    """
 
+    # FastAPIWebsocketParams fields
+    add_wav_header: bool = False
+    serializer: Optional[FrameSerializer] = None
+    session_timeout: Optional[int] = None
 
-def _extract_matching_fields(source_obj, target_class):
-    """Extract fields from source_obj that match the fields in target_class."""
-    target_fields = set(target_class.model_fields.keys())
-    matching_fields = {
-        field: getattr(source_obj, field) for field in target_fields if hasattr(source_obj, field)
-    }
-    return target_class(**matching_fields)
+    # DailyParams fields
+    api_url: str = "https://api.daily.co/v1"
+    api_key: str = ""
+    dialin_settings: Optional[DailyDialinSettings] = None
+    transcription_enabled: bool = False
+    transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
+    def to_transport_params(self) -> TransportParams:
+        """Convert to TransportParams."""
+        return self
 
-# Add the conversion methods to PipecatCloudParams
-def to_transport_params(self) -> TransportParams:
-    """Convert to TransportParams."""
-    return _extract_matching_fields(self, TransportParams)
+    def to_websocket_params(self) -> FastAPIWebsocketParams:
+        """Convert to FastAPIWebsocketParams."""
+        return FastAPIWebsocketParams(
+            **self.model_dump(),
+            add_wav_header=self.add_wav_header,
+            serializer=self.serializer,
+            session_timeout=self.session_timeout,
+        )
 
-
-def to_websocket_params(self) -> FastAPIWebsocketParams:
-    """Convert to FastAPIWebsocketParams."""
-    return _extract_matching_fields(self, FastAPIWebsocketParams)
-
-
-def to_daily_params(self) -> DailyParams:
-    """Convert to DailyParams."""
-    params = _extract_matching_fields(self, DailyParams)
-    # Also copy over the base transport params
-    transport_params = self.to_transport_params()
-    for key, value in transport_params.model_dump().items():
-        setattr(params, key, value)
-    return params
-
-
-# Add the conversion methods to the dynamically created class
-setattr(PipecatCloudParams, "to_transport_params", to_transport_params)
-setattr(PipecatCloudParams, "to_websocket_params", to_websocket_params)
-setattr(PipecatCloudParams, "to_daily_params", to_daily_params)
+    def to_daily_params(self) -> DailyParams:
+        """Convert to DailyParams."""
+        return DailyParams(
+            **self.model_dump(),
+            api_url=self.api_url,
+            api_key=self.api_key,
+            dialin_settings=self.dialin_settings,
+            transcription_enabled=self.transcription_enabled,
+            transcription_settings=self.transcription_settings,
+        )
 
 
 class SessionArguments:
