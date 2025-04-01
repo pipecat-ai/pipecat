@@ -10,11 +10,8 @@ This repository contains examples for building intelligent phone chatbots using 
 
 - **Voicemail detection**: Bot calls a number, detects if it reaches voicemail or a human, and responds appropriately
 - **Call transfer**: Bot handles initial customer interaction and transfers to a human operator when needed
-
-Each example is implemented for multiple LLM providers:
-
-- OpenAI (GPT-4o)
-- Google (Gemini Flash Lite 2.0 and Flash 2.0)
+- **Simple dial-in**: Basic incoming call handling
+- **Simple dial-out**: Basic outgoing call handling
 
 ## Architecture Overview
 
@@ -22,7 +19,7 @@ These examples use the following components:
 
 - 🔁 **Transport**: Daily WebRTC
 - 💬 **Speech-to-Text**: Deepgram via Daily transport
-- 🤖 **LLMs**: OpenAI GPT4-o / Google Gemini Flash Lite 2.0 and Flash 2.0
+- 🤖 **LLMs**: Each example uses a specific LLM (OpenAI GPT-4o or Google Gemini)
 - 🔉 **Text-to-Speech**: Cartesia
 
 ## Getting Started
@@ -78,7 +75,64 @@ Start ngrok to create a public URL for your local server:
 ngrok http --domain yourdomain.ngrok.app 7860
 ```
 
-## Example 1: Voicemail Detection
+## Example 1: Simple Dial-in
+
+This example demonstrates basic handling of incoming calls without additional features like call transfer.
+
+### Testing in Daily Prebuilt (No Actual Phone Calls)
+
+```shell
+curl -X POST "http://localhost:7860/start" \
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"simple_dialin": {
+			   "testInPrebuilt": true
+			}
+		 }
+	  }'
+```
+
+This returns a Daily room URL where you can test the bot's basic conversation capabilities.
+
+## Example 2: Simple Dial-out
+
+This example demonstrates basic handling of outgoing calls without additional features like voicemail detection.
+
+### Testing in Daily Prebuilt (No Actual Phone Calls)
+
+```shell
+curl -X POST "http://localhost:7860/start" \
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"simple_dialout": {
+			   "testInPrebuilt": true
+			}
+		 }
+	  }'
+```
+
+This returns a Daily room URL where you can test the bot's basic conversation capabilities.
+
+### Making Actual Phone Calls
+
+```shell
+curl -X POST "http://localhost:7860/start" \
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"dialout_settings": [{
+			   "phoneNumber": "+12345678910"
+			}],
+			"simple_dialout": {
+			   "testInPrebuilt": false
+			}
+		 }
+	  }'
+```
+
+## Example 3: Voicemail Detection
 
 This example demonstrates a bot that can dial out to a phone number, detect whether it reached a human or voicemail system, and respond appropriately.
 
@@ -95,30 +149,14 @@ To test without making actual phone calls:
 
 ```shell
 curl -X POST "http://localhost:7860/start" \
-     -H "Content-Type: application/json" \
-     -d '{
-         "config": {
-            "llm": "openai",
-            "voicemail_detection": {
-               "testInPrebuilt": true
-            }
-         }
-      }'
-```
-
-For testing with Gemini:
-
-```shell
-curl -X POST "http://localhost:7860/start" \
-     -H "Content-Type: application/json" \
-     -d '{
-         "config": {
-            "llm": "gemini",
-            "voicemail_detection": {
-               "testInPrebuilt": true
-            }
-         }
-      }'
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"voicemail_detection": {
+			   "testInPrebuilt": true
+			}
+		 }
+	  }'
 ```
 
 This will return a Daily room URL you can use to test the bot in the browser.
@@ -129,18 +167,17 @@ To have the bot dial out to a real phone number:
 
 ```shell
 curl -X POST "http://localhost:7860/start" \
-     -H "Content-Type: application/json" \
-     -d '{
-         "config": {
-            "llm": "openai",
-            "dialout_settings": [{
-               "phoneNumber": "+12345678910"
-            }],
-            "voicemail_detection": {
-               "testInPrebuilt": false
-            }
-         }
-      }'
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"dialout_settings": [{
+			   "phoneNumber": "+12345678910"
+			}],
+			"voicemail_detection": {
+			   "testInPrebuilt": false
+			}
+		 }
+	  }'
 ```
 
 > **Note:** To enable dial-out capabilities, you must first:
@@ -150,7 +187,7 @@ curl -X POST "http://localhost:7860/start" \
 > 3. Ensure rooms have dial-out enabled (the bot runner handles this)
 > 4. Use an owner token for the bot (also handled by the bot runner)
 
-## Example 2: Call Transfer
+## Example 4: Call Transfer
 
 This example demonstrates a bot that handles initial customer interaction and can transfer the call to a human operator when requested.
 
@@ -167,19 +204,18 @@ This example demonstrates a bot that handles initial customer interaction and ca
 
 ```shell
 curl -X POST "http://localhost:7860/start" \
-     -H "Content-Type: application/json" \
-     -d '{
-         "config": {
-            "llm": "openai",
-            "call_transfer": {
-               "mode": "dialout",
-               "speakSummary": true,
-               "storeSummary": false,
-               "operatorNumber": "+12345678910",
-               "testInPrebuilt": true
-            }
-         }
-      }'
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"call_transfer": {
+			   "mode": "dialout",
+			   "speakSummary": true,
+			   "storeSummary": false,
+			   "operatorNumber": "+12345678910",
+			   "testInPrebuilt": true
+			}
+		 }
+	  }'
 ```
 
 This returns a Daily room URL. In the room, the expected flow is:
@@ -231,7 +267,6 @@ When making requests to the `/start` endpoint, the config object can include:
 ```json
 {
 	"config": {
-		"llm": "openai",
 		"prompts": [
 			{
 				"name": "call_transfer_initial_prompt",
@@ -280,6 +315,12 @@ When making requests to the `/start` endpoint, the config object can include:
 		},
 		"voicemail_detection": {
 			"testInPrebuilt": true
+		},
+		"simple_dialin": {
+			"testInPrebuilt": true
+		},
+		"simple_dialout": {
+			"testInPrebuilt": true
 		}
 	}
 }
@@ -287,7 +328,6 @@ When making requests to the `/start` endpoint, the config object can include:
 
 ### Configuration Parameters
 
-- `llm`: Specifies which LLM to use (`"openai"` or `"gemini"`)
 - `prompts`: An array of objects containing prompts that you want the examples to use.
 - `dialin_settings`: Information about incoming calls (typically from webhook)
 - `dialout_settings`: For outbound calls:
@@ -302,25 +342,31 @@ When making requests to the `/start` endpoint, the config object can include:
   - `testInPrebuilt`: Test without actual phone calls
 - `voicemail_detection`: For voicemail detection example:
   - `testInPrebuilt`: Test without actual phone calls
+- `simple_dialin`: For simple dialin example:
+  - `testInPrebuilt`: Test without actual phone calls
+- `simple_dialout`: For simple dialout example:
+  - `testInPrebuilt`: Test without actual phone calls
 
 ## Feature Compatibility
 
 The following table shows which feature combinations are supported when making requests to the `/start` endpoint. The table is organized by use case to help you create the correct configuration.
 
-| Use Case                                                        | `call_transfer` | `voicemail_detection` | `dialin_settings` | `dialout_settings` | `operatorNumber` | `testInPrebuilt` | Status           |
-| --------------------------------------------------------------- | --------------- | --------------------- | ----------------- | ------------------ | ---------------- | ---------------- | ---------------- |
-| **Standard call transfer (incoming call)**                      | ✓               | ✗                     | ✓                 | ✗                  | ✓/✗              | ✗                | ✅ Supported     |
-| **Standard voicemail detection (outgoing call)**                | ✗               | ✓                     | ✗                 | ✓                  | ✗                | ✗                | ✅ Supported     |
-| **Test mode: Call transfer in Daily Prebuilt**                  | ✓               | ✗                     | ✗                 | ✗                  | ✓                | ✓                | ✅ Supported     |
-| **Test mode: Voicemail detection in Daily Prebuilt**            | ✗               | ✓                     | ✗                 | ✗                  | ✗                | ✓                | ✅ Supported     |
-| **Basic incoming call handling (no transfer)**                  | ✗               | ✗                     | ✓                 | ✗                  | ✗                | ✗                | ⏳ Coming Soon   |
-| **Basic outgoing call handling (no voicemail detection)**       | ✗               | ✗                     | ✗                 | ✓                  | ✗                | ✗                | ⏳ Coming Soon   |
-| Call transfer requires operatorNumber                           | ✓               | ✗                     | ✓                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
-| Voicemail detection requires dialout_settings or testInPrebuilt | ✗               | ✓                     | ✓                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
-| Cannot have both call_transfer and voicemail_detection          | ✓               | ✓                     | ✓                 | ✓                  | ✓                | ✓/✗              | ❌ Not Supported |
-| Call_transfer needs dialin_settings in non-test mode            | ✓               | ✗                     | ✗                 | ✗                  | ✓                | ✗                | ❌ Not Supported |
-| Voicemail_detection needs dialout_settings in non-test mode     | ✗               | ✓                     | ✗                 | ✗                  | ✗                | ✗                | ❌ Not Supported |
-| Insufficient configuration                                      | ✗               | ✗                     | ✗                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
+| Use Case                                                        | `call_transfer` | `voicemail_detection` | `simple_dialin` | `simple_dialout` | `dialin_settings` | `dialout_settings` | `operatorNumber` | `testInPrebuilt` | Status           |
+| --------------------------------------------------------------- | --------------- | --------------------- | --------------- | ---------------- | ----------------- | ------------------ | ---------------- | ---------------- | ---------------- |
+| **Basic incoming call handling (simple_dialin)**                | ✗               | ✗                     | ✓               | ✗                | ✓                 | ✗                  | ✗                | ✗                | ✅ Supported     |
+| **Test mode: Simple dialin in Daily Prebuilt**                  | ✗               | ✗                     | ✓               | ✗                | ✗                 | ✗                  | ✗                | ✓                | ✅ Supported     |
+| **Basic outgoing call handling (simple_dialout)**               | ✗               | ✗                     | ✗               | ✓                | ✗                 | ✓                  | ✗                | ✗                | ✅ Supported     |
+| **Test mode: Simple dialout in Daily Prebuilt**                 | ✗               | ✗                     | ✗               | ✓                | ✗                 | ✗                  | ✗                | ✓                | ✅ Supported     |
+| **Standard call transfer (incoming call)**                      | ✓               | ✗                     | ✗               | ✗                | ✓                 | ✗                  | ✓/✗              | ✗                | ✅ Supported     |
+| **Standard voicemail detection (outgoing call)**                | ✗               | ✓                     | ✗               | ✗                | ✗                 | ✓                  | ✗                | ✗                | ✅ Supported     |
+| **Test mode: Call transfer in Daily Prebuilt**                  | ✓               | ✗                     | ✗               | ✗                | ✗                 | ✗                  | ✓                | ✓                | ✅ Supported     |
+| **Test mode: Voicemail detection in Daily Prebuilt**            | ✗               | ✓                     | ✗               | ✗                | ✗                 | ✗                  | ✗                | ✓                | ✅ Supported     |
+| Call transfer requires operatorNumber                           | ✓               | ✗                     | ✗               | ✗                | ✓                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
+| Voicemail detection requires dialout_settings or testInPrebuilt | ✗               | ✓                     | ✗               | ✗                | ✓                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
+| Cannot combine different bot types                              | ✓               | ✓                     | ✗               | ✗                | ✓                 | ✓                  | ✓                | ✓/✗              | ❌ Not Supported |
+| Call_transfer needs dialin_settings in non-test mode            | ✓               | ✗                     | ✗               | ✗                | ✗                 | ✗                  | ✓                | ✗                | ❌ Not Supported |
+| Voicemail_detection needs dialout_settings in non-test mode     | ✗               | ✓                     | ✗               | ✗                | ✗                 | ✗                  | ✗                | ✗                | ❌ Not Supported |
+| Insufficient configuration                                      | ✗               | ✗                     | ✗               | ✗                | ✗                 | ✗                  | ✗                | ✓/✗              | ❌ Not Supported |
 
 ### Legend:
 
@@ -328,7 +374,6 @@ The following table shows which feature combinations are supported when making r
 - ✗: Not allowed
 - ✓/✗: Optional
 - ✅: Supported
-- ⏳: Coming Soon
 - ❌: Not Supported
 
 ### Notes:
@@ -336,11 +381,11 @@ The following table shows which feature combinations are supported when making r
 - `dialin_settings` is typically populated automatically from webhook data for incoming calls
 - `dialout_settings` must be specified manually for outgoing calls
 - `operatorNumber` is specified within the `call_transfer` object (`"call_transfer": {"operatorNumber": "+1234567890", ...}`)
-- `testInPrebuilt` is specified within either the `call_transfer` or `voicemail_detection` object
+- `testInPrebuilt` is specified within the bot type object (e.g., `"call_transfer": {"testInPrebuilt": true, ...}`)
 - For call transfers, `operatorNumber` must be provided to specify which operator to dial. If it is not provided, we will base it off of the operator map in call_connection_manager.py
 - In test mode (`testInPrebuilt: true`), some requirements are relaxed to allow testing in Daily Prebuilt
-- The `llm` parameter is required in all configurations (`"openai"` or `"gemini"`)
 - Multiple customers to dial out to can be specified by providing an array of objects in `dialout_settings`
+- Bot types are mutually exclusive - you cannot combine multiple bot types in a single configuration
 
 ### Configuration Examples
 
@@ -349,7 +394,6 @@ The following table shows which feature combinations are supported when making r
 ```json
 {
 	"config": {
-		"llm": "openai",
 		"dialin_settings": {
 			"from": "+12345678901",
 			"to": "+19876543210",
@@ -370,7 +414,6 @@ The following table shows which feature combinations are supported when making r
 ```json
 {
 	"config": {
-		"llm": "openai",
 		"call_transfer": {
 			"mode": "dialout",
 			"speakSummary": true,
@@ -386,7 +429,6 @@ The following table shows which feature combinations are supported when making r
 ```json
 {
 	"config": {
-		"llm": "openai",
 		"voicemail_detection": {
 			"testInPrebuilt": true
 		}
@@ -394,12 +436,11 @@ The following table shows which feature combinations are supported when making r
 }
 ```
 
-#### Standard voicemail detection :
+#### Standard voicemail detection:
 
 ```json
 {
 	"config": {
-		"llm": "openai",
 		"dialout_settings": [
 			{
 				"phoneNumber": "+12345678910"
@@ -407,6 +448,61 @@ The following table shows which feature combinations are supported when making r
 		],
 		"voicemail_detection": {
 			"testInPrebuilt": false
+		}
+	}
+}
+```
+
+#### Simple dialin (incoming call):
+
+```json
+{
+	"config": {
+		"dialin_settings": {
+			"from": "+12345678901",
+			"to": "+19876543210",
+			"call_id": "call-id-string",
+			"call_domain": "domain-string"
+		},
+		"simple_dialin": {}
+	}
+}
+```
+
+#### Test mode: Simple dialin in Daily Prebuilt:
+
+```json
+{
+	"config": {
+		"simple_dialin": {
+			"testInPrebuilt": true
+		}
+	}
+}
+```
+
+#### Simple dialout (outgoing call):
+
+```json
+{
+	"config": {
+		"dialout_settings": [
+			{
+				"phoneNumber": "+12345678910"
+			}
+		],
+		"simple_dialout": {}
+	}
+}
+```
+
+#### Test mode: Simple dialout in Daily Prebuilt:
+
+```json
+{
+	"config": {
+		"simple_dialout": {
+			"testInPrebuilt": true
 		}
 	}
 }
@@ -441,9 +537,25 @@ See Pipecat Cloud deployment docs for how to deploy this example: https://docs.p
 
 We also have a great, easy to use quickstart guide here: https://docs.pipecat.daily.co/quickstart
 
+## Using Different LLM Providers
+
+Each example in this repository is implemented with a specific LLM provider:
+
+- **Simple dial-in**: Uses OpenAI
+- **Simple dial-out**: Uses OpenAI
+- **Voicemail detection**: Uses Google Gemini
+- **Call transfer**: Uses OpenAI
+
+If you want to implement one of these examples with a different LLM provider than what's provided:
+
+- To implement **call_transfer** with **Gemini**, reference the `voicemail_detection.py` file for how to structure LLM context, function calling, and other Gemini-specific implementations.
+- To implement **voicemail_detection** with **OpenAI**, reference the `call_transfer.py` file for OpenAI-specific implementation details.
+
+The key differences between implementations involve how context is managed, function calling syntax, and message formatting. Looking at both implementations side-by-side provides a good template for adapting any example to your preferred LLM provider.
+
 ## Customizing Bot Prompts
 
-Both examples include default prompts that work well for standard use cases. However, you can customize how the bot behaves by providing your own prompts in the request body.
+All examples include default prompts that work well for standard use cases. However, you can customize how the bot behaves by providing your own prompts in the request body.
 
 ### Available Prompt Types
 
@@ -458,24 +570,23 @@ Both examples include default prompts that work well for standard use cases. How
 
 ```shell
 curl -X POST "http://localhost:7860/start" \
-     -H "Content-Type: application/json" \
-     -d '{
-         "config": {
-            "llm": "openai",
-            "prompts": [
-               {
-                  "name": "voicemail_prompt",
-                  "text": "Hello, this is ACME Corporation calling. Please call us back at 555-123-4567 regarding your recent order. Thank you!"
-               }
-            ],
-            "dialout_settings": [{
-               "phoneNumber": "+12345678910"
-            }],
-            "voicemail_detection": {
-               "testInPrebuilt": false
-            }
-         }
-      }'
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"prompts": [
+			   {
+				  "name": "voicemail_prompt",
+				  "text": "Hello, this is ACME Corporation calling. Please call us back at 555-123-4567 regarding your recent order. Thank you!"
+			   }
+			],
+			"dialout_settings": [{
+			   "phoneNumber": "+12345678910"
+			}],
+			"voicemail_detection": {
+			   "testInPrebuilt": false
+			}
+		 }
+	  }'
 ```
 
 This example would use all default prompts except for the voicemail message, which would be replaced with your custom message.
