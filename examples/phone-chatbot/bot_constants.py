@@ -17,7 +17,7 @@ REQUIRED_ENV_VARS = [
 DEFAULT_DIALIN_EXAMPLE = "call_transfer"  # Options: call_transfer, simple_dialin
 
 # Call transfer configuration constants
-DEFAULT_MODE = "dialout"  # Call transfer dialout mode. Options: dialout, pstn_transfer, sip_transfer, dialout_warm_transfer, sip_refer
+DEFAULT_MODE = "dialout"
 DEFAULT_SPEAK_SUMMARY = True  # Speak a summary of the call to the operator
 DEFAULT_STORE_SUMMARY = False  # Store summary of the call (for future implementation)
 DEFAULT_TEST_IN_PREBUILT = False  # Test in prebuilt mode (bypasses need to dial in/out)

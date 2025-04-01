@@ -1,5 +1,5 @@
 pipecat-ai[daily,cartesia,openai,google,silero]
-fastapi
+fastapi==3.11.12
 uvicorn
 python-dotenv
 twilio
