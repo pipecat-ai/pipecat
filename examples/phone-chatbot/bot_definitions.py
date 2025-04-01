@@ -1,7 +1,7 @@
 # bot_definitions.py
 """Definitions of different bot types for the bot registry."""
 
-from bot_registry import BotType, BotRegistry
+from bot_registry import BotRegistry, BotType
 from bot_runner_helpers import (
     create_call_transfer_settings,
     create_simple_dialin_settings,
