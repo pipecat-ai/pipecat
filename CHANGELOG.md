@@ -109,6 +109,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- Output transports now send 40ms audio chunks instead of 20ms. This should
+  improve performance.
+
 - `BotSpeakingFrame`s are now sent every 200ms. If the output transport audio chunks
   are higher than 200ms then they will be sent at every audio chunk.
 
