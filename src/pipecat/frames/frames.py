@@ -77,8 +77,8 @@ class Frame:
 
 @dataclass
 class SystemFrame(Frame):
-    """System frames are frames that are not internally queued by any of the
-    frame processors and should be processed immediately.
+    """A frame that takes higher priority than other frames. System frames are
+    handled in order and are not affected by user interruptions.
 
     """
 
@@ -87,8 +87,9 @@ class SystemFrame(Frame):
 
 @dataclass
 class DataFrame(Frame):
-    """Data frames are frames that will be processed in order and usually
-    contain data such as LLM context, text, audio or images.
+    """A frame that is processed in order and usually contains data such as LLM
+    context, text, audio or images. Data frames are cancelled by user
+    interruptions.
 
     """
 
@@ -97,9 +98,9 @@ class DataFrame(Frame):
 
 @dataclass
 class ControlFrame(Frame):
-    """Control frames are frames that, similar to data frames, will be processed
-    in order and usually contain control information such as frames to update
-    settings or to end the pipeline.
+    """A frame that, as data frames, is processed in order and usually contains
+    control information such as update settings or to end the pipeline after
+    everything is flushed. Control frames are cancelled by user interruptions.
 
     """
 
@@ -690,7 +691,7 @@ class FunctionCallResultFrame(SystemFrame):
 
 @dataclass
 class STTMuteFrame(SystemFrame):
-    """System frame to mute/unmute the STT service."""
+    """A frame to mute/unmute the STT service."""
 
     mute: bool
 
@@ -796,7 +797,7 @@ class EndFrame(ControlFrame):
     should be shut down. If the transport receives this frame, it will stop
     sending frames to its output channel(s) and close all its threads. Note,
     that this is a control frame, which means it will received in the order it
-    was sent (unline system frames).
+    was sent.
 
     """
 

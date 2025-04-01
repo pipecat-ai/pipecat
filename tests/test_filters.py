@@ -9,6 +9,7 @@ import unittest
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -57,8 +58,8 @@ class TestFrameFilter(unittest.IsolatedAsyncioTestCase):
 
     async def test_system_frame(self):
         filter = FrameFilter(types=())
-        frames_to_send = [UserStartedSpeakingFrame()]
-        expected_down_frames = [UserStartedSpeakingFrame]
+        frames_to_send = [StartInterruptionFrame()]
+        expected_down_frames = [StartInterruptionFrame]
         await run_test(
             filter,
             frames_to_send=frames_to_send,
