@@ -71,11 +71,20 @@ class SmallWebRTCConnection(BaseObject):
         self._data_channel = None
         self._renegotiation_in_progress = False
         self._last_received_time = None
+        self._message_queue = []
 
     def _setup_listeners(self):
         @self._pc.on("datachannel")
         def on_datachannel(channel):
             self._data_channel = channel
+
+            # Flush queued messages once the data channel is open
+            @channel.on("open")
+            async def on_open():
+                logger.debug("Data channel is open, flushing queued messages")
+                while self._message_queue:
+                    message = self._message_queue.pop(0)
+                    self._data_channel.send(message)
 
             @channel.on("message")
             async def on_message(message):
@@ -203,6 +212,7 @@ class SmallWebRTCConnection(BaseObject):
     async def close(self):
         if self._pc:
             await self._pc.close()
+        self._message_queue.clear()
 
     def get_answer(self):
         if not self._answer:
@@ -267,9 +277,12 @@ class SmallWebRTCConnection(BaseObject):
         return self._tracks
 
     def send_app_message(self, message: Any):
-        if self._data_channel:
-            json_message = json.dumps(message)
+        json_message = json.dumps(message)
+        if self._data_channel and self._data_channel.readyState == "open":
             self._data_channel.send(json_message)
+        else:
+            logger.debug("Data channel not ready, queuing message")
+            self._message_queue.append(json_message)
 
     def ask_to_renegotiate(self):
         if self._renegotiation_in_progress:
