@@ -74,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that could cause the `TranscriptionUpdateFrame` being pushed
+  because of an interruption to be discarded.
+
 - Fixed an issue that would cause `SegmentedSTTService` based services
   (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
   invalid transcriptions.
