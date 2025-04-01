@@ -76,17 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GladiaSTTService` now uses the `solaria-1` model by default. Other params
   use Gladia's default values. Added support for more language codes.
 
-### Fixed
-
-- Fixed an issue that could cause the `TranscriptionUpdateFrame` being pushed
-  because of an interruption to be discarded.
-
-- Fixed an issue that would cause `SegmentedSTTService` based services
-  (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
-  invalid transcriptions.
-
-- Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
-
 ### Deprecated
 
 - All Pipecat services imports have been deprecated and a warning will be shown
@@ -103,6 +92,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Deprecated using `GladiaSTTService.InputParams` directly. Use the new
   `GladiaInputParams` class instead.
+
+### Fixed
+
+- Fixed an issue that could cause the `TranscriptionUpdateFrame` being pushed
+  because of an interruption to be discarded.
+
+- Fixed an issue that would cause `SegmentedSTTService` based services
+  (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
+  invalid transcriptions.
+
+- Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
+### Performance
+
+- `BotSpeakingFrame`s are now sent every 200ms. If the output transport audio chunks
+  are higher than 200ms then they will be sent at every audio chunk.
 
 ### Other
 
