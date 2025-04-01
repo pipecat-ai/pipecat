@@ -73,8 +73,24 @@ class Frame:
 
 @dataclass
 class SystemFrame(Frame):
-    """System frames are frames that are not internally queued by any of the
-    frame processors and should be processed immediately.
+    """A frame that bypasses the internal processing queues and is handled
+    immediately upon being pushed. Unlike other frames, system frames are not
+    queued by any frame processor. Instead, they are processed directly in the
+    task that pushed them, operating outside (i.e. out-of-band) the normal
+    streaming workflow of frame processors. System frames are not affected by
+    user interruptions.
+
+    """
+
+    pass
+
+
+@dataclass
+class UrgentFrame(Frame):
+    """A high-priority frame that is internally queued but always processed
+    before other frames. Unlike system frames, urgent frames are processed from
+    the frame processors' streaming task but are prioritized over other
+    frames. Urgent frames are not affected by user interruptions.
 
     """
 
@@ -83,8 +99,9 @@ class SystemFrame(Frame):
 
 @dataclass
 class DataFrame(Frame):
-    """Data frames are frames that will be processed in order and usually
-    contain data such as LLM context, text, audio or images.
+    """A frame that is processed in order and usually contains data such as LLM
+    context, text, audio or images. They are processed from the frame
+    processors' streaming task. Data frames are cancelled by user interruptions.
 
     """
 
@@ -93,9 +110,10 @@ class DataFrame(Frame):
 
 @dataclass
 class ControlFrame(Frame):
-    """Control frames are frames that, similar to data frames, will be processed
-    in order and usually contain control information such as frames to update
-    settings or to end the pipeline.
+    """A frame that, as data frames, is processed in order and usually contains
+    control information such as update settings or to end the pipeline after
+    everything is flushed. They are processed from the frame processors'
+    streaming task. Control frames are cancelled by user interruptions.
 
     """
 
@@ -479,38 +497,6 @@ class HeartbeatFrame(SystemFrame):
 
 
 @dataclass
-class EndTaskFrame(SystemFrame):
-    """This is used to notify the pipeline task that the pipeline should be
-    closed nicely (flushing all the queued frames) by pushing an EndFrame
-    downstream.
-
-    """
-
-    pass
-
-
-@dataclass
-class CancelTaskFrame(SystemFrame):
-    """This is used to notify the pipeline task that the pipeline should be
-    stopped immediately by pushing a CancelFrame downstream.
-
-    """
-
-    pass
-
-
-@dataclass
-class StopTaskFrame(SystemFrame):
-    """This is used to notify the pipeline task that it should be stopped as
-    soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state.
-
-    """
-
-    pass
-
-
-@dataclass
 class StartInterruptionFrame(SystemFrame):
     """Emitted by VAD to indicate that a user has started speaking (i.e. is
     interruption). This is similar to UserStartedSpeakingFrame except that it
@@ -534,8 +520,56 @@ class StopInterruptionFrame(SystemFrame):
     pass
 
 
+#
+# Urgent frames
+#
+
+
 @dataclass
-class UserStartedSpeakingFrame(SystemFrame):
+class EndTaskFrame(UrgentFrame):
+    """This is used to notify the pipeline task that the pipeline should be
+    closed nicely (flushing all the queued frames) by pushing an EndFrame
+    downstream.
+
+    """
+
+    pass
+
+
+@dataclass
+class CancelTaskFrame(UrgentFrame):
+    """This is used to notify the pipeline task that the pipeline should be
+    stopped immediately by pushing a CancelFrame downstream.
+
+    """
+
+    pass
+
+
+@dataclass
+class StopTaskFrame(UrgentFrame):
+    """This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state.
+
+    """
+
+    pass
+
+
+@dataclass
+class BotInterruptionFrame(UrgentFrame):
+    """Emitted by when the bot should be interrupted. This will mainly cause the
+    same actions as if the user interrupted except that the
+    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
+
+    """
+
+    pass
+
+
+@dataclass
+class UserStartedSpeakingFrame(UrgentFrame):
     """Emitted by VAD to indicate that a user has started speaking. This can be
     used for interruptions or other times when detecting that someone is
     speaking is more important than knowing what they're saying (as you will
@@ -547,57 +581,28 @@ class UserStartedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class UserStoppedSpeakingFrame(SystemFrame):
+class UserStoppedSpeakingFrame(UrgentFrame):
     """Emitted by the VAD to indicate that a user stopped speaking."""
 
     emulated: bool = False
 
 
 @dataclass
-class EmulateUserStartedSpeakingFrame(SystemFrame):
-    """Emitted by internal processors upstream to emulate VAD behavior when a
-    user starts speaking.
-    """
-
-    pass
-
-
-@dataclass
-class EmulateUserStoppedSpeakingFrame(SystemFrame):
-    """Emitted by internal processors upstream to emulate VAD behavior when a
-    user stops speaking.
-    """
-
-    pass
-
-
-@dataclass
-class BotInterruptionFrame(SystemFrame):
-    """Emitted by when the bot should be interrupted. This will mainly cause the
-    same actions as if the user interrupted except that the
-    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
-
-    """
-
-    pass
-
-
-@dataclass
-class BotStartedSpeakingFrame(SystemFrame):
+class BotStartedSpeakingFrame(UrgentFrame):
     """Emitted upstream by transport outputs to indicate the bot started speaking."""
 
     pass
 
 
 @dataclass
-class BotStoppedSpeakingFrame(SystemFrame):
+class BotStoppedSpeakingFrame(UrgentFrame):
     """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
 
     pass
 
 
 @dataclass
-class BotSpeakingFrame(SystemFrame):
+class BotSpeakingFrame(UrgentFrame):
     """Emitted upstream by transport outputs while the bot is still
     speaking. This can be used, for example, to detect when a user is idle. That
     is, while the bot is speaking we don't want to trigger any user idle timeout
@@ -609,14 +614,32 @@ class BotSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class MetricsFrame(SystemFrame):
+class EmulateUserStartedSpeakingFrame(UrgentFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user starts speaking.
+    """
+
+    pass
+
+
+@dataclass
+class EmulateUserStoppedSpeakingFrame(UrgentFrame):
+    """Emitted by internal processors upstream to emulate VAD behavior when a
+    user stops speaking.
+    """
+
+    pass
+
+
+@dataclass
+class MetricsFrame(UrgentFrame):
     """Emitted by processor that can compute metrics like latencies."""
 
     data: List[MetricsData]
 
 
 @dataclass
-class FunctionCallInProgressFrame(SystemFrame):
+class FunctionCallInProgressFrame(UrgentFrame):
     """A frame signaling that a function call is in progress."""
 
     function_name: str
@@ -626,7 +649,7 @@ class FunctionCallInProgressFrame(SystemFrame):
 
 
 @dataclass
-class FunctionCallCancelFrame(SystemFrame):
+class FunctionCallCancelFrame(UrgentFrame):
     """A frame to signal a function call has been cancelled."""
 
     function_name: str
@@ -642,7 +665,7 @@ class FunctionCallResultProperties:
 
 
 @dataclass
-class FunctionCallResultFrame(SystemFrame):
+class FunctionCallResultFrame(UrgentFrame):
     """A frame containing the result of an LLM function (tool) call."""
 
     function_name: str
@@ -653,14 +676,14 @@ class FunctionCallResultFrame(SystemFrame):
 
 
 @dataclass
-class STTMuteFrame(SystemFrame):
-    """System frame to mute/unmute the STT service."""
+class STTMuteFrame(UrgentFrame):
+    """A frame to mute/unmute the STT service."""
 
     mute: bool
 
 
 @dataclass
-class TransportMessageUrgentFrame(SystemFrame):
+class TransportMessageUrgentFrame(UrgentFrame):
     message: Any
 
     def __str__(self):
@@ -668,7 +691,7 @@ class TransportMessageUrgentFrame(SystemFrame):
 
 
 @dataclass
-class UserImageRequestFrame(SystemFrame):
+class UserImageRequestFrame(UrgentFrame):
     """A frame to request an image from the given user. The frame might be
     generated by a function call in which case the corresponding fields will be
     properly set.
@@ -685,7 +708,7 @@ class UserImageRequestFrame(SystemFrame):
 
 
 @dataclass
-class InputAudioRawFrame(SystemFrame, AudioRawFrame):
+class InputAudioRawFrame(UrgentFrame, AudioRawFrame):
     """A chunk of audio usually coming from an input transport."""
 
     def __post_init__(self):
@@ -698,7 +721,7 @@ class InputAudioRawFrame(SystemFrame, AudioRawFrame):
 
 
 @dataclass
-class InputImageRawFrame(SystemFrame, ImageRawFrame):
+class InputImageRawFrame(UrgentFrame, ImageRawFrame):
     """An image usually coming from an input transport."""
 
     def __str__(self):
@@ -740,7 +763,7 @@ class EndFrame(ControlFrame):
     should be shut down. If the transport receives this frame, it will stop
     sending frames to its output channel(s) and close all its threads. Note,
     that this is a control frame, which means it will received in the order it
-    was sent (unline system frames).
+    was sent.
 
     """
 
