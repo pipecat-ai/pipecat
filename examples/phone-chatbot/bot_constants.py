@@ -13,9 +13,6 @@ REQUIRED_ENV_VARS = [
     "DEEPGRAM_API_KEY",
 ]
 
-# Default LLM to use when none is specified - this determines which bot file to execute
-DEFAULT_LLM = "openai"
-
 # Default example to use when handling dialin webhooks - determines which bot type to run
 DEFAULT_DIALIN_EXAMPLE = "call_transfer"  # Options: call_transfer, simple_dialin
 

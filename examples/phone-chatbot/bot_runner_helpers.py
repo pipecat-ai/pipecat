@@ -3,7 +3,6 @@ from typing import Any, Dict, Optional
 
 from bot_constants import (
     DEFAULT_DIALIN_EXAMPLE,
-    DEFAULT_LLM,
     DEFAULT_MODE,
     DEFAULT_SPEAK_SUMMARY,
     DEFAULT_STORE_SUMMARY,
@@ -197,9 +196,6 @@ async def process_dialin_request(data: Dict[str, Any]) -> Dict[str, Any]:
             "call_domain": data.get("callDomain", ""),  # Convert to snake_case
         }
     }
-
-    # Set the default LLM model - this determines which bot file to run
-    body["llm"] = DEFAULT_LLM
 
     # Use the global default to determine which example to run for dialin webhooks
     example = DEFAULT_DIALIN_EXAMPLE

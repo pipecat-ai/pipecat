@@ -3,7 +3,7 @@
 
 from typing import Any, Callable, Dict, List, Optional
 
-from bot_constants import DEFAULT_DIALIN_EXAMPLE, DEFAULT_LLM
+from bot_constants import DEFAULT_DIALIN_EXAMPLE
 from bot_runner_helpers import ensure_dialout_settings_array
 from fastapi import HTTPException
 
@@ -103,10 +103,6 @@ class BotRegistry:
 
     def setup_configuration(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """Set up bot configuration based on detected bot type."""
-        # Set default LLM if not specified
-        if "llm" not in body:
-            body["llm"] = DEFAULT_LLM
-
         # Ensure dialout_settings is an array if present
         body = ensure_dialout_settings_array(body)
 

@@ -91,36 +91,10 @@ class UserAudioCollector(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class ContextSwitcher:
-    """Switches the context to a new system instruction based on what the bot hears."""
-
-    def __init__(self, llm, context_aggregator):
-        self._llm = llm
-        self._context_aggregator = context_aggregator
-
-    async def switch_context(self, system_instruction):
-        """Switch the context to a new system instruction."""
-        # Create messages with updated system instruction
-        messages = [
-            {
-                "role": "system",
-                "content": system_instruction,
-            }
-        ]
-
-        # Update context with new messages
-        self._context_aggregator.set_messages(messages)
-        # Get the context frame with the updated messages
-        context_frame = self._context_aggregator.get_context_frame()
-        # Trigger LLM response by pushing a context frame
-        await self._llm.push_frame(context_frame)
-
-
 class FunctionHandlers:
     """Handlers for the voicemail detection bot functions."""
 
-    def __init__(self, context_switcher, session_manager):
-        self.context_switcher = context_switcher
+    def __init__(self, session_manager):
         self.session_manager = session_manager
         self.prompt = None  # Can be set externally
 
@@ -134,20 +108,11 @@ class FunctionHandlers:
         result_callback,
     ):
         """Function the bot can call to leave a voicemail message."""
-        # Update state to indicate voicemail was detected
-        self.session_manager.call_flow_state.set_voicemail_detected()
+        message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and then terminate the call:
 
-        if self.prompt:
-            message = self.prompt
-        else:
-            message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and nothing else:
+                    'Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you.'"""
 
-                        "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
-
-                        After saying this message, call the terminate_call function."""
-
-        await self.context_switcher.switch_context(system_instruction=message)
-        await result_callback("Leaving a voicemail message")
+        await result_callback(message)
 
     async def human_conversation(
         self,
@@ -278,7 +243,9 @@ async def main(
 
         If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
 
-        DO NOT say anything until you've determined if this is a voicemail or human."""
+        DO NOT say anything until you've determined if this is a voicemail or human.
+        
+        If you are asked to terminate the call, **IMMEDIATELY** call the `terminate_call` function. **FAILURE TO CALL `terminate_call` IMMEDIATELY IS A MISTAKE.**"""
 
     # Initialize voicemail detection LLM
     voicemail_detection_llm = GoogleLLMService(
@@ -294,16 +261,11 @@ async def main(
         voicemail_detection_context
     )
 
-    # Create context switcher for managing prompt changes
-    context_switcher = ContextSwitcher(
-        voicemail_detection_llm, voicemail_detection_context_aggregator.user()
-    )
-
     # Get custom voicemail prompt if available
     voicemail_prompt = call_config_manager.get_prompt("voicemail_prompt")
 
     # Set up function handlers
-    handlers = FunctionHandlers(context_switcher, session_manager)
+    handlers = FunctionHandlers(session_manager)
     handlers.prompt = voicemail_prompt  # Set custom prompt if available
 
     # Register functions with the voicemail detection LLM

@@ -8,7 +8,6 @@ from typing import Any, Dict
 
 import aiohttp
 from bot_constants import (
-    DEFAULT_LLM,
     MAX_SESSION_TIME,
     REQUIRED_ENV_VARS,
 )
@@ -107,7 +106,6 @@ async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], example:
     Returns:
         Boolean indicating success
     """
-    llm_model = body.get("llm", DEFAULT_LLM)  # Use default if not specified
     room_url = room_details["room"]
     token = room_details["token"]
 
@@ -115,8 +113,9 @@ async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], example:
     body_json = json.dumps(body).replace('"', '\\"')
     print(f"++++ Body JSON: {body_json}")
 
-    bot_proc = f'python3 -m {example}_{llm_model} -u {room_url} -t {token} -b "{body_json}"'
-    print(f"Starting bot. Example: {example}, Model: {llm_model}, Room: {room_url}")
+    # Modified to use non-LLM-specific bot module names
+    bot_proc = f'python3 -m {example} -u {room_url} -t {token} -b "{body_json}"'
+    print(f"Starting bot. Example: {example}, Room: {room_url}")
 
     try:
         command_parts = shlex.split(bot_proc)
@@ -284,7 +283,9 @@ async def handle_start_request(request: Request) -> JSONResponse:
         # Add room URL for test mode
         if bot_type.has_test_mode(body):
             response["room_url"] = room_details["room"]
-            response["llm_model"] = body["llm"]
+            # Remove llm_model from response as it's no longer relevant
+            if "llm" in body:
+                response["llm_provider"] = body["llm"]  # Optionally keep track of provider
 
         # Add dialout info for dialout scenarios
         if "dialout_settings" in body and len(body["dialout_settings"]) > 0:
