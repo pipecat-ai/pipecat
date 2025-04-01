@@ -8,10 +8,10 @@
 
 This repository contains examples for building intelligent phone chatbots using AI for various use cases including:
 
-- **Voicemail detection**: Bot calls a number, detects if it reaches voicemail or a human, and responds appropriately
-- **Call transfer**: Bot handles initial customer interaction and transfers to a human operator when needed
 - **Simple dial-in**: Basic incoming call handling
 - **Simple dial-out**: Basic outgoing call handling
+- **Voicemail detection**: Bot calls a number, detects if it reaches voicemail or a human, and responds appropriately
+- **Call transfer**: Bot handles initial customer interaction and transfers to a human operator when needed
 
 ## Architecture Overview
 
