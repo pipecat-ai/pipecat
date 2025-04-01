@@ -53,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `FunctionCallResultFrame`a are now system frames. This is to prevent function
+  call results to be discarded during interruptions.
+
 - Pipecat services have been reorganized into packages. Each package can have
   one or more of the following modules (in the future new module names might be
   needed) depending on the services implemented:
