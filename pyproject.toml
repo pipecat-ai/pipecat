@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiohttp~=3.11.13",
+    "aiohttp~=3.11.12",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "loguru~=0.7.3",
     "Markdown~=3.7",

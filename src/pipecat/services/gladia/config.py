@@ -27,11 +27,9 @@ class PreProcessingConfig(BaseModel):
     """Configuration for audio pre-processing options.
 
     Attributes:
-        audio_enhancer: Whether to apply audio enhancement
         speech_threshold: Sensitivity for speech detection (0-1)
     """
 
-    audio_enhancer: Optional[bool] = None
     speech_threshold: Optional[float] = None
 
 

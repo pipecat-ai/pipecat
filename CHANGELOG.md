@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `TransportParams.audio_out_10ms_chunks` parameter to allow controlling
+  the amount of audio being sent by the output transport. It defaults to 2, so
+  20ms audio chunks are sent.
+
 - Added `QwenLLMService` for Qwen integration with an OpenAI-compatible
   interface. Added foundational example `14q-function-calling-qwen.py`.
 
@@ -69,9 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be found in
   `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
 
-- `GladiaSTTService` now uses Gladia's default values.
+- `GladiaSTTService` now uses the `solaria-1` model by default. Other params
+  use Gladia's default values. Added support for more language codes.
 
 ### Fixed
+
+- Fixed an issue that could cause the `TranscriptionUpdateFrame` being pushed
+  because of an interruption to be discarded.
 
 - Fixed an issue that would cause `SegmentedSTTService` based services
   (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
