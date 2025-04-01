@@ -4,22 +4,22 @@ import PipecatClientIOSSmallWebrtc
 import PipecatClientIOS
 
 class CallContainerModel: ObservableObject {
-
+    
     @Published var voiceClientStatus: String = TransportState.disconnected.description
     @Published var isInCall: Bool = false
     @Published var isBotReady: Bool = false
-
+    
     @Published var isMicEnabled: Bool = false
-
+    
     @Published var toastMessage: String? = nil
     @Published var showToast: Bool = false
-
+    
     @Published var messages: [LiveMessage] = []
     @Published var liveBotMessage: LiveMessage?
     @Published var liveUserMessage: LiveMessage?
-
+    
     var rtviClientIOS: RTVIClient?
-
+    
     @Published var selectedMic: MediaDeviceId? = nil {
         didSet {
             guard let selectedMic else { return } // don't store nil
@@ -29,13 +29,13 @@ class CallContainerModel: ObservableObject {
         }
     }
     @Published var availableMics: [MediaDeviceInfo] = []
-
+    
     init() {
         // Changing the log level
         PipecatClientIOS.setLogLevel(.warn)
         PipecatClientIOSSmallWebrtc.setLogLevel(.info)
     }
-
+    
     @MainActor
     func connect(backendURL: String) {
         self.resetLiveMessages()
@@ -87,14 +87,14 @@ class CallContainerModel: ObservableObject {
         }
         self.saveCredentials(backendURL: backendURL)
     }
-
+    
     @MainActor
     func disconnect() {
         self.rtviClientIOS?.disconnect(completion: nil)
         self.rtviClientIOS?.release()
         self.rtviClientIOS = nil
     }
-
+    
     func showError(message: String) {
         self.toastMessage = message
         self.showToast = true
@@ -104,7 +104,7 @@ class CallContainerModel: ObservableObject {
             self.toastMessage = nil
         }
     }
-
+    
     @MainActor
     func toggleMicInput() {
         self.rtviClientIOS?.enableMic(enable: !self.isMicEnabled) { result in
@@ -116,14 +116,14 @@ class CallContainerModel: ObservableObject {
             }
         }
     }
-
+    
     func saveCredentials(backendURL: String) {
         var currentSettings = SettingsManager.getSettings()
         currentSettings.backendURL = backendURL
         // Saving the settings
         SettingsManager.updateSettings(settings: currentSettings)
     }
-
+    
     @MainActor
     func selectMic(_ mic: MediaDeviceId) {
         self.selectedMic = mic
@@ -162,7 +162,7 @@ class CallContainerModel: ObservableObject {
 }
 
 extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
-
+    
     private func handleEvent(eventName: String, eventValue: Any? = nil) {
         if let value = eventValue {
             print("Pipecat Demo, received event: \(eventName), value:\(value)")
@@ -170,7 +170,7 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
             print("Pipecat Demo, received event: \(eventName)")
         }
     }
-
+    
     func onTransportStateChanged(state: TransportState) {
         Task { @MainActor in
             self.handleEvent(eventName: "onTransportStateChanged", eventValue: state)
@@ -179,41 +179,41 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
             self.createLiveMessage(content: state.description, type: .system)
         }
     }
-
+    
     func onBotReady(botReadyData: BotReadyData) {
         Task { @MainActor in
             self.handleEvent(eventName: "onBotReady")
             self.isBotReady = true
         }
     }
-
+    
     func onConnected() {
         Task { @MainActor in
             self.handleEvent(eventName: "onConnected")
             self.isMicEnabled = self.rtviClientIOS?.isMicEnabled ?? false
         }
     }
-
+    
     func onDisconnected() {
         Task { @MainActor in
             self.handleEvent(eventName: "onDisconnected")
             self.isBotReady = false
         }
     }
-
+    
     func onError(message: String) {
         Task { @MainActor in
             self.handleEvent(eventName: "onError", eventValue: message)
             self.showError(message: message)
         }
     }
-
+    
     func onAvailableMicsUpdated(mics: [MediaDeviceInfo]) {
         Task { @MainActor in
             self.availableMics = mics
         }
     }
-
+    
     func onMicUpdated(mic: MediaDeviceInfo?) {
         Task { @MainActor in
             self.selectedMic = mic?.id
@@ -227,25 +227,25 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
     func onTracksUpdated(tracks: Tracks) {
         self.handleEvent(eventName: "onTracksUpdated", eventValue: tracks)
     }
-
+    
     func onUserStartedSpeaking() {
         self.createLiveMessage(content: "User started speaking", type: .system)
         self.handleEvent(eventName: "onUserStartedSpeaking")
         self.createLiveMessage(type: .user)
     }
-
+    
     func onUserStoppedSpeaking() {
         self.createLiveMessage(content: "User stopped speaking", type: .system)
         self.handleEvent(eventName: "onUserStoppedSpeaking")
     }
-
-    func onBotStartedSpeaking(participant: Participant) {
+    
+    func onBotStartedSpeaking() {
         self.createLiveMessage(content: "Bot started speaking", type: .system)
         self.handleEvent(eventName: "onBotStartedSpeaking")
         self.createLiveMessage(type: .bot)
     }
-
-    func onBotStoppedSpeaking(participant: Participant) {
+    
+    func onBotStoppedSpeaking() {
         self.createLiveMessage(content: "Bot stopped speaking", type: .system)
         self.handleEvent(eventName: "onBotStoppedSpeaking")
     }
