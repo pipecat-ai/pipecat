@@ -111,11 +111,13 @@ async def create_room_and_token() -> tuple[str, str]:
     Raises:
         HTTPException: If room creation or token generation fails
     """
-    room = await daily_helpers["rest"].create_room(DailyRoomParams())
+    room = await daily_helpers["rest"].create_room(
+        DailyRoomParams(properties={"enable_recording": "cloud"})
+    )
     if not room.url:
         raise HTTPException(status_code=500, detail="Failed to create room")
 
-    token = await daily_helpers["rest"].get_token(room.url)
+    token = await daily_helpers["rest"].get_token(room.url, 60 * 60, True)
     if not token:
         raise HTTPException(status_code=500, detail=f"Failed to get token for room: {room.url}")
 
