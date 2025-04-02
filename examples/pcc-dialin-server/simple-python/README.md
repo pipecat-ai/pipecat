@@ -1,16 +1,6 @@
-# Daily PSTN/SIP Server
+# PSTN/SIP Webhook Handler
 
 A FastAPI server that handles PSTN (Public Switched Telephone Network) and SIP (Session Initiation Protocol) calls using the Daily API.
-
-## Requirements
-
-- Python 3.8+
-- FastAPI
-- Uvicorn
-- Python-dotenv
-- Requests
-- Pydantic
-- Loguru
 
 ## Setup
 
@@ -19,22 +9,23 @@ A FastAPI server that handles PSTN (Public Switched Telephone Network) and SIP (
    ```bash
    pip install -r requirements.txt
    ```
-3. Copy `.env.example` to `.env`:
+3. Copy `env.example` to `.env`:
    ```bash
    cp .env.example .env
    ```
 4. Update `.env` with your credentials:
    - `AGENT_NAME`: Your Daily agent name
-   - `DAILY_API_KEY`: Your Daily API key
+   - `PIPECAT_CLOUD_API_KEY`: Your Daily API key
    - `PINLESS_HMAC_SECRET`: Your HMAC secret for request verification
 
 ## Running the Server
-
+3. Copy `env.example` to `.env`:
 Start the server with:
 ```bash
 python server.py
 ```
-The server will run on `http://localhost:3000`
+The server will run on `http://localhost:3000` and you can expose it via ngrok for testing:
+`ngrok http 3000`
 
 ## API Endpoints
 
@@ -78,5 +69,7 @@ Returns a JSON object containing:
 
 ## Error Handling
 - 401: Invalid signature
+- 400: Invalid authorization header (e.g. missing Daily API key in bot.py)
+- 405: Method not allowed (e.g. incorrect route on the webhook URL)
 - 500: Server errors (missing API key, network issues)
 - Other status codes are passed through from the Daily API

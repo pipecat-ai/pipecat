@@ -20,7 +20,7 @@ Next.js API routes for handling Daily Pipecat requests.
    ```
 3. Create `.env.local` file with your credentials:
    ```
-   DAILY_API_KEY=your_daily_api_key
+   PIPECAT_CLOUD_API_KEY=pk_*
    AGENT_NAME=my-first-agent
    PINLESS_HMAC_SECRET=your_hmac_secret
    LOG_LEVEL=info
@@ -69,7 +69,7 @@ The application is configured for Vercel deployment:
 1. Push your code to a Git repository
 2. Import your project in Vercel dashboard
 3. Configure environment variables:
-   - `DAILY_API_KEY`
+   - `PIPECAT_CLOUD_API_KEY`
    - `AGENT_NAME`
    - `PINLESS_HMAC_SECRET`
    - `LOG_LEVEL` (optional, defaults to 'info')
