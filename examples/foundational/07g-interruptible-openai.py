@@ -59,7 +59,7 @@ async def main():
             prompt="Expect words related to dogs, such as breed names.",
         )
 
-        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini-tts-latest")
+        tts = OpenAITTSService(api_key=os.getenv("OPENAI_API_KEY"), voice="ballad")
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
