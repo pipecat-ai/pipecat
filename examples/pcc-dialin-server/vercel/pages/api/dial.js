@@ -1,10 +1,11 @@
-import { logger } from '../../lib/utils';
+import { logger } from '../../lib/utils'; 
 import axios from 'axios';
 import crypto from 'crypto';
 
 const validateSignature = (body, signature, timestamp, secret) => {
   // Skip if any required fields are missing
   if (!signature || !timestamp || !secret) {
+    logger.warn('Missing required fields for HMAC validation');
     return true;
   }
 
@@ -99,7 +100,7 @@ export default async function handler(req, res) {
     // Configure SIP if dialin settings are provided
     if (dialin_settings !== null) {
       const sip_config = {
-        display_name: 'dialin',
+        display_name: From,
         sip_mode: 'dial-in',
         num_endpoints: call_transfer !== null ? 2 : 1,
       };
@@ -121,16 +122,16 @@ export default async function handler(req, res) {
     logger.debug(`Daily room properties: ${JSON.stringify(daily_room_properties)}`);
 
     // Get Daily API key and agent name from environment variables
-    const dailyApiKey = process.env.DAILY_API_KEY;
+    const pccApiKey = process.env.PIPECAT_CLOUD_API_KEY;
     const agentName = process.env.AGENT_NAME || 'my-first-agent';
 
-    if (!dailyApiKey) {
-      throw new Error('DAILY_API_KEY environment variable is not set');
+    if (!pccApiKey) {
+      throw new Error('PIPECAT_CLOUD_API_KEY environment variable is not set');
     }
 
     // Set up headers for Daily API call
     const headers = {
-      'Authorization': `Bearer ${dailyApiKey}`,
+      'Authorization': `Bearer ${pccApiKey}`,
       'Content-Type': 'application/json',
     };
 
