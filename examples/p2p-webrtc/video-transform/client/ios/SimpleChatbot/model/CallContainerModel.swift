@@ -12,6 +12,7 @@ class CallContainerModel: ObservableObject {
     @Published var isMicEnabled: Bool = false
     @Published var isCamEnabled: Bool = false
     @Published var localCamId: MediaTrackId? = nil
+    @Published var botCamId: MediaTrackId? = nil
     
     @Published var toastMessage: String? = nil
     @Published var showToast: Bool = false
@@ -205,8 +206,7 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
         Task { @MainActor in
             self.handleEvent(eventName: "onConnected")
             self.isMicEnabled = self.rtviClientIOS?.isMicEnabled ?? false
-            // TODO: fix this
-            //self.isCamEnabled = self.rtviClientIOS?.isCamEnabled ?? false
+            self.isCamEnabled = self.rtviClientIOS?.isCamEnabled ?? false
         }
     }
     
@@ -243,11 +243,9 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
     func onTracksUpdated(tracks: Tracks) {
         self.handleEvent(eventName: "onTracksUpdated", eventValue: tracks)
         Task { @MainActor in
-            // TODO: need to fix this.
             self.localCamId = tracks.local.video
-            self.isCamEnabled = true
+            self.botCamId = tracks.bot?.video ?? nil
         }
-        // TODO: need to implement the same for remote video track
     }
     
     func onUserStartedSpeaking() {
