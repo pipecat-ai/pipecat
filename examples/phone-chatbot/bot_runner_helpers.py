@@ -2,8 +2,8 @@
 from typing import Any, Dict, Optional
 
 from bot_constants import (
+    DEFAULT_CALLTRANSFER_MODE,
     DEFAULT_DIALIN_EXAMPLE,
-    DEFAULT_MODE,
     DEFAULT_SPEAK_SUMMARY,
     DEFAULT_STORE_SUMMARY,
     DEFAULT_TEST_IN_PREBUILT,
@@ -93,7 +93,7 @@ def create_call_transfer_settings(body: Dict[str, Any]) -> Dict[str, Any]:
     """
     # Default transfer settings
     transfer_settings = {
-        "mode": DEFAULT_MODE,
+        "mode": DEFAULT_CALLTRANSFER_MODE,
         "speakSummary": DEFAULT_SPEAK_SUMMARY,
         "storeSummary": DEFAULT_STORE_SUMMARY,
         "testInPrebuilt": DEFAULT_TEST_IN_PREBUILT,
