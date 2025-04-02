@@ -10,6 +10,8 @@ class CallContainerModel: ObservableObject {
     @Published var isBotReady: Bool = false
     
     @Published var isMicEnabled: Bool = false
+    @Published var isCamEnabled: Bool = false
+    @Published var localCamId: MediaTrackId? = nil
     
     @Published var toastMessage: String? = nil
     @Published var showToast: Bool = false
@@ -117,6 +119,18 @@ class CallContainerModel: ObservableObject {
         }
     }
     
+    @MainActor
+    func toggleCamInput() {
+        self.rtviClientIOS?.enableCam(enable: !self.isCamEnabled) { result in
+            switch result {
+            case .success():
+                self.isCamEnabled = self.rtviClientIOS?.isCamEnabled ?? false
+            case .failure(let error):
+                self.showError(message: error.localizedDescription)
+            }
+        }
+    }
+    
     func saveCredentials(backendURL: String) {
         var currentSettings = SettingsManager.getSettings()
         currentSettings.backendURL = backendURL
@@ -191,6 +205,8 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
         Task { @MainActor in
             self.handleEvent(eventName: "onConnected")
             self.isMicEnabled = self.rtviClientIOS?.isMicEnabled ?? false
+            // TODO: fix this
+            //self.isCamEnabled = self.rtviClientIOS?.isCamEnabled ?? false
         }
     }
     
@@ -226,6 +242,12 @@ extension CallContainerModel:RTVIClientDelegate, LLMHelperDelegate {
     
     func onTracksUpdated(tracks: Tracks) {
         self.handleEvent(eventName: "onTracksUpdated", eventValue: tracks)
+        Task { @MainActor in
+            // TODO: need to fix this.
+            self.localCamId = tracks.local.video
+            self.isCamEnabled = true
+        }
+        // TODO: need to implement the same for remote video track
     }
     
     func onUserStartedSpeaking() {

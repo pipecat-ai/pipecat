@@ -9,11 +9,18 @@ struct MeetingView: View {
         VStack {           
             VStack {
                 ChatView().frame(maxHeight: .infinity)
-                MicrophoneView(audioLevel: 0, isMuted: !self.model.isMicEnabled)
-                    .frame(width: 100, height: 100)
-                    .onTapGesture {
-                        self.model.toggleMicInput()
-                    }
+                HStack {
+                    MicrophoneView(audioLevel: 0, isMuted: !self.model.isMicEnabled)
+                        .frame(width: 100, height: 100)
+                        .onTapGesture {
+                            self.model.toggleMicInput()
+                        }
+                    CameraButtonView(trackId: self.model.localCamId, isMuted: !self.model.isCamEnabled)
+                        .frame(width: 120, height: 120)
+                        .onTapGesture {
+                            self.model.toggleCamInput()
+                        }
+                }
                 HStack {
                     Button(action: {
                         self.showingSettings = true

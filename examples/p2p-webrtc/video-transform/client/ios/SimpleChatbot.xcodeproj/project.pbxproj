@@ -18,6 +18,7 @@
 		90383A912D9C357F00D0DDA3 /* PipecatClientIOSSmallWebrtc in Frameworks */ = {isa = PBXBuildFile; productRef = 90383A902D9C357F00D0DDA3 /* PipecatClientIOSSmallWebrtc */; };
 		90383A932D9C35B300D0DDA3 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90383A922D9C35B300D0DDA3 /* ChatView.swift */; };
 		90383A962D9C35BD00D0DDA3 /* LiveMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90383A942D9C35BD00D0DDA3 /* LiveMessage.swift */; };
+		90383A982D9D85E700D0DDA3 /* CameraButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90383A972D9D85E700D0DDA3 /* CameraButtonView.swift */; };
 		90ABB98E2C735ED6000D9CC7 /* MeetingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB98D2C735ED6000D9CC7 /* MeetingView.swift */; };
 		90ABB9932C73820D000D9CC7 /* MicrophoneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9922C73820D000D9CC7 /* MicrophoneView.swift */; };
 		90ABB9982C738356000D9CC7 /* CustomColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9972C738356000D9CC7 /* CustomColors.swift */; };
@@ -60,6 +61,7 @@
 		90031FDB2C6D5DD700408370 /* ToastModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastModifier.swift; sourceTree = "<group>"; };
 		90383A922D9C35B300D0DDA3 /* ChatView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		90383A942D9C35BD00D0DDA3 /* LiveMessage.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LiveMessage.swift; sourceTree = "<group>"; };
+		90383A972D9D85E700D0DDA3 /* CameraButtonView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CameraButtonView.swift; sourceTree = "<group>"; };
 		90ABB98D2C735ED6000D9CC7 /* MeetingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingView.swift; sourceTree = "<group>"; };
 		90ABB9922C73820D000D9CC7 /* MicrophoneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneView.swift; sourceTree = "<group>"; };
 		90ABB9972C738356000D9CC7 /* CustomColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomColors.swift; sourceTree = "<group>"; };
@@ -195,6 +197,7 @@
 		90ABB99E2C73C3A9000D9CC7 /* components */ = {
 			isa = PBXGroup;
 			children = (
+				90383A972D9D85E700D0DDA3 /* CameraButtonView.swift */,
 				90383A922D9C35B300D0DDA3 /* ChatView.swift */,
 				90ABB9922C73820D000D9CC7 /* MicrophoneView.swift */,
 				90031FDB2C6D5DD700408370 /* ToastModifier.swift */,
@@ -353,6 +356,7 @@
 				90383A962D9C35BD00D0DDA3 /* LiveMessage.swift in Sources */,
 				90ABB99A2C73A6A9000D9CC7 /* MockCallContainerModel.swift in Sources */,
 				90031FA92C616EE700408370 /* PreJoinView.swift in Sources */,
+				90383A982D9D85E700D0DDA3 /* CameraButtonView.swift in Sources */,
 				90383A932D9C35B300D0DDA3 /* ChatView.swift in Sources */,
 				90ABB9982C738356000D9CC7 /* CustomColors.swift in Sources */,
 				90ABB98E2C735ED6000D9CC7 /* MeetingView.swift in Sources */,
