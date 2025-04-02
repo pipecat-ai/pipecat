@@ -98,6 +98,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `FastAPIWebsocketTransport` and `WebsocketClientTransport` issue that
+  would cause the transport to be closed prematurely, preventing the internally
+  queued audio to be sent. The same issue could also cause an infinite loop
+  while using an output mixer and when sending an `EndFrame`, preventing the bot
+  to finish.
+
 - Fixed an issue that could cause the `TranscriptionUpdateFrame` being pushed
   because of an interruption to be discarded.
 

@@ -56,8 +56,8 @@ class WebsocketClientSession:
         self._callbacks = callbacks
         self._transport_name = transport_name
 
+        self._leave_counter = 0
         self._task_manager: Optional[BaseTaskManager] = None
-
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
 
     @property
@@ -69,6 +69,7 @@ class WebsocketClientSession:
         return self._task_manager
 
     async def setup(self, frame: StartFrame):
+        self._leave_counter += 1
         if not self._task_manager:
             self._task_manager = frame.task_manager
 
@@ -87,7 +88,8 @@ class WebsocketClientSession:
             logger.error(f"Timeout connecting to {self._uri}")
 
     async def disconnect(self):
-        if not self._websocket:
+        self._leave_counter -= 1
+        if not self._websocket or self._leave_counter > 0:
             return
 
         await self.task_manager.cancel_task(self._client_task)
