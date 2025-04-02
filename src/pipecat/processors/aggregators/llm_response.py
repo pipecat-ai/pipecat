@@ -149,7 +149,8 @@ class BaseLLMResponseAggregator(FrameProcessor):
     @abstractmethod
     def reset(self):
         """Reset the internals of this aggregator. This should not modify the
-        internal messages."""
+        internal messages.
+        """
         pass
 
     @abstractmethod
@@ -446,6 +447,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_aggregation()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
