@@ -205,8 +205,8 @@ async def main():
                 context_aggregator.user(),
                 llm,  # LLM
                 tts,
-                context_aggregator.assistant(),
                 transport.output(),  # Transport bot output
+                context_aggregator.assistant(),
             ]
         )
 
