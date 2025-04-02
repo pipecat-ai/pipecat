@@ -94,19 +94,23 @@ async def dial(request: RoomRequest, raw_request: Request):
     # calculate signature and compare/verify
     hmac_secret = os.getenv("PINLESS_HMAC_SECRET")
     timestamp = raw_request.headers.get("x-pinless-timestamp")
+    signature = raw_request.headers.get("x-pinless-signature")
 
-    if timestamp:
-        signature = timestamp + "." + raw_body_str
-        logger.debug(f"Signature: {signature}")
+    if not hmac_secret:
+        logger.debug("Skipping HMAC validation - PINLESS_HMAC_SECRET not set")
+    elif timestamp and signature:
+        message = timestamp + "." + raw_body_str
 
         base64_decoded_secret = base64.b64decode(hmac_secret)
         computed_signature = base64.b64encode(
-            hmac.new(base64_decoded_secret, signature.encode(), "sha256").digest()
+            hmac.new(base64_decoded_secret, message.encode(), "sha256").digest()
         ).decode()
 
-        if computed_signature != raw_request.headers.get("x-pinless-signature"):
-            logger.error("Invalid signature")
+        if computed_signature != signature:
+            logger.error(f"Invalid signature. Expected {signature}, got {computed_signature}")
             raise HTTPException(status_code=401, detail="Invalid signature")
+    else:
+        logger.debug("Skipping HMAC validation - no signature headers present")
 
     if request.test == "test":
         logger.debug("Test request received")
@@ -134,7 +138,7 @@ async def dial(request: RoomRequest, raw_request: Request):
 
     if dialin_settings is not None:
         sip_config = {
-            "display_name": "dialin",
+            "display_name": request.From,
             "sip_mode": "dial-in",
             "num_endpoints": 2 if request.call_transfer is not None else 1,
         }
@@ -155,13 +159,13 @@ async def dial(request: RoomRequest, raw_request: Request):
         },
     }
 
-    daily_api_key = os.getenv("DAILY_API_KEY")
+    pcc_api_key = os.getenv("PIPECAT_CLOUD_API_KEY")
     agent_name = os.getenv("AGENT_NAME", "my-first-agent")
 
-    if not daily_api_key:
+    if not pcc_api_key:
         raise HTTPException(status_code=500, detail="DAILY_API_KEY environment variable is not set")
 
-    headers = {"Authorization": f"Bearer {daily_api_key}", "Content-Type": "application/json"}
+    headers = {"Authorization": f"Bearer {pcc_api_key}", "Content-Type": "application/json"}
 
     url = f"https://api.pipecat.daily.co/v1/public/{agent_name}/start"
 
@@ -192,6 +196,6 @@ if __name__ == "__main__":
     try:
         import uvicorn
 
-        uvicorn.run(app, host="0.0.0.0", port=3000)
+        uvicorn.run(app, host="0.0.0.0", port=7860)
     except KeyboardInterrupt:
         logger.info("Server stopped manually")
