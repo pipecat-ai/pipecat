@@ -52,6 +52,9 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
 class AzureBaseTTSService(TTSService):
     class InputParams(BaseModel):
         emphasis: Optional[str] = None
+        language_code: Optional[str] = (
+            "en-US"  #FIXME: DEPRICATE THIS. necessary for compatibility with languages supported by azure but not by other service
+        )
         language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
         rate: Optional[str] = "1.05"
@@ -77,6 +80,7 @@ class AzureBaseTTSService(TTSService):
             "language": self.language_to_service_language(params.language)
             if params.language
             else "en-US",
+            "language_code": params.language_code,
             "pitch": params.pitch,
             "rate": params.rate,
             "role": params.role,
@@ -97,7 +101,7 @@ class AzureBaseTTSService(TTSService):
         return language_to_azure_language(language)
 
     def _construct_ssml(self, text: str) -> str:
-        language = self._settings["language"]
+        language = self._settings["language_code"]
         ssml = (
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
@@ -159,7 +163,7 @@ class AzureTTSService(AzureBaseTTSService):
         self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
-            speech_recognition_language=self._settings["language"],
+            speech_recognition_language=self._settings["language_code"], # Use language instead after deprecating language_code
         )
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
