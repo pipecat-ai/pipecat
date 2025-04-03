@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `GeminiMultimodalLiveLLMService` where the assistant
+  context messages had no space between words.
+
 - Fixed an issue where `LLMAssistantContextAggregator` would prevent a
   `BotStoppedSpeakingFrame` from moving through the pipeline.
 

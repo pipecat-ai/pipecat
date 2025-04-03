@@ -749,7 +749,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         GeminiMultimodalLiveContext.upgrade(context)
         user = GeminiMultimodalLiveUserContextAggregator(context, **user_kwargs)
 
-        default_assistant_kwargs = {"expect_stripped_words": False}
+        default_assistant_kwargs = {"expect_stripped_words": True}
         default_assistant_kwargs.update(assistant_kwargs)
         assistant = GeminiMultimodalLiveAssistantContextAggregator(
             context, **default_assistant_kwargs
