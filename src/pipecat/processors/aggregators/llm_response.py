@@ -225,7 +225,6 @@ class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
         **kwargs,
     ):
         super().__init__(context=context, role="user", **kwargs)
-        logger.debug(f"{self}: init")
 
     def reset(self):
         super().reset()
@@ -234,14 +233,14 @@ class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserStartedSpeakingFrame):
-            logger.debug(f"{self}: user started speaking")
+            # logger.debug(f"{self}: user started speaking")
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
-            logger.debug(f"{self}: transcription")
+            # logger.debug(f"{self}: transcription")
             await self._handle_transcription(frame)
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            logger.debug(f"{self}: user stopped speaking")
-            await self.push_aggregation(direction)
+            # logger.debug(f"{self}: user stopped speaking")
+            await self.push_aggregation()
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMMessagesAppendFrame):
             self.add_messages(frame.messages)
@@ -253,16 +252,19 @@ class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
             await self.push_frame(frame, direction)
 
     async def handle_aggregation(self, aggregation: str):
-        self._context.add_message({"role": self.role, "content": self._aggregation})
+        self._context.add_message({"role": self.role, "content": aggregation})
 
-    async def push_aggregation(self, direction: FrameDirection):
-        logger.debug(f"{self}: pushing aggregation")
+    async def push_aggregation(self):
+        # logger.debug(f"{self}: pushing aggregation")
         if len(self._aggregation) > 0:
-            await self.handle_aggregation(self._aggregation)
+            aggregation = self._aggregation
 
             self.reset()
+
+            await self.handle_aggregation(aggregation)
+
             frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame, direction)
+            await self.push_frame(frame)
 
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
@@ -270,7 +272,7 @@ class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
             return
 
         self._aggregation += f" {text}" if self._aggregation else text
-        logger.debug(f"{self}: aggregation: {self._aggregation}")
+        # logger.debug(f"{self}: aggregation: {self._aggregation}")
 
 
 class LLMUserContextAggregator(LLMContextResponseAggregator):
