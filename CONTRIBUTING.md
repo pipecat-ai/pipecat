@@ -26,11 +26,52 @@ git commit -m "Description of your changes"
 git push origin your-branch-name
 ```
 
-9. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo. 
-> Important: Describe the changes you've made clearly!
+8. **Submit a Pull Request (PR)**: Open a PR from your forked repository to the main branch of this repo.
+   > Important: Describe the changes you've made clearly!
 
 Our maintainers will review your PR, and once everything is good, your contributions will be merged!
 
+## Code Style and Documentation
+
+### Python Code Style
+
+We use Ruff for code linting and formatting. Please ensure your code passes all linting checks before submitting a PR.
+
+### Docstring Conventions
+
+We follow Google-style docstrings with these specific conventions:
+
+- Class docstrings should fully document all parameters used in `__init__`
+- We don't require separate docstrings for `__init__` methods when parameters are documented in the class docstring
+- Property methods should have docstrings explaining their purpose and return value
+
+Example of correctly documented class:
+
+```python
+class MyClass:
+    """Class description.
+
+    Additional details about the class.
+
+    Args:
+        param1: Description of first parameter.
+        param2: Description of second parameter.
+    """
+
+    def __init__(self, param1, param2):
+        # No docstring required here as parameters are documented above
+        self.param1 = param1
+        self.param2 = param2
+
+    @property
+    def some_property(self) -> str:
+        """Get the formatted property value.
+
+        Returns:
+            A string representation of the property.
+        """
+        return f"Property: {self.param1}"
+```
 
 # Contributor Covenant Code of Conduct
 
@@ -51,23 +92,23 @@ diverse, inclusive, and healthy community.
 Examples of behavior that contributes to a positive environment for our
 community include:
 
-* Demonstrating empathy and kindness toward other people
-* Being respectful of differing opinions, viewpoints, and experiences
-* Giving and gracefully accepting constructive feedback
-* Accepting responsibility and apologizing to those affected by our mistakes,
+- Demonstrating empathy and kindness toward other people
+- Being respectful of differing opinions, viewpoints, and experiences
+- Giving and gracefully accepting constructive feedback
+- Accepting responsibility and apologizing to those affected by our mistakes,
   and learning from the experience
-* Focusing on what is best not just for us as individuals, but for the overall
+- Focusing on what is best not just for us as individuals, but for the overall
   community
 
 Examples of unacceptable behavior include:
 
-* The use of sexualized language or imagery, and sexual attention or advances of
+- The use of sexualized language or imagery, and sexual attention or advances of
   any kind
-* Trolling, insulting or derogatory comments, and personal or political attacks
-* Public or private harassment
-* Publishing others' private information, such as a physical or email address,
+- Trolling, insulting or derogatory comments, and personal or political attacks
+- Public or private harassment
+- Publishing others' private information, such as a physical or email address,
   without their explicit permission
-* Other conduct which could reasonably be considered inappropriate in a
+- Other conduct which could reasonably be considered inappropriate in a
   professional setting
 
 ## Enforcement Responsibilities
