@@ -1,11 +1,16 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import logging
 from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Optional, Union
 
 from fastapi import WebSocket
-from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
-from pipecatcloud.agent import SessionArguments as PCCSessionArguments
+from pipecatcloud.agent import DailySessionArguments, SessionArguments, WebSocketSessionArguments
 from pydantic import BaseModel, ConfigDict
 
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -29,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class WebRTCSessionArguments(PCCSessionArguments):
+class WebRTCSessionArguments(SessionArguments):
     """WebRTC based agent session arguments. The arguments are received by the
     bot() entry point.
     """
@@ -64,8 +69,14 @@ class PipecatCloudParams(TransportParams):
 
     def to_websocket_params(self) -> FastAPIWebsocketParams:
         """Convert to FastAPIWebsocketParams."""
+        base_params = self.model_dump()
+        # Remove WebSocket-specific fields since we'll add them explicitly
+        websocket_fields = ["add_wav_header", "serializer", "session_timeout"]
+        for field in websocket_fields:
+            base_params.pop(field, None)
+
         return FastAPIWebsocketParams(
-            **self.model_dump(),
+            **base_params,
             add_wav_header=self.add_wav_header,
             serializer=self.serializer,
             session_timeout=self.session_timeout,
@@ -73,8 +84,20 @@ class PipecatCloudParams(TransportParams):
 
     def to_daily_params(self) -> DailyParams:
         """Convert to DailyParams."""
+        base_params = self.model_dump()
+        # Remove Daily-specific fields since we'll add them explicitly
+        daily_fields = [
+            "api_url",
+            "api_key",
+            "dialin_settings",
+            "transcription_enabled",
+            "transcription_settings",
+        ]
+        for field in daily_fields:
+            base_params.pop(field, None)
+
         return DailyParams(
-            **self.model_dump(),
+            **base_params,
             api_url=self.api_url,
             api_key=self.api_key,
             dialin_settings=self.dialin_settings,
@@ -83,7 +106,7 @@ class PipecatCloudParams(TransportParams):
         )
 
 
-class SessionArguments:
+class PipecatCloudSessionArguments:
     """Arguments for creating a PipecatCloudTransport session.
 
     This class can be initialized with arguments for any of the supported transport types:
@@ -98,16 +121,20 @@ class SessionArguments:
         websocket: Optional[WebSocket] = None,
         room_url: Optional[str] = None,
         token: Optional[str] = None,
-        bot_name: Optional[str] = None,
         webrtc_connection: Optional[SmallWebRTCConnection] = None,
         session_id: Optional[str] = None,
+        body: Optional[dict] = None,
     ):
         """Initialize session arguments for any supported transport type."""
         if websocket is not None:
             self._args = WebSocketSessionArguments(websocket=websocket, session_id=session_id)
-        elif any(x is not None for x in (room_url, token, bot_name)):
+        elif room_url is not None:
             self._args = DailySessionArguments(
-                room_url=room_url, token=token, bot_name=bot_name, session_id=session_id
+                # TODO-CB: bot_name is missing from DailySessionArguments?
+                room_url=room_url,
+                token=token,
+                session_id=session_id,
+                body=body,
             )
         elif webrtc_connection is not None:
             self._args = WebRTCSessionArguments(
@@ -163,14 +190,13 @@ class PipecatCloudTransport(BaseTransport):
 
     def __init__(
         self,
-        session_args: SessionArguments,
+        session_args: PipecatCloudSessionArguments,
         params: Optional[Union[PipecatCloudParams, TransportParams]] = None,
         *,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
-        logger.debug(f"SessionArguments: {session_args}")
 
         # Convert TransportParams to PipecatCloudParams if needed
         if isinstance(params, TransportParams):
@@ -200,7 +226,8 @@ class PipecatCloudTransport(BaseTransport):
             self._transport = DailyTransport(
                 args.room_url,
                 args.token,
-                args.bot_name,
+                # TODO-CB: Bot name is missing from DailySessionArguments
+                "Bot",
                 params=daily_params,
                 input_name=input_name,
                 output_name=output_name,

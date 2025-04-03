@@ -18,13 +18,15 @@ the conversation flow.
 """
 
 import os
+import sys
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
-from pipecatcloud.agent import DailySessionArguments
-from pipecatcloud.agent import SessionArguments as PCCSessionArguments
+from pipecatcloud.agent import (
+    DailySessionArguments,
+)
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -43,17 +45,20 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.gladia import GladiaSTTService
-from pipecat.services.openai import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.gladia.stt import GladiaSTTService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.services.daily import DailyTransport
 from pipecat.transports.services.pipecat_cloud import (
     PipecatCloudParams,
+    PipecatCloudSessionArguments,
     PipecatCloudTransport,
-    SessionArguments,
 )
 
 load_dotenv(override=True)
+logger.add(sys.stderr, level="DEBUG")
+
+print(f"DailyTransport: {DailyTransport}")
 
 # Check if we're in local development mode
 LOCAL_RUN = os.getenv("LOCAL_RUN")
@@ -67,7 +72,7 @@ if LOCAL_RUN:
         logger.error("Could not import local_runner module. Local development mode may not work.")
 
 # Logger for local dev
-# logger.add(sys.stderr, level="DEBUG")
+logger.add(sys.stderr, level="DEBUG")
 
 sprites = []
 script_dir = os.path.dirname(__file__)
@@ -133,7 +138,7 @@ async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context
     await result_callback({"conditions": "nice", "temperature": "75"})
 
 
-async def main(session_args: SessionArguments):
+async def main(session_args: PipecatCloudSessionArguments):
     """Main bot execution function.
 
     Sets up and runs the bot pipeline including:
@@ -276,10 +281,16 @@ async def bot(args: DailySessionArguments):
         body: The configuration object from the request body
         session_id: The session ID for logging
     """
-    logger.info(f"Bot process initialized {args.room_url} {args.token}")
+    pcc_args = PipecatCloudSessionArguments(
+        room_url=args.room.url,
+        token=args.token,
+        body=args.body,
+        session_id=args.session_id,
+    )
+    logger.info(f"Bot process initialized {pcc_args.room_url} {pcc_args.token}")
 
     try:
-        await main(args)
+        await main(pcc_args)
         logger.info("Bot process completed")
     except Exception as e:
         logger.exception(f"Error in bot process: {str(e)}")
@@ -293,19 +304,22 @@ async def local_daily():
     try:
         async with aiohttp.ClientSession() as session:
             (room_url, token) = await configure(session)
+            args = PipecatCloudSessionArguments(
+                room_url=room_url, token=token, body={}, session_id=None
+            )
             logger.warning("_")
             logger.warning("_")
             logger.warning(f"Talk to your voice agent here: {room_url}")
             logger.warning("_")
             logger.warning("_")
             webbrowser.open(room_url)
-            await main(room_url, token, config={})
+            await main(args)
     except Exception as e:
         logger.exception(f"Error in local development mode: {e}")
 
 
 async def local_webrtc(webrtc_connection):
-    await main(SessionArguments(webrtc_connection=webrtc_connection))
+    await main(PipecatCloudSessionArguments(webrtc_connection=webrtc_connection))
 
 
 # Local development entry point
