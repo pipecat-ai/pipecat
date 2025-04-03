@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
 )
 from pipecat.processors.aggregators.llm_response import (
+    BetterLLMUserContextAggregator,
     LLMAssistantContextAggregator,
     LLMUserContextAggregator,
 )
@@ -76,7 +77,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 
-class OpenAIUserContextAggregator(LLMUserContextAggregator):
+class OpenAIUserContextAggregator(BetterLLMUserContextAggregator):
     pass
 
 
