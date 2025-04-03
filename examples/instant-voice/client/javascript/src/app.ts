@@ -23,15 +23,14 @@ import {
   RTVIEvent,
 } from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
-import SoundUtils from "./util/soundUtils";
-import { InstantVoiceHelper } from "./util/instantVoiceHelper";
+import SoundUtils from './util/soundUtils';
+import { InstantVoiceHelper } from './util/instantVoiceHelper';
 
 /**
  * InstantVoiceClient handles the connection and media management for a real-time
  * voice and video interaction with an AI bot.
  */
 class InstantVoiceClient {
-
   private declare rtviClient: RTVIClient;
   private connectBtn: HTMLButtonElement | null = null;
   private disconnectBtn: HTMLButtonElement | null = null;
@@ -54,8 +53,12 @@ class InstantVoiceClient {
    * Set up references to DOM elements and create necessary media elements
    */
   private setupDOMElements(): void {
-    this.connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
-    this.disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
+    this.connectBtn = document.getElementById(
+      'connect-btn'
+    ) as HTMLButtonElement;
+    this.disconnectBtn = document.getElementById(
+      'disconnect-btn'
+    ) as HTMLButtonElement;
     this.statusSpan = document.getElementById('connection-status');
     this.bufferingAudioSpan = document.getElementById('buffering-status');
     this.debugLog = document.getElementById('debug-log');
@@ -70,11 +73,10 @@ class InstantVoiceClient {
   }
 
   private initializeRTVIClient(): void {
-    const transport = new DailyTransport({
-      bufferLocalAudioUntilBotReady: true
-    });
     const RTVIConfig: RTVIClientOptions = {
-      transport,
+      transport: new DailyTransport({
+        bufferLocalAudioUntilBotReady: true,
+      }),
       params: {
         // The baseURL and endpoint of your bot server that the client will connect to
         baseUrl: 'http://localhost:7860',
@@ -95,7 +97,7 @@ class InstantVoiceClient {
           if (this.disconnectBtn) this.disconnectBtn.disabled = true;
           this.log('Client disconnected');
         },
-        onBotConnected: (participant: Participant)  => {
+        onBotConnected: (participant: Participant) => {
           this.log(`onBotConnected, timeTaken: ${Date.now() - this.startTime}`);
         },
         onBotReady: (data) => {
@@ -112,23 +114,29 @@ class InstantVoiceClient {
         onMessageError: (error) => console.error('Message error:', error),
         onError: (error) => console.error('Error:', error),
       },
-    }
+    };
 
     this.rtviClient = new RTVIClient(RTVIConfig);
-    this.rtviClient.registerHelper("transport", new InstantVoiceHelper({
-          callbacks: {
-            onAudioBufferingStarted: () => {
-              SoundUtils.beep()
-              this.updateBufferingStatus('Yes');
-              this.log(`onMicCaptureStarted, timeTaken: ${Date.now() - this.startTime}`);
-            },
-            onAudioBufferingStopped: () => {
-              this.updateBufferingStatus('No');
-              this.log(`onMicCaptureStopped, timeTaken: ${Date.now() - this.startTime}`);
-            }
-          }
-        }
-    ));
+    this.rtviClient.registerHelper(
+      'transport',
+      new InstantVoiceHelper({
+        callbacks: {
+          onAudioBufferingStarted: () => {
+            SoundUtils.beep();
+            this.updateBufferingStatus('Yes');
+            this.log(
+              `onMicCaptureStarted, timeTaken: ${Date.now() - this.startTime}`
+            );
+          },
+          onAudioBufferingStopped: () => {
+            this.updateBufferingStatus('No');
+            this.log(
+              `onMicCaptureStopped, timeTaken: ${Date.now() - this.startTime}`
+            );
+          },
+        },
+      })
+    );
     this.setupTrackListeners();
   }
 
@@ -198,7 +206,9 @@ class InstantVoiceClient {
 
     // Listen for tracks stopping
     this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
-      this.log(`Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`);
+      this.log(
+        `Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`
+      );
     });
   }
 
@@ -208,7 +218,10 @@ class InstantVoiceClient {
    */
   private setupAudioTrack(track: MediaStreamTrack): void {
     this.log('Setting up audio track');
-    if (this.botAudio.srcObject && "getAudioTracks" in this.botAudio.srcObject) {
+    if (
+      this.botAudio.srcObject &&
+      'getAudioTracks' in this.botAudio.srcObject
+    ) {
       const oldTrack = this.botAudio.srcObject.getAudioTracks()[0];
       if (oldTrack?.id === track.id) return;
     }
@@ -246,8 +259,13 @@ class InstantVoiceClient {
   public async disconnect(): Promise<void> {
     try {
       await this.rtviClient.disconnect();
-      if (this.botAudio.srcObject && "getAudioTracks" in this.botAudio.srcObject) {
-        this.botAudio.srcObject.getAudioTracks().forEach((track) => track.stop());
+      if (
+        this.botAudio.srcObject &&
+        'getAudioTracks' in this.botAudio.srcObject
+      ) {
+        this.botAudio.srcObject
+          .getAudioTracks()
+          .forEach((track) => track.stop());
         this.botAudio.srcObject = null;
       }
     } catch (error) {
