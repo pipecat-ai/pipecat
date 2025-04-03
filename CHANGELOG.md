@@ -5,6 +5,185 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed an issue where `LLMAssistantContextAggregator` would prevent a
+  `BotStoppedSpeakingFrame` from moving through the pipeline.
+
+## [0.0.62] - 2025-04-01 "An April Fools' release"
+
+### Added
+
+- Added `TransportParams.audio_out_10ms_chunks` parameter to allow controlling
+  the amount of audio being sent by the output transport. It defaults to 2, so
+  20ms audio chunks are sent.
+
+- Added `QwenLLMService` for Qwen integration with an OpenAI-compatible
+  interface. Added foundational example `14q-function-calling-qwen.py`.
+
+- Added `Mem0MemoryService`. Mem0 is a self-improving memory layer for LLM
+  applications. Learn more at: https://mem0.ai/.
+
+- Added `WhisperSTTServiceMLX` for Whisper transcription on Apple Silicon.
+  See example in `examples/foundational/13e-whisper-mlx.py`. Latency of
+  completed transcription using Whisper large-v3-turbo on an M4 macbook is
+  ~500ms.
+
+- Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
+
+  - Created two examples in `p2p-webrtc`:
+    - **video-transform**: Demonstrates sending and receiving audio/video with
+      `SmallWebRTCTransport` using `TypeScript`. Includes video frame
+      processing with OpenCV.
+    - **voice-agent**: A minimal example of creating a voice agent with
+      `SmallWebRTCTransport`.
+
+- `GladiaSTTService` now have comprehensive support for the latest API config
+  options, including model, language detection, preprocessing, custom
+  vocabulary, custom spelling, translation, and message filtering options.
+
+- Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
+
+  - Created two examples in `p2p-webrtc`:
+    - **video-transform**: Demonstrates sending and receiving audio/video with
+      `SmallWebRTCTransport` using `TypeScript`. Includes video frame
+      processing with OpenCV.
+    - **voice-agent**: A minimal example of creating a voice agent with
+      `SmallWebRTCTransport`.
+
+- Added support to `ProtobufFrameSerializer` to send the messages from
+  `TransportMessageFrame` and `TransportMessageUrgentFrame`.
+
+- Added support for a new TTS service, `PiperTTSService`.
+  (see https://github.com/rhasspy/piper/)
+
+- It is now possible to tell whether `UserStartedSpeakingFrame` or
+  `UserStoppedSpeakingFrame` have been generated because of emulation frames.
+
+### Changed
+
+- `FunctionCallResultFrame`a are now system frames. This is to prevent function
+  call results to be discarded during interruptions.
+
+- Pipecat services have been reorganized into packages. Each package can have
+  one or more of the following modules (in the future new module names might be
+  needed) depending on the services implemented:
+
+  - image: for image generation services
+  - llm: for LLM services
+  - memory: for memory services
+  - stt: for Speech-To-Text services
+  - tts: for Text-To-Speech services
+  - video: for video generation services
+  - vision: for video recognition services
+
+- Base classes for AI services have been reorganized into modules. They can now
+  be found in
+  `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
+
+- `GladiaSTTService` now uses the `solaria-1` model by default. Other params
+  use Gladia's default values. Added support for more language codes.
+
+### Deprecated
+
+- All Pipecat services imports have been deprecated and a warning will be shown
+  when using the old import. The new import should be
+  `pipecat.services.[service].[image,llm,memory,stt,tts,video,vision]`. For
+  example, `from pipecat.services.openai.llm import OpenAILLMService`.
+
+- Import for AI services base classes from `pipecat.services.ai_services` is now
+  deprecated, use one of
+  `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
+
+- Deprecated the `language` parameter in `GladiaSTTService.InputParams` in
+  favor of `language_config`, which better aligns with Gladia's API.
+
+- Deprecated using `GladiaSTTService.InputParams` directly. Use the new
+  `GladiaInputParams` class instead.
+
+### Fixed
+
+- Fixed a `FastAPIWebsocketTransport` and `WebsocketClientTransport` issue that
+  would cause the transport to be closed prematurely, preventing the internally
+  queued audio to be sent. The same issue could also cause an infinite loop
+  while using an output mixer and when sending an `EndFrame`, preventing the bot
+  to finish.
+
+- Fixed an issue that could cause the `TranscriptionUpdateFrame` being pushed
+  because of an interruption to be discarded.
+
+- Fixed an issue that would cause `SegmentedSTTService` based services
+  (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
+  invalid transcriptions.
+
+- Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
+### Performance
+
+- Output transports now send 40ms audio chunks instead of 20ms. This should
+  improve performance.
+
+- `BotSpeakingFrame`s are now sent every 200ms. If the output transport audio chunks
+  are higher than 200ms then they will be sent at every audio chunk.
+
+### Other
+
+- Added foundational example `37-mem0.py` demonstrating how to use the
+  `Mem0MemoryService`.
+
+- Added foundational example `13e-whisper-mlx.py` demonstrating how to use the
+  `WhisperSTTServiceMLX`.
+
+## [0.0.61] - 2025-03-26
+
+### Added
+
+- Added a new frame, `LLMSetToolChoiceFrame`, which provides a mechanism
+  for modifying the `tool_choice` in the context.
+
+- Added `GroqTTSService` which provides text-to-speech functionality using
+  Groq's API.
+
+- Added support in `DailyTransport` for updating remote participants'
+  `canReceive` permission via the `update_remote_participants()` method, by
+  bumping the daily-python dependency to >= 0.16.0.
+
+- ElevenLabs TTS services now support a sample rate of 8000.
+
+- Added support for `instructions` in `OpenAITTSService`.
+
+- Added support for `base_url` in `OpenAIImageGenService` and
+  `OpenAITTSService`.
+
+### Fixed
+
+- Fixed an issue in `RTVIObserver` that prevented handling of Google LLM
+  context messages. The observer now processes both OpenAI-style and
+  Google-style contexts.
+
+- Fixed an issue in Daily involving switching virtual devices, by bumping the
+  daily-python dependency to >= 0.16.1.
+
+- Fixed a `GoogleAssistantContextAggregator` issue where function calls
+  placeholders where not being updated when then function call result was
+  different from a string.
+
+- Fixed an issue that would cause `LLMAssistantContextAggregator` to block
+  processing more frames while processing a function call result.
+
+- Fixed an issue where the `RTVIObserver` would report two bot started and
+  stopped speaking events for each bot turn.
+
+- Fixed an issue in `UltravoxSTTService` that caused improper audio processing
+  and incorrect LLM frame output.
+
+### Other
+
+- Added `examples/foundational/07x-interruptible-local.py` to show how a local
+  transport can be used.
+
 ## [0.0.60] - 2025-03-20
 
 ### Added

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Voice Agent</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+        #status { font-size: 20px; margin: 20px; }
+        button { padding: 10px 20px; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <h1>WebRTC Voice Agent</h1>
+    <p id="status">Disconnected</p>
+    <button id="connect-btn">Connect</button>
+    <audio id="audio-el" autoplay></audio>
+
+    <script>
+        const statusEl = document.getElementById("status")
+        const buttonEl = document.getElementById("connect-btn")
+        const audioEl = document.getElementById("audio-el")
+
+        let connected = false
+        let peerConnection = null
+
+        /*const waitForIceGatheringComplete = async (pc) => {
+            if (pc.iceGatheringState === 'complete') return;
+            return new Promise((resolve) => {
+                const checkState = () => {
+                    if (pc.iceGatheringState === 'complete') {
+                        pc.removeEventListener('icegatheringstatechange', checkState);
+                        resolve();
+                    }
+                };
+                pc.addEventListener('icegatheringstatechange', checkState);
+            });
+        }*/
+
+        const createSmallWebRTCConnection = async (audioTrack) => {
+            const pc = new RTCPeerConnection()
+            pc.ontrack = e => audioEl.srcObject = e.streams[0]
+            pc.addTransceiver(audioTrack, { direction: 'sendrecv' })
+            await pc.setLocalDescription(await pc.createOffer())
+            //await waitForIceGatheringComplete(pc)
+            const offer = pc.localDescription
+            const response = await fetch('/api/offer', {
+                body: JSON.stringify({ sdp: offer.sdp, type: offer.type}),
+                headers: { 'Content-Type': 'application/json' },
+                method: 'POST',
+            });
+            const answer = await response.json()
+            await pc.setRemoteDescription(answer)
+            return pc
+        }
+
+        const connect = async () => {
+            const audioStream = await navigator.mediaDevices.getUserMedia({audio: true})
+            peerConnection= await createSmallWebRTCConnection(audioStream.getAudioTracks()[0])
+            peerConnection.onconnectionstatechange = () => {
+                let connectionState = peerConnection?.connectionState
+                if (connectionState === 'connected') {
+                    _onConnected()
+                } else if (connectionState === 'disconnected') {
+                    _onDisconnected()
+                }
+            }
+        }
+
+        const _onConnected = () => {
+            statusEl.textContent = "Connected"
+            buttonEl.textContent = "Disconnect"
+            connected = true
+        }
+
+        const _onDisconnected = () => {
+            statusEl.textContent = "Disconnected"
+            buttonEl.textContent = "Connect"
+            connected = false
+        }
+
+        const disconnect = () => {
+            if (!peerConnection) {
+                return
+            }
+            peerConnection.close()
+            peerConnection = null
+            _onDisconnected()
+        }
+
+        buttonEl.addEventListener("click", async () => {
+            if (!connected) {
+                await connect()
+            } else {
+                disconnect()
+            }
+        });
+    </script>
+</body>
+</html>

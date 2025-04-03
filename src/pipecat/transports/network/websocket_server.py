@@ -6,7 +6,6 @@
 
 import asyncio
 import io
-import json
 import time
 import wave
 from typing import Awaitable, Callable, Optional

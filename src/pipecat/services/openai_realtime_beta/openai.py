@@ -12,8 +12,6 @@ from typing import Any, Mapping
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
-
 try:
     import websockets
 except ModuleNotFoundError as e:
@@ -23,6 +21,7 @@ except ModuleNotFoundError as e:
     )
     raise Exception(f"Missing module: {e}")
 
+from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -54,8 +53,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
-from pipecat.services.openai import OpenAIContextAggregatorPair
+from pipecat.services.llm_service import LLMService
+from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.utils.time import time_now_iso8601
 
 from . import events

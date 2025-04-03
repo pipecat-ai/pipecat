@@ -14,11 +14,12 @@ from loguru import logger
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.ultravox import UltravoxSTTService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.ultravox.stt import UltravoxSTTService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -33,7 +34,7 @@ logger.add(sys.stderr, level="DEBUG")
 # Want to initialize the ultravox processor since it takes time to load the model and dont
 # want to load it every time the pipeline is run
 ultravox_processor = UltravoxSTTService(
-    model_size="fixie-ai/ultravox-v0_4_1-llama-3_1-8b",
+    model_name="fixie-ai/ultravox-v0_5-llama-3_1-8b",
     hf_token=os.getenv("HF_TOKEN"),
 )
 

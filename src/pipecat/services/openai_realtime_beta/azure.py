@@ -4,8 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import os
-
 from loguru import logger
 
 from .openai import OpenAIRealtimeBetaLLMService
