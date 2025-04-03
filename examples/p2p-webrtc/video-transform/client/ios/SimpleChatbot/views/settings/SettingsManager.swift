@@ -9,7 +9,7 @@ class SettingsManager {
             return settings
         } else {
             // default values in case we don't have any settings
-            return SettingsPreference(enableMic: true, backendURL: "http://YOUR_IP:7860")
+            return SettingsPreference(enableMic: true, enableCam: true, backendURL: "http://YOUR_IP:7860")
         }
     }
     

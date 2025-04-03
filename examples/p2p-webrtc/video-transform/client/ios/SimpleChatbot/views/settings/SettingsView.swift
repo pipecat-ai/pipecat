@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Binding var showingSettings: Bool
     
     @State private var isMicEnabled: Bool = true
+    @State private var isCamEnabled: Bool = true
     @State private var backendURL: String = ""
     
     var body: some View {
@@ -34,6 +35,7 @@ struct SettingsView: View {
                 }
                 Section(header: Text("Start options")) {
                     Toggle("Enable Microphone", isOn: $isMicEnabled)
+                    Toggle("Enable Cam", isOn: $isCamEnabled)
                 }
                 Section(header: Text("Server")) {
                     TextField("Backend URL", text: $backendURL)
@@ -59,6 +61,7 @@ struct SettingsView: View {
         let newSettings = SettingsPreference(
             selectedMic: model.selectedMic?.id,
             enableMic: isMicEnabled,
+            enableCam: isCamEnabled,
             backendURL: backendURL
         )
         SettingsManager.updateSettings(settings: newSettings)
@@ -67,6 +70,7 @@ struct SettingsView: View {
     private func loadSettings() {
         let savedSettings = SettingsManager.getSettings()
         self.isMicEnabled = savedSettings.enableMic
+        self.isCamEnabled = savedSettings.enableCam
         self.backendURL = savedSettings.backendURL
     }
 }
