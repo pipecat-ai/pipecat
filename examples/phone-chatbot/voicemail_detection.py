@@ -28,11 +28,11 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.ai_services import LLMService
-from pipecat.services.cartesia import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
-from pipecat.services.google import GoogleLLMService
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.google import GoogleLLMContext
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import LLMService  # Base LLM service class
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
