@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added new processors `ProducerProcessor` and `ConsumerProcessor`. The producer
+  processor processes frames from the pipeline and decides whether the consumers
+  should consume it or not. If so, the same frame that is received by the
+  producer is sent to the consumer. There can be multiple consumers per
+  producer. These processors can be useful to push frames from one part of a
+  pipeline to a different one (e.g. when using `ParallelPipeline`).
+
 ### Fixed
 
 - Fixed an issue where `LLMAssistantContextAggregator` would prevent a
