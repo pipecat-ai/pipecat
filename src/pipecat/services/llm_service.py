@@ -71,7 +71,7 @@ class LLMService(AIService):
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
 
-    def list_registered_functions(self) -> List[str]:
+    def list_registered_functions(self) -> list[str]:
         return list(self._functions.keys())
 
     def register_function(
