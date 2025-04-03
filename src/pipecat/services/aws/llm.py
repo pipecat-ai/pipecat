@@ -210,7 +210,6 @@ class BedrockLLMService(LLMService):
                 
             # Add tools if present
             if context.tools:
-                print(context.tools)
                 tool_config = {
                     "tools": context.tools
                 }
@@ -257,23 +256,22 @@ class BedrockLLMService(LLMService):
                         completion_tokens_estimate += self._estimate_tokens(delta["text"])
                     elif "toolUse" in delta and "input" in delta["toolUse"]:
                         # Handle partial JSON for tool use
-                        json_str = json.dumps(delta["toolUse"]["input"])
-                        json_accumulator += json_str
-                        completion_tokens_estimate += self._estimate_tokens(json_str)
+                        json_accumulator += delta["toolUse"]["input"]
+                        completion_tokens_estimate += self._estimate_tokens(delta["toolUse"]["input"])
                 
                 # Handle tool use start
                 elif "contentBlockStart" in event:
-                    content_block = event["contentBlockStart"]
-                    if content_block.get("type") == "toolUse":
+                    content_block_start = event["contentBlockStart"]['start']
+                    if "toolUse" in content_block_start:
                         tool_use_block = {
-                            "id": content_block["toolUse"].get("toolUseId", ""),
-                            "name": content_block["toolUse"].get("name", "")
+                            "id": content_block_start["toolUse"].get("toolUseId", ""),
+                            "name": content_block_start["toolUse"].get("name", "")
                         }
                         json_accumulator = ""
                 
                 # Handle message completion with tool use
-                elif "messageDelta" in event and "stopReason" in event["messageDelta"]:
-                    if event["messageDelta"]["stopReason"] == "toolUse" and tool_use_block:
+                elif "messageStop" in event and "stopReason" in event["messageStop"]:
+                    if event["messageStop"]["stopReason"] == "tool_use" and tool_use_block:
                         try:
                             arguments = json.loads(json_accumulator) if json_accumulator else {}
                             await self.call_function(
@@ -286,8 +284,8 @@ class BedrockLLMService(LLMService):
                             logger.error(f"Failed to parse tool arguments: {json_accumulator}")
                 
                 # Handle usage metrics if available
-                if "usage" in event:
-                    usage = event["usage"]
+                if "metadata" in event and "usage" in event["metadata"]:
+                    usage = event["metadata"]["usage"]
                     prompt_tokens += usage.get("inputTokens", 0)
                     completion_tokens += usage.get("outputTokens", 0)
 
@@ -516,7 +514,6 @@ class BedrockLLMContext(OpenAILLMContext):
                 ]
             }
         """
-        print(message)
         if message["role"] == "tool":
             # Try to parse the content as JSON if it looks like JSON
             try:
@@ -623,9 +620,6 @@ class BedrockLLMContext(OpenAILLMContext):
         """Restructure messages in Bedrock format by handling system messages, 
         merging consecutive messages with the same role, and ensuring proper content formatting.
         """
-
-        print(self.messages)
-
         # Handle system message if present at the beginning
         if self.messages and self.messages[0]["role"] == "system":
             if len(self.messages) == 1:
@@ -739,7 +733,7 @@ class BedrockAssistantContextAggregator(LLMAssistantContextAggregator):
                         "toolUse": {
                             "toolUseId": frame.tool_call_id,
                             "name": frame.function_name,
-                            "input": frame.arguments
+                            "input": frame.arguments if frame.arguments else {}
                         }
                     }
                 ],
