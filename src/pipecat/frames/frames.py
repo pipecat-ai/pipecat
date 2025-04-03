@@ -364,29 +364,17 @@ class LLMSetToolsFrame(DataFrame):
 
 
 @dataclass
+class LLMSetToolChoiceFrame(DataFrame):
+    """A frame containing a tool choice for an LLM to use for function calling."""
+
+    tool_choice: Literal["none", "auto", "required"] | dict
+
+
+@dataclass
 class LLMEnablePromptCachingFrame(DataFrame):
     """A frame to enable/disable prompt caching in certain LLMs."""
 
     enable: bool
-
-
-@dataclass
-class FunctionCallResultProperties:
-    """Properties for a function call result frame."""
-
-    run_llm: Optional[bool] = None
-    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
-
-
-@dataclass
-class FunctionCallResultFrame(DataFrame):
-    """A frame containing the result of an LLM function (tool) call."""
-
-    function_name: str
-    tool_call_id: str
-    arguments: str
-    result: Any
-    properties: Optional[FunctionCallResultProperties] = None
 
 
 @dataclass
@@ -555,14 +543,14 @@ class UserStartedSpeakingFrame(Frame):
 
     """
 
-    pass
+    emulated: bool = False
 
 
 @dataclass
 class UserStoppedSpeakingFrame(Frame):
     """Emitted by the VAD to indicate that a user stopped speaking."""
 
-    pass
+    emulated: bool = False
 
 
 @dataclass
@@ -633,8 +621,8 @@ class FunctionCallInProgressFrame(SystemFrame):
 
     function_name: str
     tool_call_id: str
-    arguments: str
-    cancel_on_interruption: bool
+    arguments: Any
+    cancel_on_interruption: bool = False
 
 
 @dataclass
@@ -643,6 +631,25 @@ class FunctionCallCancelFrame(SystemFrame):
 
     function_name: str
     tool_call_id: str
+
+
+@dataclass
+class FunctionCallResultProperties:
+    """Properties for a function call result frame."""
+
+    run_llm: Optional[bool] = None
+    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
+
+
+@dataclass
+class FunctionCallResultFrame(SystemFrame):
+    """A frame containing the result of an LLM function (tool) call."""
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+    result: Any
+    properties: Optional[FunctionCallResultProperties] = None
 
 
 @dataclass

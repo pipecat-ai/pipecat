@@ -147,10 +147,13 @@ class FrameProcessor(BaseObject):
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
-    def create_task(self, coroutine: Coroutine) -> asyncio.Task:
+    def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:
         if not self._task_manager:
             raise Exception(f"{self} TaskManager is still not initialized.")
-        name = f"{self}::{coroutine.cr_code.co_name}"
+        if name:
+            name = f"{self}::{name}"
+        else:
+            name = f"{self}::{coroutine.cr_code.co_name}"
         return self._task_manager.create_task(coroutine, name)
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):

@@ -6,23 +6,18 @@
 
 import copy
 import json
-from typing import Optional
 
 from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
-    FunctionCallResultProperties,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.openai import (
+from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )

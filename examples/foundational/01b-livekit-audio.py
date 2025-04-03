@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import argparse
 import asyncio
 import os
@@ -12,7 +18,7 @@ from pipecat.frames.frames import TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
 
 load_dotenv(override=True)

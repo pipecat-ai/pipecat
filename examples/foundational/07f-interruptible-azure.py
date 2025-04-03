@@ -18,7 +18,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.azure import AzureLLMService, AzureSTTService, AzureTTSService
+from pipecat.services.azure.llm import AzureLLMService
+from pipecat.services.azure.stt import AzureSTTService
+from pipecat.services.azure.tts import AzureTTSService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)

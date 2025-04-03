@@ -13,7 +13,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.ai_services import STTService
+from pipecat.services.stt_service import STTService
 
 
 class TranscriptionLogObserver(BaseObserver):

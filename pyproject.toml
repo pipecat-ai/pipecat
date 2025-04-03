@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "aiohttp~=3.11.13",
+    "aiohttp~=3.11.12",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "loguru~=0.7.3",
     "Markdown~=3.7",
@@ -48,10 +48,11 @@ cartesia = ["cartesia~=1.4.0", "websockets~=13.1"]
 neuphonic = ["pyneuphonic~=1.5.13", "websockets~=13.1"]
 cerebras = []
 deepseek = []
-daily = [ "daily-python~=0.15.0" ]
+daily = [ "daily-python~=0.16.1" ]
 deepgram = [ "deepgram-sdk~=3.8.0" ]
 elevenlabs = [ "websockets~=13.1" ]
 fal = [ "fal-client~=0.5.9" ]
+fireworks = []
 fish = [ "ormsgpack~=1.7.0", "websockets~=13.1" ]
 gladia = [ "websockets~=13.1" ]
 google = [ "google-cloud-speech~=2.31.1", "google-cloud-texttospeech~=2.25.1", "google-genai~=1.7.0", "google-generativeai~=0.8.4" ]

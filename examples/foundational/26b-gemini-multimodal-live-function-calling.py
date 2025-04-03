@@ -110,8 +110,8 @@ async def main():
                 transport.input(),
                 context_aggregator.user(),
                 llm,
-                context_aggregator.assistant(),
                 transport.output(),
+                context_aggregator.assistant(),
             ]
         )
 
