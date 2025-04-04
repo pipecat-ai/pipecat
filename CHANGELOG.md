@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `SmallWebRTCTransport` to support dynamic values for
+  `TransportParams.audio_out_10ms_chunks`. Previously, it only worked with 20ms 
+  chunks.
+
 - Fixed an issue where `LLMAssistantContextAggregator` would prevent a
   `BotStoppedSpeakingFrame` from moving through the pipeline.
 
@@ -26,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `TransportParams.audio_out_10ms_chunks` parameter to allow controlling
-  the amount of audio being sent by the output transport. It defaults to 2, so
-  20ms audio chunks are sent.
+  the amount of audio being sent by the output transport. It defaults to 4, so
+  40ms audio chunks are sent.
 
 - Added `QwenLLMService` for Qwen integration with an OpenAI-compatible
   interface. Added foundational example `14q-function-calling-qwen.py`.
