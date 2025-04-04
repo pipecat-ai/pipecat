@@ -29,7 +29,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AIService
+from pipecat.services.ai_service import AIService
 
 try:
     from transformers import AutoTokenizer
@@ -177,7 +177,7 @@ class UltravoxSTTService(AIService):
     to generate text transcriptions.
 
     Args:
-        model_size: The Ultravox model to use (ModelSize enum or string)
+        model_name: The Ultravox model to use (ModelSize enum or string)
         hf_token: Hugging Face token for model access
         temperature: Sampling temperature for generation
         max_tokens: Maximum tokens to generate
@@ -194,7 +194,7 @@ class UltravoxSTTService(AIService):
     def __init__(
         self,
         *,
-        model_size: str = "fixie-ai/ultravox-v0_4_1-llama-3_1-8b",
+        model_name: str = "fixie-ai/ultravox-v0_5-llama-3_1-8b",
         hf_token: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 100,
@@ -211,7 +211,6 @@ class UltravoxSTTService(AIService):
             logger.warning("No Hugging Face token provided. Model may not load correctly.")
 
         # Initialize model
-        model_name = model_size if isinstance(model_size, str) else model_size.value
         self._model = UltravoxModel(model_name=model_name)
 
         # Initialize service state
@@ -356,10 +355,10 @@ class UltravoxSTTService(AIService):
                     await self.start_ttfb_metrics()
                     await self.start_processing_metrics()
 
-                    async for response in self.model.generate(
+                    async for response in self._model.generate(
                         messages=[{"role": "user", "content": "<|audio|>\n"}],
-                        temperature=self.temperature,
-                        max_tokens=self.max_tokens,
+                        temperature=self._temperature,
+                        max_tokens=self._max_tokens,
                         audio=audio_float32,
                     ):
                         # Stop TTFB metrics after first response

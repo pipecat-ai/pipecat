@@ -34,7 +34,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
+from pipecat.services.llm_service import LLMService
 
 
 class OpenAIUnhandledFunctionException(Exception):

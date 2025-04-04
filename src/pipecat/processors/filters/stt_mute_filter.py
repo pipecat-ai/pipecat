@@ -108,7 +108,7 @@ class STTMuteFilter(FrameProcessor):
     async def _handle_mute_state(self, should_mute: bool):
         """Handles both STT muting and interruption control."""
         if should_mute != self.is_muted:
-            logger.debug(f"STT {'muting' if should_mute else 'unmuting'}")
+            logger.debug(f"STTMuteFilter {'muting' if should_mute else 'unmuting'}")
             self._is_muted = should_mute
             await self.push_frame(STTMuteFrame(mute=should_mute))
 

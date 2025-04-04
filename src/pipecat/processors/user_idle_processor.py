@@ -127,9 +127,10 @@ class UserIdleProcessor(FrameProcessor):
 
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):
-            await self.push_frame(frame, direction)  # Push the frame down the pipeline
-            if self._idle_task:
-                await self._stop()  # Stop the idle task, if it exists
+            # Stop the idle task, if it exists
+            await self._stop()
+            # Push the frame down the pipeline
+            await self.push_frame(frame, direction)
             return
 
         await self.push_frame(frame, direction)

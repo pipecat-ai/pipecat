@@ -29,6 +29,7 @@ class ChatbotClient {
     this.rtviClient = null;
     this.setupDOMElements();
     this.setupEventListeners();
+    this.initializeClientAndTransport();
   }
 
   /**
@@ -55,6 +56,79 @@ class ChatbotClient {
   setupEventListeners() {
     this.connectBtn.addEventListener('click', () => this.connect());
     this.disconnectBtn.addEventListener('click', () => this.disconnect());
+  }
+
+  /**
+   * Set up the RTVI client and Daily transport
+   */
+  initializeClientAndTransport() {
+    // Initialize the RTVI client with a DailyTransport and our configuration
+    this.rtviClient = new RTVIClient({
+      transport: new DailyTransport(),
+      params: {
+        // The baseURL and endpoint of your bot server that the client will connect to
+        baseUrl: 'http://localhost:7860',
+        endpoints: {
+          connect: '/connect',
+        },
+      },
+      enableMic: true, // Enable microphone for user input
+      enableCam: false,
+      callbacks: {
+        // Handle connection state changes
+        onConnected: () => {
+          this.updateStatus('Connected');
+          this.connectBtn.disabled = true;
+          this.disconnectBtn.disabled = false;
+          this.log('Client connected');
+        },
+        onDisconnected: () => {
+          this.updateStatus('Disconnected');
+          this.connectBtn.disabled = false;
+          this.disconnectBtn.disabled = true;
+          this.log('Client disconnected');
+        },
+        // Handle transport state changes
+        onTransportStateChanged: (state) => {
+          this.updateStatus(`Transport: ${state}`);
+          this.log(`Transport state changed: ${state}`);
+          if (state === 'ready') {
+            this.setupMediaTracks();
+          }
+        },
+        // Handle bot connection events
+        onBotConnected: (participant) => {
+          this.log(`Bot connected: ${JSON.stringify(participant)}`);
+        },
+        onBotDisconnected: (participant) => {
+          this.log(`Bot disconnected: ${JSON.stringify(participant)}`);
+        },
+        onBotReady: (data) => {
+          this.log(`Bot ready: ${JSON.stringify(data)}`);
+          this.setupMediaTracks();
+        },
+        // Transcript events
+        onUserTranscript: (data) => {
+          // Only log final transcripts
+          if (data.final) {
+            this.log(`User: ${data.text}`);
+          }
+        },
+        onBotTranscript: (data) => {
+          this.log(`Bot: ${data.text}`);
+        },
+        // Error handling
+        onMessageError: (error) => {
+          console.log('Message error:', error);
+        },
+        onError: (error) => {
+          console.log('Error:', JSON.stringify(error));
+        },
+      },
+    });
+
+    // Set up listeners for media track events
+    this.setupTrackListeners();
   }
 
   /**
@@ -181,77 +255,6 @@ class ChatbotClient {
    */
   async connect() {
     try {
-      // Create a new Daily transport for WebRTC communication
-      const transport = new DailyTransport();
-
-      // Initialize the RTVI client with our configuration
-      this.rtviClient = new RTVIClient({
-        transport,
-        params: {
-          // The baseURL and endpoint of your bot server that the client will connect to
-          baseUrl: 'http://localhost:7860',
-          endpoints: {
-            connect: '/connect',
-          },
-        },
-        enableMic: true, // Enable microphone for user input
-        enableCam: false,
-        callbacks: {
-          // Handle connection state changes
-          onConnected: () => {
-            this.updateStatus('Connected');
-            this.connectBtn.disabled = true;
-            this.disconnectBtn.disabled = false;
-            this.log('Client connected');
-          },
-          onDisconnected: () => {
-            this.updateStatus('Disconnected');
-            this.connectBtn.disabled = false;
-            this.disconnectBtn.disabled = true;
-            this.log('Client disconnected');
-          },
-          // Handle transport state changes
-          onTransportStateChanged: (state) => {
-            this.updateStatus(`Transport: ${state}`);
-            this.log(`Transport state changed: ${state}`);
-            if (state === 'ready') {
-              this.setupMediaTracks();
-            }
-          },
-          // Handle bot connection events
-          onBotConnected: (participant) => {
-            this.log(`Bot connected: ${JSON.stringify(participant)}`);
-          },
-          onBotDisconnected: (participant) => {
-            this.log(`Bot disconnected: ${JSON.stringify(participant)}`);
-          },
-          onBotReady: (data) => {
-            this.log(`Bot ready: ${JSON.stringify(data)}`);
-            this.setupMediaTracks();
-          },
-          // Transcript events
-          onUserTranscript: (data) => {
-            // Only log final transcripts
-            if (data.final) {
-              this.log(`User: ${data.text}`);
-            }
-          },
-          onBotTranscript: (data) => {
-            this.log(`Bot: ${data.text}`);
-          },
-          // Error handling
-          onMessageError: (error) => {
-            console.log('Message error:', error);
-          },
-          onError: (error) => {
-            console.log('Error:', error);
-          },
-        },
-      });
-
-      // Set up listeners for media track events
-      this.setupTrackListeners();
-
       // Initialize audio/video devices
       this.log('Initializing devices...');
       await this.rtviClient.initDevices();
@@ -286,7 +289,6 @@ class ChatbotClient {
       try {
         // Disconnect the RTVI client
         await this.rtviClient.disconnect();
-        this.rtviClient = null;
 
         // Clean up audio
         if (this.botAudio.srcObject) {

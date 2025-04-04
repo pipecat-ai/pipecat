@@ -31,6 +31,7 @@ class TransportParams(BaseModel):
     audio_out_sample_rate: Optional[int] = None
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
+    audio_out_10ms_chunks: int = 4
     audio_out_mixer: Optional[BaseAudioMixer] = None
     audio_in_enabled: bool = False
     audio_in_sample_rate: Optional[int] = None

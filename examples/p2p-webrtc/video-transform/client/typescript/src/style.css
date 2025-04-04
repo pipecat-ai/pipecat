@@ -32,6 +32,7 @@ select {
 
 .status-bar {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
     padding: 10px;
@@ -69,6 +70,7 @@ button:disabled {
     padding: 20px;
     margin-bottom: 20px;
     display: flex;
+    flex-wrap: wrap;
 }
 
 .bot-container {
@@ -79,8 +81,8 @@ button:disabled {
 }
 
 #bot-video-container {
-    width: 640px;
-    height: 360px;
+    width: 90%;
+    aspect-ratio: 16 / 9;
     background-color: #e0e0e0;
     border-radius: 8px;
     overflow: hidden;
@@ -98,8 +100,16 @@ button:disabled {
 .debug-panel {
     background-color: #fff;
     border-radius: 8px;
-    padding-left: 20px;
     width: 50%;
+}
+
+@media (max-width: 768px) {
+    .bot-container {
+        width: 100%;
+    }
+    .debug-panel {
+        width: 100%;
+    }
 }
 
 .debug-panel h3 {
@@ -109,10 +119,9 @@ button:disabled {
 }
 
 #debug-log {
-    height: 500px;
+    height: 360px;
     overflow-y: auto;
     background-color: #f8f8f8;
-    padding: 10px;
     border-radius: 4px;
     font-family: monospace;
     font-size: 12px;
