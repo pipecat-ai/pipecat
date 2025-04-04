@@ -6,6 +6,7 @@
 
 import asyncio
 from typing import AsyncGenerator, Optional
+import os
 
 from loguru import logger
 from pydantic import BaseModel
@@ -16,9 +17,9 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    TTSStoppedFrame,
+    TTSStoppedFrame
 )
-from pipecat.services.tts_service import TTSService
+from pipecat.services.ai_services import TTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -27,7 +28,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
-        "In order to use Deepgram, you need to `pip install pipecat-ai[aws]`. Also, set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
+        "In order to use AWS services, you need to `pip install pipecat-ai[aws]`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
     )
     raise Exception(f"Missing module: {e}")
 
@@ -150,6 +151,24 @@ class PollyTTSService(TTSService):
         self._resampler = create_default_resampler()
 
         self.set_voice(voice_id)
+
+        # Get credentials from environment variables if not provided
+        self._credentials = {
+            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
+            "region": region or os.getenv("AWS_REGION", "us-east-1"),
+        }
+
+        # Validate that we have the required credentials
+        if (
+            not self._credentials["aws_access_key_id"]
+            or not self._credentials["aws_secret_access_key"]
+        ):
+            raise ValueError(
+                "AWS credentials not found. Please provide them either through constructor parameters "
+                "or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
+            )
 
     def can_generate_metrics(self) -> bool:
         return True
