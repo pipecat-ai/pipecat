@@ -1,0 +1,5 @@
+python-dotenv
+fastapi[all]
+uvicorn
+-e ./pipecat[daily,cartesia,openai,silero,gladia,webrtc]
+pipecatcloud

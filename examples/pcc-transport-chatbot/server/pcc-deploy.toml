@@ -1,0 +1,7 @@
+agent_name = "pcc-transport-chatbot"
+image = "chadbailey59/pcc-transport-chatbot:0.2"
+secret_set = "pcc-transport-chatbot-secrets"
+
+[scaling]
+  min_instances = 0
+  max_instances = 2
