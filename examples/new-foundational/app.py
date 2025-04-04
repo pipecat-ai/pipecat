@@ -12,7 +12,21 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fasthtml.common import *
+from fasthtml.common import (
+    H1,
+    Audio,
+    Button,
+    Div,
+    Label,
+    Option,
+    ScriptX,
+    Select,
+    Span,
+    StyleX,
+    Title,
+    Video,
+    fast_app,
+)
 from loguru import logger
 
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -20,8 +34,8 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 # Load environment variables
 load_dotenv(override=True)
 
-# Create our FastHTML app
-app, rt = fast_app()
+# Create our FastHTML app with static file path
+app, rt = fast_app(static_path="static")
 
 # Track active connection
 bot_connection = None
@@ -56,106 +70,55 @@ def index():
     else:
         display_name = "Unknown Bot"
 
-    return Titled(
-        f"Pipecat Voice Agent ({display_name})",
+    return (
+        # Title for browser tab
+        Title(f"Pipecat - {display_name}"),
+        StyleX("static/styles.css"),
         Div(
-            H2(f"Pipecat Voice Agent - {display_name}"),
-            P("Status: ", Span("Disconnected", id="status")),
-            Button("Connect", id="connect-btn"),
-            Audio(id="audio-el", autoplay=True),
-            Script("""
-                const statusEl = document.getElementById("status")
-                const buttonEl = document.getElementById("connect-btn")
-                const audioEl = document.getElementById("audio-el")
-
-                let connected = false
-                let peerConnection = null
-
-                const createSmallWebRTCConnection = async (audioTrack) => {
-                    const pc = new RTCPeerConnection()
-                    pc.ontrack = e => audioEl.srcObject = e.streams[0]
-                    pc.addTransceiver(audioTrack, { direction: 'sendrecv' })
-                    await pc.setLocalDescription(await pc.createOffer())
-                    
-                    const offer = pc.localDescription
-                    const response = await fetch('/api/offer', {
-                        body: JSON.stringify({ 
-                            sdp: offer.sdp, 
-                            type: offer.type
-                        }),
-                        headers: { 'Content-Type': 'application/json' },
-                        method: 'POST',
-                    });
-                    const answer = await response.json()
-                    await pc.setRemoteDescription(answer)
-                    return pc
-                }
-
-                const connect = async () => {
-                    try {
-                        const audioStream = await navigator.mediaDevices.getUserMedia({audio: true})
-                        peerConnection = await createSmallWebRTCConnection(audioStream.getAudioTracks()[0])
-                        peerConnection.onconnectionstatechange = () => {
-                            let connectionState = peerConnection?.connectionState
-                            if (connectionState === 'connected') {
-                                _onConnected()
-                            } else if (connectionState === 'disconnected' || connectionState === 'failed') {
-                                _onDisconnected()
-                            }
-                        }
-                    } catch (error) {
-                        console.error("Error connecting:", error)
-                        statusEl.textContent = "Connection error"
-                    }
-                }
-
-                const _onConnected = () => {
-                    statusEl.textContent = "Connected"
-                    buttonEl.textContent = "Disconnect"
-                    connected = true
-                }
-
-                const _onDisconnected = () => {
-                    statusEl.textContent = "Disconnected"
-                    buttonEl.textContent = "Connect"
-                    connected = false
-                }
-
-                const disconnect = () => {
-                    if (!peerConnection) {
-                        return
-                    }
-                    peerConnection.close()
-                    peerConnection = null
-                    _onDisconnected()
-                }
-
-                buttonEl.addEventListener("click", async () => {
-                    if (!connected) {
-                        await connect()
-                    } else {
-                        disconnect()
-                    }
-                });
-                
-                // Keep connections alive with ping
-                const keepAlive = setInterval(() => {
-                    if (peerConnection && peerConnection.connectionState === 'connected') {
-                        const dc = peerConnection.createDataChannel('ping');
-                        dc.onopen = () => {
-                            dc.send('ping-' + Date.now());
-                            setTimeout(() => dc.close(), 1000);
-                        };
-                    }
-                }, 15000);
-                
-                // Cleanup when leaving the page
-                window.addEventListener('beforeunload', () => {
-                    clearInterval(keepAlive);
-                    if (peerConnection) disconnect();
-                });
-            """),
+            # Status bar with only the title (no status text)
+            Div(
+                Div(Span(f"Pipecat - {display_name}", cls="app-title"), cls="status"),
+                Div(
+                    # Single toggle button
+                    Button("Connect", id="connection-btn", data_state="disconnected"),
+                    cls="controls",
+                ),
+                cls="status-bar",
+            ),
+            # Device settings
+            Div(
+                Div(
+                    Label("Audio"),
+                    Select(Option("Default device", value=""), id="audio-input"),
+                    cls="option",
+                ),
+                Div(
+                    Label("Video"),
+                    Select(Option("Default device", value=""), id="video-input"),
+                    cls="option",
+                ),
+                cls="options-bar",
+            ),
+            # Main content
+            Div(
+                Div(
+                    Div(
+                        # Video container
+                        Video(id="bot-video", autoplay=True, playsinline=True),
+                        # Voice visualizer container (separate from video overlay)
+                        Div(id="voice-visualizer-container", cls="voice-visualizer-wrapper"),
+                        id="bot-video-container",
+                    ),
+                    Audio(id="bot-audio", autoplay=True),
+                    cls="bot-container",
+                ),
+                Div(Div(id="debug-log"), cls="debug-panel"),
+                cls="main-content",
+            ),
+            cls="container",
         ),
+        ScriptX("static/app.js"),
+        ScriptX("static/voice-visualizer.js"),
     )
 
 
@@ -259,7 +222,14 @@ async def webrtc_offer_post(request):
         # Start the bot task
         try:
             if hasattr(bot_module, "run_bot"):
-                bot_task = asyncio.create_task(bot_module.run_bot(bot_connection))
+                # Check if run_bot requires a room_name parameter
+                import inspect
+
+                sig = inspect.signature(bot_module.run_bot)
+                if len(sig.parameters) >= 2:
+                    bot_task = asyncio.create_task(bot_module.run_bot(bot_connection))
+                else:
+                    bot_task = asyncio.create_task(bot_module.run_bot(bot_connection))
             else:
                 logger.error(f"Bot module does not have a run_bot function")
                 return {"error": "Bot module does not have a run_bot function"}
