@@ -51,19 +51,28 @@ class RawAudioTrack(AudioStreamTrack):
     def __init__(self, sample_rate):
         super().__init__()
         self._sample_rate = sample_rate
-        self._samples_per_frame = self._sample_rate // 50  # 20ms per frame
+        self._samples_per_10ms = sample_rate * 10 // 1000
+        self._bytes_per_10ms = self._samples_per_10ms * 2  # 16-bit (2 bytes per sample)
         self._timestamp = 0
-        self._audio_buffer = deque()
         self._start = time.time()
+        # Queue of (bytes, future), broken into 10ms sub chunks as needed
+        self._chunk_queue = deque()
 
     def add_audio_bytes(self, audio_bytes: bytes):
         """
         Adds bytes to the audio buffer and returns a Future that completes when the data is processed.
         """
-        if len(audio_bytes) % 2 != 0:
-            raise ValueError("Audio bytes length must be even (16-bit samples).")
+        if len(audio_bytes) % self._bytes_per_10ms != 0:
+            raise ValueError("Audio bytes must be a multiple of 10ms size.")
         future = asyncio.get_running_loop().create_future()
-        self._audio_buffer.append((audio_bytes, future))
+
+        # Break input into 10ms chunks
+        for i in range(0, len(audio_bytes), self._bytes_per_10ms):
+            chunk = audio_bytes[i : i + self._bytes_per_10ms]
+            # Only the last chunk carries the future to be resolved once fully consumed
+            fut = future if i + self._bytes_per_10ms >= len(audio_bytes) else None
+            self._chunk_queue.append((chunk, fut))
+
         return future
 
     async def recv(self):
@@ -76,36 +85,22 @@ class RawAudioTrack(AudioStreamTrack):
             if wait > 0:
                 await asyncio.sleep(wait)
 
-        # Check if we have enough data
-        needed_bytes = self._samples_per_frame * 2  # 16-bit (2 bytes per sample)
-        available_bytes = sum(len(audio_bytes) for audio_bytes, _ in self._audio_buffer)
-        consumed_futures = []  # Track futures for processed data
-        if available_bytes >= needed_bytes:
-            # Extract data from deque
-            chunk = bytearray()
-            while len(chunk) < needed_bytes:
-                audio_bytes, future = self._audio_buffer.popleft()
-                chunk.extend(audio_bytes)
-                consumed_futures.append(future)  # Track the future
-            chunk = bytes(chunk[:needed_bytes])  # Trim excess bytes
+        if self._chunk_queue:
+            chunk, future = self._chunk_queue.popleft()
+            if future and not future.done():
+                future.set_result(True)
         else:
-            chunk = bytes(needed_bytes)  # Generate silent frame
+            chunk = bytes(self._bytes_per_10ms)  # silence
 
         # Convert the byte data to an ndarray of int16 samples
         samples = np.frombuffer(chunk, dtype=np.int16)
 
         # Create AudioFrame
         frame = AudioFrame.from_ndarray(samples[None, :], layout="mono")
-        self._timestamp += self._samples_per_frame
-        frame.pts = self._timestamp
         frame.sample_rate = self._sample_rate
+        frame.pts = self._timestamp
         frame.time_base = fractions.Fraction(1, self._sample_rate)
-
-        # Resolve all futures corresponding to consumed data
-        for future in consumed_futures:
-            if not future.done():
-                future.set_result(True)
-
+        self._timestamp += self._samples_per_10ms
         return frame
 
 
