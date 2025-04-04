@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   producer. These processors can be useful to push frames from one part of a
   pipeline to a different one (e.g. when using `ParallelPipeline`).
 
+- Improvements for the `SmallWebRTCTransport`:
+  - Wait until the pipeline is ready before triggering the `connected` event.
+  - Queue messages if the data channel is not ready.
+  - Update the aiortc dependency to fix an issue where the 'video/rtx' MIME type 
+    was incorrectly handled as a codec retransmission.
+  - Avoid initial video delays.
+
 ### Fixed
 
 - Fixed `SmallWebRTCTransport` to support dynamic values for
