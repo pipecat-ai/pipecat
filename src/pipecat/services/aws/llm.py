@@ -561,18 +561,7 @@ class BedrockLLMService(LLMService):
             "additional_model_request_fields": params.additional_model_request_fields if isinstance(params.additional_model_request_fields, dict) else {},
         }
         
-        # Determine model provider from model ID
-        self.model_provider = self._get_model_provider(model)
-        logger.info(f"Using AWS Bedrock model: {model} from provider: {self.model_provider}")
-
-    def _get_model_provider(self, model: str) -> str:
-        """Determine the model provider from the model ID"""
-        if "anthropic." in model:
-            return "anthropic"
-        elif "amazon." in model:
-            return "amazon"
-        else:
-            raise ValueError(f"Unsupported model: {model}. Only Anthropic Claude and Amazon Nova model families are supported.")
+        logger.info(f"Using AWS Bedrock model: {model}")
 
     def can_generate_metrics(self) -> bool:
         return True
