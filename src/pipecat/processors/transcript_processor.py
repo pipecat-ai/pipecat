@@ -175,22 +175,28 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TTSTextFrame):
+        if isinstance(frame, (StartInterruptionFrame, CancelFrame)):
+            # Push frame first otherwise our emitted transcription update frame
+            # might get cleaned up.
+            await self.push_frame(frame, direction)
+            # Emit accumulated text with interruptions
+            await self._emit_aggregated_text()
+        elif isinstance(frame, TTSTextFrame):
             # Start timestamp on first text part
             if not self._aggregation_start_time:
                 self._aggregation_start_time = time_now_iso8601()
 
             self._current_text_parts.append(frame.text)
 
-        elif isinstance(frame, (BotStoppedSpeakingFrame, StartInterruptionFrame, CancelFrame)):
-            # Emit accumulated text when bot finishes speaking or is interrupted
+            # Push frame.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, (BotStoppedSpeakingFrame, EndFrame)):
+            # Emit accumulated text when bot finishes speaking or pipeline ends.
             await self._emit_aggregated_text()
-
-        elif isinstance(frame, EndFrame):
-            # Emit any remaining text when pipeline ends
-            await self._emit_aggregated_text()
-
-        await self.push_frame(frame, direction)
+            # Push frame.
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
 
 
 class TranscriptProcessor:

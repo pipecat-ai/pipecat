@@ -3,16 +3,16 @@
 
 
 "@babel/runtime@^7.12.5":
-  version "7.26.0"
-  resolved "https://registry.npmjs.org/@babel/runtime/-/runtime-7.26.0.tgz"
-  integrity sha512-FDSOghenHTiToteC/QRlv2q3DhPZ/oOXTBoirfWNx1Cx3TMVcGWQtMMmQcSvb/JjpNeGzx8Pq/b4fKEJuWm1sw==
+  version "7.27.0"
+  resolved "https://registry.npmjs.org/@babel/runtime/-/runtime-7.27.0.tgz"
+  integrity sha512-VtPOkrdPHZsKc/clNqyi9WUA8TINkZ4cGk63UUE3u4pmB2k+ZMQRDuIOagv8UVd6j7k0T3+RRIb7beKTebNbcw==
   dependencies:
     regenerator-runtime "^0.14.0"
 
-"@daily-co/daily-js@^0.73.0":
-  version "0.73.0"
-  resolved "https://registry.npmjs.org/@daily-co/daily-js/-/daily-js-0.73.0.tgz"
-  integrity sha512-Wz8c60hgmkx8fcEeDAi4L4J0rbafiihWKyXFyhYoFYPsw2OdChHpA4RYwIB+1enRws5IK+/HdmzFDYLQsB4A6w==
+"@daily-co/daily-js@^0.77.0":
+  version "0.77.0"
+  resolved "https://registry.npmjs.org/@daily-co/daily-js/-/daily-js-0.77.0.tgz"
+  integrity sha512-icNXKieKAkRR/C5dcPjrCkL1jQGFp5C5WtLHy5uHAdTztm+mo9wlPJuehbWaGOM3TV24mgWHZ/+8jOys1G0I4w==
   dependencies:
     "@babel/runtime" "^7.12.5"
     "@sentry/browser" "^8.33.1"
@@ -25,10 +25,10 @@
   resolved "https://registry.npmjs.org/@esbuild/darwin-arm64/-/darwin-arm64-0.24.0.tgz"
   integrity sha512-CKyDpRbK1hXwv79soeTJNHb5EiG6ct3efd/FTPdzOWdbZZfGhpbcqIpiD0+vwmpu0wTIL97ZRPZu8vUt46nBSw==
 
-"@pipecat-ai/client-js@^0.3.2", "@pipecat-ai/client-js@~0.3.2":
-  version "0.3.2"
-  resolved "https://registry.npmjs.org/@pipecat-ai/client-js/-/client-js-0.3.2.tgz"
-  integrity sha512-psunOVrJjPka2SWlq53vxVWCA0Vt8pSXsXtn8pOLC0YTKFsUx+b7Z6quYUJcDZjCe1aAg9cKETek3Xal3Co8Tg==
+"@pipecat-ai/client-js@^0.3.5", "@pipecat-ai/client-js@~0.3.5":
+  version "0.3.5"
+  resolved "https://registry.npmjs.org/@pipecat-ai/client-js/-/client-js-0.3.5.tgz"
+  integrity sha512-qmhnDjwY2XUtLjww35ShsYf5TF9BCuAk0tIj0oHjpTe6v6QOlgKQt8JVCAdc32p5ycouzSZOeDFtBd2aNWuq1g==
   dependencies:
     "@types/events" "^3.0.3"
     clone-deep "^4.0.1"
@@ -36,63 +36,63 @@
     typed-emitter "^2.1.0"
     uuid "^10.0.0"
 
-"@pipecat-ai/daily-transport@^0.3.5":
-  version "0.3.5"
-  resolved "https://registry.npmjs.org/@pipecat-ai/daily-transport/-/daily-transport-0.3.5.tgz"
-  integrity sha512-nJ0TvWPCqXPmU81U8cXOqk5mUEEvEuI06Mis+N0jN8KZUrNy1pP08iWbs07ObmIXdnQcoL+kQmHOerT4q/bF0w==
+"@pipecat-ai/daily-transport@^0.3.8":
+  version "0.3.8"
+  resolved "https://registry.npmjs.org/@pipecat-ai/daily-transport/-/daily-transport-0.3.8.tgz"
+  integrity sha512-AcRP51LGOsEA7DH0yPaZTqX/pozfTpkJbKC0itgWLv6uCM8dAnNtBj/m1CdFKRsE7QObhEOa+cRp5PUAyF4wCA==
   dependencies:
-    "@daily-co/daily-js" "^0.73.0"
+    "@daily-co/daily-js" "^0.77.0"
 
 "@rollup/rollup-darwin-arm64@4.28.0":
   version "4.28.0"
   resolved "https://registry.npmjs.org/@rollup/rollup-darwin-arm64/-/rollup-darwin-arm64-4.28.0.tgz"
   integrity sha512-lmKx9yHsppblnLQZOGxdO66gT77bvdBtr/0P+TPOseowE7D9AJoBw8ZDULRasXRWf1Z86/gcOdpBrV6VDUY36Q==
 
-"@sentry-internal/browser-utils@8.49.0":
-  version "8.49.0"
-  resolved "https://registry.npmjs.org/@sentry-internal/browser-utils/-/browser-utils-8.49.0.tgz"
-  integrity sha512-XkPHHdFqsN7EPaB+QGUOEmpFqXiqP67t2rRZ1HG1UwJoe0PhJEKNy7b4+WRwmT7ODSt+PvFk1gNBlJBpThwH7Q==
+"@sentry-internal/browser-utils@8.55.0":
+  version "8.55.0"
+  resolved "https://registry.npmjs.org/@sentry-internal/browser-utils/-/browser-utils-8.55.0.tgz"
+  integrity sha512-ROgqtQfpH/82AQIpESPqPQe0UyWywKJsmVIqi3c5Fh+zkds5LUxnssTj3yNd1x+kxaPDVB023jAP+3ibNgeNDw==
   dependencies:
-    "@sentry/core" "8.49.0"
+    "@sentry/core" "8.55.0"
 
-"@sentry-internal/feedback@8.49.0":
-  version "8.49.0"
-  resolved "https://registry.npmjs.org/@sentry-internal/feedback/-/feedback-8.49.0.tgz"
-  integrity sha512-v/wf7WvPxEvZUB7xrCnecI3fhevVo84hw8WlxgZIz6mLUHXEIX8xYWc9H8Yet/KKJ2uEB8GQ8aDsY6S1hVEIUA==
+"@sentry-internal/feedback@8.55.0":
+  version "8.55.0"
+  resolved "https://registry.npmjs.org/@sentry-internal/feedback/-/feedback-8.55.0.tgz"
+  integrity sha512-cP3BD/Q6pquVQ+YL+rwCnorKuTXiS9KXW8HNKu4nmmBAyf7urjs+F6Hr1k9MXP5yQ8W3yK7jRWd09Yu6DHWOiw==
   dependencies:
-    "@sentry/core" "8.49.0"
+    "@sentry/core" "8.55.0"
 
-"@sentry-internal/replay-canvas@8.49.0":
-  version "8.49.0"
-  resolved "https://registry.npmjs.org/@sentry-internal/replay-canvas/-/replay-canvas-8.49.0.tgz"
-  integrity sha512-/yXxI7f+Wu24FIYoRE7A0AidNxORuhAyPzb5ey1wFqMXP72nG8dXhOpcl0w+bi554FkqkLjdeUDhSOBWYZXH9g==
+"@sentry-internal/replay-canvas@8.55.0":
+  version "8.55.0"
+  resolved "https://registry.npmjs.org/@sentry-internal/replay-canvas/-/replay-canvas-8.55.0.tgz"
+  integrity sha512-nIkfgRWk1091zHdu4NbocQsxZF1rv1f7bbp3tTIlZYbrH62XVZosx5iHAuZG0Zc48AETLE7K4AX9VGjvQj8i9w==
   dependencies:
-    "@sentry-internal/replay" "8.49.0"
-    "@sentry/core" "8.49.0"
+    "@sentry-internal/replay" "8.55.0"
+    "@sentry/core" "8.55.0"
 
-"@sentry-internal/replay@8.49.0":
-  version "8.49.0"
-  resolved "https://registry.npmjs.org/@sentry-internal/replay/-/replay-8.49.0.tgz"
-  integrity sha512-BDiiCBxskkktTd6FNplBc9V8l14R4T/AwRIZj2itX4xnuHewTTDjVbeyvGol4roA4r+V0Mzoi31hLEGI6yFQ5Q==
+"@sentry-internal/replay@8.55.0":
+  version "8.55.0"
+  resolved "https://registry.npmjs.org/@sentry-internal/replay/-/replay-8.55.0.tgz"
+  integrity sha512-roCDEGkORwolxBn8xAKedybY+Jlefq3xYmgN2fr3BTnsXjSYOPC7D1/mYqINBat99nDtvgFvNfRcZPiwwZ1hSw==
   dependencies:
-    "@sentry-internal/browser-utils" "8.49.0"
-    "@sentry/core" "8.49.0"
+    "@sentry-internal/browser-utils" "8.55.0"
+    "@sentry/core" "8.55.0"
 
 "@sentry/browser@^8.33.1":
-  version "8.49.0"
-  resolved "https://registry.npmjs.org/@sentry/browser/-/browser-8.49.0.tgz"
-  integrity sha512-dS4Sw2h8EixHeXOIR++XEVMTen6xCGcIQ/XhJbsjqvddXeIijW0WkxSeTfPkfs0dsqFHSisWmlmo0xhHbXvEsQ==
+  version "8.55.0"
+  resolved "https://registry.npmjs.org/@sentry/browser/-/browser-8.55.0.tgz"
+  integrity sha512-1A31mCEWCjaMxJt6qGUK+aDnLDcK6AwLAZnqpSchNysGni1pSn1RWSmk9TBF8qyTds5FH8B31H480uxMPUJ7Cw==
   dependencies:
-    "@sentry-internal/browser-utils" "8.49.0"
-    "@sentry-internal/feedback" "8.49.0"
-    "@sentry-internal/replay" "8.49.0"
-    "@sentry-internal/replay-canvas" "8.49.0"
-    "@sentry/core" "8.49.0"
+    "@sentry-internal/browser-utils" "8.55.0"
+    "@sentry-internal/feedback" "8.55.0"
+    "@sentry-internal/replay" "8.55.0"
+    "@sentry-internal/replay-canvas" "8.55.0"
+    "@sentry/core" "8.55.0"
 
-"@sentry/core@8.49.0":
-  version "8.49.0"
-  resolved "https://registry.npmjs.org/@sentry/core/-/core-8.49.0.tgz"
-  integrity sha512-/OAm6LdHhh8TvfDAucWfSJV7M03IOHrJm5LVjrrKr4gwQ1HKd4CDbARsBbPwHIzSRAle0IgG3sbJxEvv52JUIw==
+"@sentry/core@8.55.0":
+  version "8.55.0"
+  resolved "https://registry.npmjs.org/@sentry/core/-/core-8.55.0.tgz"
+  integrity sha512-6g7jpbefjHYs821Z+EBJ8r4Z7LT5h80YSWRJaylGS4nW5W5Z2KXzpdnyFarv37O7QjauzVC2E+PABmpkw5/JGA==
 
 "@swc/core-darwin-arm64@1.10.14":
   version "1.10.14"

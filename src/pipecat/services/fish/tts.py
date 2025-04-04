@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import InterruptibleTTSService
+from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
 
 try:

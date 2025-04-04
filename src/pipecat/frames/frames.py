@@ -378,25 +378,6 @@ class LLMEnablePromptCachingFrame(DataFrame):
 
 
 @dataclass
-class FunctionCallResultProperties:
-    """Properties for a function call result frame."""
-
-    run_llm: Optional[bool] = None
-    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
-
-
-@dataclass
-class FunctionCallResultFrame(DataFrame):
-    """A frame containing the result of an LLM function (tool) call."""
-
-    function_name: str
-    tool_call_id: str
-    arguments: Any
-    result: Any
-    properties: Optional[FunctionCallResultProperties] = None
-
-
-@dataclass
 class TTSSpeakFrame(DataFrame):
     """A frame that contains a text that should be spoken by the TTS in the
     pipeline (if any).
@@ -650,6 +631,25 @@ class FunctionCallCancelFrame(SystemFrame):
 
     function_name: str
     tool_call_id: str
+
+
+@dataclass
+class FunctionCallResultProperties:
+    """Properties for a function call result frame."""
+
+    run_llm: Optional[bool] = None
+    on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
+
+
+@dataclass
+class FunctionCallResultFrame(SystemFrame):
+    """A frame containing the result of an LLM function (tool) call."""
+
+    function_name: str
+    tool_call_id: str
+    arguments: Any
+    result: Any
+    properties: Optional[FunctionCallResultProperties] = None
 
 
 @dataclass

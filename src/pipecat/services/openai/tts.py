@@ -17,17 +17,24 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
+from pipecat.services.tts_service import TTSService
 
-ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+ValidVoice = Literal[
+    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
+]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
     "alloy": "alloy",
+    "ash": "ash",
+    "ballad": "ballad",
+    "coral": "coral",
     "echo": "echo",
     "fable": "fable",
     "onyx": "onyx",
     "nova": "nova",
+    "sage": "sage",
     "shimmer": "shimmer",
+    "verse": "verse",
 }
 
 

@@ -34,7 +34,7 @@ logger.add(sys.stderr, level="DEBUG")
 # Want to initialize the ultravox processor since it takes time to load the model and dont
 # want to load it every time the pipeline is run
 ultravox_processor = UltravoxSTTService(
-    model_size="fixie-ai/ultravox-v0_4_1-llama-3_1-8b",
+    model_name="fixie-ai/ultravox-v0_5-llama-3_1-8b",
     hf_token=os.getenv("HF_TOKEN"),
 )
 
