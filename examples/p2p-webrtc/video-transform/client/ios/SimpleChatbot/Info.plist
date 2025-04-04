@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>voip</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+    <string>Camera is necessary for transmitting video in a call</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Microphone is necessary for transmitting audio in a call</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
+</dict>
+</plist>
