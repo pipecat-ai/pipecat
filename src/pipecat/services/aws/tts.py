@@ -184,18 +184,18 @@ class PollyTTSService(TTSService):
 
         prosody_attrs = []
         # Prosody tags are only supported for standard and neural engines
-        if self._settings["engine"] != "generative":
-            if self._settings["rate"]:
-                prosody_attrs.append(f"rate='{self._settings['rate']}'")
+        if self._settings["engine"] == "standard":
             if self._settings["pitch"]:
                 prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
-            if self._settings["volume"]:
-                prosody_attrs.append(f"volume='{self._settings['volume']}'")
+        
+        if self._settings["rate"]:
+            prosody_attrs.append(f"rate='{self._settings['rate']}'")
+        if self._settings["volume"]:
+            prosody_attrs.append(f"volume='{self._settings['volume']}'")
+        # logger.warning("Prosody tags are not supported for generative engine. Ignoring.")
 
-            if prosody_attrs:
+        if prosody_attrs:
                 ssml += f"<prosody {' '.join(prosody_attrs)}>"
-        else:
-            logger.warning("Prosody tags are not supported for generative engine. Ignoring.")
 
         ssml += text
 
@@ -205,6 +205,8 @@ class PollyTTSService(TTSService):
         ssml += "</lang>"
 
         ssml += "</speak>"
+
+        logger.debug(f"SSML: {ssml}")
 
         return ssml
 
