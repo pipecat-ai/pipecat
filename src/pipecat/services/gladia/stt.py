@@ -19,6 +19,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
@@ -192,6 +194,7 @@ class GladiaSTTService(STTService):
         sample_rate: Optional[int] = None,
         model: str = "solaria-1",
         params: GladiaInputParams = GladiaInputParams(),
+        vad_enabled: bool,
         **kwargs,
     ):
         """Initialize the Gladia STT service.
@@ -204,6 +207,7 @@ class GladiaSTTService(STTService):
             model: Model to use ("solaria-1", "solaria-mini-1", "fast",
                 or "accurate")
             params: Additional configuration parameters
+            vad_enabled: Push User Start/Stop frames
             **kwargs: Additional arguments passed to the STTService
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -224,6 +228,7 @@ class GladiaSTTService(STTService):
         self._params = params
         self._websocket = None
         self._receive_task = None
+        self.vad_enabled = vad_enabled
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language enum to Gladia's language code."""
@@ -351,9 +356,14 @@ class GladiaSTTService(STTService):
                     transcript = utterance["text"]
                     if confidence >= self._confidence:
                         if content["data"]["is_final"]:
+                            if self.vad_enabled:
+                                await self.push_frame(UserStartedSpeakingFrame())
                             await self.push_frame(
                                 TranscriptionFrame(transcript, "", time_now_iso8601())
                             )
+                            logger.debug(f">> Deepgram: {transcript}")
+                            if self.vad_enabled:
+                                await self.push_frame(UserStoppedSpeakingFrame())
                         else:
                             await self.push_frame(
                                 InterimTranscriptionFrame(transcript, "", time_now_iso8601())
