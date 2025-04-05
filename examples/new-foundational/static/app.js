@@ -12,8 +12,10 @@ class WebRTCApp {
     this.videoTrack = null;
     this.audioTrack = null;
     this.videoContainer = document.getElementById('bot-video-container');
+
+    // Set initial mute states - camera starts muted/off
     this.micMuted = false;
-    this.cameraMuted = false;
+    this.cameraMuted = true;
 
     // Start with both hidden - neither video nor visualizer
     this.videoContainer.classList.remove('video-hidden');
@@ -258,6 +260,16 @@ class WebRTCApp {
       this.micChevronBtn.disabled = false;
       this.cameraChevronBtn.disabled = false;
 
+      // Set initial UI state for media controls based on mute states
+      this.micToggleBtn.setAttribute(
+        'data-state',
+        this.micMuted ? 'muted' : 'unmuted'
+      );
+      this.cameraToggleBtn.setAttribute(
+        'data-state',
+        this.cameraMuted ? 'muted' : 'unmuted'
+      );
+
       // If we have a video track, check its state
       if (this.videoTrack) {
         this.updateVideoVisibility(this.videoTrack, !this.videoTrack.muted);
@@ -279,8 +291,6 @@ class WebRTCApp {
       this.cameraToggleBtn.disabled = true;
       this.micChevronBtn.disabled = true;
       this.cameraChevronBtn.disabled = true;
-      this.micToggleBtn.setAttribute('data-state', 'unmuted');
-      this.cameraToggleBtn.setAttribute('data-state', 'unmuted');
 
       // Close any open popovers
       if (this.micPopover.classList.contains('show')) {
@@ -406,10 +416,28 @@ class WebRTCApp {
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
+      // Immediately mute camera if camera is set to be muted
+      if (this.cameraMuted) {
+        const videoTracks = stream.getVideoTracks();
+        if (videoTracks.length > 0) {
+          videoTracks[0].enabled = false;
+          this.log('Camera initially muted');
+        }
+      }
+
+      // Immediately mute microphone if mic is set to be muted
+      if (this.micMuted) {
+        const audioTracks = stream.getAudioTracks();
+        if (audioTracks.length > 0) {
+          audioTracks[0].enabled = false;
+          this.log('Microphone initially muted');
+        }
+      }
+
       // Set up self view video
       this.selfViewVideo.srcObject = stream;
 
-      // Update self view visibility
+      // Update self view visibility - should be hidden since camera is muted
       this.updateSelfViewVisibility();
 
       const pc = new RTCPeerConnection();
@@ -555,9 +583,9 @@ class WebRTCApp {
       clearInterval(this.keepAliveInterval);
     }
 
-    // Reset mute states
-    this.micMuted = false;
-    this.cameraMuted = false;
+    // Don't reset mute states - maintain them between connections
+    // this.micMuted = false;
+    // this.cameraMuted = true;
 
     // Reset UI
     this.updateStatus('Disconnected');
@@ -580,6 +608,23 @@ class WebRTCApp {
     this.cameraToggleBtn.disabled = true;
     this.micChevronBtn.disabled = true;
     this.cameraChevronBtn.disabled = true;
+
+    // Set initial UI states based on mute states
+    this.micToggleBtn.setAttribute(
+      'data-state',
+      this.micMuted ? 'muted' : 'unmuted'
+    );
+    this.cameraToggleBtn.setAttribute(
+      'data-state',
+      this.cameraMuted ? 'muted' : 'unmuted'
+    );
+
+    this.micToggleBtn.title = this.micMuted
+      ? 'Unmute microphone'
+      : 'Mute microphone';
+    this.cameraToggleBtn.title = this.cameraMuted
+      ? 'Turn on camera'
+      : 'Turn off camera';
   }
 }
 
