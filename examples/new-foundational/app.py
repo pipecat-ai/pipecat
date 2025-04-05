@@ -13,11 +13,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fasthtml.common import (
-    H1,
     Audio,
     Button,
     Div,
-    Label,
+    Link,
     Option,
     ScriptX,
     Select,
@@ -73,39 +72,98 @@ def index():
     return (
         # Title for browser tab
         Title(f"Pipecat - {display_name}"),
+        # Add Font Awesome icons
+        Link(
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
+            rel="stylesheet",
+        ),
         StyleX("static/styles.css"),
         Div(
-            # Status bar with only the title (no status text)
+            # Status bar with controls
             Div(
                 Div(Span(f"Pipecat - {display_name}", cls="app-title"), cls="status"),
                 Div(
-                    # Single toggle button
+                    # Camera toggle with dropdown
+                    Div(
+                        Button(
+                            Span(cls="fa-solid fa-video"),
+                            id="camera-toggle",
+                            cls="media-toggle-btn",
+                            data_state="unmuted",
+                            title="Turn off camera",
+                        ),
+                        Button(
+                            Span(cls="fa-solid fa-chevron-up"),
+                            cls="chevron-btn",
+                            id="camera-chevron",
+                            title="Select camera device",
+                        ),
+                        # Camera selection popover
+                        Div(
+                            # Current device display
+                            Div(
+                                Span(id="current-video-device", cls="device-name"),
+                                Button(Span(cls="fa-solid fa-circle"), cls="device-indicator"),
+                                cls="device-info",
+                            ),
+                            # Device selector
+                            Select(
+                                Option("Default device", value=""),
+                                id="video-input",
+                                cls="device-select",
+                            ),
+                            cls="device-popover",
+                            id="camera-popover",
+                        ),
+                        cls="control-wrapper",
+                    ),
+                    # Microphone toggle with dropdown
+                    Div(
+                        Button(
+                            Span(cls="fa-solid fa-microphone"),
+                            id="mic-toggle",
+                            cls="media-toggle-btn",
+                            data_state="unmuted",
+                            title="Mute microphone",
+                        ),
+                        Button(
+                            Span(cls="fa-solid fa-chevron-up"),
+                            cls="chevron-btn",
+                            id="mic-chevron",
+                            title="Select microphone device",
+                        ),
+                        # Microphone selection popover
+                        Div(
+                            # Current device display
+                            Div(
+                                Span(id="current-audio-device", cls="device-name"),
+                                Button(Span(cls="fa-solid fa-circle"), cls="device-indicator"),
+                                cls="device-info",
+                            ),
+                            # Device selector
+                            Select(
+                                Option("Default device", value=""),
+                                id="audio-input",
+                                cls="device-select",
+                            ),
+                            cls="device-popover",
+                            id="mic-popover",
+                        ),
+                        cls="control-wrapper",
+                    ),
+                    # Single connect/disconnect button
                     Button("Connect", id="connection-btn", data_state="disconnected"),
                     cls="controls",
                 ),
                 cls="status-bar",
             ),
-            # Device settings
-            Div(
-                Div(
-                    Label("Audio"),
-                    Select(Option("Default device", value=""), id="audio-input"),
-                    cls="option",
-                ),
-                Div(
-                    Label("Video"),
-                    Select(Option("Default device", value=""), id="video-input"),
-                    cls="option",
-                ),
-                cls="options-bar",
-            ),
             # Main content
             Div(
                 Div(
+                    # Video container
                     Div(
-                        # Video container
                         Video(id="bot-video", autoplay=True, playsinline=True),
-                        # Voice visualizer container (separate from video overlay)
+                        # Voice visualizer container
                         Div(id="voice-visualizer-container", cls="voice-visualizer-wrapper"),
                         id="bot-video-container",
                     ),

@@ -21,7 +21,7 @@ body {
   flex-direction: column;
 }
 
-/* Status bar with integrated title */
+/* Status bar with integrated title and controls */
 .status-bar {
   display: flex;
   justify-content: space-between;
@@ -48,9 +48,146 @@ body {
 .controls {
   display: flex;
   gap: 10px;
+  align-items: center;
 }
 
-/* Toggle button styles */
+/* Control wrapper for media toggles + chevrons */
+.control-wrapper {
+  display: flex;
+  position: relative;
+  margin-right: 5px;
+}
+
+/* Media toggle buttons */
+.media-toggle-btn {
+  background-color: #f0f0f0;
+  border: none;
+  border-radius: 4px 0 0 4px;
+  color: #333;
+  width: 40px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.media-toggle-btn:hover {
+  background-color: #e0e0e0;
+}
+
+.media-toggle-btn[data-state='muted'] {
+  background-color: #e53935;
+  color: white;
+}
+
+.media-toggle-btn[data-state='muted'] .fa-microphone::before {
+  content: '\f131'; /* Font Awesome microphone-slash icon */
+}
+
+.media-toggle-btn[data-state='muted'] .fa-video::before {
+  content: '\f4e2'; /* Font Awesome video-slash icon */
+}
+
+/* Chevron button */
+.chevron-btn {
+  background-color: #f0f0f0;
+  border: none;
+  border-radius: 0 4px 4px 0;
+  border-left: 1px solid #ddd;
+  color: #333;
+  width: 20px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.chevron-btn:hover {
+  background-color: #e0e0e0;
+}
+
+.chevron-btn.active .fa-chevron-up::before {
+  content: '\f078'; /* Change to chevron-down when active */
+}
+
+.chevron-btn.active {
+  background-color: #e0e0e0;
+}
+
+/* Device popover */
+.device-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 5px;
+  background-color: #1e2a38;
+  min-width: 250px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  z-index: 100;
+  color: white;
+  display: none;
+}
+
+.device-popover.show {
+  display: block;
+}
+
+/* Device info inside popover */
+.device-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 8px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.device-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 10px;
+}
+
+.device-indicator {
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.device-indicator .fa-circle {
+  color: #4caf50;
+  font-size: 10px;
+}
+
+.device-select {
+  width: 100%;
+  padding: 8px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.device-select option {
+  background-color: #1e2a38;
+  color: white;
+}
+
+/* Toggle button in status bar */
 #connection-btn {
   padding: 8px 16px;
   border: none;
@@ -69,39 +206,6 @@ body {
 #connection-btn[data-state='connected'] {
   background-color: #f44336;
   color: white;
-}
-
-/* Device settings section */
-.options-bar {
-  display: flex;
-  justify-content: space-between;
-  padding: 16px;
-  background-color: #fff;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.option {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.option label {
-  font-weight: 600;
-  min-width: 50px;
-  color: #111;
-}
-
-.option select {
-  padding: 8px 12px;
-  border-radius: 4px;
-  border: 1px solid #bbb;
-  background-color: #fff;
-  font-size: 14px;
-  min-width: 180px;
-  color: #333;
 }
 
 /* Main content */
@@ -143,6 +247,7 @@ body {
   transition: opacity 0.3s ease;
 }
 
+/* Voice visualizer positioning */
 .voice-visualizer-wrapper {
   position: absolute;
   top: 0;
@@ -159,8 +264,15 @@ body {
   visibility: hidden; /* Completely hide it initially */
 }
 
-#voice-visualizer {
-  display: block;
+/* Update the state classes */
+.video-hidden .voice-visualizer-wrapper {
+  opacity: 1;
+  visibility: visible; /* Make it visible when video is hidden */
+}
+
+.video-visible .voice-visualizer-wrapper {
+  opacity: 0;
+  visibility: hidden; /* Hide it when video is visible */
 }
 
 audio {
@@ -215,27 +327,6 @@ audio {
   font-weight: 500;
 }
 
-/* Video is hidden by default when not connected */
-.video-hidden #bot-video {
-  opacity: 0;
-}
-
-/* Visualizer is shown by default */
-.video-hidden .voice-visualizer-wrapper {
-  opacity: 1;
-  visibility: visible; /* Make it visible when video is hidden */
-}
-
-/* When video is shown, hide visualizer */
-.video-visible #bot-video {
-  opacity: 1;
-}
-
-.video-visible .voice-visualizer-wrapper {
-  opacity: 0;
-  visibility: hidden; /* Hide it when video is visible */
-}
-
 /* Media queries */
 @media (max-width: 768px) {
   .container {
@@ -243,44 +334,48 @@ audio {
     padding: 8px;
   }
 
-  .options-bar,
   .status-bar {
     flex-direction: column;
     gap: 12px;
+    padding: 10px;
   }
 
-  .option {
+  .status {
     width: 100%;
+    justify-content: center;
+    margin-bottom: 8px;
   }
 
-  .status,
   .controls {
     width: 100%;
-  }
-
-  .controls {
     justify-content: space-between;
   }
 
-  #connection-btn {
-    width: 100%;
+  .control-wrapper {
+    margin: 0;
+  }
+
+  .device-popover {
+    width: 200px;
+    left: 50%;
+    transform: translateX(-50%);
   }
 
   .main-content {
     flex-direction: column;
-    height: auto; /* Let content determine height on mobile */
+    height: auto;
     max-height: none;
   }
 
   .bot-container {
     width: 100%;
-    height: 250px; /* Fixed height for video container on mobile */
+    height: 250px;
   }
 
   .debug-panel {
     width: 100%;
     border-left: none;
     border-top: 1px solid #ddd;
-    height: 200px; /* Fixed height for debug panel on mobile */
+    height: 200px;
   }
 }

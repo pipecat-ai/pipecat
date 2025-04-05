@@ -6,6 +6,8 @@ class WebRTCApp {
     this.videoTrack = null;
     this.audioTrack = null;
     this.videoContainer = document.getElementById('bot-video-container');
+    this.micMuted = false;
+    this.cameraMuted = false;
 
     // Start with both hidden - neither video nor visualizer
     this.videoContainer.classList.remove('video-hidden');
@@ -16,9 +18,18 @@ class WebRTCApp {
 
   setupDOMElements() {
     this.connectionBtn = document.getElementById('connection-btn');
+    this.micToggleBtn = document.getElementById('mic-toggle');
+    this.cameraToggleBtn = document.getElementById('camera-toggle');
+    this.micChevronBtn = document.getElementById('mic-chevron');
+    this.cameraChevronBtn = document.getElementById('camera-chevron');
+    this.micPopover = document.getElementById('mic-popover');
+    this.cameraPopover = document.getElementById('camera-popover');
 
     this.audioInput = document.getElementById('audio-input');
     this.videoInput = document.getElementById('video-input');
+
+    this.currentAudioDevice = document.getElementById('current-audio-device');
+    this.currentVideoDevice = document.getElementById('current-video-device');
 
     this.videoElement = document.getElementById('bot-video');
     this.audioElement = document.getElementById('bot-audio');
@@ -27,7 +38,7 @@ class WebRTCApp {
   }
 
   setupDOMEventListeners() {
-    // Single button handler that checks the current state
+    // Connection button handler
     this.connectionBtn.addEventListener('click', () => {
       const currentState = this.connectionBtn.getAttribute('data-state');
       if (currentState === 'disconnected') {
@@ -37,14 +48,150 @@ class WebRTCApp {
       }
     });
 
-    // Update when device selections change
+    // Microphone toggle button
+    this.micToggleBtn.addEventListener('click', () => {
+      this.toggleMicrophone();
+    });
+
+    // Camera toggle button
+    this.cameraToggleBtn.addEventListener('click', () => {
+      this.toggleCamera();
+    });
+
+    // Mic chevron click
+    this.micChevronBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.togglePopover(this.micPopover, this.micChevronBtn);
+
+      // Hide the other popover if it's open
+      if (this.cameraPopover.classList.contains('show')) {
+        this.togglePopover(this.cameraPopover, this.cameraChevronBtn);
+      }
+    });
+
+    // Camera chevron click
+    this.cameraChevronBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.togglePopover(this.cameraPopover, this.cameraChevronBtn);
+
+      // Hide the other popover if it's open
+      if (this.micPopover.classList.contains('show')) {
+        this.togglePopover(this.micPopover, this.micChevronBtn);
+      }
+    });
+
+    // Click outside to close popovers
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.control-wrapper')) {
+        if (this.micPopover.classList.contains('show')) {
+          this.togglePopover(this.micPopover, this.micChevronBtn);
+        }
+        if (this.cameraPopover.classList.contains('show')) {
+          this.togglePopover(this.cameraPopover, this.cameraChevronBtn);
+        }
+      }
+    });
+
+    // Device selection changes
     this.audioInput.addEventListener('change', () => {
       this.log('Audio input changed');
+      this.updateCurrentDeviceDisplay();
+      if (this.connected) {
+        this.stop();
+        setTimeout(() => this.start(), 500);
+      }
     });
 
     this.videoInput.addEventListener('change', () => {
       this.log('Video input changed');
+      this.updateCurrentDeviceDisplay();
+      if (this.connected) {
+        this.stop();
+        setTimeout(() => this.start(), 500);
+      }
     });
+  }
+
+  togglePopover(popover, chevronBtn) {
+    popover.classList.toggle('show');
+    chevronBtn.classList.toggle('active');
+  }
+
+  updateCurrentDeviceDisplay() {
+    // Update the displayed device names
+    if (this.audioInput.selectedIndex > 0) {
+      this.currentAudioDevice.textContent =
+        this.audioInput.options[this.audioInput.selectedIndex].text;
+    } else {
+      this.currentAudioDevice.textContent = 'Default device';
+    }
+
+    if (this.videoInput.selectedIndex > 0) {
+      this.currentVideoDevice.textContent =
+        this.videoInput.options[this.videoInput.selectedIndex].text;
+    } else {
+      this.currentVideoDevice.textContent = 'Default device';
+    }
+  }
+
+  toggleMicrophone() {
+    if (!this.connected) {
+      this.log('Cannot toggle microphone when not connected', 'error');
+      return;
+    }
+
+    // Get all audio tracks from the local stream
+    if (this.stream) {
+      const audioTracks = this.stream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        const track = audioTracks[0];
+        this.micMuted = !this.micMuted;
+        track.enabled = !this.micMuted;
+
+        // Update UI
+        if (this.micMuted) {
+          this.micToggleBtn.setAttribute('data-state', 'muted');
+          this.micToggleBtn.title = 'Unmute microphone';
+          this.log('Microphone muted');
+        } else {
+          this.micToggleBtn.setAttribute('data-state', 'unmuted');
+          this.micToggleBtn.title = 'Mute microphone';
+          this.log('Microphone unmuted');
+        }
+      } else {
+        this.log('No audio track available', 'error');
+      }
+    }
+  }
+
+  toggleCamera() {
+    if (!this.connected) {
+      this.log('Cannot toggle camera when not connected', 'error');
+      return;
+    }
+
+    // Get all video tracks from the local stream
+    if (this.stream) {
+      const videoTracks = this.stream.getVideoTracks();
+      if (videoTracks.length > 0) {
+        const track = videoTracks[0];
+        this.cameraMuted = !this.cameraMuted;
+        track.enabled = !this.cameraMuted;
+
+        // Update UI
+        if (this.cameraMuted) {
+          this.cameraToggleBtn.setAttribute('data-state', 'muted');
+          this.cameraToggleBtn.title = 'Turn on camera';
+          this.log('Camera turned off');
+        } else {
+          this.cameraToggleBtn.setAttribute('data-state', 'unmuted');
+          this.cameraToggleBtn.title = 'Turn off camera';
+          this.log('Camera turned on');
+        }
+      } else {
+        this.log('No video track available', 'error');
+      }
+    }
   }
 
   log(message, type = 'normal') {
@@ -82,6 +229,12 @@ class WebRTCApp {
       this.connectionBtn.setAttribute('data-state', 'connected');
       this.connected = true;
 
+      // Enable media control buttons
+      this.micToggleBtn.disabled = false;
+      this.cameraToggleBtn.disabled = false;
+      this.micChevronBtn.disabled = false;
+      this.cameraChevronBtn.disabled = false;
+
       // If we have a video track, check its state
       if (this.videoTrack) {
         this.updateVideoVisibility(this.videoTrack, !this.videoTrack.muted);
@@ -95,12 +248,49 @@ class WebRTCApp {
       this.connectionBtn.setAttribute('data-state', 'disconnected');
       this.connected = false;
 
+      // Disable and reset media control buttons
+      this.micToggleBtn.disabled = true;
+      this.cameraToggleBtn.disabled = true;
+      this.micChevronBtn.disabled = true;
+      this.cameraChevronBtn.disabled = true;
+      this.micToggleBtn.setAttribute('data-state', 'unmuted');
+      this.cameraToggleBtn.setAttribute('data-state', 'unmuted');
+
+      // Close any open popovers
+      if (this.micPopover.classList.contains('show')) {
+        this.togglePopover(this.micPopover, this.micChevronBtn);
+      }
+      if (this.cameraPopover.classList.contains('show')) {
+        this.togglePopover(this.cameraPopover, this.cameraChevronBtn);
+      }
+
       // Reset UI state when disconnected - hide both
       this.videoContainer.classList.remove('video-visible');
       this.videoContainer.classList.remove('video-hidden');
     }
 
     this.log(`Status: ${status}`, 'status');
+  }
+
+  updateVideoVisibility(track, enabled) {
+    this.log(`Video track ${enabled ? 'enabled' : 'disabled'}`);
+
+    // Only update visibility if we're connected
+    if (this.connected) {
+      if (enabled) {
+        // Show video, hide visualizer
+        this.videoContainer.classList.remove('video-hidden');
+        this.videoContainer.classList.add('video-visible');
+      } else {
+        // Hide video, show visualizer
+        this.videoContainer.classList.remove('video-visible');
+        this.videoContainer.classList.add('video-hidden');
+      }
+    } else {
+      // If not connected, hide both
+      this.videoContainer.classList.remove('video-hidden');
+      this.videoContainer.classList.remove('video-visible');
+    }
   }
 
   async populateDevices() {
@@ -124,6 +314,7 @@ class WebRTCApp {
 
       // Select the first devices as default
       this.selectDefaultDevices(audioDevices, videoDevices);
+      this.updateCurrentDeviceDisplay();
     } catch (e) {
       this.log(`Error getting devices: ${e.message}`, 'error');
       console.error(e);
@@ -164,27 +355,6 @@ class WebRTCApp {
       this.log(
         `Default video device selected: ${this.videoInput.options[1].text}`
       );
-    }
-  }
-
-  updateVideoVisibility(track, enabled) {
-    this.log(`Video track ${enabled ? 'enabled' : 'disabled'}`);
-
-    // Only update visibility if we're connected
-    if (this.connected) {
-      if (enabled) {
-        // Show video, hide visualizer
-        this.videoContainer.classList.remove('video-hidden');
-        this.videoContainer.classList.add('video-visible');
-      } else {
-        // Hide video, show visualizer
-        this.videoContainer.classList.remove('video-visible');
-        this.videoContainer.classList.add('video-hidden');
-      }
-    } else {
-      // If not connected, hide both
-      this.videoContainer.classList.remove('video-hidden');
-      this.videoContainer.classList.remove('video-visible');
     }
   }
 
@@ -346,12 +516,16 @@ class WebRTCApp {
       clearInterval(this.keepAliveInterval);
     }
 
+    // Reset mute states
+    this.micMuted = false;
+    this.cameraMuted = false;
+
     // Reset UI
     this.updateStatus('Disconnected');
     this.videoElement.srcObject = null;
     this.audioElement.srcObject = null;
 
-    // Reset UI - hide both video and visualizer
+    // Reset UI state - hide both video and visualizer
     this.videoContainer.classList.remove('video-visible');
     this.videoContainer.classList.remove('video-hidden');
 
@@ -360,11 +534,20 @@ class WebRTCApp {
       window.voiceVisualizer.disconnectAudio();
     }
   }
+
+  initializeMediaControls() {
+    // Initially disable media controls until connected
+    this.micToggleBtn.disabled = true;
+    this.cameraToggleBtn.disabled = true;
+    this.micChevronBtn.disabled = true;
+    this.cameraChevronBtn.disabled = true;
+  }
 }
 
 // Create the WebRTCConnection instance on page load
 document.addEventListener('DOMContentLoaded', () => {
   window.webRTCApp = new WebRTCApp();
+  window.webRTCApp.initializeMediaControls();
 
   // Cleanup when leaving the page
   window.addEventListener('beforeunload', () => {
