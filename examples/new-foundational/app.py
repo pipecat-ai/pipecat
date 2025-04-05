@@ -175,6 +175,12 @@ def index():
             ),
             cls="container",
         ),
+        # Self-view video container - without the close button
+        Div(
+            Video(id="self-view", autoplay=True, playsinline=True, muted=True),
+            cls="self-view-container",
+            id="self-view-container",
+        ),
         ScriptX("static/app.js"),
         ScriptX("static/voice-visualizer.js"),
     )

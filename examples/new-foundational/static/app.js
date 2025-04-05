@@ -34,6 +34,9 @@ class WebRTCApp {
     this.videoElement = document.getElementById('bot-video');
     this.audioElement = document.getElementById('bot-audio');
 
+    this.selfViewContainer = document.getElementById('self-view-container');
+    this.selfViewVideo = document.getElementById('self-view');
+
     this.debugLog = document.getElementById('debug-log');
   }
 
@@ -134,6 +137,17 @@ class WebRTCApp {
     }
   }
 
+  updateSelfViewVisibility() {
+    // Show self view when:
+    // 1. Connected
+    // 2. Camera is not muted
+    if (this.connected && !this.cameraMuted) {
+      this.selfViewContainer.classList.add('active');
+    } else {
+      this.selfViewContainer.classList.remove('active');
+    }
+  }
+
   toggleMicrophone() {
     if (!this.connected) {
       this.log('Cannot toggle microphone when not connected', 'error');
@@ -188,6 +202,9 @@ class WebRTCApp {
           this.cameraToggleBtn.title = 'Turn off camera';
           this.log('Camera turned on');
         }
+
+        // Update self view visibility
+        this.updateSelfViewVisibility();
       } else {
         this.log('No video track available', 'error');
       }
@@ -243,6 +260,9 @@ class WebRTCApp {
         this.videoContainer.classList.remove('video-visible');
         this.videoContainer.classList.add('video-hidden');
       }
+
+      // Update self view visibility
+      this.updateSelfViewVisibility();
     } else {
       this.connectionBtn.textContent = 'Connect';
       this.connectionBtn.setAttribute('data-state', 'disconnected');
@@ -267,6 +287,9 @@ class WebRTCApp {
       // Reset UI state when disconnected - hide both
       this.videoContainer.classList.remove('video-visible');
       this.videoContainer.classList.remove('video-hidden');
+
+      // Hide self view
+      this.selfViewContainer.classList.remove('active');
     }
 
     this.log(`Status: ${status}`, 'status');
@@ -376,6 +399,12 @@ class WebRTCApp {
       };
 
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+      // Set up self view video
+      this.selfViewVideo.srcObject = stream;
+
+      // Update self view visibility
+      this.updateSelfViewVisibility();
 
       const pc = new RTCPeerConnection();
 
@@ -504,6 +533,10 @@ class WebRTCApp {
     // Reset track references
     this.videoTrack = null;
     this.audioTrack = null;
+
+    // Clear self view
+    this.selfViewVideo.srcObject = null;
+    this.selfViewContainer.classList.remove('active');
 
     // Close the peer connection
     if (this.pc) {
