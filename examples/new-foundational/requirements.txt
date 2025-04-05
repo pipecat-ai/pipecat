@@ -1,0 +1,5 @@
+pipecat-ai[webrtc]
+fastapi
+uvicorn
+python-dotenv
+python-fasthtml
