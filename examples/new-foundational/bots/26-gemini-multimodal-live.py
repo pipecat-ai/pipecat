@@ -30,12 +30,8 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
-    """Run a Gemini Multimodal Live bot that responds to voice input.
+    logger.info(f"Starting bot")
 
-    Args:
-        webrtc_connection: WebRTC connection to use
-        room_name: Optional room name to identify the session
-    """
     # Initialize the SmallWebRTCTransport with the connection
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
