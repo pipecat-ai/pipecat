@@ -16,6 +16,7 @@ from fasthtml.common import (
     Audio,
     Button,
     Div,
+    Favicon,
     Link,
     Option,
     ScriptX,
@@ -72,6 +73,8 @@ def index():
     return (
         # Title for browser tab
         Title(f"Pipecat - {display_name}"),
+        # Add favicon - using the same SVG for both light and dark modes
+        Favicon(light_icon="/favicon.svg", dark_icon="/favicon.svg"),
         # Add Font Awesome icons
         Link(
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
@@ -81,7 +84,7 @@ def index():
         Div(
             # Status bar with controls
             Div(
-                Div(Span(f"Pipecat - {display_name}", cls="app-title"), cls="status"),
+                Div(Span(f"{display_name}", cls="app-title"), cls="status"),
                 Div(
                     # Camera toggle with dropdown
                     Div(
