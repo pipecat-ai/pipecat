@@ -16,10 +16,8 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.gladia.config import GladiaInputParams, LanguageConfig
-from pipecat.services.gladia.stt import GladiaSTTService
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transcriptions.language import Language
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.together.llm import TogetherLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -44,41 +42,48 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         ),
     )
 
-    stt = GladiaSTTService(
-        api_key=os.getenv("GLADIA_API_KEY", ""),
-        params=GladiaInputParams(
-            language_config=LanguageConfig(
-                languages=[Language.EN],
-            )
-        ),
-    )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY", ""),
+        api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY", ""), model="gpt-4o")
+    llm = TogetherLLMService(
+        api_key=os.getenv("TOGETHER_API_KEY"),
+        model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+        params=TogetherLLMService.InputParams(
+            temperature=1.0,
+            top_p=0.9,
+            top_k=40,
+            extra={
+                "frequency_penalty": 2.0,
+                "presence_penalty": 0.0,
+            },
+        ),
+    )
 
     messages = [
         {
             "role": "system",
-            "content": f"You are a helpful LLM. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond in plain language. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
+    user_aggregator = context_aggregator.user()
+    assistant_aggregator = context_aggregator.assistant()
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
-            context_aggregator.user(),  # User responses
+            stt,
+            user_aggregator,  # User responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            assistant_aggregator,  # Assistant spoken responses
         ]
     )
 
@@ -109,4 +114,5 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
+
     await runner.run(task)

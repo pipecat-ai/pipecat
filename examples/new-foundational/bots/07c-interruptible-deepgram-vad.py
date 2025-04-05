@@ -7,19 +7,23 @@
 import os
 import sys
 
+from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import (
+    BotInterruptionFrame,
+    StopInterruptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.gladia.config import GladiaInputParams, LanguageConfig
-from pipecat.services.gladia.stt import GladiaSTTService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -38,32 +42,22 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 
-    stt = GladiaSTTService(
-        api_key=os.getenv("GLADIA_API_KEY", ""),
-        params=GladiaInputParams(
-            language_config=LanguageConfig(
-                languages=[Language.EN],
-            )
-        ),
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        live_options=LiveOptions(vad_events=True, utterance_end_ms="1000"),
     )
 
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY", ""),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    )
+    tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY", ""), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
     messages = [
         {
             "role": "system",
-            "content": f"You are a helpful LLM. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
@@ -92,6 +86,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         ),
     )
 
+    @stt.event_handler("on_speech_started")
+    async def on_speech_started(stt, *args, **kwargs):
+        await task.queue_frames([BotInterruptionFrame(), UserStartedSpeakingFrame()])
+
+    @stt.event_handler("on_utterance_end")
+    async def on_utterance_end(stt, *args, **kwargs):
+        await task.queue_frames([StopInterruptionFrame(), UserStoppedSpeakingFrame()])
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
@@ -109,4 +111,5 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
+
     await runner.run(task)

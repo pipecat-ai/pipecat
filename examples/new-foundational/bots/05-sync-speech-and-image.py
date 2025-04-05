@@ -74,106 +74,100 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         webrtc_connection: The WebRTC connection to use
         room_name: Optional room name for display purposes
     """
-    try:
-        logger.info(f"Starting bot")
+    logger.info(f"Starting bot")
 
-        # Create a transport using the WebRTC connection
-        transport = SmallWebRTCTransport(
-            webrtc_connection=webrtc_connection,
-            params=TransportParams(
-                audio_out_enabled=True,
-                camera_in_enabled=False,
-                camera_out_enabled=True,
-                camera_out_width=1024,
-                camera_out_height=1024,
-            ),
+    # Create a transport using the WebRTC connection
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_out_enabled=True,
+            camera_out_enabled=True,
+            camera_out_width=1024,
+            camera_out_height=1024,
+        ),
+    )
+
+    # Create an HTTP session for API calls
+    async with aiohttp.ClientSession() as session:
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+
+        tts = CartesiaHttpTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
         )
 
-        # Create an HTTP session for API calls
-        async with aiohttp.ClientSession() as session:
-            llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        imagegen = FalImageGenService(
+            params=FalImageGenService.InputParams(image_size="square_hd"),
+            aiohttp_session=session,
+            key=os.getenv("FAL_KEY"),
+        )
 
-            tts = CartesiaHttpTTSService(
-                api_key=os.getenv("CARTESIA_API_KEY"),
-                voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-            )
+        sentence_aggregator = SentenceAggregator()
+        month_prepender = MonthPrepender()
 
-            imagegen = FalImageGenService(
-                params=FalImageGenService.InputParams(image_size="square_hd"),
-                aiohttp_session=session,
-                key=os.getenv("FAL_KEY"),
-            )
+        # With `SyncParallelPipeline` we synchronize audio and images by pushing
+        # them basically in order (e.g. I1 A1 A1 A1 I2 A2 A2 A2 A2 I3 A3). To do
+        # that, each pipeline runs concurrently and `SyncParallelPipeline` will
+        # wait for the input frame to be processed.
+        #
+        # Note that `SyncParallelPipeline` requires the last processor in each
+        # of the pipelines to be synchronous. In this case, we use
+        # `CartesiaHttpTTSService` and `FalImageGenService` which make HTTP
+        # requests and wait for the response.
+        pipeline = Pipeline(
+            [
+                llm,  # LLM
+                sentence_aggregator,  # Aggregates LLM output into full sentences
+                SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
+                    [month_prepender, tts],  # Create "Month: sentence" and output audio
+                    [imagegen],  # Generate image
+                ),
+                transport.output(),  # Transport output
+            ]
+        )
 
-            sentence_aggregator = SentenceAggregator()
-            month_prepender = MonthPrepender()
+        frames = []
+        for month in [
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ]:
+            messages = [
+                {
+                    "role": "system",
+                    "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
+                }
+            ]
+            frames.append(MonthFrame(month=month))
+            frames.append(LLMMessagesFrame(messages))
 
-            # With `SyncParallelPipeline` we synchronize audio and images by pushing
-            # them basically in order (e.g. I1 A1 A1 A1 I2 A2 A2 A2 A2 I3 A3). To do
-            # that, each pipeline runs concurrently and `SyncParallelPipeline` will
-            # wait for the input frame to be processed.
-            #
-            # Note that `SyncParallelPipeline` requires the last processor in each
-            # of the pipelines to be synchronous. In this case, we use
-            # `CartesiaHttpTTSService` and `FalImageGenService` which make HTTP
-            # requests and wait for the response.
-            pipeline = Pipeline(
-                [
-                    llm,  # LLM
-                    sentence_aggregator,  # Aggregates LLM output into full sentences
-                    SyncParallelPipeline(  # Run pipelines in parallel aggregating the result
-                        [month_prepender, tts],  # Create "Month: sentence" and output audio
-                        [imagegen],  # Generate image
-                    ),
-                    transport.output(),  # Transport output
-                ]
-            )
+        task = PipelineTask(pipeline)
 
-            frames = []
-            for month in [
-                "January",
-                "February",
-                "March",
-                "April",
-                "May",
-                "June",
-                "July",
-                "August",
-                "September",
-                "October",
-                "November",
-                "December",
-            ]:
-                messages = [
-                    {
-                        "role": "system",
-                        "content": f"Describe a nature photograph suitable for use in a calendar, for the month of {month}. Include only the image description with no preamble. Limit the description to one sentence, please.",
-                    }
-                ]
-                frames.append(MonthFrame(month=month))
-                frames.append(LLMMessagesFrame(messages))
+        # Set up transport event handlers
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            logger.info(f"Client connected")
+            # Start the month narration once connected
+            await task.queue_frames(frames)
 
-            task = PipelineTask(pipeline)
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            logger.info(f"Client disconnected")
 
-            # Set up transport event handlers
-            @transport.event_handler("on_client_connected")
-            async def on_client_connected(transport, client):
-                logger.info(f"Client connected")
-                # Start the month narration once connected
-                await task.queue_frames(frames)
+        @transport.event_handler("on_client_closed")
+        async def on_client_closed(transport, client):
+            logger.info(f"Client closed connection")
+            await task.cancel()
 
-            @transport.event_handler("on_client_disconnected")
-            async def on_client_disconnected(transport, client):
-                logger.info(f"Client disconnected")
-
-            @transport.event_handler("on_client_closed")
-            async def on_client_closed(transport, client):
-                logger.info(f"Client closed connection")
-                await task.cancel()
-
-            # Run the pipeline
-            runner = PipelineRunner(handle_sigint=False)
-            await runner.run(task)
-
-    except Exception as e:
-        logger.error(f"Error in Month Narration bot: {e}")
-        raise
+        # Run the pipeline
+        runner = PipelineRunner(handle_sigint=False)
+        await runner.run(task)
