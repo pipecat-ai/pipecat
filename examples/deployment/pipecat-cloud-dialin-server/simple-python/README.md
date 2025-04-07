@@ -5,34 +5,49 @@ A FastAPI server that handles PSTN (Public Switched Telephone Network) and SIP (
 ## Setup
 
 1. Clone the repository
+
 2. Install dependencies:
+
    ```bash
    pip install -r requirements.txt
    ```
+
 3. Copy `env.example` to `.env`:
+
    ```bash
-   cp .env.example .env
+   cp env.example .env
    ```
+
 4. Update `.env` with your credentials:
+
    - `AGENT_NAME`: Your Daily agent name
    - `PIPECAT_CLOUD_API_KEY`: Your Daily API key
    - `PINLESS_HMAC_SECRET`: Your HMAC secret for request verification
 
 ## Running the Server
-3. Copy `env.example` to `.env`:
-Start the server with:
+
+Start the server:
+
 ```bash
 python server.py
 ```
+
 The server will run on `http://localhost:3000` and you can expose it via ngrok for testing:
+
+```bash
 `ngrok http 3000`
+```
+
+> Tip: Use a subdomain for a consistent URL (e.g. `ngrok http -subdomain=mydomain http://localhost:3000`)
 
 ## API Endpoints
 
 ### GET /
+
 Health check endpoint that returns a "Hello, World!" message.
 
 ### POST /api/dial
+
 Initiates a PSTN/SIP call with the following request body format:
 
 ```json
@@ -61,13 +76,15 @@ Initiates a PSTN/SIP call with the following request body format:
 ```
 
 #### Response
+
 Returns a JSON object containing:
+
 - `status`: Success/failure status
 - `data`: Response from Daily API
 - `room_properties`: Properties of the created Daily room
 
-
 ## Error Handling
+
 - 401: Invalid signature
 - 400: Invalid authorization header (e.g. missing Daily API key in bot.py)
 - 405: Method not allowed (e.g. incorrect route on the webhook URL)
