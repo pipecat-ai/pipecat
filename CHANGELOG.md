@@ -9,24 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added new processors `ProducerProcessor` and `ConsumerProcessor`. The producer
-  processor processes frames from the pipeline and decides whether the consumers
-  should consume it or not. If so, the same frame that is received by the
-  producer is sent to the consumer. There can be multiple consumers per
+- Added new processors `ProducerProcessor` and `ConsumerProcessor`. The
+  producer processor processes frames from the pipeline and decides whether the
+  consumers should consume it or not. If so, the same frame that is received by
+  the producer is sent to the consumer. There can be multiple consumers per
   producer. These processors can be useful to push frames from one part of a
   pipeline to a different one (e.g. when using `ParallelPipeline`).
 
 - Improvements for the `SmallWebRTCTransport`:
   - Wait until the pipeline is ready before triggering the `connected` event.
   - Queue messages if the data channel is not ready.
-  - Update the aiortc dependency to fix an issue where the 'video/rtx' MIME type 
-    was incorrectly handled as a codec retransmission.
+  - Update the aiortc dependency to fix an issue where the 'video/rtx' MIME
+    type was incorrectly handled as a codec retransmission.
   - Avoid initial video delays.
 
 ### Fixed
 
+- Fixed an issue in the Azure TTS services where the language was being set
+  incorrectly.
+
 - Fixed `SmallWebRTCTransport` to support dynamic values for
-  `TransportParams.audio_out_10ms_chunks`. Previously, it only worked with 20ms 
+  `TransportParams.audio_out_10ms_chunks`. Previously, it only worked with 20ms
   chunks.
 
 - Fixed an issue where `LLMAssistantContextAggregator` would prevent a
