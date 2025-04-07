@@ -106,8 +106,8 @@ async def run_bot(webrtc_connection):
         ),
     )
 
-    @daily_transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
+    @daily_transport.event_handler("on_participant_joined")
+    async def on_participant_joined(transport, participant):
         await transport.capture_participant_video(participant["id"])
 
     @pipecat_transport.event_handler("on_client_connected")
