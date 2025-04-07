@@ -64,6 +64,8 @@ class TelnyxFrameSerializer(FrameSerializer):
         if isinstance(frame, AudioRawFrame):
             data = frame.audio
 
+            print(f"data TELNYX: {data}")
+
             # Output: Convert PCM at frame's rate to 8kHz encoded for Telnyx
             if self._params.inbound_encoding == "PCMU":
                 serialized_data = await pcm_to_ulaw(
