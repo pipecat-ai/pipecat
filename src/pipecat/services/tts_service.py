@@ -269,7 +269,8 @@ class TTSService(AIService):
             filter.reset_interruption()
             text = filter.filter(text)
 
-        await self.process_generator(self.run_tts(text))
+        if text:
+            await self.process_generator(self.run_tts(text))
 
         await self.stop_processing_metrics()
 
