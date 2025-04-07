@@ -1,5 +1,5 @@
 {
-  "originHash" : "64a760bff8651c5464a11324100b2fb46be172491d43cf2e87e2e5a2d88303c7",
+  "originHash" : "77cb3fee4071811f880e69dbcd5a8ba01711a73372960391d6366c4c3a0d36eb",
   "pins" : [
     {
       "identity" : "pipecat-client-ios",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "992641fb5f7d1a794ecfc33babb5fe36e2a8ffdd",
         "version" : "0.3.5"
+      }
+    },
+    {
+      "identity" : "pipecat-client-ios-small-webrtc",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/pipecat-ai/pipecat-client-ios-small-webrtc",
+      "state" : {
+        "revision" : "a6e4516b1fcbed772ca97a9616dddc9329097958",
+        "version" : "0.0.1"
       }
     },
     {
