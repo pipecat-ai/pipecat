@@ -7,39 +7,61 @@ Next.js API routes for handling Daily Pipecat requests.
 - API endpoint for handling Daily Pipecat requests
 - HMAC signature validation
 - Structured logging with Pino
-- Support for dialin and dialout settings
+- Support for dial-in and dial-out settings
 - Voicemail detection and call transfer functionality
 - Test request handling
 
 ## Setup
 
 1. Clone the repository
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-3. Create `.env.local` file with your credentials:
-   ```
-   PIPECAT_CLOUD_API_KEY=pk_*
-   AGENT_NAME=my-first-agent
-   PINLESS_HMAC_SECRET=your_hmac_secret
-   LOG_LEVEL=info
-   ```
-4. Run the development server:
-   ```bash
-   npm run dev
-   ```
+
+2. Navigate to the `vercel` directory:
+
+```bash
+cd vercel
+```
+
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+4. Create `.env.local` file with your credentials:
+
+```bash
+cp env.local.example .env.local
+```
+
+Add your secrets:
+
+```bash
+PIPECAT_CLOUD_API_KEY=pk_*
+AGENT_NAME=my-first-agent
+PINLESS_HMAC_SECRET=your_hmac_secret
+LOG_LEVEL=info
+```
+
+5. Run the development server:
+
+```bash
+npm run dev
+```
 
 ## API Endpoints
 
 ### GET /api
+
 Returns a simple "Hello, World!" message with a cute cat emoji to verify the server is running.
 
 ### POST /api/dial
-Handles dialin and dialout requests for Daily Pipecat.
+
+Handles dial-in and dial-out requests for Pipecat Cloud.
 
 #### Test Requests
+
 The endpoint handles test requests when a webhook is configured. Send a request with `"Test": "test"` to verify your setup:
+
 ```json
 {
   "Test": "test"
@@ -47,6 +69,7 @@ The endpoint handles test requests when a webhook is configured. Send a request 
 ```
 
 #### Production Request Format
+
 ```json
 {
   // for dial-in from webhook
@@ -56,9 +79,9 @@ The endpoint handles test requests when a webhook is configured. Send a request 
   "callDomain": "string-contains-uuid",
   // for making a dial out to a phone or SIP
   "dialout_settings": [
-    {"phoneNumber": "+14158483432", "callerId": "purchased_phone_uuid"}, 
-    {"sipUri": "sip:username@sip.hostname.com"}
-  ],
+    { "phoneNumber": "+14158483432", "callerId": "purchased_phone_uuid" },
+    { "sipUri": "sip:username@sip.hostname.com" }
+  ]
 }
 ```
 

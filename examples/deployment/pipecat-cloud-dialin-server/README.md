@@ -1,29 +1,31 @@
-# Handling PSTN/SIP Dial-in on Pipecat cloud
+# Handling PSTN/SIP Dial-in on Pipecat Cloud
 
-This repository contains two server implementations for handling 
-the pinless dialin workflow in pipecat cloud. This is the companion to the 
-Pipecat Cloud [pstn_sip starter image](https://github.com/daily-co/pipecat-cloud-images/tree/main/pipecat-starters/pstn_sip). 
-In addition you can use `/api/dial` to trigger dial-out, and 
+This repository contains two server implementations for handling
+the pinless dial-in workflow in Pipecat Cloud. This is the companion to the
+Pipecat Cloud [pstn_sip starter image](https://github.com/daily-co/pipecat-cloud-images/tree/main/pipecat-starters/pstn_sip).
+In addition you can use `/api/dial` to trigger dial-out, and
 eventually, call-transfers.
 
-1. [FastAPI Server](simple-python/README.md) - 
-A FastAPI implementation that handles PSTN (Public Switched Telephone 
-Network) and SIP (Session Initiation Protocol) calls using the Daily API.
+1. [FastAPI Server](simple-python/README.md) -
+   A FastAPI implementation that handles PSTN (Public Switched Telephone
+   Network) and SIP (Session Initiation Protocol) calls using the Daily API.
 
-2. [Vercel Serverless](vercel/README.md) - 
-A Next.js API implementation designed for deployment on Vercel's 
-serverless platform.
+2. [Vercel Serverless](vercel/README.md) -
+   A Next.js API implementation designed for deployment on Vercel's
+   serverless platform.
 
 Both implementations provide:
-- HMAC signature validation for pinless webhook 
+
+- HMAC signature validation for pinless webhook
 - Structured logging
-- Support for dialin and dialout settings
+- Support for dial-in and dial-out settings
 - Voicemail detection and call transfer functionality (coming soon)
 - Test request handling
 
 ## Choosing an Implementation
 
 - Use the **Simple Python Server** if you:
+
   - Need a standalone server
   - Prefer Python and FastAPI
   - Want to deploy to traditional hosting platforms
@@ -39,22 +41,24 @@ Both implementations provide:
 ### Environment Variables
 
 Both implementations require similar environment variables:
-- `PIPECAT_CLOUD_API_KEY`: Pipecat Cloud API Key, begins with pk_*
+
+- `PIPECAT_CLOUD_API_KEY`: Pipecat Cloud API Key, begins with pk\_\*
 - `AGENT_NAME`: Your Daily agent name
 - `PINLESS_HMAC_SECRET`: Your HMAC secret for request verification
 - `LOG_LEVEL`: (Optional) Logging level (defaults to 'info')
 
-See the individual README files in each implementation directory for 
+See the individual README files in each implementation directory for
 specific setup instructions.
 
 ### Phone number setup
 
 You can buy a phone number through the Pipecat Cloud Dashboard:
+
 1. Go to `Settings` > `Telephony`
 2. Follow the UI to purchase a phone number
 3. Configure the webhook URL to receive incoming calls (e.g. `https://my-webhook-url.com/api/dial`)
 
-Or purchase the number using Daily's 
+Or purchase the number using Daily's
 [PhoneNumbers API](https://docs.daily.co/reference/rest-api/phone-numbers).
 
 ```bash
@@ -74,24 +78,24 @@ curl --request POST \
 }'
 ```
 
-The API will return a static SIP URI (`sip_uri`) that can be called 
+The API will return a static SIP URI (`sip_uri`) that can be called
 from other SIP services.
 
 ### `room_creation_api`
 
-To make and receive calls currently you have to host a server that 
-handles incoming calls. In the coming weeks, incoming calls will be 
-directly handled within Daily and we will expose an endpoint similar 
+To make and receive calls currently you have to host a server that
+handles incoming calls. In the coming weeks, incoming calls will be
+directly handled within Daily and we will expose an endpoint similar
 to `{service}/start` that will manage this for you.
 
-In the meantime, the server described below serves as the webhook 
-handler for the `room_creation_api`. Configure your pinless phone 
-number or SIP interconnect to the `ngrok` tunnel or 
-the actual server URL, append `/api/dial` to the webhook URL. 
+In the meantime, the server described below serves as the webhook
+handler for the `room_creation_api`. Configure your pinless phone
+number or SIP interconnect to the `ngrok` tunnel or
+the actual server URL, append `/api/dial` to the webhook URL.
 
-## Examples curl commands
+## Example curl commands
 
-Note: Replace `http://localhost:3000` with your actual server URL and 
+Note: Replace `http://localhost:3000` with your actual server URL and
 phone numbers with valid values for your use case.
 
 ### Dialin Request
@@ -114,7 +118,7 @@ curl -X POST http://localhost:3000/api/dial \
   }'
 ```
 
-Dial a number with callerId, which is the UUID of a purchased number. 
+Dial a number with callerId, which is the UUID of a purchased number.
 
 ```bash
 curl -X POST http://localhost:3000/api/dial \
@@ -145,6 +149,7 @@ curl -X POST http://localhost:3000/api/dial \
 ```
 
 ### Advanced Request with Voicemail Detection
+
 ```bash
 curl -X POST http://localhost:3000/api/dial \
   -H "Content-Type: application/json" \
@@ -171,7 +176,3 @@ curl -X POST http://localhost:3000/api/dial \
     }
   }'
 ```
-
-
-
-
