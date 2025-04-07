@@ -6,11 +6,11 @@ Pipecat Cloud [pstn_sip starter image](https://github.com/daily-co/pipecat-cloud
 In addition you can use `/api/dial` to trigger dial-out, and
 eventually, call-transfers.
 
-1. [FastAPI Server](simple-python/README.md) -
+1. [FastAPI Server](fastapi-webhook-server/README.md) -
    A FastAPI implementation that handles PSTN (Public Switched Telephone
    Network) and SIP (Session Initiation Protocol) calls using the Daily API.
 
-2. [Vercel Serverless](vercel/README.md) -
+2. [Next.js Serverless](nextjs-webhook-server/README.md) -
    A Next.js API implementation designed for deployment on Vercel's
    serverless platform.
 
@@ -24,16 +24,16 @@ Both implementations provide:
 
 ## Choosing an Implementation
 
-- Use the **Simple Python Server** if you:
+- Use the **FastAPI Server** if you:
 
   - Need a standalone server
   - Prefer Python and FastAPI
   - Want to deploy to traditional hosting platforms
 
-- Use the **Vercel Serverless** implementation if you:
+- Use the **Next.js Serverless** implementation if you:
   - Want serverless deployment
   - Prefer JavaScript/TypeScript
-  - Already use Vercel for other projects
+  - Already use Next.js and Vercel for other projects
   - Need quick scaling and zero maintenance
 
 ## Prerequisites
