@@ -1,4 +1,4 @@
-# PSTN/SIP Webhook Handler
+# FastAPI server for handling Daily PSTN/SIP Webhook
 
 A FastAPI server that handles PSTN (Public Switched Telephone Network) and SIP (Session Initiation Protocol) calls using the Daily API.
 
@@ -6,19 +6,25 @@ A FastAPI server that handles PSTN (Public Switched Telephone Network) and SIP (
 
 1. Clone the repository
 
-2. Install dependencies:
+2. Navigate to the `fastapi-webhook-server` directory:
+
+   ```bash
+   cd fastapi-webhook-server
+   ```
+
+3. Install dependencies:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-3. Copy `env.example` to `.env`:
+4. Copy `env.example` to `.env`:
 
    ```bash
    cp env.example .env
    ```
 
-4. Update `.env` with your credentials:
+5. Update `.env` with your credentials:
 
    - `AGENT_NAME`: Your Daily agent name
    - `PIPECAT_CLOUD_API_KEY`: Your Daily API key

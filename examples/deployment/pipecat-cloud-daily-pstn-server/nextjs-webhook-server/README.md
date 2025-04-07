@@ -1,10 +1,10 @@
-# Daily API Backend
+# Next.js server for handling Daily PSTN/SIP Webhook
 
-Next.js API routes for handling Daily Pipecat requests.
+Next.js API routes for handling Daily PSTN/SIP Pipecat requests.
 
 ## Features
 
-- API endpoint for handling Daily Pipecat requests
+- API endpoint for handling Daily PSTN/SIP Pipecat requests
 - HMAC signature validation
 - Structured logging with Pino
 - Support for dial-in and dial-out settings
@@ -15,38 +15,38 @@ Next.js API routes for handling Daily Pipecat requests.
 
 1. Clone the repository
 
-2. Navigate to the `vercel` directory:
+2. Navigate to the `nextjs-webhook-server` directory:
 
-```bash
-cd vercel
-```
+   ```bash
+   cd nextjs-webhook-server
+   ```
 
 3. Install dependencies:
 
-```bash
-npm install
-```
+   ```bash
+   npm install
+   ```
 
 4. Create `.env.local` file with your credentials:
 
-```bash
-cp env.local.example .env.local
-```
+   ```bash
+   cp env.local.example .env.local
+   ```
 
-Add your secrets:
+5. Update your `.env` with your secrets:
 
-```bash
-PIPECAT_CLOUD_API_KEY=pk_*
-AGENT_NAME=my-first-agent
-PINLESS_HMAC_SECRET=your_hmac_secret
-LOG_LEVEL=info
-```
+   ```bash
+   PIPECAT_CLOUD_API_KEY=pk_*
+   AGENT_NAME=my-first-agent
+   PINLESS_HMAC_SECRET=your_hmac_secret
+   LOG_LEVEL=info
+   ```
 
-5. Run the development server:
+6. Run the development server:
 
-```bash
-npm run dev
-```
+   ```bash
+   npm run dev
+   ```
 
 ## API Endpoints
 
