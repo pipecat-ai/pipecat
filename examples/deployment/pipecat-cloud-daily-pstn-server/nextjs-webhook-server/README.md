@@ -42,11 +42,21 @@ Next.js API routes for handling Daily PSTN/SIP Pipecat requests.
    LOG_LEVEL=info
    ```
 
-6. Run the development server:
+### Running the server
 
-   ```bash
-   npm run dev
-   ```
+Run the development server:
+
+```bash
+npm run dev
+```
+
+The server will run on `http://localhost:7860` and you can expose it via ngrok for testing:
+
+```bash
+`ngrok http 7860`
+```
+
+> Tip: Use a subdomain for a consistent URL (e.g. `ngrok http -subdomain=mydomain http://localhost:7860`)
 
 ## API Endpoints
 
