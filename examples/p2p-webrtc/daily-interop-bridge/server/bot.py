@@ -59,6 +59,8 @@ async def run_bot(webrtc_connection):
             camera_out_is_live=True,
             audio_in_enabled=True,
             audio_out_enabled=True,
+            camera_out_width=1280,
+            camera_out_height=720,
             vad_enabled=False,
         ),
     )
@@ -74,6 +76,8 @@ async def run_bot(webrtc_connection):
             camera_out_is_live=True,
             audio_in_enabled=True,
             audio_out_enabled=True,
+            camera_out_width=1280,
+            camera_out_height=720,
             vad_enabled=False,
         ),
     )
@@ -97,7 +101,6 @@ async def run_bot(webrtc_connection):
 
     task = PipelineTask(
         pipeline,
-        # TODO: I believe we don't need this
         params=PipelineParams(
             allow_interruptions=False,
         ),
