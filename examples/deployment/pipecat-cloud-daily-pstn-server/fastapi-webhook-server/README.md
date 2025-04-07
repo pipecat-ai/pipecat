@@ -38,13 +38,13 @@ Start the server:
 python server.py
 ```
 
-The server will run on `http://localhost:3000` and you can expose it via ngrok for testing:
+The server will run on `http://localhost:7860` and you can expose it via ngrok for testing:
 
 ```bash
-`ngrok http 3000`
+`ngrok http 7860`
 ```
 
-> Tip: Use a subdomain for a consistent URL (e.g. `ngrok http -subdomain=mydomain http://localhost:3000`)
+> Tip: Use a subdomain for a consistent URL (e.g. `ngrok http -subdomain=mydomain http://localhost:7860`)
 
 ## API Endpoints
 
