@@ -7,6 +7,7 @@ class WebRTCApp {
 
     private declare connectBtn: HTMLButtonElement;
     private declare disconnectBtn: HTMLButtonElement;
+    private declare muteBtn: HTMLButtonElement;
 
     private declare audioInput: HTMLSelectElement;
     private declare videoInput: HTMLSelectElement;
@@ -92,6 +93,7 @@ class WebRTCApp {
     private setupDOMElements(): void {
         this.connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
         this.disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
+        this.muteBtn = document.getElementById('mute-btn') as HTMLButtonElement;
 
         this.audioInput = document.getElementById('audio-input') as HTMLSelectElement;
         this.videoInput = document.getElementById('video-input') as HTMLSelectElement;
@@ -118,6 +120,12 @@ class WebRTCApp {
             let videoDevice = e.target?.value
             this.rtviClient.updateCam(videoDevice)
         })
+        this.muteBtn.addEventListener('click', () => {
+            let isMicEnabled = this.rtviClient.isMicEnabled
+            this.rtviClient.enableMic(!isMicEnabled)
+            this.muteBtn.textContent = isMicEnabled ? '🔇' : '🔊';
+        });
+
     }
 
     private log(message: string): void {

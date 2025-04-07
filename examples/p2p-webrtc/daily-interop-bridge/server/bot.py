@@ -65,7 +65,7 @@ async def run_bot(webrtc_connection):
         ),
     )
 
-    room_url = "https://filipi.daily.co/public"
+    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", "")
     daily_transport = DailyTransport(
         room_url,
         None,
@@ -120,7 +120,6 @@ async def run_bot(webrtc_connection):
 
     @pipecat_transport.event_handler("on_client_closed")
     async def on_client_closed(transport, client):
-        # TODO ???
         logger.info("Pipecat Client closed")
         await task.cancel()
 
