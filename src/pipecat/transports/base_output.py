@@ -37,7 +37,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
 
-BOT_VAD_STOP_SECS = 0.3
+BOT_VAD_STOP_SECS = 0.35
 
 
 class BaseOutputTransport(FrameProcessor):
