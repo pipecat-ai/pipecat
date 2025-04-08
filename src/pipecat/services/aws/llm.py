@@ -613,6 +613,8 @@ class BedrockLLMService(LLMService):
         prompt_tokens = 0
         completion_tokens = 0
         completion_tokens_estimate = 0
+        cache_read_input_tokens = 0
+        cache_creation_input_tokens = 0
         use_completion_tokens_estimate = False
 
         try:
@@ -723,6 +725,8 @@ class BedrockLLMService(LLMService):
                     usage = event["metadata"]["usage"]
                     prompt_tokens += usage.get("inputTokens", 0)
                     completion_tokens += usage.get("outputTokens", 0)
+                    cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
+                    cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
 
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
@@ -745,6 +749,8 @@ class BedrockLLMService(LLMService):
             await self._report_usage_metrics(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=comp_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens
             )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -776,11 +782,15 @@ class BedrockLLMService(LLMService):
         self,
         prompt_tokens: int,
         completion_tokens: int,
+        cache_read_input_tokens: int,
+        cache_creation_input_tokens: int
     ):
         if prompt_tokens or completion_tokens:
             tokens = LLMTokenUsage(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                cache_creation_input_tokens=cache_creation_input_tokens
             )
             await self.start_llm_usage_metrics(tokens)
