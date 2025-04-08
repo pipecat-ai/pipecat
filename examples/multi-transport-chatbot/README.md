@@ -45,9 +45,10 @@ This uses the `local_daily()` function in `bot.py`, which creates a `DailyTransp
 
 ### Step 3: Deploy to Pipecat Cloud
 
-This repo already includes a Dockerfile you can use to build an image that works with Pipecat Cloud. You can do it in two steps:
+This repo already includes a Dockerfile you can use to build an image that works with Pipecat Cloud. You can do it in a few steps. First, edit `build.sh` and `pcc-deploy.toml` and replace `your-dockerhub-username` with, well, your DockerHub username. Then:
 
 ```bash
+# 
 ./build.sh
 pcc deploy
 

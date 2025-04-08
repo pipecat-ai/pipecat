@@ -2,7 +2,7 @@
 set -e
 
 VERSION="0.1"
-DOCKER_USERNAME="chadbailey59"
+DOCKER_USERNAME="your-dockerhub-username"
 AGENT_NAME="multi-transport-chatbot"
 
 # Build the Docker image with the correct context
