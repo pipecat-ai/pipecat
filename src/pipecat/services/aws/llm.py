@@ -336,7 +336,15 @@ class BedrockLLMContext(OpenAILLMContext):
                 self.messages[0]["role"] = "user"
             else:
                 system_content = self.messages.pop(0)["content"]
-                self.system = system_content[0]["text"] if isinstance(system_content, list) and system_content and isinstance(system_content[0], dict) and "text" in system_content[0] else str(system_content)
+                if isinstance(system_content, str):
+                    system_content = [{"text": system_content}]
+                
+                if self.system:
+                    if isinstance(self.system, str):
+                        self.system = [{"text": self.system}]
+                    self.system.extend(system_content)
+                else:
+                    self.system = system_content
 
         # Ensure content is properly formatted
         for msg in self.messages:
@@ -600,7 +608,7 @@ class BedrockLLMService(LLMService):
         assistant = BedrockAssistantContextAggregator(context, **assistant_kwargs)
         return BedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
-    async def _process_context(self, context: "BedrockLLMContext"):
+    async def _process_context(self, context: BedrockLLMContext):
         # Usage tracking
         prompt_tokens = 0
         completion_tokens = 0
@@ -633,7 +641,7 @@ class BedrockLLMService(LLMService):
             }
             
             # Add system message
-            request_params["system"] = [{"text": context.system}]
+            request_params["system"] = context.system
                 
             # Add tools if present
             if context.tools:
