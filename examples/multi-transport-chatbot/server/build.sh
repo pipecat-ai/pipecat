@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-VERSION="0.2"
+VERSION="0.1"
 DOCKER_USERNAME="chadbailey59"
-AGENT_NAME="pcc-transport-chatbot"
+AGENT_NAME="multi-transport-chatbot"
 
 # Build the Docker image with the correct context
 echo "Building Docker image..."

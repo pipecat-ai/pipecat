@@ -24,7 +24,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
-from pipecatcloud.agent import DailySessionArguments, SessionArguments
+from pipecatcloud.agent import DailySessionArguments, SessionArguments, WebSocketSessionArguments
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -46,7 +46,7 @@ from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIPro
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import BaseTransport
+from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -55,9 +55,6 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
-logger.add(sys.stderr, level="DEBUG")
-
-print(f"DailyTransport: {DailyTransport}")
 
 # Check if we're in local development mode
 LOCAL_RUN = os.getenv("LOCAL_RUN")
@@ -71,60 +68,7 @@ if LOCAL_RUN:
         logger.error("Could not import local_runner module. Local development mode may not work.")
 
 # Logger for local dev
-logger.add(sys.stderr, level="DEBUG")
-
-sprites = []
-script_dir = os.path.dirname(__file__)
-
-# Load sequential animation frames
-for i in range(1, 26):
-    # Build the full path to the image file
-    full_path = os.path.join(script_dir, f"assets/robot0{i}.png")
-    # Get the filename without the extension to use as the dictionary key
-    # Open the image and convert it to bytes
-    with Image.open(full_path) as img:
-        sprites.append(OutputImageRawFrame(image=img.tobytes(), size=img.size, format=img.format))
-
-# Create a smooth animation by adding reversed frames
-flipped = sprites[::-1]
-sprites.extend(flipped)
-
-# Define static and animated states
-quiet_frame = sprites[0]  # Static frame for when bot is listening
-talking_frame = SpriteFrame(images=sprites)  # Animation sequence for when bot is talking
-
-
-class TalkingAnimation(FrameProcessor):
-    """Manages the bot's visual animation states.
-
-    Switches between static (listening) and animated (talking) states based on
-    the bot's current speaking status.
-    """
-
-    def __init__(self):
-        super().__init__()
-        self._is_talking = False
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process incoming frames and update animation state.
-
-        Args:
-            frame: The incoming frame to process
-            direction: The direction of frame flow in the pipeline
-        """
-        await super().process_frame(frame, direction)
-
-        # Switch to talking animation when bot starts speaking
-        if isinstance(frame, BotStartedSpeakingFrame):
-            if not self._is_talking:
-                await self.push_frame(talking_frame)
-                self._is_talking = True
-        # Return to static frame when bot stops speaking
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self.push_frame(quiet_frame)
-            self._is_talking = False
-
-        await self.push_frame(frame, direction)
+# logger.add(sys.stderr, level="DEBUG")
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
@@ -145,9 +89,10 @@ async def main(transport: BaseTransport):
     - Language model integration
     - Animation processing
     - RTVI event handling
-    """
 
-    # Initialize text-to-speech service
+    Uses the transport defined by the calling function.
+    See below for various ways to start the bot with different transports.
+    """
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="c45bc5ec-dc68-4feb-8829-6e6b2748095d",  # Movieman
@@ -155,7 +100,6 @@ async def main(transport: BaseTransport):
 
     stt = GladiaSTTService(api_key=os.getenv("GLADIA_API_KEY"))
 
-    # Initialize LLM service
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
     # Register your function call providing the function name and callback
@@ -198,8 +142,6 @@ async def main(transport: BaseTransport):
     context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
-    ta = TalkingAnimation()
-
     # RTVI events for Pipecat client UI
     rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
@@ -212,7 +154,6 @@ async def main(transport: BaseTransport):
             context_aggregator.user(),
             llm,
             tts,
-            ta,
             transport.output(),
             context_aggregator.assistant(),
         ]
@@ -235,17 +176,12 @@ async def main(transport: BaseTransport):
         await rtvi.set_bot_ready()
 
     @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, participant):
-        # Push a static frame to show the bot is listening
-        await task.queue_frame(quiet_frame)
-        # Capture the first participant's transcription
-        # await transport.capture_participant_transcription(participant["id"])
+    async def on_client_connected(transport, client):
         # Kick off the conversation by pushing a context frame to the pipeline
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, participant):
-        logger.debug(f"Participant left: {participant}")
+    async def on_client_disconnected(transport, client):
         # Cancel the PipelineTask to stop processing
         await task.cancel()
 
@@ -257,6 +193,8 @@ async def main(transport: BaseTransport):
 shared_params = {
     "audio_in_enabled": True,
     "audio_out_enabled": True,
+    "video_in_enabled": False,
+    "video_out_enabled": False,
     "vad_enabled": True,
     "vad_analyzer": SileroVADAnalyzer(),
     "vad_audio_passthrough": True,
@@ -264,13 +202,18 @@ shared_params = {
 
 
 async def bot(args: SessionArguments):
-    """Main bot entry point compatible with Pipecat Cloud.
+    """Bot entry point compatible with Pipecat Cloud. SessionArguments
+    will be a different subclass depending on how the session is started.
 
-    Args:
+    args: either DailySessionArguments or WebsocketSessionArguments
+    DailySessionArguments:
         room_url: The Daily room URL
         token: The Daily room token
         body: The configuration object from the request body
         session_id: The session ID for logging
+
+    WebsocketSessionArguments:
+        websocket: The websocket for connecting to Twilio
     """
     logger.info(f"Starting PCC bot. args: {args}")
 
@@ -306,8 +249,9 @@ async def bot(args: SessionArguments):
 
 # Local development
 async def local_daily():
-    # TODO-CB: This becomes SmallWebRTCTransport
-    """Function for local development testing."""
+    """This is an entrypoint for running your bot locally but using Daily
+    for the transport. To use this, you'll need to have DAILY_API_KEY set in your .env file.
+    """
     try:
         async with aiohttp.ClientSession() as session:
             (room_url, token) = await configure(session)
@@ -325,6 +269,10 @@ async def local_daily():
 
 
 async def local_webrtc(webrtc_connection):
+    """An entrypoint for using the SmallWebRTCTransport, which doesn't require a Daily
+    account or API key. You'll need to run the web client and small API server included
+    with this example to use this transport. Run `python server.py` to use it.
+    """
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection, params=TransportParams(**shared_params)
     )
@@ -334,6 +282,7 @@ async def local_webrtc(webrtc_connection):
 # Local development entry point
 if LOCAL_RUN and __name__ == "__main__":
     try:
+        # Change this line to run whichever entrypoint you want to use for your bot.
         asyncio.run(local_daily())
     except Exception as e:
         logger.exception(f"Failed to run in local mode: {e}")

@@ -1,5 +1,5 @@
-agent_name = "pcc-transport-chatbot"
-image = "chadbailey59/pcc-transport-chatbot:0.2"
+agent_name = "multi-transport-chatbot"
+image = "chadbailey59/multi-transport-chatbot:0.1"
 secret_set = "pcc-transport-chatbot-secrets"
 
 [scaling]
