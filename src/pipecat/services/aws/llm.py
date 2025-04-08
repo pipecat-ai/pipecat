@@ -310,7 +310,7 @@ class BedrockLLMContext(OpenAILLMContext):
                     # in the proper format
                     if isinstance(self.messages[-1]["content"], str):
                         self.messages[-1]["content"] = [
-                            {"type": "text", "text": self.messages[-1]["content"]}
+                            {"text": self.messages[-1]["content"]}
                         ]
                     # if this message has just a content string, convert it to a list
                     # in the proper format
