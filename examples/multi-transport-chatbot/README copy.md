@@ -1,4 +1,4 @@
-# Simple Chatbot Server
+# Multi-Transport Chatbot Server
 
 A Pipecat bot.py file that is built to be deployed to Pipecat Cloud.
 
