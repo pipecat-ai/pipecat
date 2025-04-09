@@ -164,7 +164,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self,
         *,
         api_key: str,
-        base_url="generativelanguage.googleapis.com",
+        base_url: str = "",
         model="models/gemini-2.0-flash-exp",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
@@ -180,7 +180,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         super().__init__(base_url=base_url, **kwargs)
         self._last_sent_time = 0
         self.api_key = api_key
-        self.base_url = base_url
+        if base_url:
+            self.base_url = base_url
+        else:
+            self.base_url = "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
         self.set_model_name(model)
         self._voice_id = voice_id
 
@@ -407,8 +410,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         logger.info("Connecting to Gemini service")
         try:
-            uri = f"wss://{self.base_url}/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key={self.api_key}"
-            logger.info(f"Connecting to {uri}")
+            logger.info(f"Connecting to wss://{self.base_url}")
+            uri = f"wss://{self.base_url}?key={self.api_key}"
             self._websocket = await websockets.connect(uri=uri)
             self._receive_task = self.create_task(self._receive_task_handler())
             self._transcribe_audio_task = self.create_task(self._transcribe_audio_handler())
