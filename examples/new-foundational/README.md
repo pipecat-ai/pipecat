@@ -8,10 +8,10 @@ This directory contains foundational examples showing how to use Pipecat to buil
 
 1. If you haven't already, set up a virtual environment:
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   ```
 
 2. Install Pipecat with the required dependencies:
 
@@ -25,50 +25,27 @@ source venv/bin/activate
 
 The examples use a web app that allows you to interact with the bots via WebRTC.
 
-1. **List available examples**:
+1. **Run a specific example**:
 
    ```bash
-   python run.py --list
-   ```
-
-2. **Run a specific example**:
-
-   ```bash
-   python run.py bots/<example-name>
+   python run.py <example-name>
    ```
 
    For example:
 
    ```bash
-   python run.py bot/07-interruptible.py
+   python run.py 07-interruptible.py
    ```
 
-3. **Open the web app** at the URL displayed in the console:
+2. **Open the web app** at the URL displayed in the console:
 
    ```
-   Open your browser to: http://localhost:8000
+   Open your browser to: http://localhost:7860
    ```
 
-4. **Start the example**:
+3. **Start the example**:
 
 Click "Connect" to start the example. Control your devices as needed.
-
-### Command Line Options
-
-```
-usage: run.py [-h] [-p PORT] [--host HOST] [-l] [bot_file]
-
-Pipecat Foundational Examples
-
-positional arguments:
-  bot_file              Path to bot Python file to run
-
-options:
-  -h, --help            show this help message and exit
-  -p PORT, --port PORT  Port to run the server on (default: 8000)
-  --host HOST           Host to bind the server to (default: 0.0.0.0)
-  -l, --list            List available bots and exit
-```
 
 ## Troubleshooting
 
