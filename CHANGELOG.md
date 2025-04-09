@@ -66,6 +66,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `daily-python` to 0.17.0 to fix an issue that was preventing to run on
   older platforms.
 
+- Fixed an issue where `CartesiaTTSService`'s spell feature would result in
+  the spelled word in the context appearing as "F,O,O,B,A,R" instead of
+  "FOOBAR".
+
 - Fixed an issue in the Azure TTS services where the language was being set
   incorrectly.
 
