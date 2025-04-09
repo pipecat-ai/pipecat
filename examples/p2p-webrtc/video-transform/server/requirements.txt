@@ -4,3 +4,4 @@ uvicorn
 aiortc
 opencv-python
 pipecat-ai[google,silero]
+pipecat-ai-small-webrtc-prebuilt
