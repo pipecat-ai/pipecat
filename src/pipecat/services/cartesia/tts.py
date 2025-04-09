@@ -166,6 +166,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "output_format": self._settings["output_format"],
             "language": self._settings["language"],
             "add_timestamps": add_timestamps,
+            "use_original_timestamps": True,
         }
         return json.dumps(msg)
 
