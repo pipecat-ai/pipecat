@@ -8,6 +8,8 @@ import uvicorn
 from bot import run_bot
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
+from fastapi.responses import RedirectResponse
+from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
@@ -22,6 +24,14 @@ app = FastAPI()
 pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
 ice_servers = ["stun:stun.l.google.com:19302"]
+
+# Mount the frontend at /
+app.mount("/prebuilt", SmallWebRTCPrebuiltUI)
+
+
+@app.get("/", include_in_schema=False)
+async def root_redirect():
+    return RedirectResponse(url="/prebuilt/")
 
 
 @app.post("/api/offer")
