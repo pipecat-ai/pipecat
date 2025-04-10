@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support in `SmallWebRTCTransport` to detect when remote tracks are 
+  muted.
+
 - Added support for image capture from a video stream to the
   `SmallWebRTCTransport`.
 
