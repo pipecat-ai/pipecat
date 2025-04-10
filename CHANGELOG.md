@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a new iOS client option to the `SmallWebRTCTransport` **video-transform** example.
+- Added support for image capture from a video stream to the
+  `SmallWebRTCTransport`.
+
+- Added a new iOS client option to the `SmallWebRTCTransport`
+  **video-transform** example.
 
 - Added new processors `ProducerProcessor` and `ConsumerProcessor`. The
   producer processor processes frames from the pipeline and decides whether the
