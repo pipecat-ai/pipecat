@@ -255,3 +255,6 @@ class LLMService(AIService):
             # do this because otherwise the task manager would report a dangling
             # task if we don't remove it.
             asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
+
+    async def register_mcp_tools(self, mcp_client):
+        return await mcp_client.register_mcp_tools(self)
