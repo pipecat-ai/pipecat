@@ -27,6 +27,8 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 try:
+    from google.auth import default
+    from google.auth.exceptions import GoogleAuthError
     from google.cloud import texttospeech_v1
     from google.oauth2 import service_account
 
@@ -251,6 +253,16 @@ class GoogleTTSService(TTSService):
         elif credentials_path:
             # Use service account JSON file if provided
             creds = service_account.Credentials.from_service_account_file(credentials_path)
+        else:
+            try:
+                creds, project_id = default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+            except GoogleAuthError:
+                pass
+
+        if not creds:
+            raise ValueError("No valid credentials provided.")
 
         return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
 
