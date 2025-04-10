@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Text Chatbot</title>
+</head>
+
+<body>
+  <div class="container">
+    <div class="status-bar">
+      <div class="status">
+        Status: <span id="connection-status">Disconnected</span>
+      </div>
+      <div class="controls">
+        <button id="connect-btn">Connect</button>
+        <button id="disconnect-btn" disabled>Disconnect</button>
+      </div>
+    </div>
+
+    <div class="debug-panel">
+      <h3>Chat</h3>
+      <div id="debug-log"></div>
+    </div>
+
+    <div class="main-content">
+      <div id="input-area">
+        <input type="text" id="message-input" placeholder="Type your message here...">
+        <button id="send-btn">Send</button>
+      </div>
+    </div>
+
+  <script type="module" src="/src/app.js"></script>
+  <link rel="stylesheet" href="/src/style.css">
+</body>
+
+</html>
