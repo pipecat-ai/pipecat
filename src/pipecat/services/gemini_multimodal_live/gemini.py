@@ -165,7 +165,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         *,
         api_key: str,
         base_url: str = "",
-        model="models/gemini-2.0-flash-exp",
+        model="models/gemini-2.0-flash-live-001",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
