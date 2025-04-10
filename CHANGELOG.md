@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     type was incorrectly handled as a codec retransmission.
   - Avoid initial video delays.
 
+### Changed
+
+- Updated `GeminiMultimodalLiveLLMService`’s default `model` to
+  `models/gemini-2.0-flash-live-001` and `base_url` to the `v1beta` websocket
+  URL.
+
 ### Fixed
 
 - Fixed an issue in the Azure TTS services where the language was being set
