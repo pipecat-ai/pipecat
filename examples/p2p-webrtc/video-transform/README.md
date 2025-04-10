@@ -43,7 +43,7 @@ You can quickly test your bot using the `SmallWebRTCPrebuiltUI`:
 👉 http://localhost:7860
   - (Or use your custom port, if configured)
 
-### 3️⃣ Connect Using a custom Client App
+### 3️⃣ Connect Using a Custom Client App
 
 For client-side setup, refer to the:
 - [Typescript Guide](client/typescript/README.md).
