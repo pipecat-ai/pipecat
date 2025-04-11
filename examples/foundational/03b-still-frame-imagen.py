@@ -17,7 +17,6 @@ from pipecat.services.google.image import GoogleImageGenService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
