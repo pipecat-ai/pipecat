@@ -79,8 +79,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
+            audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_in_enabled=False,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
