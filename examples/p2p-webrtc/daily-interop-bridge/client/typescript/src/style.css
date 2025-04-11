@@ -1,0 +1,144 @@
+body {
+    margin: 0;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+    background-color: #f0f0f0;
+    display: flex;
+    flex-direction: row;
+    width: 100%;
+}
+
+.container {
+    margin: 0 auto;
+    width: 90%;
+}
+
+.option {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+
+label {
+    margin: 5px;
+}
+
+select {
+    padding: 8px;
+    margin: 10px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+}
+
+.status-bar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    background-color: #fff;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.controls button {
+    padding: 8px 16px;
+    margin-left: 10px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#connect-btn {
+    background-color: #4caf50;
+    color: white;
+}
+
+#disconnect-btn {
+    background-color: #f44336;
+    color: white;
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.main-content {
+    background-color: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.bot-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 50%;
+}
+
+#bot-video-container {
+    width: 90%;
+    aspect-ratio: 16 / 9;
+    background-color: #e0e0e0;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+#bot-video-container video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+#mute-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background-color: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 16px;
+    z-index: 1;
+}
+
+.debug-panel {
+    background-color: #fff;
+    border-radius: 8px;
+    width: 50%;
+}
+
+@media (max-width: 768px) {
+    .bot-container {
+        width: 100%;
+    }
+    .debug-panel {
+        width: 100%;
+    }
+}
+
+.debug-panel h3 {
+    margin: 0 0 10px 0;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#debug-log {
+    height: 360px;
+    overflow-y: auto;
+    background-color: #f8f8f8;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.4;
+}
