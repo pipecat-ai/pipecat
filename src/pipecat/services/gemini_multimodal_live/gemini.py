@@ -266,7 +266,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
         transcribe_user_audio: bool = False,
-        transcribe_model_audio: bool = False,
         params: InputParams = InputParams(),
         inference_on_context_initialization: bool = True,
         **kwargs,
@@ -290,9 +289,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._websocket = None
         self._receive_task = None
         self._transcribe_audio_task = None
-        self._transcribe_model_audio_task = None
         self._transcribe_audio_queue = asyncio.Queue()
-        self._transcribe_model_audio_queue = asyncio.Queue()
 
         self._disconnecting = False
         self._api_session_ready = False
@@ -300,7 +297,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         self._transcriber = AudioTranscriber(api_key)
         self._transcribe_user_audio = transcribe_user_audio
-        self._transcribe_model_audio = transcribe_model_audio
         self._user_is_speaking = False
         self._bot_is_speaking = False
         self._user_audio_buffer = bytearray()
@@ -411,22 +407,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             TranscriptionFrame(text=text, user_id="user", timestamp=time_now_iso8601())
         )
 
-    async def _handle_transcribe_model_audio(self, audio, context):
-        # Early return if modalities are not set to audio.
-        if self._settings["modalities"] != GeminiMultimodalModalities.AUDIO:
-            return
-
-        text = await self._transcribe_audio(audio, context)
-        logger.debug(f"[Transcription:model] {text}")
-        # We add user messages directly to the context. We don't do that for assistant messages,
-        # because we assume the frames we emit will work normally in this downstream case. This
-        # definitely feels like a hack. Need to revisit when the API evolves.
-        # context.add_message({"role": "assistant", "content": [{"type": "text", "text": text}]})
-        await self.push_frame(LLMFullResponseStartFrame())
-        await self.push_frame(LLMTextFrame(text=text))
-        await self.push_frame(TTSTextFrame(text=text))
-        await self.push_frame(LLMFullResponseEndFrame())
-
     async def _transcribe_audio(self, audio, context):
         (text, prompt_tokens, completion_tokens, total_tokens) = await self._transcriber.transcribe(
             audio, context
@@ -520,9 +500,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._websocket = await websockets.connect(uri=uri)
             self._receive_task = self.create_task(self._receive_task_handler())
             self._transcribe_audio_task = self.create_task(self._transcribe_audio_handler())
-            self._transcribe_model_audio_task = self.create_task(
-                self._transcribe_model_audio_handler()
-            )
             config = events.Config.model_validate(
                 {
                     "setup": {
@@ -542,6 +519,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                                 "language_code": self._settings["language"],
                             },
                         },
+                        "output_audio_transcription": {},
                     },
                 }
             )
@@ -578,9 +556,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             if self._transcribe_audio_task:
                 await self.cancel_task(self._transcribe_audio_task)
                 self._transcribe_audio_task = None
-            if self._transcribe_model_audio_task:
-                await self.cancel_task(self._transcribe_model_audio_task)
-                self._transcribe_model_audio_task = None
             self._disconnecting = False
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
@@ -617,6 +592,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_model_turn(evt)
             elif evt.serverContent and evt.serverContent.turnComplete:
                 await self._handle_evt_turn_complete(evt)
+            elif evt.serverContent and evt.serverContent.outputTranscription:
+                await self._handle_evt_output_transcription(evt)
             elif evt.toolCall:
                 await self._handle_evt_tool_call(evt)
             elif False:  # !!! todo: error events?
@@ -630,11 +607,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         while True:
             audio = await self._transcribe_audio_queue.get()
             await self._handle_transcribe_user_audio(audio, self._context)
-
-    async def _transcribe_model_audio_handler(self):
-        while True:
-            audio = await self._transcribe_model_audio_queue.get()
-            await self._handle_transcribe_model_audio(audio, self._context)
 
     #
     #
@@ -815,17 +787,24 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
-        audio = self._bot_audio_buffer
         text = self._bot_text_buffer
-        self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
 
-        if audio and self._transcribe_model_audio and self._context:
-            await self._transcribe_model_audio_queue.put(audio)
-        elif text:
+        if text:
             await self.push_frame(LLMFullResponseEndFrame())
 
         await self.push_frame(TTSStoppedFrame())
+
+    async def _handle_evt_output_transcription(self, evt):
+        if not evt.serverContent.outputTranscription:
+            return
+
+        text = evt.serverContent.outputTranscription.text
+        if text:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMTextFrame(text=text))
+            await self.push_frame(TTSTextFrame(text=text))
+            await self.push_frame(LLMFullResponseEndFrame())
 
     def create_context_aggregator(
         self,

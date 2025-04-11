@@ -78,11 +78,16 @@ class SystemInstruction(BaseModel):
     parts: List[ContentPart]
 
 
+class AudioTranscriptionConfig(BaseModel):
+    pass
+
+
 class Setup(BaseModel):
     model: str
     system_instruction: Optional[SystemInstruction] = None
     tools: Optional[List[dict]] = None
     generation_config: Optional[dict] = None
+    output_audio_transcription: Optional[AudioTranscriptionConfig] = None
 
 
 class Config(BaseModel):
@@ -120,10 +125,15 @@ class ServerContentTurnComplete(BaseModel):
     turnComplete: bool
 
 
+class BidiGenerateContentTranscription(BaseModel):
+    text: str
+
+
 class ServerContent(BaseModel):
     modelTurn: Optional[ModelTurn] = None
     interrupted: Optional[bool] = None
     turnComplete: Optional[bool] = None
+    outputTranscription: Optional[BidiGenerateContentTranscription] = None
 
 
 class FunctionCall(BaseModel):
