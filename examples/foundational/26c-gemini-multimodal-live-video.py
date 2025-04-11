@@ -9,9 +9,9 @@ import os
 import sys
 
 import aiohttp
+from daily_runner import configure
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
