@@ -308,7 +308,7 @@ class SmallWebRTCClient:
         if self.is_connected and not self.is_closing:
             logger.info(f"Disconnecting to Small WebRTC")
             self._closing = True
-            await self._webrtc_connection.close()
+            await self._webrtc_connection.disconnect()
             await self._handle_client_disconnected()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
