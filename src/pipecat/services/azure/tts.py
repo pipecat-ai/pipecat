@@ -53,7 +53,7 @@ class AzureBaseTTSService(TTSService):
     class InputParams(BaseModel):
         emphasis: Optional[str] = None
         language_code: Optional[str] = (
-            "en-US"  #FIXME: DEPRICATE THIS. necessary for compatibility with languages supported by azure but not by other service
+            "en-US"  # FIXME: DEPRICATE THIS. necessary for compatibility with languages supported by azure but not by other service
         )
         language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
@@ -163,8 +163,8 @@ class AzureTTSService(AzureBaseTTSService):
         self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
-            speech_recognition_language=self._settings["language_code"], # Use language instead after deprecating language_code
         )
+        self._speech_config.speech_synthesis_language = self._settings["language_code"]
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
@@ -258,8 +258,8 @@ class AzureHttpTTSService(AzureBaseTTSService):
         self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
-            speech_recognition_language=self._settings["language"],
         )
+        self._speech_config.speech_synthesis_language = self._settings["language"]
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )

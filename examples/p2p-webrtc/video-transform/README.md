@@ -35,9 +35,19 @@ cd server
 python server.py
 ```
 
-### 2️⃣ Connect Using the Client App
+### 2️⃣ Test with SmallWebRTC Prebuilt UI
 
-For client-side setup, refer to the [JavaScript Guide](client/typescript/README.md).
+You can quickly test your bot using the `SmallWebRTCPrebuiltUI`:
+
+- Open your browser and navigate to:
+👉 http://localhost:7860
+  - (Or use your custom port, if configured)
+
+### 3️⃣ Connect Using a Custom Client App
+
+For client-side setup, refer to the:
+- [Typescript Guide](client/typescript/README.md).
+- [iOS Guide](client/ios/README.md).
 
 ## ⚠️ Important Note
 Ensure the bot server is running before using any client implementations.

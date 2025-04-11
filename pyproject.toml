@@ -31,7 +31,7 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.67.0",
+    "openai~=1.70.0"
 ]
 
 [project.urls]
@@ -48,10 +48,10 @@ cartesia = ["cartesia~=1.4.0", "websockets~=13.1"]
 neuphonic = ["pyneuphonic~=1.5.13", "websockets~=13.1"]
 cerebras = []
 deepseek = []
-daily = ["daily-python~=0.16.1"]
-deepgram = ["deepgram-sdk~=3.8.0"]
-elevenlabs = ["websockets~=13.1"]
-fal = ["fal-client~=0.5.9"]
+daily = [ "daily-python~=0.17.0" ]
+deepgram = [ "deepgram-sdk~=3.8.0" ]
+elevenlabs = [ "websockets~=13.1" ]
+fal = [ "fal-client~=0.5.9" ]
 fireworks = []
 fish = ["ormsgpack~=1.7.0", "websockets~=13.1"]
 gladia = ["websockets~=13.1"]
@@ -90,9 +90,10 @@ simli = ["simli-ai~=0.1.10"]
 soundfile = ["soundfile~=0.13.0"]
 tavus = []
 together = []
-ultravox = ["transformers~=4.48.0", "vllm~=0.7.3"]
-websocket = ["websockets~=13.1", "fastapi~=0.115.6"]
-whisper = ["faster-whisper~=1.1.1"]
+ultravox = [ "transformers~=4.48.0", "vllm~=0.7.3" ]
+webrtc = [ "aiortc~=1.11.0", "opencv-python~=4.11.0.86" ]
+websocket = [ "websockets~=13.1", "fastapi~=0.115.6" ]
+whisper = [ "faster-whisper~=1.1.1" ]
 
 [tool.setuptools.packages.find]
 # All the following settings are optional:
@@ -118,6 +119,9 @@ select = [
     "D", # Docstring rules
     "I", # Import rules
 ]
+# We ignore D107 because class docstrings already document __init__ parameters
+# and our Sphinx configuration uses napoleon_include_init_with_doc=True
+ignore = ["D107"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
