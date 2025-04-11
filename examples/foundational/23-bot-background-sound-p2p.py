@@ -4,42 +4,60 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""
+Usage
+-----
+Set the path to your background audio file using the `INPUT_AUDIO_PATH` environment variable, then run the bot using:
+
+    INPUT_AUDIO_PATH=path/to/your_audio.mp3 python 23-bot-background-sound.py
+
+Example:
+
+    INPUT_AUDIO_PATH=my_audio.mp3 python 23-bot-background-sound.py
+"""
+
+import asyncio
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import MixerEnableFrame, MixerUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.cerebras.llm import CerebrasLLMService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    await result_callback({"conditions": "nice", "temperature": "75"})
+audio_path = os.getenv("INPUT_AUDIO_PATH")
+if not audio_path:
+    raise ValueError("No INPUT_AUDIO_PATH specified in environment variables")
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")
+
+    soundfile_mixer = SoundfileMixer(
+        sound_files={"office": audio_path},
+        default_sound="office",
+        volume=2.0,
+    )
 
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            audio_out_mixer=soundfile_mixer,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
@@ -53,57 +71,27 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = CerebrasLLMService(api_key=os.getenv("CEREBRAS_API_KEY"), model="llama-3.3-70b")
-    # You can also register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function])
     messages = [
         {
             "role": "system",
-            "content": """You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way.
-
-You have one functions available:
-
-1. get_current_weather is used to get current weather information.
-
-Infer whether to use Fahrenheit or Celsius automatically based on the location, unless the user specifies a preference.
-
-Start by asking me for my location. Then, use 'get_weather_current' to give me a forecast.
-
-    Respond to what the user said in a creative and helpful way.""",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
-    context = OpenAILLMContext(messages, tools)
+    context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
         [
-            transport.input(),
-            stt,
-            context_aggregator.user(),
-            llm,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
+            transport.input(),  # Transport user input
+            stt,  # STT service
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -119,8 +107,17 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info(f"Client connected: {client}")
+        # Show how to use mixer control frames.
+        await asyncio.sleep(10.0)
+        await task.queue_frame(MixerUpdateSettingsFrame({"volume": 0.5}))
+        await asyncio.sleep(5.0)
+        await task.queue_frame(MixerEnableFrame(False))
+        await asyncio.sleep(5.0)
+        await task.queue_frame(MixerEnableFrame(True))
+        await asyncio.sleep(5.0)
         # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")

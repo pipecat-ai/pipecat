@@ -136,7 +136,6 @@ async def main():
             api_key=os.getenv("GEMINI_API_KEY"),
             voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
             transcribe_user_audio=True,
-            transcribe_model_audio=True,
         )
 
         messages = [
