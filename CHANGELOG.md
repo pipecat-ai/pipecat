@@ -9,7 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added support in `SmallWebRTCTransport` to detect when remote tracks are 
+- Added media resolution control to `GeminiMultimodalLiveLLMService` with
+  `GeminiMediaResolution` enum, allowing configuration of token usage for
+  image processing (LOW: 64 tokens, MEDIUM: 256 tokens, HIGH: zoomed reframing
+  with 256 tokens).
+
+- Added Gemini's Voice Activity Detection (VAD) configuration to
+  `GeminiMultimodalLiveLLMService` with `GeminiVADParams`, allowing fine
+  control over speech detection sensitivity and timing, including:
+
+  - Start sensitivity (how quickly speech is detected)
+  - End sensitivity (how quickly turns end after pauses)
+  - Prefix padding (milliseconds of audio to keep before speech is detected)
+  - Silence duration (milliseconds of silence required to end a turn)
+
+- Added comprehensive language support to `GeminiMultimodalLiveLLMService`,
+  supporting over 30 languages via the `language` parameter, with proper
+  mapping between Pipecat's `Language` enum and Gemini's language codes.
+
+- Added support in `SmallWebRTCTransport` to detect when remote tracks are
   muted.
 
 - Added support for image capture from a video stream to the
@@ -33,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Avoid initial video delays.
 
 ### Changed
+
+- In `GeminiMultimodalLiveLLMService`, removed the `transcribe_model_audio`
+  parameter in favor of Gemini Live's native output transcription support. Now
+  text transcriptions are produced directly by the model. No configuration is
+  required.
 
 - Updated `GeminiMultimodalLiveLLMService`’s default `model` to
   `models/gemini-2.0-flash-live-001` and `base_url` to the `v1beta` websocket
