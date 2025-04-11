@@ -28,13 +28,13 @@ The examples use a web app that allows you to interact with the bots via WebRTC.
 1. **Run a specific example**:
 
    ```bash
-   python run.py <example-name>
+   python <example-name>
    ```
 
    For example:
 
    ```bash
-   python run.py 07-interruptible.py
+   python 07-interruptible.py
    ```
 
 2. **Open the web app** at the URL displayed in the console:
