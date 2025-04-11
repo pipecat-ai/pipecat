@@ -1,5 +1,4 @@
-# voxium_stt.py
-# Copyright (c) 2024–2025, Daily & Your Name/Org
+# Copyright (c) 2024–2025, Daily & Voxium Tech
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
@@ -30,9 +29,6 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
-# Optional: Reuse language mapping if needed, though server takes string directly
-from pipecat.services.whisper.stt import language_to_whisper_language
-
 
 class VoxiumSTTService(FrameProcessor):
     """Transcribes audio using Voxium server via WebSocket.
@@ -47,7 +43,7 @@ class VoxiumSTTService(FrameProcessor):
         vad_threshold (float): VAD threshold parameter for the server. Defaults to 0.5.
         silence_threshold_s (float): Silence duration threshold for the server (in seconds). This controls the minimum duration of silence that will trigger a new transcription. Defaults to 0.5.
         speech_pad_ms (int): Speech padding parameter for the server (in milliseconds). This pads the audio to ensure all of the audio is transcribed. Defaults to 100.
-        beam_size (int): Beam size parameter for the server's Whisper model. Defaults to 1 (greedy).
+        beam_size (int): Beam size parameter. Defaults to 1
     """
 
     def __init__(
@@ -58,7 +54,7 @@ class VoxiumSTTService(FrameProcessor):
         language: Optional[Language] = None,
         sample_rate: int = 16000,
         channels: int = 1,
-        input_format: str = "base64", # Server expects base64 encoded PCM
+        input_format: str = "base64",
         vad_threshold: float = 0.5,
         silence_threshold_s: float = 0.5,
         speech_pad_ms: int = 100,
@@ -82,12 +78,7 @@ class VoxiumSTTService(FrameProcessor):
         self._connection_id: Optional[str] = None
         self._is_connected: bool = False
         self._connection_lock = asyncio.Lock()
-        self._current_language_str: Optional[str] = None # Store the string code
-
-        if self._language:
-            self._current_language_str = language_to_whisper_language(self._language)
-            if not self._current_language_str:
-                logger.warning(f"Language {self._language} not directly supported by Whisper mapping, sending None.")
+        self._current_language_str: Optional[str] = None
 
 
     def _build_connection_url(self) -> str:
@@ -97,7 +88,7 @@ class VoxiumSTTService(FrameProcessor):
             "input_format": self._input_format,
             "sample_rate": str(self._sample_rate),
             "vad_threshold": str(self._vad_threshold),
-            "silence_threshold": str(self._silence_threshold_s), # Server expects 'silence_threshold'
+            "silence_threshold": str(self._silence_threshold_s), 
             "speech_pad_ms": str(self._speech_pad_ms),
             "beam_size": str(self._beam_size),
         }
@@ -115,12 +106,10 @@ class VoxiumSTTService(FrameProcessor):
 
             connection_url = self._build_connection_url()
             logger.info(f"Connecting to Voxium STT server: {self._url} with specified params...")
-            # logger.debug(f"Full connection URL (excluding API key): {connection_url.replace(self._api_key, '***')}")
             logger.debug(f"Full connection URL: {connection_url}")
 
 
             try:
-                # Increase default limits if needed, especially max_size for larger messages
                 self._websocket = await websockets.connect(
                     connection_url,
                     ping_interval=20,  # Send pings to keep connection alive
@@ -165,8 +154,6 @@ class VoxiumSTTService(FrameProcessor):
                 if status == "connected":
                     self._connection_id = message.get("connection_id")
                     logger.info(f"Server confirmed connection (ID: {self._connection_id})")
-                    # Maybe push a specific frame on successful connection?
-                    # await self.push_frame(StartFrame()) # Or a custom status frame
 
                 elif status in ["complete"]:
                     transcription = message.get("transcription", "").strip()
@@ -175,8 +162,7 @@ class VoxiumSTTService(FrameProcessor):
                         # Convert language code back to pipecat enum if possible, otherwise keep as string
                         # Note: This requires reversing the mapping or a new map. For simplicity,
                         # we'll just use the code provided by the server for now.
-                        detected_language = lang # Use the string code directly
-                        # TODO: Optionally map 'lang' back to pipecat.transcriptions.language.Language if needed
+                        detected_language = lang # Use the string code directly. could map 'lang' back to transcriptions.language.Language if needed
 
                         await self.push_frame(
                             TranscriptionFrame(
@@ -193,7 +179,6 @@ class VoxiumSTTService(FrameProcessor):
                     error_message = message.get("message", "Unknown server error")
                     logger.error(f"Received error from server: {error_message}")
                     await self.push_frame(ErrorFrame(f"Voxium server error: {error_message}"))
-                    # Check for specific errors that require disconnection
                     if "Usage limit exceeded" in error_message or "Invalid or inactive API Key" in error_message:
                         logger.warning("Closing connection due to server-reported error.")
                         await self._close_connection()
@@ -209,20 +194,17 @@ class VoxiumSTTService(FrameProcessor):
             except ConnectionClosedError as e:
                 logger.warning(f"WebSocket connection closed unexpectedly: {e.code} {e.reason}")
                 self._is_connected = False
-                # Attempt to reconnect? Or just signal error? For now, signal error.
                 await self.push_frame(ErrorFrame(f"WebSocket closed unexpectedly: {e.code} {e.reason}"))
                 break
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to decode JSON message: {e}. Message: '{message_str}'")
-                # Decide whether to continue or stop
             except Exception as e:
                 logger.error(f"Error in receive loop: {e}", exc_info=True)
                 self._is_connected = False
                 await self.push_frame(ErrorFrame(f"Receive loop error: {e}"))
-                break # Exit loop on unexpected errors
+                break 
 
         logger.info("Receive loop finished.")
-        # Ensure connection state is updated if loop exits
         async with self._connection_lock:
              self._is_connected = False
              self._websocket = None
@@ -232,7 +214,6 @@ class VoxiumSTTService(FrameProcessor):
         """Closes the WebSocket connection and stops the receiver task."""
         logger.info("Attempting to close WebSocket connection...")
         async with self._connection_lock:
-            # Stop the receiver task first
             if self._receive_task and not self._receive_task.done():
                 logger.debug("Cancelling receive task...")
                 self._receive_task.cancel()
@@ -262,40 +243,34 @@ class VoxiumSTTService(FrameProcessor):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes incoming frames, sending audio to the server."""
-        # Ensure we are processing downstream frames
         await super().process_frame(frame, direction)
 
         if direction != FrameDirection.DOWNSTREAM:
              await self.push_frame(frame, direction)
              return
 
-        # Handle system frames
         if isinstance(frame, (StartFrame)):
             logger.info("Start frame received, ensuring connection...")
-            await self._connect() # Connect if not already connected
-            await self.push_frame(frame) # Pass StartFrame down
+            await self._connect() 
+            await self.push_frame(frame) 
             return
 
         if isinstance(frame, (CancelFrame, EndFrame)):
             logger.info(f"{type(frame).__name__} received, closing connection.")
             await self._close_connection()
-            await self.push_frame(frame) # Pass frame down
+            await self.push_frame(frame)
             return
 
-        # If not connected after trying, drop audio or push error? Drop for now.
         if not self._is_connected:
             if isinstance(frame, AudioRawFrame):
                 logger.warning("Dropping audio frame as WebSocket is not connected.")
                 return
-            else: # Push other frames through
+            else: 
                  await self.push_frame(frame)
                  return
 
         # Process audio frames
         if isinstance(frame, AudioRawFrame):
-            # Ensure audio format matches server expectations (16kHz, 16-bit PCM)
-            # Pipecat's LocalAudioTransport usually provides this format.
-            # If format conversion is needed, it should happen *before* this service.
             if not frame.audio:
                  logger.debug("Empty audio frame received, skipping.")
                  return
@@ -320,10 +295,7 @@ class VoxiumSTTService(FrameProcessor):
             else:
                  logger.warning("WebSocket is None or not connected, cannot send audio.")
 
-            # We DO NOT push the AudioRawFrame down. We only push TranscriptionFrames received.
-
         else:
-            # Push non-audio frames downstream
             await self.push_frame(frame)
 
 

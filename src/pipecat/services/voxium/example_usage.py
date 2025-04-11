@@ -13,15 +13,13 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-# Import the new service instead of the local Whisper service
-from pipecat.services.voxium.stt import VoxiumSTTService # <--- IMPORT THE NEW SERVICE
+from pipecat.services.voxium.stt import VoxiumSTTService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transcriptions.language import Language # Optional for language setting
-# Load .env file if present (contains VOXIUM_SERVER_URL, VOXIUM_API_KEY)
 load_dotenv(override=True)
 
 logger.remove(0)
-logger.add(sys.stderr, level="DEBUG") # Use DEBUG to see connection logs etc.
+logger.add(sys.stderr, level="DEBUG")
 
 
 class TranscriptionLogger(FrameProcessor):
@@ -30,12 +28,10 @@ class TranscriptionLogger(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
-            # logger.DEBUG(f"TRANSCRIPTION: [{frame.language}] {frame.text}")
             logger.debug(f"TRANSCRIPTION: {frame.text}")
 
 
 async def main():
-    # Get server URL and API key from environment variables
     voxium_url = "wss://voxium.tech/asr/ws"
     voxium_api_key = os.getenv("VOXIUM_API_KEY")
 
@@ -49,15 +45,13 @@ async def main():
     # Configure local audio transport
     # Keep VAD enabled here - it helps chunk the audio before sending to the service
     # The service itself doesn't *need* VAD, but sending smaller, VAD-segmented chunks
-    # might align well with how the server expects to receive data.
-
     transport = LocalAudioTransport(
         LocalAudioTransportParams(
             audio_in_enabled=True,
             # Keep input VAD - it helps segment the audio stream naturally
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True, # Pass audio even during silence if needed? Maybe False is better. Test this. Let's try True.
+            vad_audio_passthrough=True, # Pass audio even during silence if needed? Maybe False is better. Test it, but true works at the moment.
         )
     )
 
