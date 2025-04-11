@@ -20,7 +20,7 @@ from pipecat.frames.frames import (
 from pipecat.services.tts_service import TTSService
 
 ValidVoice = Literal[
-    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"
+    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
 ]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
@@ -34,6 +34,7 @@ VALID_VOICES: Dict[str, ValidVoice] = {
     "nova": "nova",
     "sage": "sage",
     "shimmer": "shimmer",
+    "verse": "verse",
 }
 
 
@@ -104,7 +105,7 @@ class OpenAITTSService(TTSService):
                 extra_body["instructions"] = self._instructions
 
             async with self._client.audio.speech.with_streaming_response.create(
-                input=text or " ",  # Text must contain at least one character
+                input=text,
                 model=self.model_name,
                 voice=VALID_VOICES[self._voice_id],
                 response_format="pcm",

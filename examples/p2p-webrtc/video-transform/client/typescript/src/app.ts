@@ -1,12 +1,13 @@
 import {
     SmallWebRTCTransport
 } from "@pipecat-ai/small-webrtc-transport";
-import {Participant, RTVIClient, RTVIClientOptions} from "@pipecat-ai/client-js";
+import {Participant, RTVIClient, RTVIClientOptions, Transport} from "@pipecat-ai/client-js";
 
 class WebRTCApp {
 
     private declare connectBtn: HTMLButtonElement;
     private declare disconnectBtn: HTMLButtonElement;
+    private declare muteBtn: HTMLButtonElement;
 
     private declare audioInput: HTMLSelectElement;
     private declare videoInput: HTMLSelectElement;
@@ -32,12 +33,10 @@ class WebRTCApp {
     private initializeRTVIClient(): void {
         const transport = new SmallWebRTCTransport();
         const RTVIConfig: RTVIClientOptions = {
-            // need to understand why it is complaining
-            // @ts-ignore
-            transport,
             params: {
                 baseUrl: "/api/offer"
             },
+            transport: transport as Transport,
             enableMic: true,
             enableCam: true,
             callbacks: {
@@ -92,6 +91,7 @@ class WebRTCApp {
     private setupDOMElements(): void {
         this.connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
         this.disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
+        this.muteBtn = document.getElementById('mute-btn') as HTMLButtonElement;
 
         this.audioInput = document.getElementById('audio-input') as HTMLSelectElement;
         this.videoInput = document.getElementById('video-input') as HTMLSelectElement;
@@ -118,6 +118,12 @@ class WebRTCApp {
             let videoDevice = e.target?.value
             this.rtviClient.updateCam(videoDevice)
         })
+        this.muteBtn.addEventListener('click', () => {
+            let isCamEnabled = this.rtviClient.isCamEnabled
+            this.rtviClient.enableCam(!isCamEnabled)
+            this.muteBtn.textContent = isCamEnabled ? '📵' : '📷';
+        });
+
     }
 
     private log(message: string): void {

@@ -7,7 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added support in `SmallWebRTCTransport` to detect when remote tracks are 
+  muted.
+
+- Added support for image capture from a video stream to the
+  `SmallWebRTCTransport`.
+
+- Added a new iOS client option to the `SmallWebRTCTransport`
+  **video-transform** example.
+
+- Added new processors `ProducerProcessor` and `ConsumerProcessor`. The
+  producer processor processes frames from the pipeline and decides whether the
+  consumers should consume it or not. If so, the same frame that is received by
+  the producer is sent to the consumer. There can be multiple consumers per
+  producer. These processors can be useful to push frames from one part of a
+  pipeline to a different one (e.g. when using `ParallelPipeline`).
+
+- Improvements for the `SmallWebRTCTransport`:
+  - Wait until the pipeline is ready before triggering the `connected` event.
+  - Queue messages if the data channel is not ready.
+  - Update the aiortc dependency to fix an issue where the 'video/rtx' MIME
+    type was incorrectly handled as a codec retransmission.
+  - Avoid initial video delays.
+
+### Changed
+
+- Updated `GeminiMultimodalLiveLLMService`’s default `model` to
+  `models/gemini-2.0-flash-live-001` and `base_url` to the `v1beta` websocket
+  URL.
+
 ### Fixed
+
+- Updated `daily-python` to 0.17.0 to fix an issue that was preventing to run on
+  older platforms.
+
+- Fixed an issue in the Azure TTS services where the language was being set
+  incorrectly.
+
+- Fixed `SmallWebRTCTransport` to support dynamic values for
+  `TransportParams.audio_out_10ms_chunks`. Previously, it only worked with 20ms
+  chunks.
 
 - Fixed an issue where `LLMAssistantContextAggregator` would prevent a
   `BotStoppedSpeakingFrame` from moving through the pipeline.
@@ -17,8 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `TransportParams.audio_out_10ms_chunks` parameter to allow controlling
-  the amount of audio being sent by the output transport. It defaults to 2, so
-  20ms audio chunks are sent.
+  the amount of audio being sent by the output transport. It defaults to 4, so
+  40ms audio chunks are sent.
 
 - Added `QwenLLMService` for Qwen integration with an OpenAI-compatible
   interface. Added foundational example `14q-function-calling-qwen.py`.
