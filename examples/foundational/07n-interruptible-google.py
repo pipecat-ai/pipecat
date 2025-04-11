@@ -41,11 +41,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
     stt = GoogleSTTService(
         params=GoogleSTTService.InputParams(languages=Language.EN_US),
+        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
     tts = GoogleTTSService(
-        voice_id="en-US-Journey-F",
+        voice_id="en-US-Chirp3-HD-Charon",
         params=GoogleTTSService.InputParams(language=Language.EN_US),
+        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))

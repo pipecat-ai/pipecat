@@ -14,7 +14,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
 from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -94,7 +94,10 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(allow_interruptions=True),
+    )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
