@@ -236,6 +236,15 @@ class GeminiMultimodalModalities(Enum):
     AUDIO = "AUDIO"
 
 
+class GeminiMediaResolution(str, Enum):
+    """Media resolution options for Gemini Multimodal Live."""
+
+    UNSPECIFIED = "MEDIA_RESOLUTION_UNSPECIFIED"  # Use default
+    LOW = "MEDIA_RESOLUTION_LOW"  # 64 tokens
+    MEDIUM = "MEDIA_RESOLUTION_MEDIUM"  # 256 tokens
+    HIGH = "MEDIA_RESOLUTION_HIGH"  # Zoomed reframing with 256 tokens
+
+
 class InputParams(BaseModel):
     frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4096, ge=1)
@@ -247,6 +256,9 @@ class InputParams(BaseModel):
         default=GeminiMultimodalModalities.AUDIO
     )
     language: Optional[Language] = Field(default=Language.EN_US)
+    media_resolution: Optional[GeminiMediaResolution] = Field(
+        default=GeminiMediaResolution.UNSPECIFIED
+    )
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -319,6 +331,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "top_p": params.top_p,
             "modalities": params.modalities,
             "language": self._language_code,
+            "media_resolution": params.media_resolution,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -518,6 +531,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                                 },
                                 "language_code": self._settings["language"],
                             },
+                            "media_resolution": self._settings["media_resolution"].value,
                         },
                         "output_audio_transcription": {},
                     },
