@@ -169,6 +169,8 @@ class DailyCallbacks(BaseModel):
         on_error: Called when an error occurs.
         on_app_message: Called when receiving an app message.
         on_call_state_updated: Called when call state changes.
+        on_client_connected: Called when a client (participant) connects.
+        on_client_disconnected: Called when a client (participant) disconnects.
         on_dialin_connected: Called when dial-in is connected.
         on_dialin_ready: Called when dial-in is ready.
         on_dialin_stopped: Called when dial-in is stopped.
@@ -193,6 +195,8 @@ class DailyCallbacks(BaseModel):
     on_error: Callable[[str], Awaitable[None]]
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_call_state_updated: Callable[[str], Awaitable[None]]
+    on_client_connected: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_client_disconnected: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_dialin_connected: Callable[[Any], Awaitable[None]]
     on_dialin_ready: Callable[[str], Awaitable[None]]
     on_dialin_stopped: Callable[[Any], Awaitable[None]]
@@ -1070,6 +1074,8 @@ class DailyTransport(BaseTransport):
             on_error=self._on_error,
             on_app_message=self._on_app_message,
             on_call_state_updated=self._on_call_state_updated,
+            on_client_connected=self._on_client_connected,
+            on_client_disconnected=self._on_client_disconnected,
             on_dialin_connected=self._on_dialin_connected,
             on_dialin_ready=self._on_dialin_ready,
             on_dialin_stopped=self._on_dialin_stopped,
@@ -1103,6 +1109,8 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_error")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
+        self._register_event_handler("on_client_connected")
+        self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_dialin_connected")
         self._register_event_handler("on_dialin_ready")
         self._register_event_handler("on_dialin_stopped")
@@ -1246,6 +1254,12 @@ class DailyTransport(BaseTransport):
     async def _on_call_state_updated(self, state: str):
         await self._call_event_handler("on_call_state_updated", state)
 
+    async def _on_client_connected(self, participant: Any):
+        await self._call_event_handler("on_client_connected", participant)
+
+    async def _on_client_disconnected(self, participant: Any):
+        await self._call_event_handler("on_client_disconnected", participant)
+
     async def _handle_dialin_ready(self, sip_endpoint: str):
         if not self._params.dialin_settings:
             return
@@ -1321,11 +1335,15 @@ class DailyTransport(BaseTransport):
             await self._call_event_handler("on_first_participant_joined", participant)
 
         await self._call_event_handler("on_participant_joined", participant)
+        # Also call on_client_connected for compatibility with other transports
+        await self._call_event_handler("on_client_connected", participant)
 
     async def _on_participant_left(self, participant, reason):
         id = participant["id"]
         logger.info(f"Participant left {id}")
         await self._call_event_handler("on_participant_left", participant, reason)
+        # Also call on_client_disconnected for compatibility with other transports
+        await self._call_event_handler("on_client_disconnected", participant)
 
     async def _on_participant_updated(self, participant):
         await self._call_event_handler("on_participant_updated", participant)
