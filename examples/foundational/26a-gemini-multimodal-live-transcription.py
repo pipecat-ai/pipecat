@@ -47,7 +47,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
         # system_instruction="Talk like a pirate."
         transcribe_user_audio=True,
-        transcribe_model_audio=True,
         # inference_on_context_initialization=False,
     )
 

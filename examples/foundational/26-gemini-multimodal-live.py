@@ -55,7 +55,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         system_instruction=system_instruction,
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         transcribe_user_audio=True,
-        transcribe_model_audio=True,
     )
 
     # Build the pipeline

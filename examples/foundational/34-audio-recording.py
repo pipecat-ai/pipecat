@@ -139,6 +139,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        # Start recording audio
+        await audiobuffer.start_recording()
         # Start conversation - empty prompt to let LLM follow system instructions
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 

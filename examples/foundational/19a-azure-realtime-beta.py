@@ -79,7 +79,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     )
 
     session_properties = SessionProperties(
-        input_audio_transcription=InputAudioTranscription(),
+        input_audio_transcription=InputAudioTranscription(model="whisper-1"),
         # Set openai TurnDetection parameters. Not setting this at all will turn it
         # on by default
         # turn_detection=TurnDetection(silence_duration_ms=1000),
