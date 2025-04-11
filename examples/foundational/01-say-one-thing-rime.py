@@ -6,6 +6,7 @@
 
 import os
 
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -13,7 +14,7 @@ from pipecat.frames.frames import EndFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.rime.tts import RimeHttpTTSService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -32,21 +33,24 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         ),
     )
 
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    )
+    # Create an HTTP session
+    async with aiohttp.ClientSession() as session:
+        tts = RimeHttpTTSService(
+            api_key=os.getenv("RIME_API_KEY", ""),
+            voice_id="rex",
+            aiohttp_session=session,
+        )
 
-    task = PipelineTask(Pipeline([tts, transport.output()]))
+        task = PipelineTask(Pipeline([tts, transport.output()]))
 
-    # Register an event handler so we can play the audio when the client joins
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        await task.queue_frames([TTSSpeakFrame(f"Hello there!"), EndFrame()])
+        # Register an event handler so we can play the audio when the client joins
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            await task.queue_frames([TTSSpeakFrame(f"Hello there!"), EndFrame()])
 
-    runner = PipelineRunner(handle_sigint=False)
+        runner = PipelineRunner(handle_sigint=False)
 
-    await runner.run(task)
+        await runner.run(task)
 
 
 if __name__ == "__main__":

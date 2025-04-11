@@ -20,7 +20,9 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    OutputAudioRawFrame,
     OutputImageRawFrame,
+    SpriteFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -524,10 +526,8 @@ class SmallWebRTCTransport(BaseTransport):
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
 
-        self._input = SmallWebRTCInputTransport(self._client, self._params, name=self._input_name)
-        self._output = SmallWebRTCOutputTransport(
-            self._client, self._params, name=self._output_name
-        )
+        self._input: Optional[SmallWebRTCInputTransport] = None
+        self._output: Optional[SmallWebRTCOutputTransport] = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -549,6 +549,14 @@ class SmallWebRTCTransport(BaseTransport):
                 self._client, self._params, name=self._input_name
             )
         return self._output
+
+    async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
+        if self._output:
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
+
+    async def send_audio(self, frame: OutputAudioRawFrame):
+        if self._output:
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def _on_app_message(self, message: Any):
         if self._input:

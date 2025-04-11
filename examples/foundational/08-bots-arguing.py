@@ -4,8 +4,8 @@ import os
 from typing import Tuple
 
 import aiohttp
+from daily_runner import configure
 from dotenv import load_dotenv
-from runner import configure
 
 from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -72,7 +72,8 @@ async def main():
 
         async def get_text_and_audio(messages) -> Tuple[str, bytearray]:
             """This function streams text from the LLM and uses the TTS service to convert
-            that text to speech as it's received."""
+            that text to speech as it's received.
+            """
             source_queue = asyncio.Queue()
             sink_queue = asyncio.Queue()
             sentence_aggregator = SentenceAggregator()

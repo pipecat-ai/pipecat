@@ -9,27 +9,19 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.google.llm_openai import GoogleLLMOpenAIBetaService
+from pipecat.services.groq.llm import GroqLLMService
+from pipecat.services.groq.stt import GroqSTTService
+from pipecat.services.groq.tts import GroqTTSService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    await result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
@@ -46,54 +38,31 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         ),
     )
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))
 
-    tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
-    )
+    llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile")
 
-    llm = GoogleLLMOpenAIBetaService(api_key=os.getenv("GEMINI_API_KEY"))
-    # You can aslo register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
+    tts = GroqTTSService(api_key=os.getenv("GROQ_API_KEY"))
 
-    weather_function = FunctionSchema(
-        name="get_current_weather",
-        description="Get the current weather",
-        properties={
-            "location": {
-                "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
-            "format": {
-                "type": "string",
-                "enum": ["celsius", "fahrenheit"],
-                "description": "The temperature unit to use. Infer this from the user's location.",
-            },
-        },
-        required=["location", "format"],
-    )
-    tools = ToolsSchema(standard_tools=[weather_function])
     messages = [
         {
-            "role": "user",
-            "content": "Start a conversation with 'Hey there' to get the current weather.",
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
-    context = OpenAILLMContext(messages, tools)
+    context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
         [
-            transport.input(),
+            transport.input(),  # Transport user input
             stt,
-            context_aggregator.user(),
-            llm,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -110,6 +79,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")

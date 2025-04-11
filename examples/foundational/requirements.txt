@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+python-dotenv
+pipecat-ai[webrtc]
+pipecat-ai-small-webrtc-prebuilt

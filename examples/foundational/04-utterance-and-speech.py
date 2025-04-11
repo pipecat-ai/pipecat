@@ -13,9 +13,9 @@ import os
 import sys
 
 import aiohttp
+from daily_runner import configure
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.frames.frames import EndPipeFrame, LLMMessagesFrame, TextFrame
 from pipecat.pipeline.merge_pipeline import SequentialMergePipeline
