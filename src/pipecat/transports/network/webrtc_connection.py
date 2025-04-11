@@ -43,8 +43,10 @@ class TrackStatusMessage(BaseModel):
 class RenegotiateMessage(BaseModel):
     type: Literal["renegotiate"] = "renegotiate"
 
+
 class PeerLeftMessage(BaseModel):
     type: Literal["peerLeft"] = "peerLeft"
+
 
 class SignallingMessage:
     Inbound = Union[TrackStatusMessage]  # in case we need to add new messages in the future
@@ -274,9 +276,7 @@ class SmallWebRTCConnection(BaseObject):
             logger.warning("Video transceiver not found. Cannot replace video track.")
 
     async def disconnect(self):
-        self.send_app_message(
-            {"type": SIGNALLING_TYPE, "message": PeerLeftMessage().model_dump()}
-        )
+        self.send_app_message({"type": SIGNALLING_TYPE, "message": PeerLeftMessage().model_dump()})
         await self._close()
 
     async def _close(self):
