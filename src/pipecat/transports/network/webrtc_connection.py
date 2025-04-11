@@ -226,7 +226,7 @@ class SmallWebRTCConnection(BaseObject):
             logger.debug("Closing old peer connection")
             # removing the listeners to prevent the bot from closing
             self._pc.remove_all_listeners()
-            await self.close()
+            await self._close()
             # we are initializing a new peer connection in this case.
             self._initialize()
 
@@ -271,7 +271,13 @@ class SmallWebRTCConnection(BaseObject):
         else:
             logger.warning("Video transceiver not found. Cannot replace video track.")
 
-    async def close(self):
+    async def disconnect(self):
+        # TODO: we should trigger something to know we are leaving
+        # so the client does not try to reconnect
+        # Like participant left
+        await self._close()
+
+    async def _close(self):
         if self._pc:
             await self._pc.close()
         self._message_queue.clear()
@@ -296,7 +302,7 @@ class SmallWebRTCConnection(BaseObject):
         await self._call_event_handler(state)
         if state == "failed":
             logger.warning("Connection failed, closing peer connection.")
-            await self.close()
+            await self._close()
 
     # Despite the fact that aiortc provides this listener, they don't have a status for "disconnected"
     # So, there is no advantage in looking at self._pc.connectionState
