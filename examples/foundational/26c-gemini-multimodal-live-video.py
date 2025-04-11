@@ -9,9 +9,9 @@ import os
 import sys
 
 import aiohttp
+from daily_runner import configure
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -53,7 +53,6 @@ async def main():
             voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
             # system_instruction="Talk like a pirate."
             transcribe_user_audio=True,
-            transcribe_model_audio=True,
             # inference_on_context_initialization=False,
         )
 
