@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import sys
+
 import time
 
 from dotenv import load_dotenv
@@ -23,9 +23,6 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 STOP_SECS = 2.0
@@ -94,3 +91,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()

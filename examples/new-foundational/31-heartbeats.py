@@ -25,9 +25,10 @@ class NullProcessor(FrameProcessor):
 
 
 async def main():
-    """This test shows heartbeat monitoring by displaying a warning when
-    heartbeats are not received.
+    """This test shows heartbeat monitoring.
 
+    A warning is dispalyed when heartbeats are not received within the
+    default (5 seconds) timeout.
     """
     pipeline = Pipeline([NullProcessor()])
 

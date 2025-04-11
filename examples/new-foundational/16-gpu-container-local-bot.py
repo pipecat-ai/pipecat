@@ -5,7 +5,6 @@
 #
 
 import os
-import sys
 
 import aiohttp
 from dotenv import load_dotenv
@@ -25,9 +24,6 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 from pipecat.transports.services.daily import DailyTransportMessageFrame
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
@@ -143,3 +139,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         runner = PipelineRunner(handle_sigint=False)
 
         await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()

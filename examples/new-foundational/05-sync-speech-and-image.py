@@ -5,7 +5,6 @@
 #
 
 import os
-import sys
 from dataclasses import dataclass
 
 import aiohttp
@@ -33,9 +32,6 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 @dataclass
@@ -171,3 +167,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         # Run the pipeline
         runner = PipelineRunner(handle_sigint=False)
         await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()

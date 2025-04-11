@@ -5,7 +5,6 @@
 #
 
 import os
-import sys
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -29,9 +28,6 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
@@ -175,3 +171,9 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()

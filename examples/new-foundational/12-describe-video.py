@@ -5,7 +5,6 @@
 #
 
 import os
-import sys
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -27,9 +26,6 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 class UserImageRequester(FrameProcessor):
@@ -122,3 +118,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()

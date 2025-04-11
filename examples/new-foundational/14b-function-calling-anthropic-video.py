@@ -6,7 +6,6 @@
 
 import asyncio
 import os
-import sys
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -27,8 +26,6 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 # Global variable to store the peer connection ID
 webrtc_peer_id = None
@@ -192,3 +189,9 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
     runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()

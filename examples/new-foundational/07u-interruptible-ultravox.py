@@ -5,7 +5,6 @@
 #
 
 import os
-import sys
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -27,8 +26,6 @@ load_dotenv(override=True)
 # The Ultravox model is compute-intensive and performs best with GPU acceleration.
 # This can be deployed on cloud GPU providers like Cerebrium.ai for optimal performance.
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 # Want to initialize the ultravox processor since it takes time to load the model and dont
 # want to load it every time the pipeline is run
@@ -90,3 +87,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()

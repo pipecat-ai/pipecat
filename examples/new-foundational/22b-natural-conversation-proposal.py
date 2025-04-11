@@ -6,7 +6,6 @@
 
 import asyncio
 import os
-import sys
 import time
 
 from dotenv import load_dotenv
@@ -52,9 +51,6 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 classifier_statement = "Determine if the user's statement ends with a complete thought and you should respond. The user text is transcribed speech. It may contain multiple fragments concatentated together. You are trying to determine only the completeness of the last user statement. The previous assistant statement is provided only for context. Categorize the text as either complete with the user now expecting a response, or incomplete. Return 'YES' if text is likely complete and the user is expecting a response. Return 'NO' if the text seems to be a partial expression or unfinished thought."
@@ -389,3 +385,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
+
+
+if __name__ == "__main__":
+    from run import main
+
+    main()
