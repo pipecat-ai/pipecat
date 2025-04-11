@@ -150,11 +150,9 @@ async def run_standalone_bot() -> None:
         raise RuntimeError("No bot function available to run")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
-    parser.add_argument(
-        "bot_file", nargs="?", default="bot.py", help="Path to the bot file (default: bot.py)"
-    )
+    parser.add_argument("bot_file", nargs="?", help="Path to the bot file", default=None)
     parser.add_argument(
         "--host", default="localhost", help="Host for HTTP server (default: localhost)"
     )
@@ -169,10 +167,25 @@ if __name__ == "__main__":
     else:
         logging.basicConfig(level=logging.INFO)
 
+    # Infer the bot file from the caller if not provided explicitly
+    bot_file = args.bot_file
+    if bot_file is None:
+        # Get the __file__ of the script that called main()
+        import inspect
+
+        caller_frame = inspect.stack()[1]
+        caller_globals = caller_frame.frame.f_globals
+        bot_file = caller_globals.get("__file__")
+
+    if not bot_file:
+        print("❌ Could not determine the bot file. Pass it explicitly to main().")
+        sys.exit(1)
+
     # Import the bot file
     try:
-        bot_module, run_bot_func, is_webrtc_bot = import_bot_file(args.bot_file)
-        logger.info(f"Successfully loaded bot from {args.bot_file}")
+        global run_bot_func, bot_module, is_webrtc_bot
+        bot_module, run_bot_func, is_webrtc_bot = import_bot_file(bot_file)
+        logger.info(f"Successfully loaded bot from {bot_file}")
 
         if is_webrtc_bot:
             logger.info("Detected WebRTC-compatible bot, starting web server...")
@@ -183,3 +196,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Error loading bot file: {e}")
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
