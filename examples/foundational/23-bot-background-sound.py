@@ -4,7 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
+"""
+Usage
+-----
+Set the path to your background audio file using the `INPUT_AUDIO_PATH` environment variable, then run the bot using:
+
+    INPUT_AUDIO_PATH=path/to/your_audio.mp3 python 23-bot-background-sound.py
+
+Example:
+
+    INPUT_AUDIO_PATH=my_audio.mp3 python 23-bot-background-sound.py
+"""
+
 import asyncio
 import os
 
@@ -27,18 +38,16 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-
-# Parse command line arguments
-parser = argparse.ArgumentParser(description="Bot Background Sound")
-parser.add_argument("-i", "--input", type=str, required=True, help="Input audio file")
-args = parser.parse_args()
+audio_path = os.getenv("INPUT_AUDIO_PATH")
+if not audio_path:
+    raise ValueError("No INPUT_AUDIO_PATH specified in environment variables")
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")
 
     soundfile_mixer = SoundfileMixer(
-        sound_files={"office": args.input},
+        sound_files={"office": audio_path},
         default_sound="office",
         volume=2.0,
     )
