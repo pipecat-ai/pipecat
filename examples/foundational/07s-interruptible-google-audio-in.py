@@ -30,6 +30,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.google.tts import GoogleTTSService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -209,6 +210,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
     tts = GoogleTTSService(
         voice_id="en-US-Chirp3-HD-Charon",
+        params=GoogleTTSService.InputParams(language=Language.EN_US),
+        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
     messages = [
