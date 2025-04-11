@@ -55,10 +55,103 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .audio_transcriber import AudioTranscriber
+
+
+def language_to_gemini_language(language: Language) -> Optional[str]:
+    """Maps a Language enum value to a Gemini Live supported language code.
+
+    Source:
+    https://ai.google.dev/api/generate-content#MediaResolution
+
+    Returns None if the language is not supported by Gemini Live.
+    """
+    language_map = {
+        # Arabic
+        Language.AR: "ar-XA",
+        # Bengali
+        Language.BN_IN: "bn-IN",
+        # Chinese (Mandarin)
+        Language.CMN: "cmn-CN",
+        Language.CMN_CN: "cmn-CN",
+        Language.ZH: "cmn-CN",  # Map general Chinese to Mandarin for Gemini
+        Language.ZH_CN: "cmn-CN",  # Map Simplified Chinese to Mandarin for Gemini
+        # German
+        Language.DE: "de-DE",
+        Language.DE_DE: "de-DE",
+        # English
+        Language.EN: "en-US",  # Default to US English (though not explicitly listed in supported codes)
+        Language.EN_US: "en-US",
+        Language.EN_AU: "en-AU",
+        Language.EN_GB: "en-GB",
+        Language.EN_IN: "en-IN",
+        # Spanish
+        Language.ES: "es-ES",  # Default to Spain Spanish
+        Language.ES_ES: "es-ES",
+        Language.ES_US: "es-US",
+        # French
+        Language.FR: "fr-FR",  # Default to France French
+        Language.FR_FR: "fr-FR",
+        Language.FR_CA: "fr-CA",
+        # Gujarati
+        Language.GU: "gu-IN",
+        Language.GU_IN: "gu-IN",
+        # Hindi
+        Language.HI: "hi-IN",
+        Language.HI_IN: "hi-IN",
+        # Indonesian
+        Language.ID: "id-ID",
+        Language.ID_ID: "id-ID",
+        # Italian
+        Language.IT: "it-IT",
+        Language.IT_IT: "it-IT",
+        # Japanese
+        Language.JA: "ja-JP",
+        Language.JA_JP: "ja-JP",
+        # Kannada
+        Language.KN: "kn-IN",
+        Language.KN_IN: "kn-IN",
+        # Korean
+        Language.KO: "ko-KR",
+        Language.KO_KR: "ko-KR",
+        # Malayalam
+        Language.ML: "ml-IN",
+        Language.ML_IN: "ml-IN",
+        # Marathi
+        Language.MR: "mr-IN",
+        Language.MR_IN: "mr-IN",
+        # Dutch
+        Language.NL: "nl-NL",
+        Language.NL_NL: "nl-NL",
+        # Polish
+        Language.PL: "pl-PL",
+        Language.PL_PL: "pl-PL",
+        # Portuguese (Brazil)
+        Language.PT_BR: "pt-BR",
+        # Russian
+        Language.RU: "ru-RU",
+        Language.RU_RU: "ru-RU",
+        # Tamil
+        Language.TA: "ta-IN",
+        Language.TA_IN: "ta-IN",
+        # Telugu
+        Language.TE: "te-IN",
+        Language.TE_IN: "te-IN",
+        # Thai
+        Language.TH: "th-TH",
+        Language.TH_TH: "th-TH",
+        # Turkish
+        Language.TR: "tr-TR",
+        Language.TR_TR: "tr-TR",
+        # Vietnamese
+        Language.VI: "vi-VN",
+        Language.VI_VN: "vi-VN",
+    }
+    return language_map.get(language)
 
 
 class GeminiMultimodalLiveContext(OpenAILLMContext):
@@ -143,6 +236,25 @@ class GeminiMultimodalModalities(Enum):
     AUDIO = "AUDIO"
 
 
+class GeminiMediaResolution(str, Enum):
+    """Media resolution options for Gemini Multimodal Live."""
+
+    UNSPECIFIED = "MEDIA_RESOLUTION_UNSPECIFIED"  # Use default
+    LOW = "MEDIA_RESOLUTION_LOW"  # 64 tokens
+    MEDIUM = "MEDIA_RESOLUTION_MEDIUM"  # 256 tokens
+    HIGH = "MEDIA_RESOLUTION_HIGH"  # Zoomed reframing with 256 tokens
+
+
+class GeminiVADParams(BaseModel):
+    """Voice Activity Detection parameters."""
+
+    disabled: Optional[bool] = Field(default=None)
+    start_sensitivity: Optional[events.StartSensitivity] = Field(default=None)
+    end_sensitivity: Optional[events.EndSensitivity] = Field(default=None)
+    prefix_padding_ms: Optional[int] = Field(default=None)
+    silence_duration_ms: Optional[int] = Field(default=None)
+
+
 class InputParams(BaseModel):
     frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4096, ge=1)
@@ -153,6 +265,11 @@ class InputParams(BaseModel):
     modalities: Optional[GeminiMultimodalModalities] = Field(
         default=GeminiMultimodalModalities.AUDIO
     )
+    language: Optional[Language] = Field(default=Language.EN_US)
+    media_resolution: Optional[GeminiMediaResolution] = Field(
+        default=GeminiMediaResolution.UNSPECIFIED
+    )
+    vad: Optional[GeminiVADParams] = Field(default=None)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -172,7 +289,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
         transcribe_user_audio: bool = False,
-        transcribe_model_audio: bool = False,
         params: InputParams = InputParams(),
         inference_on_context_initialization: bool = True,
         **kwargs,
@@ -183,6 +299,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._base_url = base_url
         self.set_model_name(model)
         self._voice_id = voice_id
+        self._language_code = params.language
 
         self._system_instruction = system_instruction
         self._tools = tools
@@ -195,9 +312,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._websocket = None
         self._receive_task = None
         self._transcribe_audio_task = None
-        self._transcribe_model_audio_task = None
         self._transcribe_audio_queue = asyncio.Queue()
-        self._transcribe_model_audio_queue = asyncio.Queue()
 
         self._disconnecting = False
         self._api_session_ready = False
@@ -205,7 +320,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         self._transcriber = AudioTranscriber(api_key)
         self._transcribe_user_audio = transcribe_user_audio
-        self._transcribe_model_audio = transcribe_model_audio
         self._user_is_speaking = False
         self._bot_is_speaking = False
         self._user_audio_buffer = bytearray()
@@ -213,6 +327,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_text_buffer = ""
 
         self._sample_rate = 24000
+
+        self._language = params.language
+        self._language_code = (
+            language_to_gemini_language(params.language) if params.language else "en-US"
+        )
+        self._vad_params = params.vad
 
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
@@ -222,6 +342,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "top_k": params.top_k,
             "top_p": params.top_p,
             "modalities": params.modalities,
+            "language": self._language_code,
+            "media_resolution": params.media_resolution,
+            "vad": params.vad,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -236,6 +359,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     def set_model_modalities(self, modalities: GeminiMultimodalModalities):
         self._settings["modalities"] = modalities
+
+    def set_language(self, language: Language):
+        """Set the language for generation."""
+        self._language = language
+        self._language_code = language_to_gemini_language(language) or "en-US"
+        self._settings["language"] = self._language_code
+        logger.info(f"Set Gemini language to: {self._language_code}")
 
     async def set_context(self, context: OpenAILLMContext):
         """Set the context explicitly from outside the pipeline.
@@ -302,22 +432,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self.push_frame(
             TranscriptionFrame(text=text, user_id="user", timestamp=time_now_iso8601())
         )
-
-    async def _handle_transcribe_model_audio(self, audio, context):
-        # Early return if modalities are not set to audio.
-        if self._settings["modalities"] != GeminiMultimodalModalities.AUDIO:
-            return
-
-        text = await self._transcribe_audio(audio, context)
-        logger.debug(f"[Transcription:model] {text}")
-        # We add user messages directly to the context. We don't do that for assistant messages,
-        # because we assume the frames we emit will work normally in this downstream case. This
-        # definitely feels like a hack. Need to revisit when the API evolves.
-        # context.add_message({"role": "assistant", "content": [{"type": "text", "text": text}]})
-        await self.push_frame(LLMFullResponseStartFrame())
-        await self.push_frame(LLMTextFrame(text=text))
-        await self.push_frame(TTSTextFrame(text=text))
-        await self.push_frame(LLMFullResponseEndFrame())
 
     async def _transcribe_audio(self, audio, context):
         (text, prompt_tokens, completion_tokens, total_tokens) = await self._transcriber.transcribe(
@@ -412,31 +526,61 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._websocket = await websockets.connect(uri=uri)
             self._receive_task = self.create_task(self._receive_task_handler())
             self._transcribe_audio_task = self.create_task(self._transcribe_audio_handler())
-            self._transcribe_model_audio_task = self.create_task(
-                self._transcribe_model_audio_handler()
-            )
-            config = events.Config.model_validate(
-                {
-                    "setup": {
-                        "model": self._model_name,
-                        "generation_config": {
-                            "frequency_penalty": self._settings["frequency_penalty"],
-                            "max_output_tokens": self._settings["max_tokens"],  # Not supported yet
-                            "presence_penalty": self._settings["presence_penalty"],
-                            "temperature": self._settings["temperature"],
-                            "top_k": self._settings["top_k"],
-                            "top_p": self._settings["top_p"],
-                            "response_modalities": self._settings["modalities"].value,
-                            "speech_config": {
-                                "voice_config": {
-                                    "prebuilt_voice_config": {"voice_name": self._voice_id}
-                                },
-                            },
-                        },
-                    },
-                }
-            )
 
+            # Create the basic configuration
+            config_data = {
+                "setup": {
+                    "model": self._model_name,
+                    "generation_config": {
+                        "frequency_penalty": self._settings["frequency_penalty"],
+                        "max_output_tokens": self._settings["max_tokens"],
+                        "presence_penalty": self._settings["presence_penalty"],
+                        "temperature": self._settings["temperature"],
+                        "top_k": self._settings["top_k"],
+                        "top_p": self._settings["top_p"],
+                        "response_modalities": self._settings["modalities"].value,
+                        "speech_config": {
+                            "voice_config": {
+                                "prebuilt_voice_config": {"voice_name": self._voice_id}
+                            },
+                            "language_code": self._settings["language"],
+                        },
+                        "media_resolution": self._settings["media_resolution"].value,
+                    },
+                    "output_audio_transcription": {},
+                }
+            }
+
+            # Add VAD configuration if provided
+            if self._settings.get("vad"):
+                vad_config = {}
+                vad_params = self._settings["vad"]
+
+                # Only add parameters that are explicitly set
+                if vad_params.disabled is not None:
+                    vad_config["disabled"] = vad_params.disabled
+
+                if vad_params.start_sensitivity:
+                    vad_config["start_of_speech_sensitivity"] = vad_params.start_sensitivity.value
+
+                if vad_params.end_sensitivity:
+                    vad_config["end_of_speech_sensitivity"] = vad_params.end_sensitivity.value
+
+                if vad_params.prefix_padding_ms is not None:
+                    vad_config["prefix_padding_ms"] = vad_params.prefix_padding_ms
+
+                if vad_params.silence_duration_ms is not None:
+                    vad_config["silence_duration_ms"] = vad_params.silence_duration_ms
+
+                # Only add automatic_activity_detection if we have VAD settings
+                if vad_config:
+                    realtime_config = {"automatic_activity_detection": vad_config}
+
+                    config_data["setup"]["realtime_input_config"] = realtime_config
+
+            config = events.Config.model_validate(config_data)
+
+            # Add system instruction if available
             system_instruction = self._system_instruction or ""
             if self._context and hasattr(self._context, "extract_system_instructions"):
                 system_instruction += "\n" + self._context.extract_system_instructions()
@@ -445,9 +589,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 config.setup.system_instruction = events.SystemInstruction(
                     parts=[events.ContentPart(text=system_instruction)]
                 )
+
+            # Add tools if available
             if self._tools:
                 logger.debug(f"Gemini is configuring to use tools{self._tools}")
                 config.setup.tools = self.get_llm_adapter().from_standard_tools(self._tools)
+
+            # Send the configuration
             await self.send_client_event(config)
 
         except Exception as e:
@@ -469,9 +617,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             if self._transcribe_audio_task:
                 await self.cancel_task(self._transcribe_audio_task)
                 self._transcribe_audio_task = None
-            if self._transcribe_model_audio_task:
-                await self.cancel_task(self._transcribe_model_audio_task)
-                self._transcribe_model_audio_task = None
             self._disconnecting = False
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
@@ -508,6 +653,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_model_turn(evt)
             elif evt.serverContent and evt.serverContent.turnComplete:
                 await self._handle_evt_turn_complete(evt)
+            elif evt.serverContent and evt.serverContent.outputTranscription:
+                await self._handle_evt_output_transcription(evt)
             elif evt.toolCall:
                 await self._handle_evt_tool_call(evt)
             elif False:  # !!! todo: error events?
@@ -521,11 +668,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         while True:
             audio = await self._transcribe_audio_queue.get()
             await self._handle_transcribe_user_audio(audio, self._context)
-
-    async def _transcribe_model_audio_handler(self):
-        while True:
-            audio = await self._transcribe_model_audio_queue.get()
-            await self._handle_transcribe_model_audio(audio, self._context)
 
     #
     #
@@ -706,17 +848,24 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
-        audio = self._bot_audio_buffer
         text = self._bot_text_buffer
-        self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
 
-        if audio and self._transcribe_model_audio and self._context:
-            await self._transcribe_model_audio_queue.put(audio)
-        elif text:
+        if text:
             await self.push_frame(LLMFullResponseEndFrame())
 
         await self.push_frame(TTSStoppedFrame())
+
+    async def _handle_evt_output_transcription(self, evt):
+        if not evt.serverContent.outputTranscription:
+            return
+
+        text = evt.serverContent.outputTranscription.text
+        if text:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(LLMTextFrame(text=text))
+            await self.push_frame(TTSTextFrame(text=text))
+            await self.push_frame(LLMFullResponseEndFrame())
 
     def create_context_aggregator(
         self,
