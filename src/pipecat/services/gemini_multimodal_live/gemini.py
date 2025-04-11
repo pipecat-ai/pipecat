@@ -55,10 +55,103 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .audio_transcriber import AudioTranscriber
+
+
+def language_to_gemini_language(language: Language) -> Optional[str]:
+    """Maps a Language enum value to a Gemini Live supported language code.
+
+    Source:
+    https://ai.google.dev/api/generate-content#MediaResolution
+
+    Returns None if the language is not supported by Gemini Live.
+    """
+    language_map = {
+        # Arabic
+        Language.AR: "ar-XA",
+        # Bengali
+        Language.BN_IN: "bn-IN",
+        # Chinese (Mandarin)
+        Language.CMN: "cmn-CN",
+        Language.CMN_CN: "cmn-CN",
+        Language.ZH: "cmn-CN",  # Map general Chinese to Mandarin for Gemini
+        Language.ZH_CN: "cmn-CN",  # Map Simplified Chinese to Mandarin for Gemini
+        # German
+        Language.DE: "de-DE",
+        Language.DE_DE: "de-DE",
+        # English
+        Language.EN: "en-US",  # Default to US English (though not explicitly listed in supported codes)
+        Language.EN_US: "en-US",
+        Language.EN_AU: "en-AU",
+        Language.EN_GB: "en-GB",
+        Language.EN_IN: "en-IN",
+        # Spanish
+        Language.ES: "es-ES",  # Default to Spain Spanish
+        Language.ES_ES: "es-ES",
+        Language.ES_US: "es-US",
+        # French
+        Language.FR: "fr-FR",  # Default to France French
+        Language.FR_FR: "fr-FR",
+        Language.FR_CA: "fr-CA",
+        # Gujarati
+        Language.GU: "gu-IN",
+        Language.GU_IN: "gu-IN",
+        # Hindi
+        Language.HI: "hi-IN",
+        Language.HI_IN: "hi-IN",
+        # Indonesian
+        Language.ID: "id-ID",
+        Language.ID_ID: "id-ID",
+        # Italian
+        Language.IT: "it-IT",
+        Language.IT_IT: "it-IT",
+        # Japanese
+        Language.JA: "ja-JP",
+        Language.JA_JP: "ja-JP",
+        # Kannada
+        Language.KN: "kn-IN",
+        Language.KN_IN: "kn-IN",
+        # Korean
+        Language.KO: "ko-KR",
+        Language.KO_KR: "ko-KR",
+        # Malayalam
+        Language.ML: "ml-IN",
+        Language.ML_IN: "ml-IN",
+        # Marathi
+        Language.MR: "mr-IN",
+        Language.MR_IN: "mr-IN",
+        # Dutch
+        Language.NL: "nl-NL",
+        Language.NL_NL: "nl-NL",
+        # Polish
+        Language.PL: "pl-PL",
+        Language.PL_PL: "pl-PL",
+        # Portuguese (Brazil)
+        Language.PT_BR: "pt-BR",
+        # Russian
+        Language.RU: "ru-RU",
+        Language.RU_RU: "ru-RU",
+        # Tamil
+        Language.TA: "ta-IN",
+        Language.TA_IN: "ta-IN",
+        # Telugu
+        Language.TE: "te-IN",
+        Language.TE_IN: "te-IN",
+        # Thai
+        Language.TH: "th-TH",
+        Language.TH_TH: "th-TH",
+        # Turkish
+        Language.TR: "tr-TR",
+        Language.TR_TR: "tr-TR",
+        # Vietnamese
+        Language.VI: "vi-VN",
+        Language.VI_VN: "vi-VN",
+    }
+    return language_map.get(language)
 
 
 class GeminiMultimodalLiveContext(OpenAILLMContext):
@@ -153,6 +246,7 @@ class InputParams(BaseModel):
     modalities: Optional[GeminiMultimodalModalities] = Field(
         default=GeminiMultimodalModalities.AUDIO
     )
+    language: Optional[Language] = Field(default=Language.EN_US)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -183,6 +277,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._base_url = base_url
         self.set_model_name(model)
         self._voice_id = voice_id
+        self._language_code = params.language
 
         self._system_instruction = system_instruction
         self._tools = tools
@@ -214,6 +309,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         self._sample_rate = 24000
 
+        self._language = params.language
+        self._language_code = (
+            language_to_gemini_language(params.language) if params.language else "en-US"
+        )
+
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
             "max_tokens": params.max_tokens,
@@ -222,6 +322,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "top_k": params.top_k,
             "top_p": params.top_p,
             "modalities": params.modalities,
+            "language": self._language_code,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -236,6 +337,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     def set_model_modalities(self, modalities: GeminiMultimodalModalities):
         self._settings["modalities"] = modalities
+
+    def set_language(self, language: Language):
+        """Set the language for generation."""
+        self._language = language
+        self._language_code = language_to_gemini_language(language) or "en-US"
+        self._settings["language"] = self._language_code
+        logger.info(f"Set Gemini language to: {self._language_code}")
 
     async def set_context(self, context: OpenAILLMContext):
         """Set the context explicitly from outside the pipeline.
@@ -431,6 +539,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                                 "voice_config": {
                                     "prebuilt_voice_config": {"voice_name": self._voice_id}
                                 },
+                                "language_code": self._settings["language"],
                             },
                         },
                     },
