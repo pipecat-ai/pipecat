@@ -43,7 +43,7 @@ class VoxiumSTTService(FrameProcessor):
         vad_threshold (float): VAD threshold parameter for the server. Defaults to 0.5.
         silence_threshold_s (float): Silence duration threshold for the server (in seconds). This controls the minimum duration of silence that will trigger a new transcription. Defaults to 0.5.
         speech_pad_ms (int): Speech padding parameter for the server (in milliseconds). This pads the audio to ensure all of the audio is transcribed. Defaults to 100.
-        beam_size (int): Beam size parameter. Defaults to 1
+        beam_size (int): Beam size parameter. Defaults to 3
     """
 
     def __init__(
@@ -82,7 +82,11 @@ class VoxiumSTTService(FrameProcessor):
 
 
     def _build_connection_url(self) -> str:
-        """Builds the WebSocket URL with query parameters."""
+        """Builds the WebSocket URL with query parameters.
+        
+        Returns:
+            str: The complete WebSocket URL with all query parameters.
+        """
         params = {
             "apiKey": self._api_key,
             "input_format": self._input_format,
@@ -141,7 +145,11 @@ class VoxiumSTTService(FrameProcessor):
 
 
     async def _receive_loop(self):
-        """Listens for messages from the server and pushes frames."""
+        """Listens for messages from the server and pushes frames.
+        
+        This method runs in a loop while the WebSocket connection is active, processing
+        incoming messages and pushing appropriate frames to the output queue.
+        """
         logger.info("Receive loop started.")
         while self._websocket and self._is_connected:
             try:
