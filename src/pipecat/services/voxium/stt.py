@@ -80,10 +80,9 @@ class VoxiumSTTService(FrameProcessor):
         self._connection_lock = asyncio.Lock()
         self._current_language_str: Optional[str] = None
 
-
     def _build_connection_url(self) -> str:
         """Builds the WebSocket URL with query parameters.
-        
+
         Returns:
             str: The complete WebSocket URL with all query parameters.
         """
@@ -92,7 +91,7 @@ class VoxiumSTTService(FrameProcessor):
             "input_format": self._input_format,
             "sample_rate": str(self._sample_rate),
             "vad_threshold": str(self._vad_threshold),
-            "silence_threshold": str(self._silence_threshold_s), 
+            "silence_threshold": str(self._silence_threshold_s),
             "speech_pad_ms": str(self._speech_pad_ms),
             "beam_size": str(self._beam_size),
         }
@@ -112,7 +111,6 @@ class VoxiumSTTService(FrameProcessor):
             logger.info(f"Connecting to Voxium STT server: {self._url} with specified params...")
             logger.debug(f"Full connection URL: {connection_url}")
 
-
             try:
                 self._websocket = await websockets.connect(
                     connection_url,
@@ -131,7 +129,9 @@ class VoxiumSTTService(FrameProcessor):
                 await self.push_frame(ErrorFrame(f"Invalid WebSocket URI: {connection_url}"))
                 self._is_connected = False
             except websockets.exceptions.InvalidHandshake as e:
-                logger.error(f"WebSocket handshake failed: {e}. Check URL, API key, and server status.")
+                logger.error(
+                    f"WebSocket handshake failed: {e}. Check URL, API key, and server status."
+                )
                 await self.push_frame(ErrorFrame(f"WebSocket handshake failed: {e}"))
                 self._is_connected = False
             except ConnectionRefusedError:
@@ -141,12 +141,11 @@ class VoxiumSTTService(FrameProcessor):
             except Exception as e:
                 logger.error(f"Failed to connect to WebSocket: {e}", exc_info=True)
                 await self.push_frame(ErrorFrame(f"WebSocket connection error: {e}"))
-                self._is_connected = False # Ensure state reflects failure
-
+                self._is_connected = False  # Ensure state reflects failure
 
     async def _receive_loop(self):
         """Listens for messages from the server and pushes frames.
-        
+
         This method runs in a loop while the WebSocket connection is active, processing
         incoming messages and pushing appropriate frames to the output queue.
         """
@@ -165,29 +164,32 @@ class VoxiumSTTService(FrameProcessor):
 
                 elif status in ["complete"]:
                     transcription = message.get("transcription", "").strip()
-                    if transcription: # Only push if there's text
+                    if transcription:  # Only push if there's text
                         lang = message.get("language")
                         # Convert language code back to pipecat enum if possible, otherwise keep as string
                         # Note: This requires reversing the mapping or a new map. For simplicity,
                         # we'll just use the code provided by the server for now.
-                        detected_language = lang # Use the string code directly. could map 'lang' back to transcriptions.language.Language if needed
+                        detected_language = lang  # Use the string code directly. could map 'lang' back to transcriptions.language.Language if needed
 
                         await self.push_frame(
                             TranscriptionFrame(
                                 text=transcription,
-                                user_id="", 
+                                user_id="",
                                 timestamp=time_now_iso8601(),
-                                language=detected_language 
+                                language=detected_language,
                             )
                         )
                     else:
-                         logger.debug("Received transcription message with empty text, skipping.")
+                        logger.debug("Received transcription message with empty text, skipping.")
 
                 elif status == "error":
                     error_message = message.get("message", "Unknown server error")
                     logger.error(f"Received error from server: {error_message}")
                     await self.push_frame(ErrorFrame(f"Voxium server error: {error_message}"))
-                    if "Usage limit exceeded" in error_message or "Invalid or inactive API Key" in error_message:
+                    if (
+                        "Usage limit exceeded" in error_message
+                        or "Invalid or inactive API Key" in error_message
+                    ):
                         logger.warning("Closing connection due to server-reported error.")
                         await self._close_connection()
                         break
@@ -202,7 +204,9 @@ class VoxiumSTTService(FrameProcessor):
             except ConnectionClosedError as e:
                 logger.warning(f"WebSocket connection closed unexpectedly: {e.code} {e.reason}")
                 self._is_connected = False
-                await self.push_frame(ErrorFrame(f"WebSocket closed unexpectedly: {e.code} {e.reason}"))
+                await self.push_frame(
+                    ErrorFrame(f"WebSocket closed unexpectedly: {e.code} {e.reason}")
+                )
                 break
             except json.JSONDecodeError as e:
                 logger.error(f"Failed to decode JSON message: {e}. Message: '{message_str}'")
@@ -210,13 +214,12 @@ class VoxiumSTTService(FrameProcessor):
                 logger.error(f"Error in receive loop: {e}", exc_info=True)
                 self._is_connected = False
                 await self.push_frame(ErrorFrame(f"Receive loop error: {e}"))
-                break 
+                break
 
         logger.info("Receive loop finished.")
         async with self._connection_lock:
-             self._is_connected = False
-             self._websocket = None
-
+            self._is_connected = False
+            self._websocket = None
 
     async def _close_connection(self):
         """Closes the WebSocket connection and stops the receiver task."""
@@ -231,9 +234,9 @@ class VoxiumSTTService(FrameProcessor):
                 except asyncio.TimeoutError:
                     logger.warning("Timeout waiting for receive task to cancel.")
                 except asyncio.CancelledError:
-                     logger.debug("Receive task already cancelled.") # Expected
+                    logger.debug("Receive task already cancelled.")  # Expected
                 except Exception as e:
-                     logger.error(f"Error waiting for receive task cancellation: {e}")
+                    logger.error(f"Error waiting for receive task cancellation: {e}")
             self._receive_task = None
 
             # Close the websocket connection
@@ -248,19 +251,18 @@ class VoxiumSTTService(FrameProcessor):
             self._is_connected = False
             self._connection_id = None
 
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes incoming frames, sending audio to the server."""
         await super().process_frame(frame, direction)
 
         if direction != FrameDirection.DOWNSTREAM:
-             await self.push_frame(frame, direction)
-             return
+            await self.push_frame(frame, direction)
+            return
 
         if isinstance(frame, (StartFrame)):
             logger.info("Start frame received, ensuring connection...")
-            await self._connect() 
-            await self.push_frame(frame) 
+            await self._connect()
+            await self.push_frame(frame)
             return
 
         if isinstance(frame, (CancelFrame, EndFrame)):
@@ -273,17 +275,17 @@ class VoxiumSTTService(FrameProcessor):
             if isinstance(frame, AudioRawFrame):
                 logger.warning("Dropping audio frame as WebSocket is not connected.")
                 return
-            else: 
-                 await self.push_frame(frame)
-                 return
+            else:
+                await self.push_frame(frame)
+                return
 
         # Process audio frames
         if isinstance(frame, AudioRawFrame):
             if not frame.audio:
-                 logger.debug("Empty audio frame received, skipping.")
-                 return
+                logger.debug("Empty audio frame received, skipping.")
+                return
 
-            encoded_audio = base64.b64encode(frame.audio).decode('utf-8')
+            encoded_audio = base64.b64encode(frame.audio).decode("utf-8")
             message = {"audio_data": encoded_audio}
 
             if self._websocket and self._is_connected:
@@ -292,20 +294,21 @@ class VoxiumSTTService(FrameProcessor):
                     # logger.debug(f"Sending audio chunk ({len(frame.audio)} bytes)...")
                     asyncio.create_task(self._websocket.send(json.dumps(message)))
                 except ConnectionClosedError:
-                    logger.warning("WebSocket closed while trying to send audio. Attempting cleanup.")
-                    self._is_connected = False # Update state immediately
-                    await self._close_connection() # Clean up resources
+                    logger.warning(
+                        "WebSocket closed while trying to send audio. Attempting cleanup."
+                    )
+                    self._is_connected = False  # Update state immediately
+                    await self._close_connection()  # Clean up resources
                     await self.push_frame(ErrorFrame("WebSocket closed during audio send"))
                 except Exception as e:
                     logger.error(f"Error sending audio frame: {e}", exc_info=True)
                     # Should we close connection on send error? Maybe.
                     await self.push_frame(ErrorFrame(f"Error sending audio: {e}"))
             else:
-                 logger.warning("WebSocket is None or not connected, cannot send audio.")
+                logger.warning("WebSocket is None or not connected, cannot send audio.")
 
         else:
             await self.push_frame(frame)
-
 
     async def stop(self):
         """Overrides FrameProcessor stop method for cleanup."""
