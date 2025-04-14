@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024-2025 Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import os
 from unittest.mock import AsyncMock
 
@@ -6,17 +12,16 @@ from dotenv import load_dotenv
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.frames.frames import (
-    LLMFullResponseEndFrame,
-    LLMFullResponseStartFrame,
-    LLMTextFrame,
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
-from pipecat.services.anthropic import AnthropicLLMService
-from pipecat.services.google import GoogleLLMService
-from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame, OpenAILLMService
-from pipecat.utils.test_frame_processor import TestFrameProcessor
+from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import LLMService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.tests.utils import run_test
 
 load_dotenv(override=True)
 
@@ -47,8 +52,6 @@ async def _test_llm_function_calling(llm: LLMService):
     mock_fetch_weather = AsyncMock()
 
     llm.register_function(None, mock_fetch_weather)
-    t = TestFrameProcessor([LLMFullResponseStartFrame, LLMTextFrame, LLMFullResponseEndFrame])
-    llm.link(t)
 
     messages = [
         {
@@ -61,10 +64,14 @@ async def _test_llm_function_calling(llm: LLMService):
     # This is done by default inside the create_context_aggregator
     context.set_llm_adapter(llm.get_llm_adapter())
 
-    frame = OpenAILLMContextFrame(context)
+    pipeline = Pipeline([llm])
 
-    # This will fail if an exception is raised
-    await llm.process_frame(frame, FrameDirection.DOWNSTREAM)
+    frames_to_send = [OpenAILLMContextFrame(context)]
+    await run_test(
+        pipeline,
+        frames_to_send=frames_to_send,
+        expected_down_frames=None,
+    )
 
     # Assert that the mock function was called
     mock_fetch_weather.assert_called_once()

@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import os
 import re
 
@@ -16,12 +22,11 @@ from utils.helpers import load_sounds
 from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
-    LLMMessagesFrame,
     TextFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.google import GoogleImageGenService, GoogleLLMContext, GoogleLLMService
+from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.services.daily import DailyTransportMessageFrame
 
 sounds = load_sounds(["talking.wav", "listening.wav", "ding.wav"])

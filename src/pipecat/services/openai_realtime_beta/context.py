@@ -6,22 +6,18 @@
 
 import copy
 import json
-from typing import Optional
 
 from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
-    FunctionCallResultProperties,
+    FunctionCallResultFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.openai import (
+from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
@@ -174,67 +170,12 @@ class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    async def push_aggregation(self):
-        # the only thing we implement here is function calling. in all other cases, messages
-        # are added to the context when we receive openai realtime api events
-        if not self._function_call_result:
-            return
+    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        await super().handle_function_call_result(frame)
 
-        properties: Optional[FunctionCallResultProperties] = None
-
-        self.reset()
-        try:
-            run_llm = True
-            frame = self._function_call_result
-            properties = frame.properties
-            self._function_call_result = None
-            if frame.result:
-                # The "tool_call" message from the LLM that triggered the function call
-                self._context.add_message(
-                    {
-                        "role": "assistant",
-                        "tool_calls": [
-                            {
-                                "id": frame.tool_call_id,
-                                "function": {
-                                    "name": frame.function_name,
-                                    "arguments": json.dumps(frame.arguments),
-                                },
-                                "type": "function",
-                            }
-                        ],
-                    }
-                )
-                # The result of the function call. Need to add this both to our context here and to
-                # the openai realtime api context.
-                result_message = {
-                    "role": "tool",
-                    "content": json.dumps(frame.result),
-                    "tool_call_id": frame.tool_call_id,
-                }
-
-                self._context.add_message(result_message)
-                # The standard function callback code path pushes the FunctionCallResultFrame from the llm itself,
-                # so we didn't have a chance to add the result to the openai realtime api context. Let's push a
-                # special frame to do that.
-                await self.push_frame(
-                    RealtimeFunctionCallResultFrame(result_frame=frame), FrameDirection.UPSTREAM
-                )
-                if properties and properties.run_llm is not None:
-                    # If the tool call result has a run_llm property, use it
-                    run_llm = properties.run_llm
-                else:
-                    # Default behavior is to run the LLM if there are no function calls in progress
-                    run_llm = not bool(self._function_calls_in_progress)
-
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
-
-            # Emit the on_context_updated callback once the function call result is added to the context
-            if properties and properties.on_context_updated is not None:
-                await properties.on_context_updated()
-
-            await self.push_context_frame()
-
-        except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+        # The standard function callback code path pushes the FunctionCallResultFrame from the llm itself,
+        # so we didn't have a chance to add the result to the openai realtime api context. Let's push a
+        # special frame to do that.
+        await self.push_frame(
+            RealtimeFunctionCallResultFrame(result_frame=frame), FrameDirection.UPSTREAM
+        )

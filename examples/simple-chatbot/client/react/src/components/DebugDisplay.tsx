@@ -76,7 +76,7 @@ export function DebugDisplay() {
   );
 
   useRTVIClientEvent(
-    RTVIEvent.TrackedStopped,
+    RTVIEvent.TrackStopped,
     useCallback(
       (track: MediaStreamTrack, participant?: Participant) => {
         log(

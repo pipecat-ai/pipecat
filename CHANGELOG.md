@@ -5,9 +5,327 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
 ## [Unreleased]
 
 ### Added
+
+- It is now possible to disable `SoundfileMixer` when created. You can then use
+  `MixerEnableFrame` to dynamically enable it when necessary.
+
+- Added `on_client_connected` and `on_client_disconnected` event handlers to
+  the `DailyTransport` class. These handlers map to the same underlying Daily
+  events as `on_participant_joined` and `on_participant_left`, respectively.
+  This makes it easier to write a single bot pipeline that can also use other
+  transports like `SmallWebRTCTransport` and `FastAPIWebsocketTransport`.
+
+### Changed
+
+- `SoundfileMixer` constructor arguments need to be keywords.
+
+### Fixed
+
+- Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
+  client did not create a video transceiver.
+
+## [0.0.63] - 2025-04-11
+
+### Added
+
+- Added media resolution control to `GeminiMultimodalLiveLLMService` with
+  `GeminiMediaResolution` enum, allowing configuration of token usage for
+  image processing (LOW: 64 tokens, MEDIUM: 256 tokens, HIGH: zoomed reframing
+  with 256 tokens).
+
+- Added Gemini's Voice Activity Detection (VAD) configuration to
+  `GeminiMultimodalLiveLLMService` with `GeminiVADParams`, allowing fine
+  control over speech detection sensitivity and timing, including:
+
+  - Start sensitivity (how quickly speech is detected)
+  - End sensitivity (how quickly turns end after pauses)
+  - Prefix padding (milliseconds of audio to keep before speech is detected)
+  - Silence duration (milliseconds of silence required to end a turn)
+
+- Added comprehensive language support to `GeminiMultimodalLiveLLMService`,
+  supporting over 30 languages via the `language` parameter, with proper
+  mapping between Pipecat's `Language` enum and Gemini's language codes.
+
+- Added support in `SmallWebRTCTransport` to detect when remote tracks are
+  muted.
+
+- Added support for image capture from a video stream to the
+  `SmallWebRTCTransport`.
+
+- Added a new iOS client option to the `SmallWebRTCTransport`
+  **video-transform** example.
+
+- Added new processors `ProducerProcessor` and `ConsumerProcessor`. The
+  producer processor processes frames from the pipeline and decides whether the
+  consumers should consume it or not. If so, the same frame that is received by
+  the producer is sent to the consumer. There can be multiple consumers per
+  producer. These processors can be useful to push frames from one part of a
+  pipeline to a different one (e.g. when using `ParallelPipeline`).
+
+- Improvements for the `SmallWebRTCTransport`:
+  - Wait until the pipeline is ready before triggering the `connected` event.
+  - Queue messages if the data channel is not ready.
+  - Update the aiortc dependency to fix an issue where the 'video/rtx' MIME
+    type was incorrectly handled as a codec retransmission.
+  - Avoid initial video delays.
+
+### Changed
+
+- In `GeminiMultimodalLiveLLMService`, removed the `transcribe_model_audio`
+  parameter in favor of Gemini Live's native output transcription support. Now
+  text transcriptions are produced directly by the model. No configuration is
+  required.
+
+- Updated `GeminiMultimodalLiveLLMService`’s default `model` to
+  `models/gemini-2.0-flash-live-001` and `base_url` to the `v1beta` websocket
+  URL.
+
+### Fixed
+
+- Updated `daily-python` to 0.17.0 to fix an issue that was preventing to run on
+  older platforms.
+
+- Fixed an issue where `CartesiaTTSService`'s spell feature would result in
+  the spelled word in the context appearing as "F,O,O,B,A,R" instead of
+  "FOOBAR".
+
+- Fixed an issue in the Azure TTS services where the language was being set
+  incorrectly.
+
+- Fixed `SmallWebRTCTransport` to support dynamic values for
+  `TransportParams.audio_out_10ms_chunks`. Previously, it only worked with 20ms
+  chunks.
+
+- Fixed an issue with `GeminiMultimodalLiveLLMService` where the assistant
+  context messages had no space between words.
+
+- Fixed an issue where `LLMAssistantContextAggregator` would prevent a
+  `BotStoppedSpeakingFrame` from moving through the pipeline.
+
+## [0.0.62] - 2025-04-01 "An April Fools' release"
+
+### Added
+
+- Added `TransportParams.audio_out_10ms_chunks` parameter to allow controlling
+  the amount of audio being sent by the output transport. It defaults to 4, so
+  40ms audio chunks are sent.
+
+- Added `QwenLLMService` for Qwen integration with an OpenAI-compatible
+  interface. Added foundational example `14q-function-calling-qwen.py`.
+
+- Added `Mem0MemoryService`. Mem0 is a self-improving memory layer for LLM
+  applications. Learn more at: https://mem0.ai/.
+
+- Added `WhisperSTTServiceMLX` for Whisper transcription on Apple Silicon.
+  See example in `examples/foundational/13e-whisper-mlx.py`. Latency of
+  completed transcription using Whisper large-v3-turbo on an M4 macbook is
+  ~500ms.
+
+- Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
+
+  - Created two examples in `p2p-webrtc`:
+    - **video-transform**: Demonstrates sending and receiving audio/video with
+      `SmallWebRTCTransport` using `TypeScript`. Includes video frame
+      processing with OpenCV.
+    - **voice-agent**: A minimal example of creating a voice agent with
+      `SmallWebRTCTransport`.
+
+- `GladiaSTTService` now have comprehensive support for the latest API config
+  options, including model, language detection, preprocessing, custom
+  vocabulary, custom spelling, translation, and message filtering options.
+
+- Added `SmallWebRTCTransport`, a new P2P WebRTC transport.
+
+  - Created two examples in `p2p-webrtc`:
+    - **video-transform**: Demonstrates sending and receiving audio/video with
+      `SmallWebRTCTransport` using `TypeScript`. Includes video frame
+      processing with OpenCV.
+    - **voice-agent**: A minimal example of creating a voice agent with
+      `SmallWebRTCTransport`.
+
+- Added support to `ProtobufFrameSerializer` to send the messages from
+  `TransportMessageFrame` and `TransportMessageUrgentFrame`.
+
+- Added support for a new TTS service, `PiperTTSService`.
+  (see https://github.com/rhasspy/piper/)
+
+- It is now possible to tell whether `UserStartedSpeakingFrame` or
+  `UserStoppedSpeakingFrame` have been generated because of emulation frames.
+
+### Changed
+
+- `FunctionCallResultFrame`a are now system frames. This is to prevent function
+  call results to be discarded during interruptions.
+
+- Pipecat services have been reorganized into packages. Each package can have
+  one or more of the following modules (in the future new module names might be
+  needed) depending on the services implemented:
+
+  - image: for image generation services
+  - llm: for LLM services
+  - memory: for memory services
+  - stt: for Speech-To-Text services
+  - tts: for Text-To-Speech services
+  - video: for video generation services
+  - vision: for video recognition services
+
+- Base classes for AI services have been reorganized into modules. They can now
+  be found in
+  `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
+
+- `GladiaSTTService` now uses the `solaria-1` model by default. Other params
+  use Gladia's default values. Added support for more language codes.
+
+### Deprecated
+
+- All Pipecat services imports have been deprecated and a warning will be shown
+  when using the old import. The new import should be
+  `pipecat.services.[service].[image,llm,memory,stt,tts,video,vision]`. For
+  example, `from pipecat.services.openai.llm import OpenAILLMService`.
+
+- Import for AI services base classes from `pipecat.services.ai_services` is now
+  deprecated, use one of
+  `pipecat.services.[ai_service,image_service,llm_service,stt_service,vision_service]`.
+
+- Deprecated the `language` parameter in `GladiaSTTService.InputParams` in
+  favor of `language_config`, which better aligns with Gladia's API.
+
+- Deprecated using `GladiaSTTService.InputParams` directly. Use the new
+  `GladiaInputParams` class instead.
+
+### Fixed
+
+- Fixed a `FastAPIWebsocketTransport` and `WebsocketClientTransport` issue that
+  would cause the transport to be closed prematurely, preventing the internally
+  queued audio to be sent. The same issue could also cause an infinite loop
+  while using an output mixer and when sending an `EndFrame`, preventing the bot
+  to finish.
+
+- Fixed an issue that could cause the `TranscriptionUpdateFrame` being pushed
+  because of an interruption to be discarded.
+
+- Fixed an issue that would cause `SegmentedSTTService` based services
+  (e.g. `OpenAISTTService`) to try to transcribe non-spoken audio, causing
+  invalid transcriptions.
+
+- Fixed an issue where `GoogleTTSService` was emitting two `TTSStoppedFrames`.
+
+### Performance
+
+- Output transports now send 40ms audio chunks instead of 20ms. This should
+  improve performance.
+
+- `BotSpeakingFrame`s are now sent every 200ms. If the output transport audio chunks
+  are higher than 200ms then they will be sent at every audio chunk.
+
+### Other
+
+- Added foundational example `37-mem0.py` demonstrating how to use the
+  `Mem0MemoryService`.
+
+- Added foundational example `13e-whisper-mlx.py` demonstrating how to use the
+  `WhisperSTTServiceMLX`.
+
+## [0.0.61] - 2025-03-26
+
+### Added
+
+- Added a new frame, `LLMSetToolChoiceFrame`, which provides a mechanism
+  for modifying the `tool_choice` in the context.
+
+- Added `GroqTTSService` which provides text-to-speech functionality using
+  Groq's API.
+
+- Added support in `DailyTransport` for updating remote participants'
+  `canReceive` permission via the `update_remote_participants()` method, by
+  bumping the daily-python dependency to >= 0.16.0.
+
+- ElevenLabs TTS services now support a sample rate of 8000.
+
+- Added support for `instructions` in `OpenAITTSService`.
+
+- Added support for `base_url` in `OpenAIImageGenService` and
+  `OpenAITTSService`.
+
+### Fixed
+
+- Fixed an issue in `RTVIObserver` that prevented handling of Google LLM
+  context messages. The observer now processes both OpenAI-style and
+  Google-style contexts.
+
+- Fixed an issue in Daily involving switching virtual devices, by bumping the
+  daily-python dependency to >= 0.16.1.
+
+- Fixed a `GoogleAssistantContextAggregator` issue where function calls
+  placeholders where not being updated when then function call result was
+  different from a string.
+
+- Fixed an issue that would cause `LLMAssistantContextAggregator` to block
+  processing more frames while processing a function call result.
+
+- Fixed an issue where the `RTVIObserver` would report two bot started and
+  stopped speaking events for each bot turn.
+
+- Fixed an issue in `UltravoxSTTService` that caused improper audio processing
+  and incorrect LLM frame output.
+
+### Other
+
+- Added `examples/foundational/07x-interruptible-local.py` to show how a local
+  transport can be used.
+
+## [0.0.60] - 2025-03-20
+
+### Added
+
+- Added `default_headers` parameter to `BaseOpenAILLMService` constructor.
+
+### Changed
+
+- Rollback to `deepgram-sdk` 3.8.0 since 3.10.1 was causing connections issues.
+
+- Changed the default `InputAudioTranscription` model to `gpt-4o-transcribe`
+  for `OpenAIRealtimeBetaLLMService`.
+
+### Other
+
+- Update the `19-openai-realtime-beta.py` and `19a-azure-realtime-beta.py`
+  examples to use the FunctionSchema format.
+
+## [0.0.59] - 2025-03-20
+
+### Added
+
+- When registering a function call it is now possible to indicate if you want
+  the function call to be cancelled if there's a user interruption via
+  `cancel_on_interruption` (defaults to False). This is now possible because
+  function calls are executed concurrently.
+
+- Added support for detecting idle pipelines. By default, if no activity has
+  been detected during 5 minutes, the `PipelineTask` will be automatically
+  cancelled. It is possible to override this behavior by passing
+  `cancel_on_idle_timeout=False`. It is also possible to change the default
+  timeout with `idle_timeout_secs` or the frames that prevent the pipeline from
+  being idle with `idle_timeout_frames`. Finally, an `on_idle_timeout` event
+  handler will be triggered if the idle timeout is reached (whether the pipeline
+  task is cancelled or not).
+
+- Added `FalSTTService`, which provides STT for Fal's Wizper API.
+
+- Added a `reconnect_on_error` parameter to websocket-based TTS services as well
+  as a `on_connection_error` event handler. The `reconnect_on_error` indicates
+  whether the TTS service should reconnect on error. The `on_connection_error`
+  will always get called if there's any error no matter the value of
+  `reconnect_on_error`. This allows, for example, to fallback to a different TTS
+  provider if something goes wrong with the current one.
+
+- Added new `SkipTagsAggregator` that extends `BaseTextAggregator` to aggregate
+  text and skips end of sentence matching if aggregated text is between
+  start/end tags.
 
 - Added new `PatternPairAggregator` that extends `BaseTextAggregator` to
   identify content between matching pattern pairs in streamed text. This allows
@@ -17,8 +335,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new `BaseTextAggregator`. Text aggregators are used by the TTS service
   to aggregate LLM tokens and decide when the aggregated text should be pushed
   to the TTS service. They also allow for the text to be manipulated while it's
-  being aggregated. Multiple text aggregators can be passed with
-  `text_aggregators` to the TTS service.
+  being aggregated. A text aggregator can be passed via `text_aggregator` to the
+  TTS service.
+
+- Added new `sample_rate` constructor parameter to `TavusVideoService` to allow
+  changing the output sample rate.
+
+- Added new `NeuphonicTTSService`.
+  (see https://neuphonic.com)
 
 - Added new `UltravoxSTTService`.
   (see https://github.com/fixie-ai/ultravox)
@@ -98,7 +422,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Gemini models. Added foundational example
   `14p-function-calling-gemini-vertex-ai.py`.
 
+- Added support in `OpenAIRealtimeBetaLLMService` for a slate of new features:
+
+  - The `'gpt-4o-transcribe'` input audio transcription model, along
+    with new `language` and `prompt` options specific to that model.
+  - The `input_audio_noise_reduction` session property.
+
+    ```python
+    session_properties = SessionProperties(
+      # ...
+      input_audio_noise_reduction=InputAudioNoiseReduction(
+        type="near_field" # also supported: "far_field"
+      )
+      # ...
+    )
+    ```
+
+  - The `'semantic_vad'` `turn_detection` session property value, a more
+    sophisticated model for detecting when the user has stopped speaking.
+  - `on_conversation_item_created` and `on_conversation_item_updated`
+    events to `OpenAIRealtimeBetaLLMService`.
+
+    ```python
+    @llm.event_handler("on_conversation_item_created")
+    async def on_conversation_item_created(llm, item_id, item):
+      # ...
+
+    @llm.event_handler("on_conversation_item_updated")
+    async def on_conversation_item_updated(llm, item_id, item):
+      # `item` may not always be available here
+      # ...
+    ```
+
+  - The `retrieve_conversation_item(item_id)` method for introspecting a
+    conversation item on the server.
+
+    ```python
+    item = await llm.retrieve_conversation_item(item_id)
+    ```
+
 ### Changed
+
+- Updated `OpenAISTTService` to use `gpt-4o-transcribe` as the default
+  transcription model.
+
+- Updated `OpenAITTSService` to use `gpt-4o-mini-tts` as the default TTS model.
+
+- Function calls are now executed in tasks. This means that the pipeline will
+  not be blocked while the function call is being executed.
+
+- ⚠️ `PipelineTask` will now be automatically cancelled if no bot activity is
+  happening in the pipeline. There are a few settings to configure this
+  behavior, see `PipelineTask` documentation for more details.
 
 - All event handlers are now executed in separate tasks in order to prevent
   blocking the pipeline. It is possible that event handlers take some time to
@@ -115,6 +490,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CartesiaHttpTTSService` to `sonic-2`.
 
 ### Deprecated
+
+- Passing a `start_callback` to `LLMService.register_function()` is now
+  deprecated, simply move the code from the start callback to the function call.
 
 - `TTSService` parameter `text_filter` is now deprecated, use `text_filters`
   instead which is now a list. This allows passing multiple filters that will be
@@ -138,6 +516,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an assistant aggregator issue that could cause assistant text to be
+  split into multiple chunks during function calls.
+
+- Fixed an assistant aggregator issue that was causing assistant text to not be
+  added to the context during function calls. This could lead to duplications.
+
+- Fixed a `SegmentedSTTService` issue that was causing audio to be sent
+  prematurely to the STT service. Instead of analyzing the volume in this
+  service we rely on VAD events which use both VAD and volume.
+
+- Fixed a `GeminiMultimodalLiveLLMService` issue that was causing messages to be
+  duplicated in the context when pushing `LLMMessagesAppendFrame` frames.
+
+- Fixed an issue with `SegmentedSTTService` based services
+  (e.g. `GroqSTTService`) that was not allow audio to pass-through downstream.
+
+- Fixed a `CartesiaTTSService` and `RimeTTSService` issue that would consider
+  text between spelling out tags end of sentence.
+
+- Fixed a `match_endofsentence` issue that would result in floating point
+  numbers to be considered an end of sentence.
+
+- Fixed a `match_endofsentence` issue that would result in emails to be
+  considered an end of sentence.
+
 - Fixed an issue where the RTVI message `disconnect-bot` was pushing an
   `EndFrame`, resulting in the pipeline not shutting down. It now pushes an
   `EndTaskFrame` upstream to shutdown the pipeline.
@@ -151,7 +554,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `RimeTTSService` where the last line of text sent didn't
   result in an audio output being generated.
 
+- Fixed `OpenAIRealtimeBetaLLMService` by adding proper handling for:
+  - The `conversation.item.input_audio_transcription.delta` server message,
+    which was added server-side at some point and not handled client-side.
+  - Errors reported by the `response.done` server message.
+
 ### Other
+
+- Add foundational example `07w-interruptible-fal.py`, showing `FalSTTService`.
+
+- Added a new Ultravox example
+  `examples/foundational/07u-interruptible-ultravox.py`.
+
+- Added new Neuphonic examples
+  `examples/foundational/07v-interruptible-neuphonic.py` and
+  `examples/foundational/07v-interruptible-neuphonic-http.py`.
+
+- Added a new example `examples/foundational/36-user-email-gathering.py` to show
+  how to gather user emails. The example uses's Cartesia's `<spell></spell>`
+  tags and Rime `spell()` function to spell out the emails for confirmation.
 
 - Update the `34-audio-recording.py` example to include an STT processor.
 
@@ -247,6 +668,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 
 ### Fixed
 
+- Fixed an issue that would cause undesired interruptions via
+  `EmulateUserStartedSpeakingFrame`.
+
 - Fixed a `GoogleLLMService` that was causing an exception when sending inline
   audio in some cases.
 
@@ -262,10 +686,6 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
   interruption being played after an interruption.
 
 - Fixed `match_endofsentence` support for ellipses.
-
-- Fixed an issue that would cause undesired interruptions via
-  `EmulateUserStartedSpeakingFrame` when only interim transcriptions (i.e. no
-  final transcriptions) where received.
 
 - Fixed an issue where `EndTaskFrame` was not triggering
   `on_client_disconnected` or closing the WebSocket in FastAPI.
@@ -1931,7 +2351,7 @@ async def on_connected(processor):
   completed. If a task is never ran `has_finished()` will return False.
 
 - `PipelineRunner` now supports SIGTERM. If received, the runner will be
-  canceled.
+  cancelled.
 
 ### Fixed
 

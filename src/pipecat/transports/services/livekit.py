@@ -599,13 +599,6 @@ class LiveKitTransport(BaseTransport):
             )
             await self._output.send_message(frame)
 
-    async def cleanup(self):
-        if self._input:
-            await self._input.cleanup()
-        if self._output:
-            await self._output.cleanup()
-        await self._client.disconnect()
-
     async def on_room_event(self, event):
         # Handle room events
         pass

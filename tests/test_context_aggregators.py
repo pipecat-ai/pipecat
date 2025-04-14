@@ -4,13 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 import unittest
+from typing import Any
 
 import google.ai.generativelanguage as glm
 
 from pipecat.frames.frames import (
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallResultProperties,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -21,31 +26,29 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
-)
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.services.anthropic import (
+from pipecat.services.anthropic.llm import (
     AnthropicAssistantContextAggregator,
     AnthropicLLMContext,
     AnthropicUserContextAggregator,
 )
-from pipecat.services.google.google import (
+from pipecat.services.google.llm import (
     GoogleAssistantContextAggregator,
     GoogleLLMContext,
     GoogleUserContextAggregator,
 )
-from pipecat.services.openai import OpenAIAssistantContextAggregator, OpenAIUserContextAggregator
+from pipecat.services.openai.llm import (
+    OpenAIAssistantContextAggregator,
+    OpenAIUserContextAggregator,
+)
 from pipecat.tests.utils import SleepFrame, run_test
 
 AGGREGATION_TIMEOUT = 0.1
 AGGREGATION_SLEEP = 0.15
-BOT_INTERRUPTION_TIMEOUT = 0.2
-BOT_INTERRUPTION_SLEEP = 0.25
 
 
 class BaseTestUserContextAggregator:
@@ -388,14 +391,13 @@ class BaseTestUserContextAggregator:
         aggregator = self.AGGREGATOR_CLASS(
             context,
             aggregation_timeout=AGGREGATION_TIMEOUT,
-            bot_interruption_timeout=BOT_INTERRUPTION_TIMEOUT,
         )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             InterimTranscriptionFrame(text="How ", user_id="cat", timestamp=""),
             SleepFrame(),
             UserStoppedSpeakingFrame(),
-            SleepFrame(BOT_INTERRUPTION_SLEEP),
+            SleepFrame(AGGREGATION_SLEEP),
             InterimTranscriptionFrame(text="are you?", user_id="cat", timestamp=""),
             TranscriptionFrame(text="How are you?", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
@@ -405,12 +407,10 @@ class BaseTestUserContextAggregator:
             UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
-        expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
         await run_test(
             aggregator,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
-            expected_up_frames=expected_up_frames,
         )
         self.check_message_content(context, 0, "How are you?")
 
@@ -418,7 +418,7 @@ class BaseTestUserContextAggregator:
 class BaseTestAssistantContextAggreagator:
     CONTEXT_CLASS = None  # To be set in subclasses
     AGGREGATOR_CLASS = None  # To be set in subclasses
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame]
+    EXPECTED_CONTEXT_FRAMES = None  # To be set in subclasses
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
         assert context.messages[index]["content"] == content
@@ -427,6 +427,9 @@ class BaseTestAssistantContextAggreagator:
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
     ):
         assert context.messages[index]["content"] == content
+
+    def check_function_call_result(self, context: OpenAILLMContext, index: int, content: str):
+        assert json.loads(context.messages[index]["content"]) == content
 
     async def test_empty(self):
         assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
@@ -561,22 +564,82 @@ class BaseTestAssistantContextAggreagator:
         self.check_message_multi_content(context, 0, 0, "Hello Pipecat.")
         self.check_message_multi_content(context, 0, 1, "How are you?")
 
+    async def test_function_call(self):
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+            ),
+        ]
+        expected_down_frames = []
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.check_function_call_result(context, -1, {"conditions": "Sunny"})
+
+    async def test_function_call_on_context_updated(self):
+        assert self.CONTEXT_CLASS is not None, "CONTEXT_CLASS must be set in a subclass"
+        assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
+
+        context_updated = False
+
+        async def on_context_updated():
+            nonlocal context_updated
+            context_updated = True
+
+        context = self.CONTEXT_CLASS()
+        aggregator = self.AGGREGATOR_CLASS(context)
+        frames_to_send = [
+            FunctionCallInProgressFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                cancel_on_interruption=False,
+            ),
+            SleepFrame(),
+            FunctionCallResultFrame(
+                function_name="get_weather",
+                tool_call_id="1",
+                arguments={"location": "Los Angeles"},
+                result={"conditions": "Sunny"},
+                properties=FunctionCallResultProperties(on_context_updated=on_context_updated),
+            ),
+            SleepFrame(),
+        ]
+        expected_down_frames = []
+        await run_test(
+            aggregator,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+        self.check_function_call_result(context, -1, {"conditions": "Sunny"})
+        assert context_updated
+
 
 #
-# LLMUserContextAggregator, LLMAssistantContextAggregator
+# LLMUserContextAggregator
 #
 
 
 class TestLLMUserContextAggregator(BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase):
     CONTEXT_CLASS = OpenAILLMContext
     AGGREGATOR_CLASS = LLMUserContextAggregator
-
-
-class TestLLMAssistantContextAggregator(
-    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
-):
-    CONTEXT_CLASS = OpenAILLMContext
-    AGGREGATOR_CLASS = LLMAssistantContextAggregator
 
 
 #
@@ -630,6 +693,9 @@ class TestAnthropicAssistantContextAggregator(
         messages = context.messages[content_index]
         assert messages["content"][index]["text"] == content
 
+    def check_function_call_result(self, context: OpenAILLMContext, index: int, content: Any):
+        assert context.messages[index]["content"][0]["content"] == json.dumps(content)
+
 
 #
 # Google
@@ -669,3 +735,7 @@ class TestGoogleAssistantContextAggregator(
     ):
         obj = glm.Content.to_dict(context.messages[index])
         assert obj["parts"][0]["text"] == content
+
+    def check_function_call_result(self, context: OpenAILLMContext, index: int, content: Any):
+        obj = glm.Content.to_dict(context.messages[index])
+        assert obj["parts"][0]["function_response"]["response"]["value"] == json.dumps(content)

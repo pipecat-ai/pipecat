@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC demo</title>
+</head>
+<body>
+
+<div class="container">
+    <!-- Settings Bar -->
+    <div class="status-bar">
+        <div class="option">
+            <label>Audio</label>
+            <select id="audio-input">
+                <option value="" selected>Default device</option>
+            </select>
+            <select id="audio-codec">
+                <option value="default" selected>Default codecs</option>
+                <option value="opus/48000/2">Opus</option>
+                <option value="PCMU/8000">PCMU</option>
+                <option value="PCMA/8000">PCMA</option>
+            </select>
+        </div>
+        <div class="option">
+            <label>Video</label>
+            <select id="video-input">
+                <option value="" selected>Default device</option>
+            </select>
+            <select id="video-codec">
+                <option value="default" selected>Default codecs</option>
+                <option value="VP8/90000">VP8</option>
+                <option value="H264/90000">H264</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="status">
+            Status: <span id="connection-status">Disconnected</span>
+        </div>
+        <div class="controls">
+            <button id="connect-btn">Connect</button>
+            <button id="disconnect-btn" disabled>Disconnect</button>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="bot-container">
+            <div id="bot-video-container">
+                <video id="bot-video" autoplay="true" playsinline="true"></video>
+                <button id="mute-btn">📷</button>
+            </div>
+            <audio id="bot-audio" autoplay></audio>
+        </div>
+        <!-- Debug Panel -->
+        <div class="debug-panel">
+            <div id="debug-log"></div>
+        </div>
+    </div>
+</div>
+
+<script type="module" src="/src/app.ts"></script>
+<link rel="stylesheet" href="/src/style.css">
+
+</body>
+</html>

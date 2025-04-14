@@ -61,6 +61,10 @@ class FastAPIWebsocketClient:
         self._closing = False
         self._is_binary = is_binary
         self._callbacks = callbacks
+        self._leave_counter = 0
+
+    async def setup(self, _: StartFrame):
+        self._leave_counter += 1
 
     def receive(self) -> typing.AsyncIterator[bytes | str]:
         return self._websocket.iter_bytes() if self._is_binary else self._websocket.iter_text()
@@ -73,6 +77,10 @@ class FastAPIWebsocketClient:
                 await self._websocket.send_text(data)
 
     async def disconnect(self):
+        self._leave_counter -= 1
+        if self._leave_counter > 0:
+            return
+
         if self.is_connected and not self.is_closing:
             self._closing = True
             await self._websocket.close()
@@ -116,6 +124,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._client.setup(frame)
         await self._params.serializer.setup(frame)
         if not self._monitor_websocket_task and self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(self._monitor_websocket())
@@ -192,6 +201,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        await self._client.setup(frame)
         await self._params.serializer.setup(frame)
         self._send_interval = (self._audio_chunk_size / self.sample_rate) / 2
 
