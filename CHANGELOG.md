@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     type was incorrectly handled as a codec retransmission.
   - Avoid initial video delays.
 
+- Added `on_client_connected` and `on_client_disconnected` event handlers to
+  the `DailyTransport` class. These handlers map to the same underlying Daily
+  events as `on_participant_joined` and `on_participant_left`, respectively.
+  This makes it easier to write a single bot pipeline that can also use other
+  transports like `SmallWebRTCTransport` and `FastAPIWebsocketTransport`.
+
 ### Fixed
 
 - Fixed an issue in the Azure TTS services where the language was being set
