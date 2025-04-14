@@ -1,7 +1,0 @@
-agent_name = "multi-transport-chatbot"
-image = "your-dockerhub-username/multi-transport-chatbot:0.1"
-secret_set = "pcc-transport-chatbot-secrets"
-
-[scaling]
-  min_instances = 0
-  max_instances = 2
