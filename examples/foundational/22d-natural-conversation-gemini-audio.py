@@ -33,7 +33,10 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import LLMAssistantResponseAggregator
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMAssistantResponseAggregator,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -478,7 +481,7 @@ class LLMAggregatorBuffer(LLMAssistantResponseAggregator):
     """Buffers the output of the transcription LLM. Used by the bot output gate."""
 
     def __init__(self, **kwargs):
-        super().__init__(expect_stripped_words=False)
+        super().__init__(params=LLMAssistantAggregatorParams(expect_stripped_words=False))
         self._transcription = ""
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
