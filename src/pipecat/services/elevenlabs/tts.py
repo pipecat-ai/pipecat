@@ -185,10 +185,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
         auto_mode: Optional[bool] = True
-        context: Optional[List[dict]] = None
-        """Optionally provide a context for previous_text parameter for "context-aware" TTS resulting in more consistant TTS output"""
-        context_max_previous_text: int = 3
-        """The max number of previous assistant messages that will be used for the previous_text parameter"""
 
         @model_validator(mode="after")
         def validate_voice_settings(self):
@@ -363,21 +359,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                 "text": " ",
                 "xi_api_key": self._api_key,
             }
-            # Add context if available
-            if self._params.context:
-                previous_assistant_messages = [
-                    str(msg.get("content"))  # Ensure content is string
-                    for msg in self._params.context
-                    if msg.get("role") == "assistant" and isinstance(msg.get("content"), str)
-                ]
-                previous_assistant_messages = previous_assistant_messages[
-                    -self._params.context_max_previous_text :
-                ]
-                if len(previous_assistant_messages) > 0:
-                    previous_text = " ".join(previous_assistant_messages)
-                    if previous_text.strip():  # Only add if not empty or whitespace
-                        msg["previous_text"] = previous_text
-                        logger.debug(f"Using previous_text: {previous_text[:50]}...") # Log truncated previous text
 
             if self._voice_settings:
                 msg["voice_settings"] = self._voice_settings
