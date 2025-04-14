@@ -16,7 +16,7 @@
  * - Browser with WebRTC support
  */
 
-import { RTVIClient, RTVIEvent } from '@pipecat-ai/client-js';
+import { LLMHelper, RTVIClient, RTVIEvent } from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
 
 /**
@@ -27,6 +27,7 @@ class ChatbotClient {
   constructor() {
     // Initialize client state
     this.rtviClient = null;
+    this.llmHelper = null;
     this.setupDOMElements();
     this.setupEventListeners();
     this.initializeClientAndTransport();
@@ -126,6 +127,13 @@ class ChatbotClient {
         },
       },
     });
+
+    this.llmHelper = new LLMHelper({});
+    rtviClient.registerHelper('llm', this.llmHelper);
+
+    // Uncomment for debugging
+    // window.rtviClient = this.rtviClient;
+    // window.llmHelper = this.llmHelper;
 
     // Set up listeners for media track events
     this.setupTrackListeners();
