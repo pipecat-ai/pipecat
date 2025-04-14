@@ -10,9 +10,8 @@ import json
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
-import websockets
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -64,6 +63,13 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .audio_transcriber import AudioTranscriber
+
+try:
+    import websockets
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 def language_to_gemini_language(language: Language) -> Optional[str]:
