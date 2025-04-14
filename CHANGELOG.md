@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - It is now possible to disable `SoundfileMixer` when created. You can then use
   `MixerEnableFrame` to dynamically enable it when necessary.
 
+- Added `on_client_connected` and `on_client_disconnected` event handlers to
+  the `DailyTransport` class. These handlers map to the same underlying Daily
+  events as `on_participant_joined` and `on_participant_left`, respectively.
+  This makes it easier to write a single bot pipeline that can also use other
+  transports like `SmallWebRTCTransport` and `FastAPIWebsocketTransport`.
+
 ### Changed
 
 - `SoundfileMixer` constructor arguments need to be keywords.
