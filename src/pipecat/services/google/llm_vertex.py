@@ -65,7 +65,7 @@ class GoogleVertexLLMService(OpenAILLMService):
         base_url = self._get_base_url(params)
         self._api_key = self._get_api_token(credentials, credentials_path)
 
-        super().__init__(api_key=self._api_key, base_url=base_url, model=model, **kwargs)
+        super().__init__(api_key=self._api_key, base_url=base_url, model=model,params=params, **kwargs)
 
     @staticmethod
     def _get_base_url(params: InputParams) -> str:
