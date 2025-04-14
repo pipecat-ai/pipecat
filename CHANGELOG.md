@@ -8,9 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- It is now possible to disable `SoundfileMixer` when created. You can then use
+  `MixerEnableFrame` to dynamically enable it when necessary.
+
+### Changed
+
+- `SoundfileMixer` constructor arguments need to be keywords.
+
 ### Fixed
 
-- Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the 
+- Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
   client did not create a video transceiver.
 
 ## [0.0.63] - 2025-04-11
