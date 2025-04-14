@@ -40,7 +40,12 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIConfig,
+    RTVIObserver,
+    RTVIProcessor,
+    RTVIServerMessageFrame,
+)
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -90,15 +95,22 @@ class TalkingAnimation(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
+        # Send a custom message to client
+        animation_frame = RTVIServerMessageFrame(
+            data={"type": "animation", "payload": {"is_talking": self._is_talking}}
+        )
+
         # Switch to talking animation when bot starts speaking
         if isinstance(frame, BotStartedSpeakingFrame):
             if not self._is_talking:
                 await self.push_frame(talking_frame)
                 self._is_talking = True
+                await self.push_frame(animation_frame)
         # Return to static frame when bot stops speaking
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(quiet_frame)
             self._is_talking = False
+            await self.push_frame(animation_frame)
 
         await self.push_frame(frame, direction)
 
