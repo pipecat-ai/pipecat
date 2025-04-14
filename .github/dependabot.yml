@@ -1,0 +1,36 @@
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#package-ecosystem-
+
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+  - package-ecosystem: "docker"
+    directories:
+      - "/"
+      - "examples/canonical-metrics"
+      - "examples/chatbot-audio-recording"
+      - "examples/deployment/flyio-example"
+      - "examples/deployment/pipecat-cloud-example"
+      - "examples/moondream-chatbot"
+      - "examples/patient-intake"
+      - "examples/sentry-metrics"
+      - "examples/simple-chatbot/server"
+      - "examples/storytelling-chatbot"
+      - "examples/telnyx-chatbot"
+      - "examples/translation-chatbot"
+      - "examples/twilio-chatbot"
+      - "examples/websocket-server"
+    schedule:
+      interval: "monthly"
+  - package-ecosystem: "pip"
+    directories:
+      - "/"
+      - "examples/deployment/modal-example"
+      - "examples/deployment/pipecat-cloud-example"
+      - "examples/studypal"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "chore(deps):"
