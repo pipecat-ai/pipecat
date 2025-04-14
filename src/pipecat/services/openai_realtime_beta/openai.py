@@ -8,18 +8,8 @@ import base64
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Mapping
 
 from loguru import logger
-
-try:
-    import websockets
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
@@ -48,6 +38,10 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -64,6 +58,13 @@ from .context import (
     OpenAIRealtimeUserContextAggregator,
 )
 from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
+
+try:
+    import websockets
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 @dataclass
@@ -650,8 +651,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> OpenAIContextAggregatorPair:
         """Create an instance of OpenAIContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -659,12 +660,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         Args:
             context (OpenAILLMContext): The LLM context.
-            user_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the user context aggregator constructor. Defaults
-                to an empty mapping.
-            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the assistant context aggregator
-                constructor. Defaults to an empty mapping.
+            user_params (LLMUserAggregatorParams, optional): User aggregator
+                parameters.
+            assistant_params (LLMAssistantAggregatorParams, optional): User
+                aggregator parameters.
 
         Returns:
             OpenAIContextAggregatorPair: A pair of context aggregators, one for
@@ -675,9 +674,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         context.set_llm_adapter(self.get_llm_adapter())
 
         OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
-        user = OpenAIRealtimeUserContextAggregator(context, **user_kwargs)
+        user = OpenAIRealtimeUserContextAggregator(context, params=user_params)
 
-        default_assistant_kwargs = {"expect_stripped_words": False}
-        default_assistant_kwargs.update(assistant_kwargs)
-        assistant = OpenAIRealtimeAssistantContextAggregator(context, **default_assistant_kwargs)
+        assistant_params.expect_stripped_words = False
+        assistant = OpenAIRealtimeAssistantContextAggregator(context, params=assistant_params)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
