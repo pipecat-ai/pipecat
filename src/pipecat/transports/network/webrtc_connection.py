@@ -91,7 +91,14 @@ class SmallWebRTCConnection(BaseObject):
     def __init__(self, ice_servers=None):
         super().__init__()
         if ice_servers:
-            self.ice_servers = [RTCIceServer(urls=server) for server in ice_servers]
+            self.ice_servers = [
+                RTCIceServer(
+                    urls=server["urls"],
+                    username=server.get("username"),
+                    credential=server.get("credential"),
+                )
+                for server in ice_servers
+            ]
         else:
             self.ice_servers = []
         self._connect_invoked = False
