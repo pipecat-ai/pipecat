@@ -219,7 +219,9 @@ class SmallWebRTCConnection(BaseObject):
             await self._call_event_handler("connected")
             # We are renegotiating here, because likely we have loose the first video frames
             # and aiortc does not handle that pretty well.
-            await self.video_input_track().discard_old_frames()
+            video_input_track = self.video_input_track()
+            if video_input_track:
+                await self.video_input_track().discard_old_frames()
             self.ask_to_renegotiate()
 
     async def renegotiate(self, sdp: str, type: str, restart_pc: bool = False):
