@@ -5,9 +5,59 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
 ## [Unreleased]
 
 ### Added
+
+- It is now possible to disable `SoundfileMixer` when created. You can then use
+  `MixerEnableFrame` to dynamically enable it when necessary.
+
+- Added `on_client_connected` and `on_client_disconnected` event handlers to
+  the `DailyTransport` class. These handlers map to the same underlying Daily
+  events as `on_participant_joined` and `on_participant_left`, respectively.
+  This makes it easier to write a single bot pipeline that can also use other
+  transports like `SmallWebRTCTransport` and `FastAPIWebsocketTransport`.
+
+### Changed
+
+- `SoundfileMixer` constructor arguments need to be keywords.
+
+### Fixed
+
+- Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
+  client did not create a video transceiver.
+
+## [0.0.63] - 2025-04-11
+
+### Added
+
+- Added media resolution control to `GeminiMultimodalLiveLLMService` with
+  `GeminiMediaResolution` enum, allowing configuration of token usage for
+  image processing (LOW: 64 tokens, MEDIUM: 256 tokens, HIGH: zoomed reframing
+  with 256 tokens).
+
+- Added Gemini's Voice Activity Detection (VAD) configuration to
+  `GeminiMultimodalLiveLLMService` with `GeminiVADParams`, allowing fine
+  control over speech detection sensitivity and timing, including:
+
+  - Start sensitivity (how quickly speech is detected)
+  - End sensitivity (how quickly turns end after pauses)
+  - Prefix padding (milliseconds of audio to keep before speech is detected)
+  - Silence duration (milliseconds of silence required to end a turn)
+
+- Added comprehensive language support to `GeminiMultimodalLiveLLMService`,
+  supporting over 30 languages via the `language` parameter, with proper
+  mapping between Pipecat's `Language` enum and Gemini's language codes.
+
+- Added support in `SmallWebRTCTransport` to detect when remote tracks are
+  muted.
+
+- Added support for image capture from a video stream to the
+  `SmallWebRTCTransport`.
+
+- Added a new iOS client option to the `SmallWebRTCTransport`
+  **video-transform** example.
 
 - Added new processors `ProducerProcessor` and `ConsumerProcessor`. The
   producer processor processes frames from the pipeline and decides whether the
@@ -23,13 +73,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     type was incorrectly handled as a codec retransmission.
   - Avoid initial video delays.
 
-- Added `on_client_connected` and `on_client_disconnected` event handlers to
-  the `DailyTransport` class. These handlers map to the same underlying Daily
-  events as `on_participant_joined` and `on_participant_left`, respectively.
-  This makes it easier to write a single bot pipeline that can also use other
-  transports like `SmallWebRTCTransport` and `FastAPIWebsocketTransport`.
+### Changed
+
+- In `GeminiMultimodalLiveLLMService`, removed the `transcribe_model_audio`
+  parameter in favor of Gemini Live's native output transcription support. Now
+  text transcriptions are produced directly by the model. No configuration is
+  required.
+
+- Updated `GeminiMultimodalLiveLLMService`’s default `model` to
+  `models/gemini-2.0-flash-live-001` and `base_url` to the `v1beta` websocket
+  URL.
 
 ### Fixed
+
+- Updated `daily-python` to 0.17.0 to fix an issue that was preventing to run on
+  older platforms.
+
+- Fixed an issue where `CartesiaTTSService`'s spell feature would result in
+  the spelled word in the context appearing as "F,O,O,B,A,R" instead of
+  "FOOBAR".
 
 - Fixed an issue in the Azure TTS services where the language was being set
   incorrectly.
@@ -37,6 +99,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `SmallWebRTCTransport` to support dynamic values for
   `TransportParams.audio_out_10ms_chunks`. Previously, it only worked with 20ms
   chunks.
+
+- Fixed an issue with `GeminiMultimodalLiveLLMService` where the assistant
+  context messages had no space between words.
 
 - Fixed an issue where `LLMAssistantContextAggregator` would prevent a
   `BotStoppedSpeakingFrame` from moving through the pipeline.

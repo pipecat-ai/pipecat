@@ -1,0 +1,727 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		90031FA72C616EE700408370 /* SimpleChatbotApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90031FA62C616EE700408370 /* SimpleChatbotApp.swift */; };
+		90031FA92C616EE700408370 /* PreJoinView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90031FA82C616EE700408370 /* PreJoinView.swift */; };
+		90031FAB2C616EE800408370 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 90031FAA2C616EE800408370 /* Assets.xcassets */; };
+		90031FAE2C616EE800408370 /* Preview Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 90031FAD2C616EE800408370 /* Preview Assets.xcassets */; };
+		90031FB82C616EE900408370 /* SimpleChatbotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90031FB72C616EE900408370 /* SimpleChatbotTests.swift */; };
+		90031FC22C616EE900408370 /* SimpleChatbotUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90031FC12C616EE900408370 /* SimpleChatbotUITests.swift */; };
+		90031FC42C616EE900408370 /* SimpleChatbotUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90031FC32C616EE900408370 /* SimpleChatbotUITestsLaunchTests.swift */; };
+		90031FDC2C6D5DD700408370 /* ToastModifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90031FDB2C6D5DD700408370 /* ToastModifier.swift */; };
+		90383A912D9C357F00D0DDA3 /* PipecatClientIOSSmallWebrtc in Frameworks */ = {isa = PBXBuildFile; productRef = 90383A902D9C357F00D0DDA3 /* PipecatClientIOSSmallWebrtc */; };
+		90383A932D9C35B300D0DDA3 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90383A922D9C35B300D0DDA3 /* ChatView.swift */; };
+		90383A962D9C35BD00D0DDA3 /* LiveMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90383A942D9C35BD00D0DDA3 /* LiveMessage.swift */; };
+		90383A982D9D85E700D0DDA3 /* CameraButtonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90383A972D9D85E700D0DDA3 /* CameraButtonView.swift */; };
+		90383A9B2DA4620800D0DDA3 /* PipecatClientIOSSmallWebrtc in Frameworks */ = {isa = PBXBuildFile; productRef = 90383A9A2DA4620800D0DDA3 /* PipecatClientIOSSmallWebrtc */; };
+		90ABB98E2C735ED6000D9CC7 /* MeetingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB98D2C735ED6000D9CC7 /* MeetingView.swift */; };
+		90ABB9932C73820D000D9CC7 /* MicrophoneView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9922C73820D000D9CC7 /* MicrophoneView.swift */; };
+		90ABB9982C738356000D9CC7 /* CustomColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9972C738356000D9CC7 /* CustomColors.swift */; };
+		90ABB99A2C73A6A9000D9CC7 /* MockCallContainerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9992C73A6A9000D9CC7 /* MockCallContainerModel.swift */; };
+		90ABB99D2C73C2D1000D9CC7 /* CallContainerModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB99C2C73C2D1000D9CC7 /* CallContainerModel.swift */; };
+		90ABB9A32C74E1CE000D9CC7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9A22C74E1CE000D9CC7 /* SettingsView.swift */; };
+		90ABB9A62C74EA8A000D9CC7 /* SettingsPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9A52C74EA8A000D9CC7 /* SettingsPreference.swift */; };
+		90ABB9A82C74EAB1000D9CC7 /* SettingsManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90ABB9A72C74EAB1000D9CC7 /* SettingsManager.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		90031FB42C616EE900408370 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 90031F9B2C616EE700408370 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 90031FA22C616EE700408370;
+			remoteInfo = SimpleChatbot;
+		};
+		90031FBE2C616EE900408370 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 90031F9B2C616EE700408370 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 90031FA22C616EE700408370;
+			remoteInfo = SimpleChatbot;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		90031FA32C616EE700408370 /* SimpleChatbot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SimpleChatbot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		90031FA62C616EE700408370 /* SimpleChatbotApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleChatbotApp.swift; sourceTree = "<group>"; };
+		90031FA82C616EE700408370 /* PreJoinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreJoinView.swift; sourceTree = "<group>"; };
+		90031FAA2C616EE800408370 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		90031FAD2C616EE800408370 /* Preview Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Preview Assets.xcassets"; sourceTree = "<group>"; };
+		90031FB32C616EE900408370 /* SimpleChatbotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimpleChatbotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		90031FB72C616EE900408370 /* SimpleChatbotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleChatbotTests.swift; sourceTree = "<group>"; };
+		90031FBD2C616EE900408370 /* SimpleChatbotUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SimpleChatbotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		90031FC12C616EE900408370 /* SimpleChatbotUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleChatbotUITests.swift; sourceTree = "<group>"; };
+		90031FC32C616EE900408370 /* SimpleChatbotUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleChatbotUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		90031FD62C63FD6A00408370 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		90031FDB2C6D5DD700408370 /* ToastModifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastModifier.swift; sourceTree = "<group>"; };
+		90383A922D9C35B300D0DDA3 /* ChatView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		90383A942D9C35BD00D0DDA3 /* LiveMessage.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LiveMessage.swift; sourceTree = "<group>"; };
+		90383A972D9D85E700D0DDA3 /* CameraButtonView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CameraButtonView.swift; sourceTree = "<group>"; };
+		90ABB98D2C735ED6000D9CC7 /* MeetingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingView.swift; sourceTree = "<group>"; };
+		90ABB9922C73820D000D9CC7 /* MicrophoneView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicrophoneView.swift; sourceTree = "<group>"; };
+		90ABB9972C738356000D9CC7 /* CustomColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomColors.swift; sourceTree = "<group>"; };
+		90ABB9992C73A6A9000D9CC7 /* MockCallContainerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockCallContainerModel.swift; sourceTree = "<group>"; };
+		90ABB99C2C73C2D1000D9CC7 /* CallContainerModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallContainerModel.swift; sourceTree = "<group>"; };
+		90ABB9A22C74E1CE000D9CC7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		90ABB9A52C74EA8A000D9CC7 /* SettingsPreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsPreference.swift; sourceTree = "<group>"; };
+		90ABB9A72C74EAB1000D9CC7 /* SettingsManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsManager.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		90031FA02C616EE700408370 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90383A912D9C357F00D0DDA3 /* PipecatClientIOSSmallWebrtc in Frameworks */,
+				90383A9B2DA4620800D0DDA3 /* PipecatClientIOSSmallWebrtc in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90031FB02C616EE900408370 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90031FBA2C616EE900408370 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		90031F9A2C616EE700408370 = {
+			isa = PBXGroup;
+			children = (
+				90031FA52C616EE700408370 /* SimpleChatbot */,
+				90031FB62C616EE900408370 /* SimpleChatbotTests */,
+				90031FC02C616EE900408370 /* SimpleChatbotUITests */,
+				90031FA42C616EE700408370 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		90031FA42C616EE700408370 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				90031FA32C616EE700408370 /* SimpleChatbot.app */,
+				90031FB32C616EE900408370 /* SimpleChatbotTests.xctest */,
+				90031FBD2C616EE900408370 /* SimpleChatbotUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		90031FA52C616EE700408370 /* SimpleChatbot */ = {
+			isa = PBXGroup;
+			children = (
+				90383A952D9C35BD00D0DDA3 /* types */,
+				90ABB99B2C73C2C5000D9CC7 /* model */,
+				90031FDD2C6D61E000408370 /* views */,
+				90031FD62C63FD6A00408370 /* Info.plist */,
+				90031FA62C616EE700408370 /* SimpleChatbotApp.swift */,
+				90031FAA2C616EE800408370 /* Assets.xcassets */,
+				90031FAC2C616EE800408370 /* Preview Content */,
+			);
+			path = SimpleChatbot;
+			sourceTree = "<group>";
+		};
+		90031FAC2C616EE800408370 /* Preview Content */ = {
+			isa = PBXGroup;
+			children = (
+				90031FAD2C616EE800408370 /* Preview Assets.xcassets */,
+			);
+			path = "Preview Content";
+			sourceTree = "<group>";
+		};
+		90031FB62C616EE900408370 /* SimpleChatbotTests */ = {
+			isa = PBXGroup;
+			children = (
+				90031FB72C616EE900408370 /* SimpleChatbotTests.swift */,
+			);
+			path = SimpleChatbotTests;
+			sourceTree = "<group>";
+		};
+		90031FC02C616EE900408370 /* SimpleChatbotUITests */ = {
+			isa = PBXGroup;
+			children = (
+				90031FC12C616EE900408370 /* SimpleChatbotUITests.swift */,
+				90031FC32C616EE900408370 /* SimpleChatbotUITestsLaunchTests.swift */,
+			);
+			path = SimpleChatbotUITests;
+			sourceTree = "<group>";
+		};
+		90031FDD2C6D61E000408370 /* views */ = {
+			isa = PBXGroup;
+			children = (
+				90ABB99E2C73C3A9000D9CC7 /* components */,
+				90ABB9962C738346000D9CC7 /* extensions */,
+				90ABB9A42C74EA52000D9CC7 /* settings */,
+				90031FA82C616EE700408370 /* PreJoinView.swift */,
+				90ABB98D2C735ED6000D9CC7 /* MeetingView.swift */,
+			);
+			path = views;
+			sourceTree = "<group>";
+		};
+		90383A952D9C35BD00D0DDA3 /* types */ = {
+			isa = PBXGroup;
+			children = (
+				90383A942D9C35BD00D0DDA3 /* LiveMessage.swift */,
+			);
+			path = types;
+			sourceTree = "<group>";
+		};
+		90ABB9962C738346000D9CC7 /* extensions */ = {
+			isa = PBXGroup;
+			children = (
+				90ABB9972C738356000D9CC7 /* CustomColors.swift */,
+			);
+			path = extensions;
+			sourceTree = "<group>";
+		};
+		90ABB99B2C73C2C5000D9CC7 /* model */ = {
+			isa = PBXGroup;
+			children = (
+				90ABB9992C73A6A9000D9CC7 /* MockCallContainerModel.swift */,
+				90ABB99C2C73C2D1000D9CC7 /* CallContainerModel.swift */,
+			);
+			path = model;
+			sourceTree = "<group>";
+		};
+		90ABB99E2C73C3A9000D9CC7 /* components */ = {
+			isa = PBXGroup;
+			children = (
+				90383A972D9D85E700D0DDA3 /* CameraButtonView.swift */,
+				90383A922D9C35B300D0DDA3 /* ChatView.swift */,
+				90ABB9922C73820D000D9CC7 /* MicrophoneView.swift */,
+				90031FDB2C6D5DD700408370 /* ToastModifier.swift */,
+			);
+			path = components;
+			sourceTree = "<group>";
+		};
+		90ABB9A42C74EA52000D9CC7 /* settings */ = {
+			isa = PBXGroup;
+			children = (
+				90ABB9A52C74EA8A000D9CC7 /* SettingsPreference.swift */,
+				90ABB9A72C74EAB1000D9CC7 /* SettingsManager.swift */,
+				90ABB9A22C74E1CE000D9CC7 /* SettingsView.swift */,
+			);
+			path = settings;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		90031FA22C616EE700408370 /* SimpleChatbot */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 90031FC72C616EE900408370 /* Build configuration list for PBXNativeTarget "SimpleChatbot" */;
+			buildPhases = (
+				90031F9F2C616EE700408370 /* Sources */,
+				90031FA02C616EE700408370 /* Frameworks */,
+				90031FA12C616EE700408370 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SimpleChatbot;
+			packageProductDependencies = (
+				90383A902D9C357F00D0DDA3 /* PipecatClientIOSSmallWebrtc */,
+				90383A9A2DA4620800D0DDA3 /* PipecatClientIOSSmallWebrtc */,
+			);
+			productName = SimpleChatbot;
+			productReference = 90031FA32C616EE700408370 /* SimpleChatbot.app */;
+			productType = "com.apple.product-type.application";
+		};
+		90031FB22C616EE900408370 /* SimpleChatbotTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 90031FCA2C616EE900408370 /* Build configuration list for PBXNativeTarget "SimpleChatbotTests" */;
+			buildPhases = (
+				90031FAF2C616EE900408370 /* Sources */,
+				90031FB02C616EE900408370 /* Frameworks */,
+				90031FB12C616EE900408370 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				90031FB52C616EE900408370 /* PBXTargetDependency */,
+			);
+			name = SimpleChatbotTests;
+			productName = SimpleChatbotTests;
+			productReference = 90031FB32C616EE900408370 /* SimpleChatbotTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		90031FBC2C616EE900408370 /* SimpleChatbotUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 90031FCD2C616EE900408370 /* Build configuration list for PBXNativeTarget "SimpleChatbotUITests" */;
+			buildPhases = (
+				90031FB92C616EE900408370 /* Sources */,
+				90031FBA2C616EE900408370 /* Frameworks */,
+				90031FBB2C616EE900408370 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				90031FBF2C616EE900408370 /* PBXTargetDependency */,
+			);
+			name = SimpleChatbotUITests;
+			productName = SimpleChatbotUITests;
+			productReference = 90031FBD2C616EE900408370 /* SimpleChatbotUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		90031F9B2C616EE700408370 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1540;
+				LastUpgradeCheck = 1540;
+				TargetAttributes = {
+					90031FA22C616EE700408370 = {
+						CreatedOnToolsVersion = 15.4;
+					};
+					90031FB22C616EE900408370 = {
+						CreatedOnToolsVersion = 15.4;
+						TestTargetID = 90031FA22C616EE700408370;
+					};
+					90031FBC2C616EE900408370 = {
+						CreatedOnToolsVersion = 15.4;
+						TestTargetID = 90031FA22C616EE700408370;
+					};
+				};
+			};
+			buildConfigurationList = 90031F9E2C616EE700408370 /* Build configuration list for PBXProject "SimpleChatbot" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 90031F9A2C616EE700408370;
+			packageReferences = (
+				90383A992DA4620800D0DDA3 /* XCRemoteSwiftPackageReference "pipecat-client-ios-small-webrtc" */,
+			);
+			productRefGroup = 90031FA42C616EE700408370 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				90031FA22C616EE700408370 /* SimpleChatbot */,
+				90031FB22C616EE900408370 /* SimpleChatbotTests */,
+				90031FBC2C616EE900408370 /* SimpleChatbotUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		90031FA12C616EE700408370 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90031FAE2C616EE800408370 /* Preview Assets.xcassets in Resources */,
+				90031FAB2C616EE800408370 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90031FB12C616EE900408370 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90031FBB2C616EE900408370 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		90031F9F2C616EE700408370 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90ABB99D2C73C2D1000D9CC7 /* CallContainerModel.swift in Sources */,
+				90ABB9A62C74EA8A000D9CC7 /* SettingsPreference.swift in Sources */,
+				90383A962D9C35BD00D0DDA3 /* LiveMessage.swift in Sources */,
+				90ABB99A2C73A6A9000D9CC7 /* MockCallContainerModel.swift in Sources */,
+				90031FA92C616EE700408370 /* PreJoinView.swift in Sources */,
+				90383A982D9D85E700D0DDA3 /* CameraButtonView.swift in Sources */,
+				90383A932D9C35B300D0DDA3 /* ChatView.swift in Sources */,
+				90ABB9982C738356000D9CC7 /* CustomColors.swift in Sources */,
+				90ABB98E2C735ED6000D9CC7 /* MeetingView.swift in Sources */,
+				90ABB9A32C74E1CE000D9CC7 /* SettingsView.swift in Sources */,
+				90ABB9932C73820D000D9CC7 /* MicrophoneView.swift in Sources */,
+				90ABB9A82C74EAB1000D9CC7 /* SettingsManager.swift in Sources */,
+				90031FDC2C6D5DD700408370 /* ToastModifier.swift in Sources */,
+				90031FA72C616EE700408370 /* SimpleChatbotApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90031FAF2C616EE900408370 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90031FB82C616EE900408370 /* SimpleChatbotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90031FB92C616EE900408370 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90031FC42C616EE900408370 /* SimpleChatbotUITestsLaunchTests.swift in Sources */,
+				90031FC22C616EE900408370 /* SimpleChatbotUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		90031FB52C616EE900408370 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 90031FA22C616EE700408370 /* SimpleChatbot */;
+			targetProxy = 90031FB42C616EE900408370 /* PBXContainerItemProxy */;
+		};
+		90031FBF2C616EE900408370 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 90031FA22C616EE700408370 /* SimpleChatbot */;
+			targetProxy = 90031FBE2C616EE900408370 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		90031FC52C616EE900408370 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		90031FC62C616EE900408370 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		90031FC82C616EE900408370 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"SimpleChatbot/Preview Content\"";
+				DEVELOPMENT_TEAM = EEBGKV9N3N;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SimpleChatbot/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.daily.SimpleChatbot;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		90031FC92C616EE900408370 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"SimpleChatbot/Preview Content\"";
+				DEVELOPMENT_TEAM = EEBGKV9N3N;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SimpleChatbot/Info.plist;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.daily.SimpleChatbot;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		90031FCB2C616EE900408370 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = EEBGKV9N3N;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.daily.SimpleChatbotTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SimpleChatbot.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SimpleChatbot";
+			};
+			name = Debug;
+		};
+		90031FCC2C616EE900408370 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = EEBGKV9N3N;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.daily.SimpleChatbotTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SimpleChatbot.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SimpleChatbot";
+			};
+			name = Release;
+		};
+		90031FCE2C616EE900408370 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = EEBGKV9N3N;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.daily.SimpleChatbotUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SimpleChatbot;
+			};
+			name = Debug;
+		};
+		90031FCF2C616EE900408370 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = EEBGKV9N3N;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.daily.SimpleChatbotUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = SimpleChatbot;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		90031F9E2C616EE700408370 /* Build configuration list for PBXProject "SimpleChatbot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				90031FC52C616EE900408370 /* Debug */,
+				90031FC62C616EE900408370 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		90031FC72C616EE900408370 /* Build configuration list for PBXNativeTarget "SimpleChatbot" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				90031FC82C616EE900408370 /* Debug */,
+				90031FC92C616EE900408370 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		90031FCA2C616EE900408370 /* Build configuration list for PBXNativeTarget "SimpleChatbotTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				90031FCB2C616EE900408370 /* Debug */,
+				90031FCC2C616EE900408370 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		90031FCD2C616EE900408370 /* Build configuration list for PBXNativeTarget "SimpleChatbotUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				90031FCE2C616EE900408370 /* Debug */,
+				90031FCF2C616EE900408370 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		90383A992DA4620800D0DDA3 /* XCRemoteSwiftPackageReference "pipecat-client-ios-small-webrtc" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pipecat-ai/pipecat-client-ios-small-webrtc";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.0.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		90383A902D9C357F00D0DDA3 /* PipecatClientIOSSmallWebrtc */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PipecatClientIOSSmallWebrtc;
+		};
+		90383A9A2DA4620800D0DDA3 /* PipecatClientIOSSmallWebrtc */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 90383A992DA4620800D0DDA3 /* XCRemoteSwiftPackageReference "pipecat-client-ios-small-webrtc" */;
+			productName = PipecatClientIOSSmallWebrtc;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 90031F9B2C616EE700408370 /* Project object */;
+}

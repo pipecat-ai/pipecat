@@ -82,6 +82,7 @@ async def run_bot(webrtc_connection):
         vad_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
         vad_audio_passthrough=True,
+        audio_out_10ms_chunks=2,
     )
 
     pipecat_transport = SmallWebRTCTransport(
@@ -92,7 +93,6 @@ async def run_bot(webrtc_connection):
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         transcribe_user_audio=True,
-        transcribe_model_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
     )
 

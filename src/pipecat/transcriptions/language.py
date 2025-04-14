@@ -83,6 +83,10 @@ class Language(StrEnum):
     CA = "ca"
     CA_ES = "ca-ES"
 
+    # Mandarin Chinese
+    CMN = "cmn"
+    CMN_CN = "cmn-CN"
+
     # Czech
     CS = "cs"
     CS_CZ = "cs-CZ"

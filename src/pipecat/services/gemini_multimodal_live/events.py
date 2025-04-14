@@ -8,6 +8,7 @@
 import base64
 import io
 import json
+from enum import Enum
 from typing import List, Literal, Optional
 
 from PIL import Image
@@ -33,6 +34,38 @@ class ContentPart(BaseModel):
 class Turn(BaseModel):
     role: Literal["user", "model"] = "user"
     parts: List[ContentPart]
+
+
+class StartSensitivity(str, Enum):
+    """Determines how start of speech is detected."""
+
+    UNSPECIFIED = "START_SENSITIVITY_UNSPECIFIED"  # Default is HIGH
+    HIGH = "START_SENSITIVITY_HIGH"  # Detect start of speech more often
+    LOW = "START_SENSITIVITY_LOW"  # Detect start of speech less often
+
+
+class EndSensitivity(str, Enum):
+    """Determines how end of speech is detected."""
+
+    UNSPECIFIED = "END_SENSITIVITY_UNSPECIFIED"  # Default is HIGH
+    HIGH = "END_SENSITIVITY_HIGH"  # End speech more often
+    LOW = "END_SENSITIVITY_LOW"  # End speech less often
+
+
+class AutomaticActivityDetection(BaseModel):
+    """Configures automatic detection of activity."""
+
+    disabled: Optional[bool] = None
+    start_of_speech_sensitivity: Optional[StartSensitivity] = None
+    prefix_padding_ms: Optional[int] = None
+    end_of_speech_sensitivity: Optional[EndSensitivity] = None
+    silence_duration_ms: Optional[int] = None
+
+
+class RealtimeInputConfig(BaseModel):
+    """Configures the realtime input behavior."""
+
+    automatic_activity_detection: Optional[AutomaticActivityDetection] = None
 
 
 class RealtimeInput(BaseModel):
@@ -78,11 +111,17 @@ class SystemInstruction(BaseModel):
     parts: List[ContentPart]
 
 
+class AudioTranscriptionConfig(BaseModel):
+    pass
+
+
 class Setup(BaseModel):
     model: str
     system_instruction: Optional[SystemInstruction] = None
     tools: Optional[List[dict]] = None
     generation_config: Optional[dict] = None
+    output_audio_transcription: Optional[AudioTranscriptionConfig] = None
+    realtime_input_config: Optional[RealtimeInputConfig] = None
 
 
 class Config(BaseModel):
@@ -120,10 +159,15 @@ class ServerContentTurnComplete(BaseModel):
     turnComplete: bool
 
 
+class BidiGenerateContentTranscription(BaseModel):
+    text: str
+
+
 class ServerContent(BaseModel):
     modelTurn: Optional[ModelTurn] = None
     interrupted: Optional[bool] = None
     turnComplete: Optional[bool] = None
+    outputTranscription: Optional[BidiGenerateContentTranscription] = None
 
 
 class FunctionCall(BaseModel):

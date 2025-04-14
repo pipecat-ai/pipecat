@@ -158,7 +158,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
 
         msg = {
-            "transcript": text or " ",  # Text must contain at least one character
+            "transcript": text,
             "continue": continue_transcript,
             "context_id": self._context_id,
             "model_id": self.model_name,
@@ -166,6 +166,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "output_format": self._settings["output_format"],
             "language": self._settings["language"],
             "add_timestamps": add_timestamps,
+            "use_original_timestamps": True,
         }
         return json.dumps(msg)
 
@@ -287,7 +288,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 self._context_id = str(uuid.uuid4())
                 await self.create_audio_context(self._context_id)
 
-            msg = self._build_msg(text=text or " ")  # Text must contain at least one character
+            msg = self._build_msg(text=text)
 
             try:
                 await self._get_websocket().send(msg)
