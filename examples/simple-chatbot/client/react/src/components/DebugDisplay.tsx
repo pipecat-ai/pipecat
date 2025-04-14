@@ -1,13 +1,13 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback } from "react";
 import {
   Participant,
   RTVIEvent,
   TransportState,
   TranscriptData,
   BotLLMTextData,
-} from '@pipecat-ai/client-js';
-import { useRTVIClient, useRTVIClientEvent } from '@pipecat-ai/client-react';
-import './DebugDisplay.css';
+} from "@pipecat-ai/client-js";
+import { useRTVIClient, useRTVIClientEvent } from "@pipecat-ai/client-react";
+import "./DebugDisplay.css";
 
 export function DebugDisplay() {
   const debugLogRef = useRef<HTMLDivElement>(null);
@@ -16,14 +16,14 @@ export function DebugDisplay() {
   const log = useCallback((message: string) => {
     if (!debugLogRef.current) return;
 
-    const entry = document.createElement('div');
+    const entry = document.createElement("div");
     entry.textContent = `${new Date().toISOString()} - ${message}`;
 
     // Add styling based on message type
-    if (message.startsWith('User: ')) {
-      entry.style.color = '#2196F3'; // blue for user
-    } else if (message.startsWith('Bot: ')) {
-      entry.style.color = '#4CAF50'; // green for bot
+    if (message.startsWith("User: ")) {
+      entry.style.color = "#2196F3"; // blue for user
+    } else if (message.startsWith("Bot: ")) {
+      entry.style.color = "#4CAF50"; // green for bot
     }
 
     debugLogRef.current.appendChild(entry);
@@ -68,7 +68,7 @@ export function DebugDisplay() {
     useCallback(
       (track: MediaStreamTrack, participant?: Participant) => {
         log(
-          `Track started: ${track.kind} from ${participant?.name || 'unknown'}`
+          `Track started: ${track.kind} from ${participant?.name || "unknown"}`
         );
       },
       [log]
@@ -76,11 +76,11 @@ export function DebugDisplay() {
   );
 
   useRTVIClientEvent(
-    RTVIEvent.TrackedStopped,
+    RTVIEvent.TrackStopped,
     useCallback(
       (track: MediaStreamTrack, participant?: Participant) => {
         log(
-          `Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`
+          `Track stopped: ${track.kind} from ${participant?.name || "unknown"}`
         );
       },
       [log]
