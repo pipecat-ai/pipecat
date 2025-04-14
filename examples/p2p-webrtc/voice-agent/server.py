@@ -24,6 +24,7 @@ pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
 ice_servers = ["stun:stun.l.google.com:19302"]
 
+
 @app.post("/api/offer")
 async def offer(request: dict, background_tasks: BackgroundTasks):
     pc_id = request.get("pc_id")
