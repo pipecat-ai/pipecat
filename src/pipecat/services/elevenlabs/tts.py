@@ -232,7 +232,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
         self._api_key = api_key
         self._url = url
-        self._params = params
         self._settings = {
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -359,7 +358,6 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                 "text": " ",
                 "xi_api_key": self._api_key,
             }
-
             if self._voice_settings:
                 msg["voice_settings"] = self._voice_settings
             await self._websocket.send(json.dumps(msg))
