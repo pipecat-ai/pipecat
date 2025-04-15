@@ -63,7 +63,7 @@ async def main():
 
         llm = OpenAILLMService(
             api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o",
+            model="gpt-4.1",
             metrics=SentryMetrics(),
         )
 

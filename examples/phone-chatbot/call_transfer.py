@@ -305,7 +305,7 @@ async def main(
     tools = ToolsSchema(standard_tools=[terminate_call_function, dial_operator_function])
 
     # Initialize LLM
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
 
     # Register functions with the LLM
     llm.register_function(

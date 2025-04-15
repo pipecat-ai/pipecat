@@ -48,7 +48,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=PlayHTTTSService.InputParams(language=Language.EN),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
 
     messages = [
         {
