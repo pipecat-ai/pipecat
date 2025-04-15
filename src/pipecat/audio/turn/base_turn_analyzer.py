@@ -36,5 +36,9 @@ class BaseEndOfTurnAnalyzer(ABC):
         self._chunk_size_ms = chunk_size_ms
 
     @abstractmethod
-    def analyze_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
+    def append_audio(self, buffer: bytes, is_speech: bool):
+        pass
+
+    @abstractmethod
+    def analyze_end_of_turn(self) -> EndOfTurnState:
         pass

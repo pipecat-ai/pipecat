@@ -28,7 +28,7 @@ except ModuleNotFoundError as e:
 # TODO: we should convert all this to params
 STOP_MS = 1000
 PRE_SPEECH_MS = 200
-MAX_DURATION_SECONDS = 16  # Maximum duration for the smart turn model
+MAX_DURATION_SECONDS = 8  # Maximum duration for the smart turn model
 
 
 class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
@@ -68,11 +68,8 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
         self._silence_frames = 0
         self._speech_start_time = None
 
-    def analyze_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
-        state = EndOfTurnState.INCOMPLETE
-
+    def append_audio(self, buffer: bytes, is_speech: bool):
         audio_int16 = np.frombuffer(buffer, dtype=np.int16)
-
         # Divide by 32768 because we have signed 16-bit data.
         audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -87,18 +84,6 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
             if self._speech_triggered:
                 self._audio_buffer.append((time.time(), audio_float32))
                 self._silence_frames += 1
-                if self._silence_frames * self._chunk_size_ms >= STOP_MS:
-                    self._speech_triggered = False
-
-                    # TODO: do we need to stop or do something to prevent ??
-
-                    state = self._process_speech_segment(
-                        self._audio_buffer, self._speech_start_time
-                    )
-                    self._audio_buffer = []
-                    self._speech_start_time = None
-
-                    # TODO: same here for restart
             else:
                 # Keep buffering some silence before potential speech starts
                 self._audio_buffer.append((time.time(), audio_float32))
@@ -111,16 +96,30 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
                 ):
                     self._audio_buffer.pop(0)
 
+    def analyze_end_of_turn(self) -> EndOfTurnState:
+        logger.debug("Analyzing End of Turn...")
+        if self._silence_frames * self._chunk_size_ms >= STOP_MS:
+            logger.debug("End of Turn complete due to STOP_MS.")
+            state = EndOfTurnState.COMPLETE
+        else:
+            state = self._process_speech_segment(self._audio_buffer)
+
+        if state == EndOfTurnState.COMPLETE:
+            self._speech_triggered = False
+            self._audio_buffer = []
+            self._speech_start_time = None
+
+        logger.debug(f"End of Turn result: {state}")
         return state
 
-    def _process_speech_segment(self, audio_buffer, speech_start_time) -> EndOfTurnState:
+    def _process_speech_segment(self, audio_buffer) -> EndOfTurnState:
         state = EndOfTurnState.INCOMPLETE
 
         if not audio_buffer:
             return state
 
         # Find start and end indices for the segment
-        start_time = speech_start_time - (PRE_SPEECH_MS / 1000)
+        start_time = self._speech_start_time - (PRE_SPEECH_MS / 1000)
         start_index = 0
         for i, (t, _) in enumerate(audio_buffer):
             if t >= start_time:
