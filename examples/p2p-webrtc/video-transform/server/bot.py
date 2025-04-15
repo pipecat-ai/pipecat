@@ -135,12 +135,12 @@ async def run_bot(webrtc_connection):
     async def on_client_ready(rtvi):
         logger.info("Pipecat client ready.")
         await rtvi.set_bot_ready()
+        # Kick off the conversation.
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @pipecat_transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Pipecat Client connected")
-        # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
