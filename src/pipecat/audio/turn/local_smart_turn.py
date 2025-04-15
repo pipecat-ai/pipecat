@@ -75,8 +75,7 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
 
         state = EndOfTurnState.INCOMPLETE
         if is_speech:
-            if not self._speech_triggered:
-                self._silence_frames = 0
+            self._silence_frames = 0
             self._speech_triggered = True
             if self._speech_start_time is None:
                 self._speech_start_time = time.time()
@@ -116,6 +115,7 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
         self._speech_triggered = False
         self._audio_buffer = []
         self._speech_start_time = None
+        self._silence_frames = 0
 
     def _process_speech_segment(self, audio_buffer) -> EndOfTurnState:
         state = EndOfTurnState.INCOMPLETE
