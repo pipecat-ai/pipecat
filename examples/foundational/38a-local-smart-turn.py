@@ -11,6 +11,7 @@ from loguru import logger
 
 from pipecat.audio.turn.local_smart_turn import LocalSmartTurnAnalyzer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -34,7 +35,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             audio_in_enabled=True,
             audio_out_enabled=True,
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             vad_audio_passthrough=True,
             end_of_turn_analyzer=LocalSmartTurnAnalyzer(),
         ),

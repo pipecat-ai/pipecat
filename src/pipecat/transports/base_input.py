@@ -217,26 +217,15 @@ class BaseInputTransport(FrameProcessor):
             vad_state = new_vad_state
         return vad_state
 
-    async def _end_of_turn_analyze(
-        self, audio_frame: InputAudioRawFrame, is_speech: bool
-    ) -> EndOfTurnState:
-        state = EndOfTurnState.INCOMPLETE
+    async def _handle_end_of_turn(self, end_of_turn_state: EndOfTurnState):
+        state = end_of_turn_state
         if self.end_of_turn_analyzer:
-            state = await self.get_event_loop().run_in_executor(
-                self._executor,
-                self.end_of_turn_analyzer.analyze_audio,
-                audio_frame.audio,
-                is_speech,
+            new_state = await self.get_event_loop().run_in_executor(
+                self._executor, self.end_of_turn_analyzer.analyze_end_of_turn
             )
+            if new_state != state and new_state == EndOfTurnState.COMPLETE:
+                await self._handle_user_interruption(UserEndOfTurnFrame())
         return state
-
-    async def _handle_end_of_turn(
-        self, audio_frame: InputAudioRawFrame, end_of_turn_state: EndOfTurnState, is_speech: bool
-    ):
-        new_eot_state = await self._end_of_turn_analyze(audio_frame, is_speech)
-        if new_eot_state != end_of_turn_state:
-            await self._handle_user_interruption(UserEndOfTurnFrame())
-        return new_eot_state
 
     async def _audio_task_handler(self):
         vad_state: VADState = VADState.QUIET
@@ -252,15 +241,16 @@ class BaseInputTransport(FrameProcessor):
 
             # Check VAD and push event if necessary. We just care about
             # changes from QUIET to SPEAKING and vice versa.
+            previous_vad_state = vad_state
             if self._params.vad_enabled:
                 vad_state = await self._handle_vad(frame, vad_state)
                 audio_passthrough = self._params.vad_audio_passthrough
 
             if self._params.end_of_turn_analyzer:
                 is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
-                end_of_turn_state = await self._handle_end_of_turn(
-                    frame, end_of_turn_state, is_speech
-                )
+                self._params.end_of_turn_analyzer.append_audio(frame.audio, is_speech)
+                if vad_state == VADState.QUIET and vad_state != previous_vad_state:
+                    end_of_turn_state = await self._handle_end_of_turn(end_of_turn_state)
 
             # Push audio downstream if passthrough.
             if audio_passthrough:
