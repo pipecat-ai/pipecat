@@ -172,9 +172,16 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             logger.debug("User stopped speaking")
             await self.push_frame(frame)
+
+            # TODO check, we probably should change here as well.
+            # if the end of turn is enabled, we should only stop interruption after this point
             if self.interruptions_allowed:
                 await self._stop_interruption()
                 await self.push_frame(StopInterruptionFrame())
+        elif isinstance(frame, UserEndOfTurnFrame):
+            logger.debug("User end of turn")
+            await self.push_frame(frame)
+            # TODO: implement to handle interruptions
 
     #
     # Audio input
@@ -220,7 +227,7 @@ class BaseInputTransport(FrameProcessor):
     ):
         new_eot_state = await self._end_of_turn_analyze(audio_frame)
         if new_eot_state != end_of_turn_state:
-            await self.push_frame(UserEndOfTurnFrame())
+            await self._handle_user_interruption(UserEndOfTurnFrame())
         return new_eot_state
 
     async def _audio_task_handler(self):
@@ -239,9 +246,13 @@ class BaseInputTransport(FrameProcessor):
             # changes from QUIET to SPEAKING and vice versa.
             if self._params.vad_enabled:
                 vad_state = await self._handle_vad(frame, vad_state)
+                # TODO: need to check if we need to keep it later
+                if vad_state == VADState.QUIET:
+                    end_of_turn_state = EndOfTurnState.INCOMPLETE
                 audio_passthrough = self._params.vad_audio_passthrough
 
-            if self._params.end_of_turn_analyzer:
+            # We only need to check for completion if the user is speaking
+            if self._params.end_of_turn_analyzer and VADState.QUIET != vad_state:
                 end_of_turn_state = await self._handle_end_of_turn(frame, end_of_turn_state)
 
             # Push audio downstream if passthrough.
