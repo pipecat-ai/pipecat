@@ -25,7 +25,7 @@ class OpenPipeLLMService(OpenAILLMService):
     def __init__(
         self,
         *,
-        model: str = "gpt-4o",
+        model: str = "gpt-4.1",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         openpipe_api_key: Optional[str] = None,

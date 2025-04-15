@@ -38,7 +38,7 @@ class OpenAILLMService(BaseOpenAILLMService):
     def __init__(
         self,
         *,
-        model: str = "gpt-4o",
+        model: str = "gpt-4.1",
         params: BaseOpenAILLMService.InputParams = BaseOpenAILLMService.InputParams(),
         **kwargs,
     ):
