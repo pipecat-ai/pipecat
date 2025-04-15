@@ -191,6 +191,12 @@ pip install "path_to_this_repo[option,...]"
 
 ### Running tests
 
+Install the test dependencies:
+
+```shell
+pip install -r test-requirements.txt
+```
+
 From the root directory, run:
 
 ```shell
