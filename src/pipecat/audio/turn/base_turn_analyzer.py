@@ -19,6 +19,7 @@ class BaseEndOfTurnAnalyzer(ABC):
     def __init__(self, *, sample_rate: Optional[int] = None):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
+        self._chunk_size_ms = 0
 
     @property
     def sample_rate(self) -> int:
@@ -27,6 +28,13 @@ class BaseEndOfTurnAnalyzer(ABC):
     def set_sample_rate(self, sample_rate: int):
         self._sample_rate = self._init_sample_rate or sample_rate
 
+    @property
+    def chunk_size_ms(self) -> int:
+        return self._chunk_size_ms
+
+    def set_chunk_size_ms(self, chunk_size_ms: int):
+        self._chunk_size_ms = chunk_size_ms
+
     @abstractmethod
-    def analyze_audio(self, buffer: bytes) -> EndOfTurnState:
+    def analyze_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         pass

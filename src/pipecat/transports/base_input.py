@@ -79,6 +79,9 @@ class BaseInputTransport(FrameProcessor):
         # Configure End of turn analyzer.
         if self._params.end_of_turn_analyzer:
             self._params.end_of_turn_analyzer.set_sample_rate(self._sample_rate)
+            self._params.end_of_turn_analyzer.set_chunk_size_ms(
+                self._params.audio_out_10ms_chunks * 10
+            )
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
@@ -214,18 +217,23 @@ class BaseInputTransport(FrameProcessor):
             vad_state = new_vad_state
         return vad_state
 
-    async def _end_of_turn_analyze(self, audio_frame: InputAudioRawFrame) -> EndOfTurnState:
+    async def _end_of_turn_analyze(
+        self, audio_frame: InputAudioRawFrame, is_speech: bool
+    ) -> EndOfTurnState:
         state = EndOfTurnState.INCOMPLETE
         if self.end_of_turn_analyzer:
             state = await self.get_event_loop().run_in_executor(
-                self._executor, self.end_of_turn_analyzer.analyze_audio, audio_frame.audio
+                self._executor,
+                self.end_of_turn_analyzer.analyze_audio,
+                audio_frame.audio,
+                is_speech,
             )
         return state
 
     async def _handle_end_of_turn(
-        self, audio_frame: InputAudioRawFrame, end_of_turn_state: EndOfTurnState
+        self, audio_frame: InputAudioRawFrame, end_of_turn_state: EndOfTurnState, is_speech: bool
     ):
-        new_eot_state = await self._end_of_turn_analyze(audio_frame)
+        new_eot_state = await self._end_of_turn_analyze(audio_frame, is_speech)
         if new_eot_state != end_of_turn_state:
             await self._handle_user_interruption(UserEndOfTurnFrame())
         return new_eot_state
@@ -246,14 +254,13 @@ class BaseInputTransport(FrameProcessor):
             # changes from QUIET to SPEAKING and vice versa.
             if self._params.vad_enabled:
                 vad_state = await self._handle_vad(frame, vad_state)
-                # TODO: need to check if we need to keep it later
-                if vad_state == VADState.QUIET:
-                    end_of_turn_state = EndOfTurnState.INCOMPLETE
                 audio_passthrough = self._params.vad_audio_passthrough
 
-            # We only need to check for completion if the user is speaking
-            if self._params.end_of_turn_analyzer and VADState.QUIET != vad_state:
-                end_of_turn_state = await self._handle_end_of_turn(frame, end_of_turn_state)
+            if self._params.end_of_turn_analyzer:
+                is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
+                end_of_turn_state = await self._handle_end_of_turn(
+                    frame, end_of_turn_state, is_speech
+                )
 
             # Push audio downstream if passthrough.
             if audio_passthrough:
