@@ -56,7 +56,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     # statement. This doesn't really need to be an LLM, we could use NLP
     # libraries for that, but it was easier as an example because we
     # leverage the context aggregators.
-    statement_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    statement_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
 
     statement_messages = [
         {
@@ -69,7 +69,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     statement_context_aggregator = statement_llm.create_context_aggregator(statement_context)
 
     # This is the regular LLM.
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
 
     messages = [
         {

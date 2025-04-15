@@ -436,7 +436,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     # This is the regular LLM.
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o",
+        model="gpt-4.1",
     )
     # Register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.

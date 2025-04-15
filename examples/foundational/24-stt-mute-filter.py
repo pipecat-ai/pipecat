@@ -64,7 +64,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
     tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
     weather_function = FunctionSchema(

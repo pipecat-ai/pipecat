@@ -42,7 +42,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
     tts = LmntTTSService(api_key=os.getenv("LMNT_API_KEY"), voice_id="morgan")
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
 
     messages = [
         {

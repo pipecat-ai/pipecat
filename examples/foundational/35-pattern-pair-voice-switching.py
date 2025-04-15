@@ -120,7 +120,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     )
 
     # Initialize LLM
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
 
     # System prompt for storytelling with voice switching
     system_prompt = """You are an engaging storyteller that uses different voices to bring stories to life.

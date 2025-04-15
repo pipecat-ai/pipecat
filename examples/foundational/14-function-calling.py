@@ -53,7 +53,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
 
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
