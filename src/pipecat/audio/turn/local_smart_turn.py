@@ -68,11 +68,12 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
         self._silence_frames = 0
         self._speech_start_time = None
 
-    def append_audio(self, buffer: bytes, is_speech: bool):
+    def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         audio_int16 = np.frombuffer(buffer, dtype=np.int16)
         # Divide by 32768 because we have signed 16-bit data.
         audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
 
+        state = EndOfTurnState.INCOMPLETE
         if is_speech:
             if not self._speech_triggered:
                 self._silence_frames = 0
@@ -84,6 +85,10 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
             if self._speech_triggered:
                 self._audio_buffer.append((time.time(), audio_float32))
                 self._silence_frames += 1
+                if self._silence_frames * self._chunk_size_ms >= STOP_MS:
+                    logger.debug("End of Turn complete due to STOP_MS.")
+                    state = EndOfTurnState.COMPLETE
+                    self._clear()
             else:
                 # Keep buffering some silence before potential speech starts
                 self._audio_buffer.append((time.time(), audio_float32))
@@ -96,21 +101,21 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
                 ):
                     self._audio_buffer.pop(0)
 
+        return state
+
     def analyze_end_of_turn(self) -> EndOfTurnState:
         logger.debug("Analyzing End of Turn...")
-        if self._silence_frames * self._chunk_size_ms >= STOP_MS:
-            logger.debug("End of Turn complete due to STOP_MS.")
-            state = EndOfTurnState.COMPLETE
-        else:
-            state = self._process_speech_segment(self._audio_buffer)
-
+        state = self._process_speech_segment(self._audio_buffer)
         if state == EndOfTurnState.COMPLETE:
-            self._speech_triggered = False
-            self._audio_buffer = []
-            self._speech_start_time = None
+            self._clear()
 
         logger.debug(f"End of Turn result: {state}")
         return state
+
+    def _clear(self):
+        self._speech_triggered = False
+        self._audio_buffer = []
+        self._speech_start_time = None
 
     def _process_speech_segment(self, audio_buffer) -> EndOfTurnState:
         state = EndOfTurnState.INCOMPLETE
