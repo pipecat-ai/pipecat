@@ -93,3 +93,6 @@ OPENROUTER_API_KEY=...
 
 # Piper
 PIPER_BASE_URL=...
+
+# Local Smart turn
+LOCAL_SMART_TURN_MODEL_PATH=
