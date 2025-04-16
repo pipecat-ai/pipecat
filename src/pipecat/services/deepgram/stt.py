@@ -45,6 +45,7 @@ class DeepgramSTTService(STTService):
         *,
         api_key: str,
         url: str = "",
+        base_url: str = "",
         sample_rate: Optional[int] = None,
         live_options: Optional[LiveOptions] = None,
         addons: Optional[Dict] = None,
@@ -52,6 +53,17 @@ class DeepgramSTTService(STTService):
     ):
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        if url:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'url' is deprecated, use 'base_url' instead.",
+                    DeprecationWarning,
+                )
+            base_url = url
 
         default_options = LiveOptions(
             encoding="linear16",
@@ -81,7 +93,7 @@ class DeepgramSTTService(STTService):
         self._client = DeepgramClient(
             api_key,
             config=DeepgramClientOptions(
-                url=url,
+                url=base_url,
                 options={"keepalive": "true"},  # verbose=logging.DEBUG
             ),
         )
