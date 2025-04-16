@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `TavusVideoService` issue that was causing audio choppiness.
+
 - Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
   client did not create a video transceiver.
 
