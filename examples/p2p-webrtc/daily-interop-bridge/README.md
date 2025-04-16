@@ -6,11 +6,6 @@ A Pipecat example demonstrating how to interoperate audio and video between `Sma
 
 ### 1️⃣ Start the Bot Server
 
-#### 📂 Navigate to the Server Directory
-```bash
-cd server
-```
-
 #### 🔧 Set Up the Environment
 1. Create and activate a virtual environment:
    ```bash
@@ -35,9 +30,12 @@ cd server
 python server.py
 ```
 
-### 2️⃣ Connect Using SmallWebRTC Prebuilt UI
+###  1️⃣ Connect the first client using Daily Prebuilt
 
-You can quickly test your bot using the `SmallWebRTCPrebuiltUI`:
+- Open your browser and navigate to the same URL that you configured inside your `.env` file:
+  - `DAILY_SAMPLE_ROOM_URL`
+
+### 2️⃣ Connect the second client using SmallWebRTC Prebuilt UI
 
 - Open your browser and navigate to:
 👉 http://localhost:7860
