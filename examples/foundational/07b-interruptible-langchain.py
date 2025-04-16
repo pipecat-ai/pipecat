@@ -74,7 +74,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             ("human", "{input}"),
         ]
     )
-    chain = prompt | ChatOpenAI(model="gpt-4o", temperature=0.7)
+    chain = prompt | ChatOpenAI(model="gpt-4.1", temperature=0.7)
     history_chain = RunnableWithMessageHistory(
         chain,
         get_session_history,
