@@ -40,7 +40,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
-    logger.info(f"Starting bot")    
+    logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
@@ -60,7 +60,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest")
+    llm = AnthropicLLMService(
+        api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
+    )
     # llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
     # llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
     # llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile")
@@ -78,7 +80,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             Just respond with short sentences when you are carrying out tool calls.
             """
 
-    messages = [{"role": "system","content": system}]
+    messages = [{"role": "system", "content": system}]
 
     context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
