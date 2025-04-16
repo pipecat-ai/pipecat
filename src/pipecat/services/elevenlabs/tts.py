@@ -12,6 +12,7 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, model_validator
+from sentry_sdk import push_scope
 
 from pipecat.frames.frames import (
     CancelFrame,
