@@ -24,18 +24,32 @@
         let connected = false
         let peerConnection = null
 
-        const waitForIceGatheringComplete = async (pc) => {
+        const waitForIceGatheringComplete = async (pc, timeoutMs = 5000) => {
             if (pc.iceGatheringState === 'complete') return;
+            console.log("Waiting for ICE gathering to complete...");
             return new Promise((resolve) => {
+                let timeoutId;
                 const checkState = () => {
+                    console.log("icegatheringstatechange:", pc.iceGatheringState);
                     if (pc.iceGatheringState === 'complete') {
-                        pc.removeEventListener('icegatheringstatechange', checkState);
+                        cleanup();
                         resolve();
                     }
                 };
+                const onTimeout = () => {
+                    console.warn(`ICE gathering timed out after ${timeoutMs} ms.`);
+                    cleanup();
+                    resolve();
+                };
+                const cleanup = () => {
+                    pc.removeEventListener('icegatheringstatechange', checkState);
+                    clearTimeout(timeoutId);
+                };
                 pc.addEventListener('icegatheringstatechange', checkState);
+                timeoutId = setTimeout(onTimeout, timeoutMs);
             });
-        }
+        };
+
 
         const createSmallWebRTCConnection = async (audioTrack) => {
             const config = {
@@ -60,9 +74,14 @@
         }
 
         const connect = async () => {
+            _onConnecting()
             const audioStream = await navigator.mediaDevices.getUserMedia({audio: true})
             peerConnection= await createSmallWebRTCConnection(audioStream.getAudioTracks()[0])
+            peerConnection.oniceconnectionstatechange = () => {
+                console.log("oniceconnectionstatechange", peerConnection?.iceConnectionState)
+            }
             peerConnection.onconnectionstatechange = () => {
+                console.log("onconnectionstatechange", peerConnection?.connectionState)
                 let connectionState = peerConnection?.connectionState
                 if (connectionState === 'connected') {
                     _onConnected()
@@ -70,6 +89,12 @@
                     _onDisconnected()
                 }
             }
+        }
+
+        const _onConnecting = () => {
+            statusEl.textContent = "Connecting"
+            buttonEl.textContent = "Disconnect"
+            connected = true
         }
 
         const _onConnected = () => {
