@@ -50,7 +50,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     llm = OpenPipeLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         openpipe_api_key=os.getenv("OPENPIPE_API_KEY"),
-        model="gpt-4.1",
         tags={"conversation_id": f"pipecat-{timestamp}"},
     )
 

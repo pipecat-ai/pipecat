@@ -54,7 +54,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         llm = OpenAILLMService(
             # To use OpenAI
             # api_key=os.getenv("OPENAI_API_KEY"),
-            # model="gpt-4.1"
             # Or, to use a local vLLM (or similar) api server
             model="meta-llama/Meta-Llama-3-8B-Instruct",
             base_url="http://0.0.0.0:8000/v1",
