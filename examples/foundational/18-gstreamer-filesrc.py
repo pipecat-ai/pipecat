@@ -5,67 +5,71 @@
 #
 
 import argparse
-import asyncio
-import sys
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure_with_args
 
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.gstreamer.pipeline_source import GStreamerPipelineSource
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
+
+# Parse command line arguments
+# This will be used to pass the input video file to the bot
+# You can run the bot with a command like:
+# python 18-gstreamer-filesrc.py -i path/to/video.mp4
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
+    parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
+    return parser.parse_args()
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
-        parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
+args = parse_arguments()
 
-        (room_url, _, args) = await configure_with_args(session, parser)
 
-        transport = DailyTransport(
-            room_url,
-            None,
-            "GStreamer",
-            DailyParams(
-                audio_out_enabled=True,
-                camera_out_enabled=True,
-                camera_out_width=1280,
-                camera_out_height=720,
-                camera_out_is_live=True,
-            ),
-        )
+async def run_bot(webrtc_connection: SmallWebRTCConnection):
+    logger.info(f"Starting bot with video input: {args.input}")
 
-        gst = GStreamerPipelineSource(
-            pipeline=f"filesrc location={args.input}",
-            out_params=GStreamerPipelineSource.OutputParams(
-                video_width=1280,
-                video_height=720,
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            camera_out_enabled=True,
+            camera_out_is_live=True,
+            camera_out_width=1280,
+            camera_out_height=720,
+        ),
+    )
 
-        pipeline = Pipeline(
-            [
-                gst,  # GStreamer file source
-                transport.output(),  # Transport bot output
-            ]
-        )
+    gst = GStreamerPipelineSource(
+        pipeline=f"filesrc location={args.input}",
+        out_params=GStreamerPipelineSource.OutputParams(
+            video_width=1280,
+            video_height=720,
+        ),
+    )
 
-        task = PipelineTask(pipeline)
+    pipeline = Pipeline(
+        [
+            gst,  # GStreamer file source
+            transport.output(),  # Transport bot output
+        ]
+    )
 
-        runner = PipelineRunner()
+    task = PipelineTask(pipeline)
 
-        await runner.run(task)
+    runner = PipelineRunner(handle_sigint=False)
+
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

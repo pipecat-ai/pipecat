@@ -45,8 +45,10 @@ Transport & Serialization
 Utilities
 ~~~~~~~~~
 
+* :mod:`Adapters <pipecat.adapters>`
 * :mod:`Clocks <pipecat.clocks>`
 * :mod:`Metrics <pipecat.metrics>`
+* :mod:`Observers <pipecat.observers>`
 * :mod:`Sync <pipecat.sync>`
 * :mod:`Transcriptions <pipecat.transcriptions>`
 * :mod:`Utils <pipecat.utils>`
@@ -56,10 +58,12 @@ Utilities
    :caption: API Reference
    :hidden:
 
+   Adapters <api/pipecat.adapters>
    Audio <api/pipecat.audio>
    Clocks <api/pipecat.clocks>
    Frames <api/pipecat.frames>
    Metrics <api/pipecat.metrics>
+   Observers <api/pipecat.observers>
    Pipeline <api/pipecat.pipeline>
    Processors <api/pipecat.processors>
    Serializers <api/pipecat.serializers>

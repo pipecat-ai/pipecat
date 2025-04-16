@@ -13,10 +13,14 @@ from dotenv import load_dotenv
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.services.ai_services import LLMService
-from pipecat.services.anthropic import AnthropicLLMService
-from pipecat.services.google import GoogleLLMService
-from pipecat.services.openai import OpenAILLMContext, OpenAILLMContextFrame, OpenAILLMService
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
+from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import LLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.tests.utils import run_test
 
 load_dotenv(override=True)
