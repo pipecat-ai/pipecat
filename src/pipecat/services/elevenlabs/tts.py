@@ -12,13 +12,13 @@ from typing import Any, AsyncGenerator, Dict, List, Literal, Mapping, Optional, 
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, model_validator
-from sentry_sdk import push_scope
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -509,6 +509,9 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self._cumulative_time = 0
         self._started = False
 
+        # Store previous text for context within a turn
+        self._previous_text = ""
+
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language to ElevenLabs language code."""
         return language_to_elevenlabs_language(language)
@@ -526,6 +529,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         self._output_format = output_format_from_sample_rate(self.sample_rate)
         self._cumulative_time = 0
         self._started = False
+        self._previous_text = ""
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
@@ -533,8 +537,14 @@ class ElevenLabsHttpTTSService(WordTTSService):
             # Reset timing on interruption or stop
             self._started = False
             self._cumulative_time = 0
+            self._previous_text = ""
+
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
+
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            # End of turn - reset previous text
+            self._previous_text = ""
 
     def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> List[Tuple[str, float]]:
         """Calculate word timing from character alignment data.
@@ -598,6 +608,10 @@ class ElevenLabsHttpTTSService(WordTTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs streaming API with timestamps.
 
+        Makes a request to the ElevenLabs API to generate audio and timing data.
+        Tracks the duration of each utterance to ensure correct sequencing.
+        Includes previous text as context for better prosody continuity.
+
         Args:
             text: Text to convert to speech
 
@@ -613,6 +627,11 @@ class ElevenLabsHttpTTSService(WordTTSService):
             "text": text,
             "model_id": self._model_name,
         }
+
+        # Include previous text as context if available
+        if self._previous_text:
+            payload["previous_text"] = self._previous_text
+            print(f"Previous text: {self._previous_text}")
 
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
@@ -701,6 +720,13 @@ class ElevenLabsHttpTTSService(WordTTSService):
                 # to the cumulative time to ensure next utterance starts after this one
                 if utterance_duration > 0:
                     self._cumulative_time += utterance_duration
+
+                # Append the current text to previous_text for context continuity
+                # Only add a space if there's already text
+                if self._previous_text:
+                    self._previous_text += " " + text
+                else:
+                    self._previous_text = text
 
         except Exception as e:
             logger.error(f"Error in run_tts: {e}")

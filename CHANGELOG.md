@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   you to control aggregator settings. You can now pass these arguments when
   creating aggregator pairs with `create_context_aggregator()`.
 
+- Added `previous_text` context support to ElevenLabsHttpTTSService, improving
+  speech consistency across sentences within an LLM response.
+
 - Added word/timestamp pairs to `ElevenLabsHttpTTSService`.
 
 - It is now possible to disable `SoundfileMixer` when created. You can then use
