@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Daily's REST helpers now include an `eject_at_token_exp` param, which ejects
+  the user when their token expires. This new parameter defaults to False.
+  Also, the default value for `enable_prejoin_ui` changed to False and
+  `eject_at_room_exp` changed to False.
+
 - `OpenAILLMService` and `OpenPipeLLMService` now use `gpt-4.1` as their
   default model.
 
