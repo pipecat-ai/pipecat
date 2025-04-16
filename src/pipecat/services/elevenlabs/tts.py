@@ -550,7 +550,7 @@ class ElevenLabsHttpTTSService(TTSService):
         if self._settings["optimize_streaming_latency"] is not None:
             params["optimize_streaming_latency"] = self._settings["optimize_streaming_latency"]
 
-        logger.debug(f"ElevenLabs request - payload: {payload}, params: {params}")
+        logger.debug(f"{self} ElevenLabs request - payload: {payload}, params: {params}")
 
         try:
             await self.start_ttfb_metrics()
