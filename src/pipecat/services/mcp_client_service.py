@@ -7,8 +7,8 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 try:
-    from mcp.client.sse import sse_client
     from mcp.client.session import ClientSession
+    from mcp.client.sse import sse_client
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use mcp, you need to `pip install pipecat-ai[mcp]`.")

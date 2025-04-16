@@ -1,14 +1,10 @@
 import os
-import json
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from pipecat.services.llm_service import LLMService
-
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-
 from pipecat.services.mcp_client_service import MCPClient
 
 ## not needed with SSE, but we might expose other ways to connect in future

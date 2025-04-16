@@ -19,11 +19,11 @@ from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_run.mcp_run_client import MCPRunClient
-# from pipecat.services.google.llm import GoogleLLMService
-# from pipecat.services.openai.llm import OpenAILLMService
-# from pipecat.services.groq.llm import GroqLLMService
-# from pipecat.services.grok.llm import GrokLLMService
 
+# from pipecat.services.google.llm import GoogleLLMService
+# from pipecat.services.grok.llm import GrokLLMService
+# from pipecat.services.groq.llm import GroqLLMService
+# from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -59,9 +59,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
     )
     # llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
-    # llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-    # llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile")
     # llm = GrokLLMService(api_key=os.getenv("GROK_API_KEY"))
+    # llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile")
+    # llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
 
     # https://docs.mcp.run/integrating/tutorials/mcp-run-sse-openai-agents/
     mcp = MCPRunClient(sse_server_url="https://www.mcp.run/api/mcp/sse?...")

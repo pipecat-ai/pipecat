@@ -71,6 +71,9 @@ class LLMService(AIService):
             if entry.cancel_on_interruption:
                 await self._cancel_function_call(function_name)
 
+    async def register_mcp_tools(self, mcp_client):
+        return await mcp_client.register_mcp_tools(self)
+
     def register_function(
         self,
         function_name: Optional[str],
@@ -255,6 +258,3 @@ class LLMService(AIService):
             # do this because otherwise the task manager would report a dangling
             # task if we don't remove it.
             asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
-
-    async def register_mcp_tools(self, mcp_client):
-        return await mcp_client.register_mcp_tools(self)

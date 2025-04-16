@@ -4,18 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import os
 import json
-from typing import Any, Dict, List, Mapping, Optional, Union
+import os
+from typing import Any, Dict, Optional
 
 from loguru import logger
-
-from pipecat.services.llm_service import LLMService
+from mcp_run import Client
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-
-from mcp_run import Client
+from pipecat.services.llm_service import LLMService
 
 
 class MCPRun(Client):
@@ -30,7 +28,7 @@ class MCPRun(Client):
         self._mcp_run_session_id = mcp_run_session_id or os.getenv("MCP_RUN_SESSION_ID")
 
     def convert_mcp_schema_to_pipecat(
-        self, tool_name: str, tool_schema: dict[str, any]
+        self, tool_name: str, tool_schema: Dict[str, Any]
     ) -> FunctionSchema:
         """Convert an mcp.run tool schema to Pipecat's FunctionSchema format.
         Args:
@@ -54,11 +52,11 @@ class MCPRun(Client):
             required=required,
         )
 
-        logger.debug(f"Converted schema: {json.dumps(schema.to_default_dict(), indent=2)}")
+        logger.debug(f"Converted schema: {json.dumps(schema.to_default_Dict(), indent=2)}")
 
         return schema
 
-    def register_mcp_tools(self, llm) -> ToolsSchema:
+    def register_mcp_tools(self, llm: LLMService) -> ToolsSchema:
         """Register all available mcp.run tools with the LLM service.
         Args:
             llm: The Pipecat LLM service to register tools with
@@ -69,10 +67,10 @@ class MCPRun(Client):
         async def mcp_tool_wrapper(
             function_name: str,
             tool_call_id: str,
-            arguments: dict[str, any],
-            llm: any,
-            context: any,
-            result_callback: any,
+            arguments: Dict[str, Any],
+            llm: LLMService,
+            context: Any,
+            result_callback: Any,
         ) -> None:
             """Wrapper for mcp.run tool calls to match Pipecat's function call interface."""
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
