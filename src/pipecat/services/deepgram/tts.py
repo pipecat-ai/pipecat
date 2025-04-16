@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -60,8 +59,8 @@ class DeepgramTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            response = await asyncio.to_thread(
-                self._deepgram_client.speak.v("1").stream, {"text": text}, options
+            response = await self._deepgram_client.speak.asyncrest.v("1").stream_memory(
+                {"text": text}, options
             )
 
             await self.start_tts_usage_metrics(text)
