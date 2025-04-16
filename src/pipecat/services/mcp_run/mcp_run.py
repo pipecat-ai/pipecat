@@ -17,18 +17,21 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 from mcp_run import Client
 
+
 class MCPRun(Client):
     def __init__(
-            self,
-            llm: LLMService,
-            mcp_run_session_id: Optional[str] = None,
-            **kwargs,
-        ):
-            super().__init__(**kwargs)
-            self._client = Client()
-            self._mcp_run_session_id = mcp_run_session_id or os.getenv("MCP_RUN_SESSION_ID")
+        self,
+        llm: LLMService,
+        mcp_run_session_id: Optional[str] = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._client = Client()
+        self._mcp_run_session_id = mcp_run_session_id or os.getenv("MCP_RUN_SESSION_ID")
 
-    def convert_mcp_schema_to_pipecat(self, tool_name: str, tool_schema: dict[str, any]) -> FunctionSchema:
+    def convert_mcp_schema_to_pipecat(
+        self, tool_name: str, tool_schema: dict[str, any]
+    ) -> FunctionSchema:
         """Convert an mcp.run tool schema to Pipecat's FunctionSchema format.
         Args:
             tool_name: The name of the tool
@@ -48,7 +51,7 @@ class MCPRun(Client):
             name=tool_name,
             description=tool_schema["description"],
             properties=properties,
-            required=required
+            required=required,
         )
 
         logger.debug(f"Converted schema: {json.dumps(schema.to_default_dict(), indent=2)}")
@@ -63,10 +66,15 @@ class MCPRun(Client):
             A ToolsSchema containing all registered tools
         """
 
-        async def mcp_tool_wrapper(function_name: str, tool_call_id: str, arguments: dict[str, any],
-                                 llm: any, context: any, result_callback: any) -> None:
-            """Wrapper for mcp.run tool calls to match Pipecat's function call interface.
-            """
+        async def mcp_tool_wrapper(
+            function_name: str,
+            tool_call_id: str,
+            arguments: dict[str, any],
+            llm: any,
+            context: any,
+            result_callback: any,
+        ) -> None:
+            """Wrapper for mcp.run tool calls to match Pipecat's function call interface."""
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
             logger.debug(f"Tool arguments: {json.dumps(arguments, indent=2)}")
 
@@ -106,10 +114,9 @@ class MCPRun(Client):
 
             try:
                 # Convert the schema
-                function_schema = self.convert_mcp_schema_to_pipecat(tool_name, {
-                    "description": tool.description,
-                    "input_schema": tool.input_schema
-                })
+                function_schema = self.convert_mcp_schema_to_pipecat(
+                    tool_name, {"description": tool.description, "input_schema": tool.input_schema}
+                )
 
                 # Register the wrapped function
                 logger.debug(f"Registering function handler for '{tool_name}'")

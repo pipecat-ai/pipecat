@@ -4,8 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import aiohttp
-import asyncio
 import os
 import sys
 
@@ -17,21 +15,18 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-
 from pipecat.services.mcp_run.mcp_run_client import MCPRunClient
-
-from pipecat.services.anthropic.llm import AnthropicLLMService
 # from pipecat.services.google.llm import GoogleLLMService
 # from pipecat.services.openai.llm import OpenAILLMService
 # from pipecat.services.groq.llm import GroqLLMService
 # from pipecat.services.grok.llm import GrokLLMService
 
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 

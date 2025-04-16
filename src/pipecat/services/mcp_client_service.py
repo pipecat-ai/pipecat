@@ -1,39 +1,34 @@
-import os
 import json
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, Optional
 
-import aiohttp
 from loguru import logger
-
-from pipecat.services.llm_service import LLMService
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-
-
 
 try:
     from mcp.client.sse import sse_client
     from mcp.client.session import ClientSession
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use mcp, you need to `pip install mcp[cli]`."
-    )
+    logger.error("In order to use mcp, you need to `pip install pipecat-ai[mcp]`.")
     raise Exception(f"Missing module: {e}")
+
 
 class MCPClient:
     def __init__(
-            self,
-            server_url: Optional[str],
-            **kwargs,
-        ):
-            super().__init__(**kwargs)
+        self,
+        server_url: Optional[str],
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
 
-            self._server_url = server_url
-            self._session = ClientSession
+        self._server_url = server_url
+        self._session = ClientSession
 
-    def convert_mcp_schema_to_pipecat(self, tool_name: str, tool_schema: dict[str, any]) -> FunctionSchema:
+    def convert_mcp_schema_to_pipecat(
+        self, tool_name: str, tool_schema: Dict[str, Any]
+    ) -> FunctionSchema:
         """Convert an mcp.run tool schema to Pipecat's FunctionSchema format.
         Args:
             tool_name: The name of the tool
@@ -53,7 +48,7 @@ class MCPClient:
             name=tool_name,
             description=tool_schema["description"],
             properties=properties,
-            required=required
+            required=required,
         )
 
         logger.debug(f"Converted schema: {json.dumps(schema.to_default_dict(), indent=2)}")
@@ -68,10 +63,15 @@ class MCPClient:
             A ToolsSchema containing all registered tools
         """
 
-        async def mcp_tool_wrapper(function_name: str, tool_call_id: str, arguments: dict[str, any],
-                                 llm: any, context: any, result_callback: any) -> None:
-            """Wrapper for mcp.run tool calls to match Pipecat's function call interface.
-            """
+        async def mcp_tool_wrapper(
+            function_name: str,
+            tool_call_id: str,
+            arguments: Dict[str, Any],
+            llm: any,
+            context: any,
+            result_callback: any,
+        ) -> None:
+            """Wrapper for mcp.run tool calls to match Pipecat's function call interface."""
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
             logger.debug(f"Tool arguments: {json.dumps(arguments, indent=2)}")
 
@@ -102,17 +102,14 @@ class MCPClient:
                 logger.exception("Full exception details:")
                 await result_callback(error_msg)
 
-
-
         logger.debug("Starting registration of mcp.run tools")
         tool_schemas: List[FunctionSchema] = []
-
 
         async with sse_client(self._server_url) as streams:
             async with self._session(streams[0], streams[1]) as session:
                 await session.initialize()
 
-                available_tools =  await session.list_tools()
+                available_tools = await session.list_tools()
                 try:
                     logger.debug(f"Found {len(available_tools)} available tools")
                 except:
@@ -125,10 +122,10 @@ class MCPClient:
 
                     try:
                         # Convert the schema
-                        function_schema = self.convert_mcp_schema_to_pipecat(tool_name, {
-                            "description": tool.description,
-                            "input_schema": tool.inputSchema
-                        })
+                        function_schema = self.convert_mcp_schema_to_pipecat(
+                            tool_name,
+                            {"description": tool.description, "input_schema": tool.inputSchema},
+                        )
 
                         # Register the wrapped function
                         logger.debug(f"Registering function handler for '{tool_name}'")
