@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the 
   client did not create a video transceiver.
 
-- Fixed an issue where LLM input parameters were not working and applied correctly in `GoogleVertexLLMService`, causing 
+- Fixed an  issue where LLM input parameters were not working and applied correctly in `GoogleVertexLLMService`, causing 
   unexpected behavior during inference.
 
 ## [0.0.63] - 2025-04-11
