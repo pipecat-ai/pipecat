@@ -73,7 +73,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm.register_function("switch_language", switch_language)
 
     tools = [

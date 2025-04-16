@@ -45,7 +45,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [
         {
