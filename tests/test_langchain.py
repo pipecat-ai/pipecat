@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
     LLMAssistantResponseAggregator,
     LLMUserResponseAggregator,
 )
@@ -63,7 +64,9 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         self.mock_proc = self.MockProcessor("token_collector")
 
         tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(messages, expect_stripped_words=False)
+        tma_out = LLMAssistantResponseAggregator(
+            messages, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+        )
 
         pipeline = Pipeline([tma_in, proc, self.mock_proc, tma_out])
 

@@ -6,6 +6,7 @@
 
 import asyncio
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Dict, List, Literal, Set
 
 from loguru import logger
@@ -44,6 +45,16 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.time import time_now_iso8601
+
+
+@dataclass
+class LLMUserAggregatorParams:
+    aggregation_timeout: float = 1.0
+
+
+@dataclass
+class LLMAssistantAggregatorParams:
+    expect_stripped_words: bool = True
 
 
 class LLMFullResponseAggregator(FrameProcessor):
@@ -230,11 +241,23 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     def __init__(
         self,
         context: OpenAILLMContext,
-        aggregation_timeout: float = 1.0,
+        *,
+        params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         **kwargs,
     ):
         super().__init__(context=context, role="user", **kwargs)
-        self._aggregation_timeout = aggregation_timeout
+        self._params = params
+        if "aggregation_timeout" in kwargs:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'aggregation_timeout' is deprecated, use 'params' instead.",
+                    DeprecationWarning,
+                )
+
+            self._params.aggregation_timeout = kwargs["aggregation_timeout"]
 
         self._seen_interim_results = False
         self._user_speaking = False
@@ -357,7 +380,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def _aggregation_task_handler(self):
         while True:
             try:
-                await asyncio.wait_for(self._aggregation_event.wait(), self._aggregation_timeout)
+                await asyncio.wait_for(
+                    self._aggregation_event.wait(), self._params.aggregation_timeout
+                )
                 await self._maybe_push_bot_interruption()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
@@ -394,9 +419,27 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
     """
 
-    def __init__(self, context: OpenAILLMContext, *, expect_stripped_words: bool = True, **kwargs):
+    def __init__(
+        self,
+        context: OpenAILLMContext,
+        *,
+        params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        **kwargs,
+    ):
         super().__init__(context=context, role="assistant", **kwargs)
-        self._expect_stripped_words = expect_stripped_words
+        self._params = params
+
+        if "expect_stripped_words" in kwargs:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'expect_stripped_words' is deprecated, use 'params' instead.",
+                    DeprecationWarning,
+                )
+
+            self._params.expect_stripped_words = kwargs["expect_stripped_words"]
 
         self._started = 0
         self._function_calls_in_progress: Dict[str, FunctionCallInProgressFrame] = {}
@@ -558,7 +601,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         if not self._started:
             return
 
-        if self._expect_stripped_words:
+        if self._params.expect_stripped_words:
             self._aggregation += f" {frame.text}" if self._aggregation else frame.text
         else:
             self._aggregation += frame.text
@@ -572,8 +615,14 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
 
 class LLMUserResponseAggregator(LLMUserContextAggregator):
-    def __init__(self, messages: List[dict] = [], **kwargs):
-        super().__init__(context=OpenAILLMContext(messages), **kwargs)
+    def __init__(
+        self,
+        messages: List[dict] = [],
+        *,
+        params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        **kwargs,
+    ):
+        super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
     async def push_aggregation(self):
         if len(self._aggregation) > 0:
@@ -588,8 +637,14 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 
 
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
-    def __init__(self, messages: List[dict] = [], **kwargs):
-        super().__init__(context=OpenAILLMContext(messages), **kwargs)
+    def __init__(
+        self,
+        messages: List[dict] = [],
+        *,
+        params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        **kwargs,
+    ):
+        super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
     async def push_aggregation(self):
         if len(self._aggregation) > 0:
