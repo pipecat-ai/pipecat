@@ -12,9 +12,7 @@ import numpy as np
 import torch
 from loguru import logger
 
-from pipecat.audio.turn.base_turn_analyzer import (
-    BaseEndOfTurnAnalyzer,
-)
+from pipecat.audio.turn.base_smart_turn import BaseSmartTurn
 
 try:
     import coremltools as ct
@@ -27,9 +25,9 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
-    def __init__(self):
-        super().__init__()
+class LocalSmartTurnAnalyzer(BaseSmartTurn):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         # To use this locally, set the environment variable LOCAL_SMART_TURN_MODEL_PATH
         # to the path where the smart-turn repo is cloned.
         #

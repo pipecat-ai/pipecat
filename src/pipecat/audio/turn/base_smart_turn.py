@@ -12,6 +12,7 @@ from typing import Dict, Optional
 
 import numpy as np
 from loguru import logger
+from pydantic import BaseModel
 
 
 class EndOfTurnState(Enum):
@@ -19,18 +20,25 @@ class EndOfTurnState(Enum):
     INCOMPLETE = 2
 
 
-# TODO: we should convert all this to params
-STOP_MS = 1000
+STOP_SECS = 1
 PRE_SPEECH_MS = 200
 MAX_DURATION_SECONDS = 8  # Maximum duration for the smart turn model
 
 
-class BaseEndOfTurnAnalyzer(ABC):
-    def __init__(self, *, sample_rate: Optional[int] = None):
+class SmartTurnParams(BaseModel):
+    stop_secs: float = STOP_SECS
+    pre_speech_ms: float = PRE_SPEECH_MS
+    max_duration_secs: float = MAX_DURATION_SECONDS
+
+
+class BaseSmartTurn(ABC):
+    def __init__(self, *, sample_rate: Optional[int] = None, params: SmartTurnParams = SmartTurnParams()):
         self._init_sample_rate = sample_rate
+        self._params = params
         # settings variables
         self._sample_rate = 0
         self._chunk_size_ms = 0
+        self._stop_ms = self._params.stop_secs * 1000
         # inference variables
         self._audio_buffer = []
         self._speech_triggered = False
@@ -67,8 +75,8 @@ class BaseEndOfTurnAnalyzer(ABC):
             if self._speech_triggered:
                 self._audio_buffer.append((time.time(), audio_float32))
                 self._silence_frames += 1
-                if self._silence_frames * self._chunk_size_ms >= STOP_MS:
-                    logger.debug("End of Turn complete due to STOP_MS.")
+                if self._silence_frames * self._chunk_size_ms >= self._stop_ms:
+                    logger.debug("End of Turn complete due to stop_secs.")
                     state = EndOfTurnState.COMPLETE
                     self._clear()
             else:
@@ -76,8 +84,8 @@ class BaseEndOfTurnAnalyzer(ABC):
                 self._audio_buffer.append((time.time(), audio_float32))
                 # Keep the buffer size reasonable, assuming CHUNK is small
                 max_buffer_time = (
-                    PRE_SPEECH_MS + STOP_MS
-                ) / 1000 + MAX_DURATION_SECONDS  # Some extra buffer
+                    self._params.pre_speech_ms + self._stop_ms
+                ) / 1000 + self._params.max_duration_secs  # Some extra buffer
                 while (
                     self._audio_buffer and self._audio_buffer[0][0] < time.time() - max_buffer_time
                 ):
@@ -107,7 +115,7 @@ class BaseEndOfTurnAnalyzer(ABC):
             return state
 
         # Find start and end indices for the segment
-        start_time = self._speech_start_time - (PRE_SPEECH_MS / 1000)
+        start_time = self._speech_start_time - (self._params.pre_speech_ms / 1000)
         start_index = 0
         for i, (t, _) in enumerate(audio_buffer):
             if t >= start_time:
@@ -120,13 +128,13 @@ class BaseEndOfTurnAnalyzer(ABC):
         segment_audio_chunks = [chunk for _, chunk in audio_buffer[start_index : end_index + 1]]
         segment_audio = np.concatenate(segment_audio_chunks)
 
-        # Remove (STOP_MS - 200)ms from the end of the segment
-        samples_to_remove = int((STOP_MS - 200) / 1000 * self.sample_rate)
+        # Remove (self._stop_ms - 200)ms from the end of the segment
+        samples_to_remove = int((self._stop_ms - 200) / 1000 * self.sample_rate)
         segment_audio = segment_audio[:-samples_to_remove]
 
         # Limit maximum duration
-        if len(segment_audio) / self.sample_rate > MAX_DURATION_SECONDS:
-            segment_audio = segment_audio[: int(MAX_DURATION_SECONDS * self.sample_rate)]
+        if len(segment_audio) / self.sample_rate > self._params.max_duration_secs:
+            segment_audio = segment_audio[: int(self._params.max_duration_secs * self.sample_rate)]
 
         # No resampling needed as both recording and prediction use 16000 Hz
         segment_audio_resampled = segment_audio

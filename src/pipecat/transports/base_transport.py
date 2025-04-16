@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.turn.base_turn_analyzer import BaseEndOfTurnAnalyzer
+from pipecat.audio.turn.base_smart_turn import BaseSmartTurn
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.utils.base_object import BaseObject
@@ -42,7 +42,7 @@ class TransportParams(BaseModel):
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: Optional[VADAnalyzer] = None
-    end_of_turn_analyzer: Optional[BaseEndOfTurnAnalyzer] = None
+    end_of_turn_analyzer: Optional[BaseSmartTurn] = None
 
 
 class BaseTransport(BaseObject):

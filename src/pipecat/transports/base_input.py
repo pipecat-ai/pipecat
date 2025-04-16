@@ -10,7 +10,7 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.audio.turn.base_turn_analyzer import BaseEndOfTurnAnalyzer, EndOfTurnState
+from pipecat.audio.turn.base_smart_turn import BaseSmartTurn, EndOfTurnState
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -67,7 +67,7 @@ class BaseInputTransport(FrameProcessor):
         return self._params.vad_analyzer
 
     @property
-    def end_of_turn_analyzer(self) -> Optional[BaseEndOfTurnAnalyzer]:
+    def end_of_turn_analyzer(self) -> Optional[BaseSmartTurn]:
         return self._params.end_of_turn_analyzer
 
     async def start(self, frame: StartFrame):
