@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
 from pipecat.services.tts_service import TTSService
 
 try:
-    from deepgram import DeepgramClient, SpeakOptions
+    from deepgram import DeepgramClient, DeepgramClientOptions, SpeakOptions
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Deepgram, you need to `pip install pipecat-ai[deepgram]`.")
@@ -31,6 +31,7 @@ class DeepgramTTSService(TTSService):
         *,
         api_key: str,
         voice: str = "aura-helios-en",
+        base_url: str = "",
         sample_rate: Optional[int] = None,
         encoding: str = "linear16",
         **kwargs,
@@ -41,7 +42,9 @@ class DeepgramTTSService(TTSService):
             "encoding": encoding,
         }
         self.set_voice(voice)
-        self._deepgram_client = DeepgramClient(api_key=api_key)
+
+        client_options = DeepgramClientOptions(url=base_url)
+        self._deepgram_client = DeepgramClient(api_key, config=client_options)
 
     def can_generate_metrics(self) -> bool:
         return True
