@@ -21,7 +21,7 @@ class EndOfTurnState(Enum):
 
 
 STOP_SECS = 1
-PRE_SPEECH_MS = 200
+PRE_SPEECH_MS = 0
 MAX_DURATION_SECONDS = 8  # Maximum duration for the smart turn model
 
 
@@ -32,7 +32,9 @@ class SmartTurnParams(BaseModel):
 
 
 class BaseSmartTurn(ABC):
-    def __init__(self, *, sample_rate: Optional[int] = None, params: SmartTurnParams = SmartTurnParams()):
+    def __init__(
+        self, *, sample_rate: Optional[int] = None, params: SmartTurnParams = SmartTurnParams()
+    ):
         self._init_sample_rate = sample_rate
         self._params = params
         # settings variables
@@ -63,6 +65,7 @@ class BaseSmartTurn(ABC):
         audio_int16 = np.frombuffer(buffer, dtype=np.int16)
         # Divide by 32768 because we have signed 16-bit data.
         audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
+        self._audio_buffer.append((time.time(), audio_float32))
 
         state = EndOfTurnState.INCOMPLETE
         if is_speech:
@@ -70,18 +73,15 @@ class BaseSmartTurn(ABC):
             self._speech_triggered = True
             if self._speech_start_time is None:
                 self._speech_start_time = time.time()
-            self._audio_buffer.append((time.time(), audio_float32))
+                logger.debug(f"Speech started at {self._speech_start_time}")
         else:
             if self._speech_triggered:
-                self._audio_buffer.append((time.time(), audio_float32))
                 self._silence_frames += 1
                 if self._silence_frames * self._chunk_size_ms >= self._stop_ms:
                     logger.debug("End of Turn complete due to stop_secs.")
                     state = EndOfTurnState.COMPLETE
                     self._clear()
             else:
-                # Keep buffering some silence before potential speech starts
-                self._audio_buffer.append((time.time(), audio_float32))
                 # Keep the buffer size reasonable, assuming CHUNK is small
                 max_buffer_time = (
                     self._params.pre_speech_ms + self._stop_ms
@@ -103,6 +103,7 @@ class BaseSmartTurn(ABC):
         return state
 
     def _clear(self):
+        logger.debug("Clearing audio buffer...")
         self._speech_triggered = False
         self._audio_buffer = []
         self._speech_start_time = None
@@ -156,6 +157,7 @@ class BaseSmartTurn(ABC):
             logger.debug(f"Probability of complete: {result['probability']:.4f}")
             logger.debug(f"Prediction took {(end_time - start_time) * 1000:.2f}ms seconds")
         else:
+            logger.debug(f"params: {self._params}, stop_ms: {self._stop_ms}")
             logger.debug("Captured empty audio segment, skipping prediction.")
 
         return state
