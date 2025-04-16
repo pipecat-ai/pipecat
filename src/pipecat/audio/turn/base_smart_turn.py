@@ -129,22 +129,20 @@ class BaseSmartTurn(ABC):
         segment_audio_chunks = [chunk for _, chunk in audio_buffer[start_index : end_index + 1]]
         segment_audio = np.concatenate(segment_audio_chunks)
 
-        # Remove (self._stop_ms - 200)ms from the end of the segment
-        samples_to_remove = int((self._stop_ms - 200) / 1000 * self.sample_rate)
-        segment_audio = segment_audio[:-samples_to_remove]
+        logger.debug(f"Segment audio chunks after start index: {len(segment_audio)}")
 
         # Limit maximum duration
         if len(segment_audio) / self.sample_rate > self._params.max_duration_secs:
             segment_audio = segment_audio[: int(self._params.max_duration_secs * self.sample_rate)]
 
-        # No resampling needed as both recording and prediction use 16000 Hz
-        segment_audio_resampled = segment_audio
+        logger.debug(f"Segment audio chunks after limiting duration: {len(segment_audio)}")
 
-        if len(segment_audio_resampled) > 0:
+        # No resampling needed as both recording and prediction use 16000 Hz
+        if len(segment_audio) > 0:
             # Call the new predict_endpoint function with the audio data
             start_time = time.perf_counter()
 
-            result = self._predict_endpoint(segment_audio_resampled)
+            result = self._predict_endpoint(segment_audio)
 
             state = (
                 EndOfTurnState.COMPLETE if result["prediction"] == 1 else EndOfTurnState.INCOMPLETE
