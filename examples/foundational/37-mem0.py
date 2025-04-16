@@ -210,10 +210,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     @rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         await rtvi.set_bot_ready()
-
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
         # Get personalized greeting based on user memories. Can pass agent_id and run_id as per requirement of the application to manage short term memory or agent specific memory.
         greeting = await get_initial_greeting(
             memory_client=memory.memory_client, user_id=USER_ID, agent_id=None, run_id=None
@@ -224,6 +220,10 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
         # Queue the context frame to start the conversation
         await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
