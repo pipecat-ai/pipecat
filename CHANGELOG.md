@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `DeepgramTTSService` accepts `base_url` argument again, allowing you to
+  connect to an on-prem service.
+
 - It is now possible to disable `SoundfileMixer` when created. You can then use
   `MixerEnableFrame` to dynamically enable it when necessary.
 
@@ -30,7 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `SoundfileMixer` constructor arguments need to be keywords.
 
+### Deprecated
+
+- `DeepgramSTTService` parameter `url` is now deprecated, use `base_url`
+  instead.
+
 ### Fixed
+
+- Fixed a `TavusVideoService` issue that was causing audio choppiness.
 
 - Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
   client did not create a video transceiver.
