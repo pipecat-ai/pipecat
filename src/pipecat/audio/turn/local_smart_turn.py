@@ -60,18 +60,6 @@ class LocalSmartTurnAnalyzer(BaseEndOfTurnAnalyzer):
         logger.debug("Loaded Local Smart Turn")
 
     def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
-        """
-        Predict whether an audio segment is complete (turn ended) or incomplete.
-
-        Args:
-            audio_array: Numpy array containing audio samples at 16kHz
-
-        Returns:
-            Dictionary containing prediction results:
-            - prediction: 1 for complete, 0 for incomplete
-            - probability: Probability of completion class
-        """
-
         inputs = self._turn_processor(
             audio_array,
             sampling_rate=16000,

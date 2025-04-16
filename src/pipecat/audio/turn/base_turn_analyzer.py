@@ -154,4 +154,15 @@ class BaseEndOfTurnAnalyzer(ABC):
 
     @abstractmethod
     def _predict_endpoint(self, buffer: np.ndarray) -> Dict[str, any]:
+        """
+        Predict whether an audio segment is complete (turn ended) or incomplete.
+
+        Args:
+            audio_array: Numpy array containing audio samples at 16kHz
+
+        Returns:
+            Dictionary containing prediction results:
+            - prediction: 1 for complete, 0 for incomplete
+            - probability: Probability of completion class
+        """
         pass
