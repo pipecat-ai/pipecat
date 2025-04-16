@@ -60,7 +60,7 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [
         {

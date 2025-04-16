@@ -83,7 +83,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm.register_function("switch_voice", switch_voice)
 
     tools = [

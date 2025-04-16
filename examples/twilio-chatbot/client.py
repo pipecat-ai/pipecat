@@ -98,7 +98,7 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
         ),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     # We let the audio passthrough so we can record the conversation.
     stt = DeepgramSTTService(

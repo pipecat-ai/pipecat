@@ -45,7 +45,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         model="4ce7e917cedd4bc2bb2e6ff3a46acaa1",  # Barack Obama
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4.1")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [
         {

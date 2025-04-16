@@ -428,16 +428,10 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     # This is the LLM that will be used to detect if the user has finished a
     # statement. This doesn't really need to be an LLM, we could use NLP
     # libraries for that, but we have the machinery to use an LLM, so we might as well!
-    statement_llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        model="claude-3-5-sonnet-20241022",
-    )
+    statement_llm = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
     # This is the regular LLM.
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4.1",
-    )
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     # Register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
