@@ -22,7 +22,12 @@ app = FastAPI()
 # Store connections by pc_id
 pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
-ice_servers = ["stun:stun.l.google.com:19302"]
+
+ice_servers = [
+    {
+        "urls": ["stun:stun.l.google.com:19302"],
+    }
+]
 
 
 @app.post("/api/offer")
