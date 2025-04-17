@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, Mapping, Optional
 
 import aiohttp
 from daily import (
+    AudioData,
     VirtualCameraDevice,
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
@@ -34,6 +35,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
@@ -275,6 +277,7 @@ class DailyTransportClient(EventHandler):
         self._transport_name = transport_name
 
         self._participant_id: str = ""
+        self._audio_renderers = {}
         self._video_renderers = {}
         self._transcription_ids = []
         self._transcription_status = None
@@ -648,6 +651,20 @@ class DailyTransportClient(EventHandler):
         if self._joined and self._transcription_status:
             await self.update_transcription(self._transcription_ids)
 
+    async def capture_participant_audio(
+        self,
+        participant_id: str,
+        callback: Callable,
+        audio_source: str = "camera",
+    ):
+        self._audio_renderers[participant_id] = callback
+
+        self._client.set_audio_renderer(
+            participant_id,
+            self._audio_data_received,
+            audio_source=audio_source,
+        )
+
     async def capture_participant_video(
         self,
         participant_id: str,
@@ -773,6 +790,10 @@ class DailyTransportClient(EventHandler):
     # Daily (CallClient callbacks)
     #
 
+    def _audio_data_received(self, participant_id, audio_data):
+        callback = self._audio_renderers[participant_id]
+        self._call_async_callback(callback, participant_id, audio_data)
+
     def _video_frame_received(self, participant_id, video_frame):
         callback = self._video_renderers[participant_id]
         self._call_async_callback(
@@ -828,6 +849,7 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
         self._params = params
 
+        self._audio_renderers = {}
         self._video_renderers = {}
 
         # Whether we have seen a StartFrame already.
@@ -915,6 +937,27 @@ class DailyInputTransport(BaseInputTransport):
     #
     # Audio in
     #
+
+    async def capture_participant_audio(
+        self,
+        participant_id: str,
+        audio_source: str = "camera",
+    ):
+        self._audio_renderers[participant_id] = {"audio_source": audio_source}
+
+        await self._client.capture_participant_audio(
+            participant_id, self._on_participant_audio_data, audio_source
+        )
+
+    async def _on_participant_audio_data(self, participant_id: str, audio: AudioData):
+        frame = UserAudioRawFrame(
+            user_id=participant_id,
+            audio_source=self._audio_renderers[participant_id]["audio_source"],
+            audio=audio.audio_frames,
+            sample_rate=audio.sample_rate,
+            num_channels=audio.num_channels,
+        )
+        await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):
         while True:
@@ -1203,6 +1246,14 @@ class DailyTransport(BaseTransport):
 
     async def capture_participant_transcription(self, participant_id: str):
         await self._client.capture_participant_transcription(participant_id)
+
+    async def capture_participant_audio(
+        self,
+        participant_id: str,
+        audio_source: str = "microphone",
+    ):
+        if self._input:
+            await self._input.capture_participant_audio(participant_id, audio_source)
 
     async def capture_participant_video(
         self,
