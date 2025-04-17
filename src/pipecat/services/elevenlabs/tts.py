@@ -523,21 +523,24 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def _set_voice_settings(self):
         return build_elevenlabs_voice_settings(self._settings)
 
+    def _reset_state(self):
+        """Reset internal state variables."""
+        self._cumulative_time = 0
+        self._started = False
+        self._previous_text = ""
+        logger.debug(f"{self}: Reset internal state")
+
     async def start(self, frame: StartFrame):
         """Initialize the service upon receiving a StartFrame."""
         await super().start(frame)
         self._output_format = output_format_from_sample_rate(self.sample_rate)
-        self._cumulative_time = 0
-        self._started = False
-        self._previous_text = ""
+        self._reset_state()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
         if isinstance(frame, (StartInterruptionFrame, TTSStoppedFrame)):
             # Reset timing on interruption or stop
-            self._started = False
-            self._cumulative_time = 0
-            self._previous_text = ""
+            self._reset_state()
 
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
@@ -631,7 +634,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
         # Include previous text as context if available
         if self._previous_text:
             payload["previous_text"] = self._previous_text
-            print(f"Previous text: {self._previous_text}")
 
         if self._voice_settings:
             payload["voice_settings"] = self._voice_settings
