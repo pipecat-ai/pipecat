@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that would cause TTS websocket-based services to not cleanup
+  resources properly when disconnecting.
+
 - Fixed a `TavusVideoService` issue that was causing audio choppiness.
 
 - Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
