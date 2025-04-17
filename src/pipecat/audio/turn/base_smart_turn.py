@@ -23,7 +23,7 @@ class EndOfTurnState(Enum):
 # Default timing parameters
 STOP_SECS = 1
 PRE_SPEECH_MS = 0
-MAX_DURATION_SECONDS = 16  # Max allowed segment duration
+MAX_DURATION_SECONDS = 8  # Max allowed segment duration
 
 
 class SmartTurnParams(BaseModel):
