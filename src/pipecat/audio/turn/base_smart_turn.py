@@ -82,7 +82,7 @@ class BaseSmartTurn(ABC):
                         f"End of Turn complete due to stop_secs. Silence in ms: {self._silence_ms}"
                     )
                     state = EndOfTurnState.COMPLETE
-                    self._clear()
+                    self._clear(state)
             else:
                 # Trim buffer to prevent unbounded growth before speech
                 max_buffer_time = (
@@ -101,14 +101,15 @@ class BaseSmartTurn(ABC):
         logger.debug("Analyzing End of Turn...")
         state = self._process_speech_segment(self._audio_buffer)
         if state == EndOfTurnState.COMPLETE or USE_ONLY_LAST_VAD_SEGMENT:
-            self._clear()
+            self._clear(state)
         logger.debug(f"End of Turn result: {state}")
         return state
 
-    def _clear(self):
+    def _clear(self, turn_state: EndOfTurnState):
         # Reset internal state for next turn
         logger.debug("Clearing audio buffer...")
-        self._speech_triggered = False
+        # If the state is still incomplete, keep the _speech_triggered as True
+        self._speech_triggered = turn_state == EndOfTurnState.INCOMPLETE
         self._audio_buffer = []
         self._speech_start_time = None
         self._silence_ms = 0
