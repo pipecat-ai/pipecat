@@ -221,6 +221,18 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(UserEndOfTurnFrame())
             await self._handle_user_interruption(UserStoppedSpeakingFrame())
 
+    async def _run_turn_analyzer(self, frame: InputAudioRawFrame, vad_state: VADState, previous_vad_state: VADState):
+        is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
+        # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
+        end_of_turn_state = self._params.end_of_turn_analyzer.append_audio(
+            frame.audio, is_speech
+        )
+        if end_of_turn_state == EndOfTurnState.COMPLETE:
+            await self._handle_end_of_turn_complete(end_of_turn_state)
+        # Otherwise we are going to trigger to check if the turn is completed based on the VAD
+        elif vad_state == VADState.QUIET and vad_state != previous_vad_state:
+            await self._handle_end_of_turn()
+
     async def _audio_task_handler(self):
         vad_state: VADState = VADState.QUIET
         while True:
@@ -240,16 +252,7 @@ class BaseInputTransport(FrameProcessor):
                 audio_passthrough = self._params.vad_audio_passthrough
 
             if self._params.end_of_turn_analyzer:
-                is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
-                # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
-                end_of_turn_state = self._params.end_of_turn_analyzer.append_audio(
-                    frame.audio, is_speech
-                )
-                if end_of_turn_state == EndOfTurnState.COMPLETE:
-                    await self._handle_end_of_turn_complete(end_of_turn_state)
-                # Otherwise we are going to trigger to check if the turn is completed based on the VAD
-                elif vad_state == VADState.QUIET and vad_state != previous_vad_state:
-                    await self._handle_end_of_turn()
+                await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
 
             # Push audio downstream if passthrough.
             if audio_passthrough:
