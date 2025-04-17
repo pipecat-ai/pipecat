@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added 04 foundational examples for client/server transports. Also, renamed
   `29-livekit-audio-chat.py` to `04b-transports-livekit.py`.
 
+- Added foundational example `13c-gladia-translation.py` showing how to use
+  `TranscriptionFrame` and `TranslationFrame`.
+
 ## [0.0.65] - 2025-04-23 "Sant Jordi's release" 🌹📕
 
 https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
@@ -108,6 +111,9 @@ https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
 
 - Added word/timestamp pairs to `ElevenLabsHttpTTSService`.
 
+- Added `TranslationFrame`, a new frame type that contains a translated
+  transcription.
+
 - It is now possible to disable `SoundfileMixer` when created. You can then use
   `MixerEnableFrame` to dynamically enable it when necessary.
 
@@ -128,6 +134,9 @@ https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
 
 - `OpenAILLMService` and `OpenPipeLLMService` now use `gpt-4.1` as their
   default model.
+
+- Updated `GladiaSTTService` to output a `TranslationFrame` when specifying a
+  `translation` and `translation_config`.
 
 - `SoundfileMixer` constructor arguments need to be keywords.
 
