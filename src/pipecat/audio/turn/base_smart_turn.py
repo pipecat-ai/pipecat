@@ -24,12 +24,14 @@ class EndOfTurnState(Enum):
 STOP_SECS = 1
 PRE_SPEECH_MS = 0
 MAX_DURATION_SECONDS = 8  # Max allowed segment duration
+USE_ONLY_LAST_VAD_SEGMENT = False
 
 
 class SmartTurnParams(BaseModel):
     stop_secs: float = STOP_SECS
     pre_speech_ms: float = PRE_SPEECH_MS
     max_duration_secs: float = MAX_DURATION_SECONDS
+    use_only_last_vad_segment: bool = USE_ONLY_LAST_VAD_SEGMENT
 
 
 class BaseSmartTurn(ABC):
@@ -97,7 +99,7 @@ class BaseSmartTurn(ABC):
     def analyze_end_of_turn(self) -> EndOfTurnState:
         logger.debug("Analyzing End of Turn...")
         state = self._process_speech_segment(self._audio_buffer)
-        if state == EndOfTurnState.COMPLETE:
+        if state == EndOfTurnState.COMPLETE or self._params.use_only_last_vad_segment:
             self._clear()
         logger.debug(f"End of Turn result: {state}")
         return state
