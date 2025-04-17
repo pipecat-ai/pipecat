@@ -16,7 +16,7 @@ from loguru import logger
 from pipecat.audio.turn.base_smart_turn import BaseSmartTurn
 
 
-class RemoteSmartTurnAnalyzer(BaseSmartTurn):
+class SmartTurnAnalyzer(BaseSmartTurn):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.remote_smart_turn_url = os.getenv("REMOTE_SMART_TURN_URL")

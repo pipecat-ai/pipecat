@@ -25,7 +25,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class LocalSmartTurnAnalyzer(BaseSmartTurn):
+class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # To use this locally, set the environment variable LOCAL_SMART_TURN_MODEL_PATH
