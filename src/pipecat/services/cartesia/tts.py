@@ -185,7 +185,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _connect(self):
         await self._connect_websocket()
-        if not self._receive_task:
+
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -197,7 +198,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket:
+            if self._websocket and self._websocket.open:
                 return
             logger.debug("Connecting to Cartesia")
             self._websocket = await websockets.connect(
@@ -215,11 +216,11 @@ class CartesiaTTSService(AudioContextWordTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from Cartesia")
                 await self._websocket.close()
-                self._websocket = None
-
-            self._context_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._context_id = None
+            self._websocket = None
 
     def _get_websocket(self):
         if self._websocket:
@@ -279,7 +280,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket:
+            if not self._websocket or self._websocket.closed:
                 await self._connect()
 
             if not self._context_id:

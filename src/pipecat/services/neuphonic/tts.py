@@ -106,6 +106,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
         self._started = False
         self._cumulative_time = 0
 
+        self._receive_task = None
+        self._keepalive_task = None
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -159,8 +162,11 @@ class NeuphonicTTSService(InterruptibleTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
-        self._keepalive_task = self.create_task(self._keepalive_task_handler())
+        if self._websocket and not self._receive_task:
+            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+
+        if self._websocket and not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
         if self._receive_task:
@@ -175,6 +181,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
     async def _connect_websocket(self):
         try:
+            if self._websocket and self._websocket.open:
+                return
+
             logger.debug("Connecting to Neuphonic")
 
             tts_config = {
@@ -190,7 +199,6 @@ class NeuphonicTTSService(InterruptibleTTSService):
             url = f"{self._url}/speak/{self._settings['lang_code']}?{'&'.join(query_params)}"
 
             self._websocket = await websockets.connect(url)
-
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -203,11 +211,11 @@ class NeuphonicTTSService(InterruptibleTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from Neuphonic")
                 await self._websocket.close()
-                self._websocket = None
-
-            self._started = False
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._started = False
+            self._websocket = None
 
     async def _receive_messages(self):
         async for message in self._websocket:
@@ -235,7 +243,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
-            if not self._websocket:
+            if not self._websocket or self._websocket.closed:
                 await self._connect()
 
             try:
