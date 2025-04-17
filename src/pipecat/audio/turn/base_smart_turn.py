@@ -57,6 +57,10 @@ class BaseSmartTurn(ABC):
     def set_sample_rate(self, sample_rate: int):
         self._sample_rate = sample_rate
 
+    @property
+    def speech_triggered(self) -> bool:
+        return self._speech_triggered
+
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         # Convert raw audio to float32 format and append to the buffer
         audio_int16 = np.frombuffer(buffer, dtype=np.int16)
