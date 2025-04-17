@@ -30,16 +30,16 @@ class SmartTurnAnalyzer(BaseSmartTurn):
         self.session.headers.update({"Connection": "keep-alive"})
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
-        logger.debug("Serializing NumPy array to bytes...")
+        logger.trace("Serializing NumPy array to bytes...")
         buffer = io.BytesIO()
         np.save(buffer, audio_array)
         serialized_bytes = buffer.getvalue()
-        logger.debug(f"Serialized size: {len(serialized_bytes)} bytes")
+        logger.trace(f"Serialized size: {len(serialized_bytes)} bytes")
         return serialized_bytes
 
     def _send_raw_request(self, data_bytes: bytes):
         headers = {"Content-Type": "application/octet-stream"}
-        logger.debug(
+        logger.trace(
             f"Sending {len(data_bytes)} bytes as raw body to {self.remote_smart_turn_url}..."
         )
         try:
@@ -50,24 +50,24 @@ class SmartTurnAnalyzer(BaseSmartTurn):
                 timeout=60,
             )
 
-            logger.debug("\n--- Response ---")
-            logger.debug(f"Status Code: {response.status_code}")
+            logger.trace("\n--- Response ---")
+            logger.trace(f"Status Code: {response.status_code}")
 
             if response.ok:
                 try:
-                    logger.debug("Response JSON:")
-                    logger.debug(response.json())
+                    logger.trace("Response JSON:")
+                    logger.trace(response.json())
                     return response.json()
                 except requests.exceptions.JSONDecodeError:
-                    logger.debug("Response Content (non-JSON):")
-                    logger.debug(response.text)
+                    logger.trace("Response Content (non-JSON):")
+                    logger.trace(response.text)
             else:
-                logger.debug("Response Content (Error):")
-                logger.debug(response.text)
+                logger.trace("Response Content (Error):")
+                logger.trace(response.text)
                 response.raise_for_status()
 
         except requests.exceptions.RequestException as e:
-            logger.debug(f"Failed to send raw request to Daily Smart Turn: {e}")
+            logger.error(f"Failed to send raw request to Daily Smart Turn: {e}")
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
     def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
