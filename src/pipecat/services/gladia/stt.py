@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    TranslationFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
@@ -405,7 +406,7 @@ class GladiaSTTService(STTService):
                     translation = translated_utterance["text"]
                     if translated_language != original_language and confidence >= self._confidence:
                         await self.push_frame(
-                            TranscriptionFrame(
+                            TranslationFrame(
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
