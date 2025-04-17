@@ -25,7 +25,6 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
-    UserEndOfTurnFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
@@ -224,7 +223,6 @@ class BaseInputTransport(FrameProcessor):
 
     async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
         if state == EndOfTurnState.COMPLETE:
-            await self.push_frame(UserEndOfTurnFrame())
             await self._handle_user_interruption(UserStoppedSpeakingFrame())
 
     async def _run_turn_analyzer(
