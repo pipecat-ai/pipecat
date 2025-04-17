@@ -9,7 +9,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.remote_smart_turn import RemoteSmartTurnAnalyzer
+from pipecat.audio.turn.smart_turn import SmartTurnAnalyzer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
@@ -37,7 +37,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             vad_audio_passthrough=True,
-            end_of_turn_analyzer=RemoteSmartTurnAnalyzer(),
+            end_of_turn_analyzer=SmartTurnAnalyzer(),
         ),
     )
 
