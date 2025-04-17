@@ -40,12 +40,11 @@ class BaseSmartTurn(ABC):
         self._params = params
         # Configuration
         self._sample_rate = 0
-        self._chunk_size_ms = 0
         self._stop_ms = self._params.stop_secs * 1000  # silence threshold in ms
         # Inference state
         self._audio_buffer = []
         self._speech_triggered = False
-        self._silence_frames = 0
+        self._silence_ms = 0
         self._speech_start_time = None
 
     @property
@@ -54,13 +53,6 @@ class BaseSmartTurn(ABC):
 
     def set_sample_rate(self, sample_rate: int):
         self._sample_rate = sample_rate
-
-    @property
-    def chunk_size_ms(self) -> int:
-        return self._chunk_size_ms
-
-    def set_chunk_size_ms(self, chunk_size_ms: int):
-        self._chunk_size_ms = chunk_size_ms
 
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         # Convert raw audio to float32 format and append to the buffer
@@ -72,18 +64,19 @@ class BaseSmartTurn(ABC):
 
         if is_speech:
             # Reset silence tracking on speech
-            self._silence_frames = 0
+            self._silence_ms = 0
             self._speech_triggered = True
             if self._speech_start_time is None:
                 self._speech_start_time = time.time()
                 logger.debug(f"Speech started at {self._speech_start_time}")
         else:
             if self._speech_triggered:
-                self._silence_frames += 1
+                chunk_duration_ms = len(audio_int16) / (self._sample_rate / 1000)
+                self._silence_ms += chunk_duration_ms
                 # If silence exceeds threshold, mark end of turn
-                if self._silence_frames * self._chunk_size_ms >= self._stop_ms:
+                if self._silence_ms >= self._stop_ms:
                     logger.debug(
-                        f"End of Turn complete due to stop_secs. Silence: {self._silence_frames}, chunk_size_ms: {self._chunk_size_ms}"
+                        f"End of Turn complete due to stop_secs. Silence in ms: {self._silence_ms}"
                     )
                     state = EndOfTurnState.COMPLETE
                     self._clear()
@@ -115,7 +108,7 @@ class BaseSmartTurn(ABC):
         self._speech_triggered = False
         self._audio_buffer = []
         self._speech_start_time = None
-        self._silence_frames = 0
+        self._silence_ms = 0
 
     def _process_speech_segment(self, audio_buffer) -> EndOfTurnState:
         state = EndOfTurnState.INCOMPLETE
