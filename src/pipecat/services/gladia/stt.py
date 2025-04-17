@@ -285,7 +285,7 @@ class GladiaSTTService(STTService):
         settings = self._prepare_settings()
         response = await self._setup_gladia(settings)
         self._websocket = await websockets.connect(response["url"])
-        if not self._receive_task:
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler())
 
     async def stop(self, frame: EndFrame):
