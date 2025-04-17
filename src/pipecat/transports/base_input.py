@@ -196,12 +196,18 @@ class BaseInputTransport(FrameProcessor):
             and new_vad_state != VADState.STOPPING
         ):
             frame = None
-            if new_vad_state == VADState.SPEAKING:
-                frame = UserStartedSpeakingFrame()
-            # TODO: need to double check if this is the expected behavior
-            # Not triggering the UserStoppedSpeakingFrame if the turn analyser is enabled
-            elif new_vad_state == VADState.QUIET and not self.end_of_turn_analyzer:
-                frame = UserStoppedSpeakingFrame()
+            # If the turn analyser is enabled, this will prevent:
+            # - Creating the UserStoppedSpeakingFrame
+            # - Creating the UserStartedSpeakingFrame multiple times
+            can_create_user_frames = (
+                self._params.end_of_turn_analyzer is None
+                or not self._params.end_of_turn_analyzer.speech_triggered
+            )
+            if can_create_user_frames:
+                if new_vad_state == VADState.SPEAKING:
+                    frame = UserStartedSpeakingFrame()
+                elif new_vad_state == VADState.QUIET:
+                    frame = UserStoppedSpeakingFrame()
 
             if frame:
                 await self._handle_user_interruption(frame)
