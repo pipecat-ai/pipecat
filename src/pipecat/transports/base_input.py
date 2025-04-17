@@ -79,9 +79,6 @@ class BaseInputTransport(FrameProcessor):
         # Configure End of turn analyzer.
         if self._params.end_of_turn_analyzer:
             self._params.end_of_turn_analyzer.set_sample_rate(self._sample_rate)
-            self._params.end_of_turn_analyzer.set_chunk_size_ms(
-                self._params.audio_out_10ms_chunks * 10
-            )
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
