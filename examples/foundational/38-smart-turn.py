@@ -29,6 +29,8 @@ load_dotenv(override=True)
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")
 
+    remote_smart_turn_url = os.getenv("REMOTE_SMART_TURN_URL")
+
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
@@ -37,7 +39,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             vad_audio_passthrough=True,
-            end_of_turn_analyzer=SmartTurnAnalyzer(),
+            end_of_turn_analyzer=SmartTurnAnalyzer(url=remote_smart_turn_url),
         ),
     )
 

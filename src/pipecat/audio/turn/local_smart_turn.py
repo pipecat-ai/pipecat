@@ -26,28 +26,12 @@ except ModuleNotFoundError as e:
 
 
 class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
-    def __init__(self, **kwargs):
+    def __init__(self, smart_turn_model_path: str, **kwargs):
         super().__init__(**kwargs)
-        # To use this locally, set the environment variable LOCAL_SMART_TURN_MODEL_PATH
-        # to the path where the smart-turn repo is cloned.
-        #
-        # Example setup:
-        #
-        #   # Git LFS (Large File Storage)
-        #   brew install git-lfs
-        #   # Hugging Face uses LFS to store large model files, including .mlpackage
-        #   git lfs install
-        #   # Clone the repo with the smart_turn_classifier.mlpackage
-        #   git clone https://huggingface.co/pipecat-ai/smart-turn
-        #
-        # Then set the env variable:
-        #   export LOCAL_SMART_TURN_MODEL_PATH=./smart-turn
-        # or add it to your .env file
-        smart_turn_model_path = os.getenv("LOCAL_SMART_TURN_MODEL_PATH")
 
         if not smart_turn_model_path:
-            logger.error("LOCAL_SMART_TURN_MODEL_PATH is not set.")
-            raise Exception("LOCAL_SMART_TURN_MODEL_PATH environment variable must be provided.")
+            logger.error("smart_turn_model_path is not set.")
+            raise Exception("smart_turn_model_path must be provided.")
 
         core_ml_model_path = f"{smart_turn_model_path}/coreml/smart_turn_classifier.mlpackage"
 

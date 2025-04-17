@@ -30,6 +30,23 @@ load_dotenv(override=True)
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")
 
+    # To use this locally, set the environment variable LOCAL_SMART_TURN_MODEL_PATH
+    # to the path where the smart-turn repo is cloned.
+    #
+    # Example setup:
+    #
+    #   # Git LFS (Large File Storage)
+    #   brew install git-lfs
+    #   # Hugging Face uses LFS to store large model files, including .mlpackage
+    #   git lfs install
+    #   # Clone the repo with the smart_turn_classifier.mlpackage
+    #   git clone https://huggingface.co/pipecat-ai/smart-turn
+    #
+    # Then set the env variable:
+    #   export LOCAL_SMART_TURN_MODEL_PATH=./smart-turn
+    # or add it to your .env file
+    smart_turn_model_path = os.getenv("LOCAL_SMART_TURN_MODEL_PATH")
+
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
@@ -38,7 +55,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             vad_audio_passthrough=True,
-            end_of_turn_analyzer=LocalCoreMLSmartTurnAnalyzer(params=SmartTurnParams(stop_secs=5)),
+            end_of_turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
+                smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams(stop_secs=5)
+            ),
         ),
     )
 

@@ -17,13 +17,13 @@ from pipecat.audio.turn.base_smart_turn import BaseSmartTurn
 
 
 class SmartTurnAnalyzer(BaseSmartTurn):
-    def __init__(self, **kwargs):
+    def __init__(self, url: str, **kwargs):
         super().__init__(**kwargs)
-        self.remote_smart_turn_url = os.getenv("REMOTE_SMART_TURN_URL")
+        self.remote_smart_turn_url = url
 
         if not self.remote_smart_turn_url:
-            logger.error("REMOTE_SMART_TURN_URL is not set.")
-            raise Exception("REMOTE_SMART_TURN_URL environment variable must be provided.")
+            logger.error("remote_smart_turn_url is not set.")
+            raise Exception("remote_smart_turn_url must be provided.")
 
         # Use a session to reuse connections (keep-alive)
         self.session = requests.Session()
