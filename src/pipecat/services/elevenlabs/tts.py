@@ -308,10 +308,10 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        if not self._receive_task:
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if not self._keepalive_task:
+        if self._websocket and not self._keepalive_task:
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
