@@ -82,7 +82,9 @@ class BaseSmartTurn(ABC):
                 self._silence_frames += 1
                 # If silence exceeds threshold, mark end of turn
                 if self._silence_frames * self._chunk_size_ms >= self._stop_ms:
-                    logger.debug("End of Turn complete due to stop_secs.")
+                    logger.debug(
+                        f"End of Turn complete due to stop_secs. Silence: {self._silence_frames}, chunk_size_ms: {self._chunk_size_ms}"
+                    )
                     state = EndOfTurnState.COMPLETE
                     self._clear()
             else:
