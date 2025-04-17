@@ -168,7 +168,7 @@ class RimeTTSService(AudioContextWordTTSService):
         """Establish websocket connection and start receive task."""
         await self._connect_websocket()
 
-        if not self._receive_task:
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -182,7 +182,7 @@ class RimeTTSService(AudioContextWordTTSService):
     async def _connect_websocket(self):
         """Connect to Rime websocket API with configured settings."""
         try:
-            if self._websocket:
+            if self._websocket and self._websocket.open:
                 return
 
             params = "&".join(f"{k}={v}" for k, v in self._settings.items())
@@ -201,10 +201,11 @@ class RimeTTSService(AudioContextWordTTSService):
             if self._websocket:
                 await self._websocket.send(json.dumps(self._build_eos_msg()))
                 await self._websocket.close()
-                self._websocket = None
-            self._context_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._context_id = None
+            self._websocket = None
 
     def _get_websocket(self):
         """Get active websocket connection or raise exception."""
@@ -316,7 +317,7 @@ class RimeTTSService(AudioContextWordTTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
-            if not self._websocket:
+            if not self._websocket or self._websocket.closed:
                 await self._connect()
 
             try:

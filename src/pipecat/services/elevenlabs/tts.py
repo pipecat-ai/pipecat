@@ -309,10 +309,10 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        if not self._receive_task:
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
-        if not self._keepalive_task:
+        if self._websocket and not self._keepalive_task:
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
@@ -328,7 +328,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket:
+            if self._websocket and self._websocket.open:
                 return
 
             logger.debug("Connecting to ElevenLabs")
@@ -375,11 +375,11 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
                 logger.debug("Disconnecting from ElevenLabs")
                 await self._websocket.send(json.dumps({"text": ""}))
                 await self._websocket.close()
-                self._websocket = None
-
-            self._started = False
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._started = False
+            self._websocket = None
 
     def _get_websocket(self):
         if self._websocket:
@@ -419,7 +419,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket:
+            if not self._websocket or self._websocket.closed:
                 await self._connect()
 
             try:
