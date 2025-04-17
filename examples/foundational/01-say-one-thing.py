@@ -42,7 +42,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     # Register an event handler so we can play the audio when the client joins
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        await task.queue_frames([TTSSpeakFrame(f"Hello there!"), EndFrame()])
+        await task.queue_frames([TTSSpeakFrame(f"<spell>Hello there!</spell>"), EndFrame()])
 
     runner = PipelineRunner(handle_sigint=False)
 
