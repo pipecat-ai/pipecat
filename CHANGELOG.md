@@ -5,10 +5,21 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
 ## [Unreleased]
 
 ### Added
+
+- `DeepgramTTSService` accepts `base_url` argument again, allowing you to
+  connect to an on-prem service.
+
+- Added `LLMUserAggregatorParams` and `LLMAssistantAggregatorParams` which allow
+  you to control aggregator settings. You can now pass these arguments when
+  creating aggregator pairs with `create_context_aggregator()`.
+
+- Added `previous_text` context support to ElevenLabsHttpTTSService, improving
+  speech consistency across sentences within an LLM response.
+
+- Added word/timestamp pairs to `ElevenLabsHttpTTSService`.
 
 - It is now possible to disable `SoundfileMixer` when created. You can then use
   `MixerEnableFrame` to dynamically enable it when necessary.
@@ -21,12 +32,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Daily's REST helpers now include an `eject_at_token_exp` param, which ejects
+  the user when their token expires. This new parameter defaults to False.
+  Also, the default value for `enable_prejoin_ui` changed to False and
+  `eject_at_room_exp` changed to False.
+
+- `OpenAILLMService` and `OpenPipeLLMService` now use `gpt-4.1` as their
+  default model.
+
 - `SoundfileMixer` constructor arguments need to be keywords.
+
+### Deprecated
+
+- `DeepgramSTTService` parameter `url` is now deprecated, use `base_url`
+  instead.
+
+### Removed
+
+- Parameters `user_kwargs` and `assistant_kwargs` when creating a context
+  aggregator pair using `create_context_aggregator()` have been removed. Use
+  `user_params` and `assistant_params` instead.
 
 ### Fixed
 
+- Fixed a `TavusVideoService` issue that was causing audio choppiness.
+
 - Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
   client did not create a video transceiver.
+
+- Fixed an issue where LLM input parameters were not working and applied correctly in `GoogleVertexLLMService`, causing
+  unexpected behavior during inference.
 
 ## [0.0.63] - 2025-04-11
 

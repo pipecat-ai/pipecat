@@ -6,7 +6,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Set, Tuple, Type
+from typing import Any, Optional, Set, Tuple, Type
 
 from loguru import logger
 
@@ -19,6 +19,10 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     StartInterruptionFrame,
     UserImageRequestFrame,
+)
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -55,8 +59,8 @@ class LLMService(AIService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> Any:
         pass
 

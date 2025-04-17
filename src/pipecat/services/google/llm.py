@@ -9,21 +9,14 @@ import io
 import json
 import os
 import uuid
-
-from google.api_core.exceptions import DeadlineExceeded
-
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
-
-# Suppress gRPC fork warnings
-os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
-
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -39,6 +32,10 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -51,11 +48,14 @@ from pipecat.services.openai.llm import (
     OpenAIUserContextAggregator,
 )
 
+# Suppress gRPC fork warnings
+os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
+
 try:
     import google.ai.generativelanguage as glm
     import google.generativeai as gai
+    from google.api_core.exceptions import DeadlineExceeded
     from google.generativeai.types import GenerationConfig
-
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -686,8 +686,8 @@ class GoogleLLMService(LLMService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> GoogleContextAggregatorPair:
         """Create an instance of GoogleContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -695,12 +695,10 @@ class GoogleLLMService(LLMService):
 
         Args:
             context (OpenAILLMContext): The LLM context.
-            user_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the user context aggregator constructor. Defaults
-                to an empty mapping.
-            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the assistant context aggregator
-                constructor. Defaults to an empty mapping.
+            user_params (LLMUserAggregatorParams, optional): User aggregator
+                parameters.
+            assistant_params (LLMAssistantAggregatorParams, optional): User
+                aggregator parameters.
 
         Returns:
             GoogleContextAggregatorPair: A pair of context aggregators, one for
@@ -712,6 +710,6 @@ class GoogleLLMService(LLMService):
 
         if isinstance(context, OpenAILLMContext):
             context = GoogleLLMContext.upgrade_to_google(context)
-        user = GoogleUserContextAggregator(context, **user_kwargs)
-        assistant = GoogleAssistantContextAggregator(context, **assistant_kwargs)
+        user = GoogleUserContextAggregator(context, params=user_params)
+        assistant = GoogleAssistantContextAggregator(context, params=assistant_params)
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
