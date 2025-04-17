@@ -133,8 +133,10 @@ class BaseSmartTurn(ABC):
         logger.debug(f"Segment audio chunks after start index: {len(segment_audio)}")
 
         # Limit maximum duration
-        if len(segment_audio) / self.sample_rate > self._params.max_duration_secs:
-            segment_audio = segment_audio[: int(self._params.max_duration_secs * self.sample_rate)]
+        max_samples = int(self._params.max_duration_secs * self.sample_rate)
+        if len(segment_audio) > max_samples:
+            # slices the array to keep the last max_samples samples, discarding the earlier part.
+            segment_audio = segment_audio[-max_samples:]
 
         logger.debug(f"Segment audio chunks after limiting duration: {len(segment_audio)}")
 
