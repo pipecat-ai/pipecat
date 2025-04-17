@@ -572,15 +572,6 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class UserEndOfTurnFrame(SystemFrame):
-    """Emitted based on the Smart Turn model to indicate that the user has
-    completed their turn/sentence.
-    """
-
-    pass
-
-
-@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
