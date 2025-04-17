@@ -386,10 +386,13 @@ class BaseOutputTransport(FrameProcessor):
     async def _draw_image(self, frame: OutputImageRawFrame):
         desired_size = (self._params.camera_out_width, self._params.camera_out_height)
 
+        # TODO: we should refactor in the future to support dynamic resolutions
+        # which is kind of what happens in P2P connections.
+        # We need to add support for that inside the DailyTransport
         if frame.size != desired_size:
             image = Image.frombytes(frame.format, frame.size, frame.image)
             resized_image = image.resize(desired_size)
-            logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
+            # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
             frame = OutputImageRawFrame(
                 resized_image.tobytes(), resized_image.size, resized_image.format
             )
