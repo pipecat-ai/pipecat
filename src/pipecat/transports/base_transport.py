@@ -41,7 +41,7 @@ class TransportParams(BaseModel):
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: Optional[VADAnalyzer] = None
-
+    interrupt_taper_duration_ms: int = 5000
 
 class BaseTransport(BaseObject):
     def __init__(
