@@ -13,6 +13,7 @@ from typing import Any, Awaitable, Callable, Mapping, Optional
 import aiohttp
 from daily import (
     AudioData,
+    VideoFrame,
     VirtualCameraDevice,
     VirtualMicrophoneDevice,
     VirtualSpeakerDevice,
@@ -657,7 +658,7 @@ class DailyTransportClient(EventHandler):
         callback: Callable,
         audio_source: str = "camera",
     ):
-        self._audio_renderers[participant_id] = callback
+        self._audio_renderers[participant_id][audio_source] = callback
 
         self._client.set_audio_renderer(
             participant_id,
@@ -678,7 +679,7 @@ class DailyTransportClient(EventHandler):
             participant_settings={participant_id: {"media": {video_source: "subscribed"}}}
         )
 
-        self._video_renderers[participant_id] = callback
+        self._video_renderers[participant_id][video_source] = callback
 
         self._client.set_video_renderer(
             participant_id,
@@ -790,19 +791,15 @@ class DailyTransportClient(EventHandler):
     # Daily (CallClient callbacks)
     #
 
-    def _audio_data_received(self, participant_id, audio_data):
-        callback = self._audio_renderers[participant_id]
-        self._call_async_callback(callback, participant_id, audio_data)
+    def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
+        callback = self._audio_renderers[participant_id][audio_source]
+        self._call_async_callback(callback, participant_id, audio_data, audio_source)
 
-    def _video_frame_received(self, participant_id, video_frame):
-        callback = self._video_renderers[participant_id]
-        self._call_async_callback(
-            callback,
-            participant_id,
-            video_frame.buffer,
-            (video_frame.width, video_frame.height),
-            video_frame.color_format,
-        )
+    def _video_frame_received(
+        self, participant_id: str, video_frame: VideoFrame, video_source: str
+    ):
+        callback = self._video_renderers[participant_id][video_source]
+        self._call_async_callback(callback, participant_id, video_frame, video_source)
 
     def _call_async_callback(self, callback, *args):
         future = asyncio.run_coroutine_threadsafe(
@@ -849,7 +846,6 @@ class DailyInputTransport(BaseInputTransport):
         self._client = client
         self._params = params
 
-        self._audio_renderers = {}
         self._video_renderers = {}
 
         # Whether we have seen a StartFrame already.
@@ -943,20 +939,20 @@ class DailyInputTransport(BaseInputTransport):
         participant_id: str,
         audio_source: str = "camera",
     ):
-        self._audio_renderers[participant_id] = {"audio_source": audio_source}
-
         await self._client.capture_participant_audio(
             participant_id, self._on_participant_audio_data, audio_source
         )
 
-    async def _on_participant_audio_data(self, participant_id: str, audio: AudioData):
+    async def _on_participant_audio_data(
+        self, participant_id: str, audio: AudioData, audio_source: str
+    ):
         frame = UserAudioRawFrame(
             user_id=participant_id,
-            audio_source=self._audio_renderers[participant_id]["audio_source"],
             audio=audio.audio_frames,
             sample_rate=audio.sample_rate,
             num_channels=audio.num_channels,
         )
+        frame.source = audio_source
         await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):
@@ -976,7 +972,7 @@ class DailyInputTransport(BaseInputTransport):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        self._video_renderers[participant_id] = {
+        self._video_renderers[participant_id][video_source] = {
             "framerate": framerate,
             "timestamp": 0,
             "render_next_frame": [],
@@ -990,12 +986,14 @@ class DailyInputTransport(BaseInputTransport):
         if frame.user_id in self._video_renderers:
             self._video_renderers[frame.user_id]["render_next_frame"].append(frame)
 
-    async def _on_participant_video_frame(self, participant_id: str, buffer, size, format):
+    async def _on_participant_video_frame(
+        self, participant_id: str, video_frame: VideoFrame, video_source: str
+    ):
         render_frame = False
 
         curr_time = time.time()
-        prev_time = self._video_renderers[participant_id]["timestamp"]
-        framerate = self._video_renderers[participant_id]["framerate"]
+        prev_time = self._video_renderers[participant_id][video_source]["timestamp"]
+        framerate = self._video_renderers[participant_id][video_source]["framerate"]
 
         # Some times we render frames because of a request.
         request_frame = None
@@ -1004,20 +1002,23 @@ class DailyInputTransport(BaseInputTransport):
             next_time = prev_time + 1 / framerate
             render_frame = (next_time - curr_time) < 0.1
 
-        elif self._video_renderers[participant_id]["render_next_frame"]:
-            request_frame = self._video_renderers[participant_id]["render_next_frame"].pop(0)
+        elif self._video_renderers[participant_id][video_source]["render_next_frame"]:
+            request_frame = self._video_renderers[participant_id][video_source][
+                "render_next_frame"
+            ].pop(0)
             render_frame = True
 
         if render_frame:
             frame = UserImageRawFrame(
                 user_id=participant_id,
                 request=request_frame,
-                image=buffer,
-                size=size,
-                format=format,
+                image=video_frame.buffer,
+                size=(video_frame.width, video_frame.height),
+                format=video_frame.color_format,
             )
+            frame.source = video_source
             await self.push_frame(frame)
-            self._video_renderers[participant_id]["timestamp"] = curr_time
+            self._video_renderers[participant_id][video_source]["timestamp"] = curr_time
 
 
 class DailyOutputTransport(BaseOutputTransport):
