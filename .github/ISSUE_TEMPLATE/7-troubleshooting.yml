@@ -1,0 +1,70 @@
+name: Troubleshooting
+description: Help with a specific use case
+type: Troubleshooting
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Troubleshooting Request
+
+        Use this form to get help with a specific use case or implementation.
+
+  - type: input
+    id: pipecat-version
+    attributes:
+      label: pipecat version
+      description: Which version are you using?
+      placeholder: e.g., 0.0.63
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Which version of Python are you using?
+      placeholder: e.g., 3.12.8
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Which OS are you using?
+      placeholder: e.g., Ubuntu 24.04, Windows 11, macOS 12.5
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case Description
+      description: Describe what you're trying to accomplish with pipecat.
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-approach
+    attributes:
+      label: Current Approach
+      description: What have you tried so far? Include code snippets if relevant.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: errors
+    attributes:
+      label: Errors or Unexpected Behavior
+      description: Describe any errors or unexpected behavior you're encountering.
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information that might help us understand your situation.
+    validations:
+      required: false
