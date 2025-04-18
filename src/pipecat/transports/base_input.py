@@ -10,7 +10,7 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.audio.turn.base_smart_turn import BaseSmartTurn, EndOfTurnState
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -66,8 +66,8 @@ class BaseInputTransport(FrameProcessor):
         return self._params.vad_analyzer
 
     @property
-    def end_of_turn_analyzer(self) -> Optional[BaseSmartTurn]:
-        return self._params.end_of_turn_analyzer
+    def turn_analyzer(self) -> Optional[BaseTurnAnalyzer]:
+        return self._params.turn_analyzer
 
     async def start(self, frame: StartFrame):
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
@@ -76,8 +76,8 @@ class BaseInputTransport(FrameProcessor):
         if self._params.vad_enabled and self._params.vad_analyzer:
             self._params.vad_analyzer.set_sample_rate(self._sample_rate)
         # Configure End of turn analyzer.
-        if self._params.end_of_turn_analyzer:
-            self._params.end_of_turn_analyzer.set_sample_rate(self._sample_rate)
+        if self._params.turn_analyzer:
+            self._params.turn_analyzer.set_sample_rate(self._sample_rate)
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
@@ -199,8 +199,8 @@ class BaseInputTransport(FrameProcessor):
             # - Creating the UserStoppedSpeakingFrame
             # - Creating the UserStartedSpeakingFrame multiple times
             can_create_user_frames = (
-                self._params.end_of_turn_analyzer is None
-                or not self._params.end_of_turn_analyzer.speech_triggered
+                self._params.turn_analyzer is None
+                or not self._params.turn_analyzer.speech_triggered
             )
             if can_create_user_frames:
                 if new_vad_state == VADState.SPEAKING:
@@ -215,9 +215,9 @@ class BaseInputTransport(FrameProcessor):
         return vad_state
 
     async def _handle_end_of_turn(self):
-        if self.end_of_turn_analyzer:
+        if self.turn_analyzer:
             state = await self.get_event_loop().run_in_executor(
-                self._executor, self.end_of_turn_analyzer.analyze_end_of_turn
+                self._executor, self.turn_analyzer.analyze_end_of_turn
             )
             await self._handle_end_of_turn_complete(state)
 
@@ -230,7 +230,7 @@ class BaseInputTransport(FrameProcessor):
     ):
         is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
         # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
-        end_of_turn_state = self._params.end_of_turn_analyzer.append_audio(frame.audio, is_speech)
+        end_of_turn_state = self._params.turn_analyzer.append_audio(frame.audio, is_speech)
         if end_of_turn_state == EndOfTurnState.COMPLETE:
             await self._handle_end_of_turn_complete(end_of_turn_state)
         # Otherwise we are going to trigger to check if the turn is completed based on the VAD
@@ -255,7 +255,7 @@ class BaseInputTransport(FrameProcessor):
                 vad_state = await self._handle_vad(frame, vad_state)
                 audio_passthrough = self._params.vad_audio_passthrough
 
-            if self._params.end_of_turn_analyzer:
+            if self._params.turn_analyzer:
                 await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
 
             # Push audio downstream if passthrough.

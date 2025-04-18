@@ -5,20 +5,14 @@
 #
 
 import time
-from abc import ABC, abstractmethod
-from enum import Enum
+from abc import abstractmethod
 from typing import Dict, Optional
 
 import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
-
-# Enum for end-of-turn detection states
-class EndOfTurnState(Enum):
-    COMPLETE = 1
-    INCOMPLETE = 2
-
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
 
 # Default timing parameters
 STOP_SECS = 3
@@ -35,27 +29,19 @@ class SmartTurnParams(BaseModel):
     # use_only_last_vad_segment: bool = USE_ONLY_LAST_VAD_SEGMENT
 
 
-class BaseSmartTurn(ABC):
+class BaseSmartTurn(BaseTurnAnalyzer):
     def __init__(
         self, *, sample_rate: Optional[int] = None, params: SmartTurnParams = SmartTurnParams()
     ):
-        self._init_sample_rate = sample_rate
+        super().__init__(sample_rate=sample_rate)
         self._params = params
         # Configuration
-        self._sample_rate = 0
         self._stop_ms = self._params.stop_secs * 1000  # silence threshold in ms
         # Inference state
         self._audio_buffer = []
         self._speech_triggered = False
         self._silence_ms = 0
         self._speech_start_time = None
-
-    @property
-    def sample_rate(self) -> int:
-        return self._sample_rate
-
-    def set_sample_rate(self, sample_rate: int):
-        self._sample_rate = sample_rate
 
     @property
     def speech_triggered(self) -> bool:
