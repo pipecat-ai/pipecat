@@ -40,7 +40,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-transcribe-latest",
+        model="gpt-4o-transcribe",
         prompt="Expect words related to dogs, such as breed names.",
     )
 
