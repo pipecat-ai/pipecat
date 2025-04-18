@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest an enhancement or new feature
+type: Enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Feature Request
+
+        Thank you for suggesting an enhancement to pipecat.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: A clear description of the problem this feature would solve.
+      placeholder: I'm always frustrated when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: A clear and concise description of what you want to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions
+      description: Any alternative solutions or features you've considered.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context, mockups, or screenshots about the feature request here.
+      placeholder: You can drag and drop images here to include them.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Would you be willing to help implement this feature?
+      options:
+        - label: Yes, I'd like to contribute
+        - label: No, I'm just suggesting
