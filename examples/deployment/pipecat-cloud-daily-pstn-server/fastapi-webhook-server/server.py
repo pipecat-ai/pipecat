@@ -141,6 +141,7 @@ async def dial(request: RoomRequest, raw_request: Request):
             "display_name": request.From,
             "sip_mode": "dial-in",
             "num_endpoints": 2 if request.call_transfer is not None else 1,
+            "codecs": {"audio": ["OPUS"]},
         }
         daily_room_properties["sip"] = sip_config
 
