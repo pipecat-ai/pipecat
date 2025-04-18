@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://docs.pipecat.ai/getting-started/overview
+    about: Please check our documentation before creating an issue.
+  - name: Discord
+    url: https://discord.gg/pipecat
+    about: You can ask questions and get help in our Discord community.
