@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a bug or unexpected behavior
+type: Bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Bug Report
+
+        Thank you for taking the time to fill out this bug report.
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Environment
+
+  - type: input
+    id: pipecat-version
+    attributes:
+      label: pipecat version
+      description: Which version are you using?
+      placeholder: e.g., 0.0.63
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Which Python version are you using?
+      placeholder: e.g., 3.12.8
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Which OS are you using?
+      placeholder: e.g., Ubuntu 24.04, Windows 11, macOS 12.5
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue description
+      description: Provide a clear description of the issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: List the steps to reproduce the issue.
+      placeholder: |
+        1. Do this...
+        2. Then do that...
+        3. Observe the error...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: If applicable, include any relevant logs or error messages
+      render: shell
+    validations:
+      required: false
