@@ -145,7 +145,7 @@ async def main():
 
         await timeout_handler.handle_timeout(client)
 
-    runner = PipelineRunner()
+    runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
 
