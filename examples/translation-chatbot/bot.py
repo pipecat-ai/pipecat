@@ -150,7 +150,7 @@ async def main():
         in_language = "English"
         out_language = "Spanish"
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
         context = OpenAILLMContext()
         context_aggregator = llm.create_context_aggregator(context)
 

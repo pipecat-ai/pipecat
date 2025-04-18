@@ -63,7 +63,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     #     aiohttp_session=session,
     # )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     # You can aslo register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("store_user_emails", store_user_emails)

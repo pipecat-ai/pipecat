@@ -10,6 +10,7 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -64,12 +65,19 @@ class BaseInputTransport(FrameProcessor):
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._params.vad_analyzer
 
+    @property
+    def turn_analyzer(self) -> Optional[BaseTurnAnalyzer]:
+        return self._params.turn_analyzer
+
     async def start(self, frame: StartFrame):
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
 
         # Configure VAD analyzer.
         if self._params.vad_enabled and self._params.vad_analyzer:
             self._params.vad_analyzer.set_sample_rate(self._sample_rate)
+        # Configure End of turn analyzer.
+        if self._params.turn_analyzer:
+            self._params.turn_analyzer.set_sample_rate(self._sample_rate)
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
@@ -187,16 +195,47 @@ class BaseInputTransport(FrameProcessor):
             and new_vad_state != VADState.STOPPING
         ):
             frame = None
-            if new_vad_state == VADState.SPEAKING:
-                frame = UserStartedSpeakingFrame()
-            elif new_vad_state == VADState.QUIET:
-                frame = UserStoppedSpeakingFrame()
+            # If the turn analyser is enabled, this will prevent:
+            # - Creating the UserStoppedSpeakingFrame
+            # - Creating the UserStartedSpeakingFrame multiple times
+            can_create_user_frames = (
+                self._params.turn_analyzer is None
+                or not self._params.turn_analyzer.speech_triggered
+            )
+            if can_create_user_frames:
+                if new_vad_state == VADState.SPEAKING:
+                    frame = UserStartedSpeakingFrame()
+                elif new_vad_state == VADState.QUIET:
+                    frame = UserStoppedSpeakingFrame()
 
             if frame:
                 await self._handle_user_interruption(frame)
 
             vad_state = new_vad_state
         return vad_state
+
+    async def _handle_end_of_turn(self):
+        if self.turn_analyzer:
+            state = await self.get_event_loop().run_in_executor(
+                self._executor, self.turn_analyzer.analyze_end_of_turn
+            )
+            await self._handle_end_of_turn_complete(state)
+
+    async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
+        if state == EndOfTurnState.COMPLETE:
+            await self._handle_user_interruption(UserStoppedSpeakingFrame())
+
+    async def _run_turn_analyzer(
+        self, frame: InputAudioRawFrame, vad_state: VADState, previous_vad_state: VADState
+    ):
+        is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
+        # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
+        end_of_turn_state = self._params.turn_analyzer.append_audio(frame.audio, is_speech)
+        if end_of_turn_state == EndOfTurnState.COMPLETE:
+            await self._handle_end_of_turn_complete(end_of_turn_state)
+        # Otherwise we are going to trigger to check if the turn is completed based on the VAD
+        elif vad_state == VADState.QUIET and vad_state != previous_vad_state:
+            await self._handle_end_of_turn()
 
     async def _audio_task_handler(self):
         vad_state: VADState = VADState.QUIET
@@ -211,9 +250,13 @@ class BaseInputTransport(FrameProcessor):
 
             # Check VAD and push event if necessary. We just care about
             # changes from QUIET to SPEAKING and vice versa.
+            previous_vad_state = vad_state
             if self._params.vad_enabled:
                 vad_state = await self._handle_vad(frame, vad_state)
                 audio_passthrough = self._params.vad_audio_passthrough
+
+            if self._params.turn_analyzer:
+                await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
 
             # Push audio downstream if passthrough.
             if audio_passthrough:

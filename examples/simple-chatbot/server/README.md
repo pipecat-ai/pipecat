@@ -70,3 +70,17 @@ Run the server:
 ```bash
 python server.py
 ```
+
+## Troubleshooting
+
+If you encounred this error:
+
+```bash
+aiohttp.client_exceptions.ClientConnectorCertificateError: Cannot connect to host api.daily.co:443 ssl:True [SSLCertVerificationError: (1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate (_ssl.c:1000)')]
+```
+
+It's because Python cannot verify the SSL certificate from https://api.daily.co when making a POST request to create a room or token.
+
+This is a common issue when the system doesn't have the proper CA certificates.
+
+Install SSL Certificates (macOS): `/Applications/Python\ 3.12/Install\ Certificates.command`

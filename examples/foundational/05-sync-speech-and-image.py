@@ -85,7 +85,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
     # Create an HTTP session for API calls
     async with aiohttp.ClientSession() as session:
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
         tts = CartesiaHttpTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),

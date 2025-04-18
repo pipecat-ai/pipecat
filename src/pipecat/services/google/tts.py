@@ -346,9 +346,9 @@ class GoogleTTSService(TTSService):
             audio_content = response.audio_content[44:]
 
             # Read and yield audio data in chunks
-            chunk_size = 8192
-            for i in range(0, len(audio_content), chunk_size):
-                chunk = audio_content[i : i + chunk_size]
+            CHUNK_SIZE = 1024
+            for i in range(0, len(audio_content), CHUNK_SIZE):
+                chunk = audio_content[i : i + CHUNK_SIZE]
                 if not chunk:
                     break
                 await self.stop_ttfb_metrics()
