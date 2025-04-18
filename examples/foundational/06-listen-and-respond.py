@@ -53,6 +53,9 @@ class BananaProcessor(FrameProcessor):
 
 
 class MetricsLogger(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -107,13 +110,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    hello = BananaProcessor()
+    banana = BananaProcessor()
 
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
-            hello,
+            banana,
             context_aggregator.user(),
             llm,
             tts,
