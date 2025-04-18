@@ -55,7 +55,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
             vad_audio_passthrough=True,
-            end_of_turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
+            turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
                 smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
             ),
         ),
