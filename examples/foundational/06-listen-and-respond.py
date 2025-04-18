@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, MetricsFrame
+from pipecat.frames.frames import Frame, MetricsFrame, TranscriptionFrame, TTSSpeakFrame
 from pipecat.metrics.metrics import (
     LLMUsageMetricsData,
     ProcessingMetricsData,
@@ -30,6 +30,26 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
+
+
+# Custom processor that prints a message if it receives a TranscriptionFrame that says "banana"
+class BananaProcessor(FrameProcessor):
+    """A custom processor that listens for transcription frames containing the word 'banana'."""
+
+    def __init__(self):
+        super().__init__()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # Ensure the super method is called first
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, TranscriptionFrame):
+            logger.debug(f"Received transcription frame: {frame.text}")
+            if "banana" in frame.text.lower():
+                logger.info("---- Received 'banana' in transcription frame")
+
+        # Push the frame after processing
+        await self.push_frame(frame)
 
 
 class MetricsLogger(FrameProcessor):
@@ -87,10 +107,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
+    hello = BananaProcessor()
+
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
+            hello,
             context_aggregator.user(),
             llm,
             tts,
