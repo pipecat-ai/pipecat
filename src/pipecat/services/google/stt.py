@@ -32,6 +32,8 @@ from pipecat.utils.time import time_now_iso8601
 
 try:
     from google.api_core.client_options import ClientOptions
+    from google.auth import default
+    from google.auth.exceptions import GoogleAuthError
     from google.cloud import speech_v2
     from google.cloud.speech_v2.types import cloud_speech
     from google.oauth2 import service_account
@@ -451,6 +453,7 @@ class GoogleSTTService(STTService):
             client_options = ClientOptions(api_endpoint=f"{self._location}-speech.googleapis.com")
 
         # Extract project ID and create client
+        creds: Optional[service_account.Credentials] = None
         if credentials:
             json_account_info = json.loads(credentials)
             self._project_id = json_account_info.get("project_id")
@@ -461,7 +464,16 @@ class GoogleSTTService(STTService):
                 self._project_id = json_account_info.get("project_id")
             creds = service_account.Credentials.from_service_account_file(credentials_path)
         else:
-            raise ValueError("Either credentials or credentials_path must be provided")
+            try:
+                creds, project_id = default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+                self._project_id = project_id
+            except GoogleAuthError:
+                pass
+
+        if not creds:
+            raise ValueError("No valid credentials provided.")
 
         if not self._project_id:
             raise ValueError("Project ID not found in credentials")
