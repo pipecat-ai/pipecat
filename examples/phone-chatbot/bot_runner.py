@@ -56,7 +56,7 @@ async def create_daily_room(room_url: str = None, config_body: Dict[str, Any] = 
         sip_params = None
         if capabilities["enable_dialin"]:
             sip_params = DailyRoomSipParams(
-                display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=2
+                display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=2, "codecs": {"audio": ["PCMU"]}
             )
 
         # Create the properties object with the appropriate settings
