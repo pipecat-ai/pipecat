@@ -6,7 +6,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional
+from typing import Any, Callable, Optional
 
 
 class EndOfTurnState(Enum):
@@ -15,18 +15,21 @@ class EndOfTurnState(Enum):
 
 
 class BaseTurnAnalyzer(ABC):
-    """
-    Abstract base class for analyzing user end of turn.
-    """
+    """Abstract base class for analyzing user end of turn."""
 
-    def __init__(self, *, sample_rate: Optional[int] = None):
+    def __init__(
+        self,
+        *,
+        sample_rate: Optional[int] = None,
+        on_result: Optional[Callable[[dict], Any]] = None,
+    ):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
+        self._on_result = on_result
 
     @property
     def sample_rate(self) -> int:
-        """
-        Returns the current sample rate.
+        """Returns the current sample rate.
 
         Returns:
             int: The effective sample rate for audio processing.
@@ -34,8 +37,7 @@ class BaseTurnAnalyzer(ABC):
         return self._sample_rate
 
     def set_sample_rate(self, sample_rate: int):
-        """
-        Sets the sample rate for audio processing.
+        """Sets the sample rate for audio processing.
 
         If the initial sample rate was provided, it will use that; otherwise, it sets to
         the provided sample rate.
@@ -48,8 +50,7 @@ class BaseTurnAnalyzer(ABC):
     @property
     @abstractmethod
     def speech_triggered(self) -> bool:
-        """
-        Determines if speech has been detected.
+        """Determines if speech has been detected.
 
         Returns:
             bool: True if speech is triggered, otherwise False.
@@ -58,8 +59,7 @@ class BaseTurnAnalyzer(ABC):
 
     @abstractmethod
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
-        """
-        Appends audio data for analysis.
+        """Appends audio data for analysis.
 
         Args:
             buffer (bytes): The audio data to append.
@@ -72,10 +72,23 @@ class BaseTurnAnalyzer(ABC):
 
     @abstractmethod
     def analyze_end_of_turn(self) -> EndOfTurnState:
-        """
-        Analyzes if an end of turn has occurred based on the audio input.
+        """Analyzes if an end of turn has occurred based on the audio input.
 
         Returns:
             EndOfTurnState: The result of the end of turn analysis.
         """
         pass
+
+    @property
+    def on_result(self) -> Optional[Callable[[dict], Any]]:
+        """Returns the current result callback function."""
+        return self._on_result
+
+    @on_result.setter
+    def on_result(self, callback: Optional[Callable[[dict], Any]]):
+        """Sets the callback function to be called when a prediction result is available.
+
+        Args:
+            callback: A function that will be called with the prediction result dictionary.
+        """
+        self._on_result = callback
