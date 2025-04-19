@@ -130,6 +130,12 @@ pip install "pipecat-ai[option,...]"
 
 ### Running tests
 
+Install dev and test packages:
+
+```shell
+pip install -r dev-requirements.txt -r test-requirements.txt
+```
+
 From the root directory, run:
 
 ```shell
