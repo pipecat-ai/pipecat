@@ -119,7 +119,7 @@ pip install "pipecat-ai[option,...]"
 5. Include optional dependencies as needed. For example:
 
    ```shell
-   pip install -e ".[daily,deepgram,cartesia,openai,silero]"     # Updated for the services you're using
+   pip install -e ".[daily,deepgram,cartesia,openai,silero]"
    ```
 
 6. (Optional) If you want to use this package from another directory:
