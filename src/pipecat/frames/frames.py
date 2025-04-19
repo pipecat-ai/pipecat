@@ -621,10 +621,18 @@ class SmartTurnResultFrame(SystemFrame):
 
     is_complete: bool
     probability: float
-    processing_time_ms: float
+    inference_time_ms: float  # Time spent on model computation only
+    server_total_time_ms: float  # Total server processing time (inference + server overhead)
+    e2e_processing_time_ms: float  # Complete end-to-end time (includes network round trip)
 
     def __str__(self):
-        return f"{self.name}(is_complete: {self.is_complete}, probability: {self.probability:.4f}, processing_time: {self.processing_time_ms:.2f}ms)"
+        return (
+            f"{self.name}(is_complete: {self.is_complete}, "
+            f"probability: {self.probability:.4f}, "
+            f"model: {self.inference_time_ms:.2f}ms, "
+            f"server: {self.server_total_time_ms:.2f}ms, "
+            f"e2e: {self.e2e_processing_time_ms:.2f}ms)"
+        )
 
 
 @dataclass

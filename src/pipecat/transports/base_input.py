@@ -289,7 +289,11 @@ class BaseInputTransport(FrameProcessor):
         frame = SmartTurnResultFrame(
             is_complete=(result["prediction"] == 1),
             probability=result["probability"],
-            processing_time_ms=result["processing_time_ms"],
+            inference_time_ms=result.get("inference_time_ms", 0),
+            server_total_time_ms=result.get("server_total_time_ms", 0),
+            e2e_processing_time_ms=result.get("e2e_processing_time_ms", 0),
         )
 
+        # Push the frame
         await self.push_frame(frame)
+        logger.debug(f"Pushed SmartTurnResultFrame: {frame}")

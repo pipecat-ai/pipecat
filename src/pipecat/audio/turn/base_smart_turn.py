@@ -143,19 +143,29 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             end_time = time.perf_counter()
 
             # Calculate processing time
-            processing_time_ms = (end_time - start_time) * 1000
+            e2e_processing_time_ms = (end_time - start_time) * 1000
 
-            # Include processing time in the result
-            result["processing_time_ms"] = processing_time_ms
+            # Prepare the result data
+            result_data = {
+                "prediction": result["prediction"],
+                "probability": result["probability"],
+                "inference_time_ms": result.get("inference_time", 0) * 1000,  # Convert to ms
+                "server_total_time_ms": result.get("total_time", 0) * 1000,  # Convert to ms
+                "e2e_processing_time_ms": e2e_processing_time_ms,  # Total time including network
+            }
 
             # Call the callback if available
             if self._on_result:
-                self._on_result(result)
+                self._on_result(result_data)
 
             logger.debug("--------")
-            logger.debug(f"Prediction: {'Complete' if result['prediction'] == 1 else 'Incomplete'}")
-            logger.debug(f"Probability of complete: {result['probability']:.4f}")
-            logger.debug(f"Prediction took {processing_time_ms:.2f}ms")
+            logger.debug(
+                f"Prediction: {'Complete' if result_data['prediction'] == 1 else 'Incomplete'}"
+            )
+            logger.debug(f"Probability of complete: {result_data['probability']:.4f}")
+            logger.debug(f"Inference time: {result_data['inference_time_ms']:.2f}ms")
+            logger.debug(f"Server total time: {result_data['server_total_time_ms']:.2f}ms")
+            logger.debug(f"E2E processing time: {result_data['e2e_processing_time_ms']:.2f}ms")
         else:
             logger.debug(f"params: {self._params}, stop_ms: {self._stop_ms}")
             logger.debug("Captured empty audio segment, skipping prediction.")
