@@ -41,6 +41,8 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi_helpers.llm import RTVILLMHelper
+
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -182,6 +184,11 @@ async def main():
         # RTVI events for Pipecat client UI
         #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+        llmHelper = RTVILLMHelper(
+            service="llm",
+            user_aggregator=context_aggregator.user(),
+        )
+        llmHelper.register_actions(rtvi)
 
         pipeline = Pipeline(
             [
