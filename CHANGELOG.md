@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for Application Default Credentials in Google services,
+  `GoogleSTTService`, `GoogleTTSService`, and `GoogleVertexLLMService`.
+
 - Added support for Smart Turn Detection via the `turn_analyzer` transport
-  parameter. You can now choose between `SmartTurnAnalyzer()` for remote 
-  inference or `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using 
+  parameter. You can now choose between `SmartTurnAnalyzer()` for remote
+  inference or `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using
   Core ML.
 
 - `DeepgramTTSService` accepts `base_url` argument again, allowing you to
