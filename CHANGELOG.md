@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added support for Smart Turn Detection via the `turn_analyzer` transport
-  parameter. You can now choose between `SmartTurnAnalyzer()` for remote 
-  inference or `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using 
+  parameter. You can now choose between `SmartTurnAnalyzer()` for remote
+  inference or `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using
   Core ML.
 
 - `DeepgramTTSService` accepts `base_url` argument again, allowing you to
@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transports like `SmallWebRTCTransport` and `FastAPIWebsocketTransport`.
 
 ### Changed
+
+- `GrokLLMService` now uses `grok-3-beta` as its default model.
 
 - Daily's REST helpers now include an `eject_at_token_exp` param, which ejects
   the user when their token expires. This new parameter defaults to False.
