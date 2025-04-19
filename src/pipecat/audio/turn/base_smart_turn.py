@@ -142,10 +142,20 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             )
             end_time = time.perf_counter()
 
+            # Calculate processing time
+            processing_time_ms = (end_time - start_time) * 1000
+
+            # Include processing time in the result
+            result["processing_time_ms"] = processing_time_ms
+
+            # Call the callback if available
+            if self._on_result:
+                self._on_result(result)
+
             logger.debug("--------")
             logger.debug(f"Prediction: {'Complete' if result['prediction'] == 1 else 'Incomplete'}")
             logger.debug(f"Probability of complete: {result['probability']:.4f}")
-            logger.debug(f"Prediction took {(end_time - start_time) * 1000:.2f}ms seconds")
+            logger.debug(f"Prediction took {processing_time_ms:.2f}ms")
         else:
             logger.debug(f"params: {self._params}, stop_ms: {self._stop_ms}")
             logger.debug("Captured empty audio segment, skipping prediction.")
@@ -154,8 +164,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
 
     @abstractmethod
     def _predict_endpoint(self, buffer: np.ndarray) -> Dict[str, any]:
-        """
-        Abstract method to predict if a turn has ended based on audio.
+        """Abstract method to predict if a turn has ended based on audio.
 
         Args:
             buffer: Float32 numpy array of audio samples at 16kHz.

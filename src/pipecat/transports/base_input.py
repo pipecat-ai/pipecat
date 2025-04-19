@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     FilterUpdateSettingsFrame,
     Frame,
     InputAudioRawFrame,
+    SmartTurnResultFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -78,6 +79,7 @@ class BaseInputTransport(FrameProcessor):
         # Configure End of turn analyzer.
         if self._params.turn_analyzer:
             self._params.turn_analyzer.set_sample_rate(self._sample_rate)
+            self._params.turn_analyzer.on_result = self._handle_smart_turn_result
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
@@ -263,3 +265,31 @@ class BaseInputTransport(FrameProcessor):
                 await self.push_frame(frame)
 
             self._audio_in_queue.task_done()
+
+    def _handle_smart_turn_result(self, result: dict):
+        """Handle smart turn prediction results by pushing a SmartTurnResultFrame.
+
+        This is called potentially from a background thread, so we need to schedule it on the event loop.
+
+        Args:
+            result: The prediction result dict from the smart turn analyzer.
+        """
+        # Get current event loop and schedule the async handler
+        asyncio.run_coroutine_threadsafe(
+            self._async_handle_smart_turn_result(result), self.get_event_loop()
+        )
+
+    async def _async_handle_smart_turn_result(self, result: dict):
+        """Async handler for smart turn results.
+
+        Args:
+            result: The prediction result dict from the smart turn analyzer.
+        """
+        # Create the SmartTurnResultFrame
+        frame = SmartTurnResultFrame(
+            is_complete=(result["prediction"] == 1),
+            probability=result["probability"],
+            processing_time_ms=result["processing_time_ms"],
+        )
+
+        await self.push_frame(frame)

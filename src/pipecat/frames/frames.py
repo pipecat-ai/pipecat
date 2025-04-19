@@ -616,6 +616,18 @@ class MetricsFrame(SystemFrame):
 
 
 @dataclass
+class SmartTurnResultFrame(SystemFrame):
+    """A frame containing the result of a smart turn analysis prediction."""
+
+    is_complete: bool
+    probability: float
+    processing_time_ms: float
+
+    def __str__(self):
+        return f"{self.name}(is_complete: {self.is_complete}, probability: {self.probability:.4f}, processing_time: {self.processing_time_ms:.2f}ms)"
+
+
+@dataclass
 class FunctionCallInProgressFrame(SystemFrame):
     """A frame signaling that a function call is in progress."""
 
