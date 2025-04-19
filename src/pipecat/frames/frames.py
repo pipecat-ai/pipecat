@@ -257,6 +257,22 @@ class InterimTranscriptionFrame(TextFrame):
 
 
 @dataclass
+class TranslationFrame(TextFrame):
+    """A text frame with translated transcription data.
+
+    Will be placed in the transport's receive queue when a participant speaks.
+
+    """
+
+    user_id: str
+    timestamp: str
+    language: Optional[Language] = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
 class OpenAILLMContextAssistantTimestampFrame(DataFrame):
     """Timestamp information for assistant message in LLM context."""
 
