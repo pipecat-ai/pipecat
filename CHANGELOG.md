@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `SmartTurnMetricsData`, which contains end-of-turn prediction metrics,
+  to the `MetricsFrame`. Using `MetricsFrame`, you can now retrieve prediction
+  confidence scores and processing time metrics from the smart turn analyzers.
+
 - Added support for Application Default Credentials in Google services,
   `GoogleSTTService`, `GoogleTTSService`, and `GoogleVertexLLMService`.
 
