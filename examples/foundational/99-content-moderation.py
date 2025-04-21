@@ -56,15 +56,26 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     # something inappropriate.
     moderator_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    statement_messages = [
+    moderator_messages = [
         {
             "role": "system",
-            "content": "",
+            "content": """
+You are a helpful LLM that will be used to moderate a conversation
+between a user and an assistant. Your goal is to determine if the user
+is saying something inappropriate. You will be given the user
+transcript and you will have to determine if the user is saying
+something inappropriate. If you think the user is saying something
+inappropriate please respond with "YES". If you think the user is
+saying something appropriate please respond with "NO". Examples of inappropriate
+content are: hate speech, racism, sexism, bullying, harassment,
+violence, self-harm, and any other content that violates the
+community guidelines.
+            """,
         },
     ]
 
-    statement_context = OpenAILLMContext(statement_messages)
-    statement_context_aggregator = moderator_llm.create_context_aggregator(statement_context)
+    moderator_context = OpenAILLMContext(moderator_messages)
+    moderator_context_aggregator = moderator_llm.create_context_aggregator(moderator_context)
 
     # This is the regular LLM.
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -101,13 +112,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     async def user_idle_notifier(frame):
         await notifier.notify()
 
-    # Sometimes the LLM will fail detecting if a user has completed a
-    # sentence, this will wake up the notifier if that happens.
+    # Sometimes the LLM will fail detecting if a user should be
+    # moderated, this will wake up the notifier if that happens.
     user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=3.0)
 
     # The ParallePipeline input are the user transcripts. We have two
-    # contexts. The first one will be used to determine if the user finished
-    # a statement and if so the notifier will be woken up. The second
+    # contexts. The first one will be used to determine if the user is
+    # moderated and if so the notifier will be woken up. The second
     # context is simply the regular context but it's gated waiting for the
     # notifier to be woken up.
     pipeline = Pipeline(
@@ -116,7 +127,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             stt,
             ParallelPipeline(
                 [
-                    statement_context_aggregator.user(),
+                    moderator_context_aggregator.user(),
                     moderator_llm,
                     completness_check,
                     NullFilter(),
