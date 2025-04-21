@@ -64,13 +64,17 @@ class SimliVideoService(FrameProcessor):
         async for audio_frame in self._simli_client.getAudioStreamIterator():
             resampled_frames = self._pipecat_resampler.resample(audio_frame)
             for resampled_frame in resampled_frames:
-                await self.push_frame(
-                    TTSAudioRawFrame(
-                        audio=resampled_frame.to_ndarray().tobytes(),
-                        sample_rate=self._pipecat_resampler.rate,
-                        num_channels=1,
-                    ),
-                )
+                # Convert to NumPy array
+                audio_array = resampled_frame.to_ndarray()
+                # Check if all values are zero (silence) then not sending
+                if audio_array.any():
+                    await self.push_frame(
+                        TTSAudioRawFrame(
+                            audio=resampled_frame.to_ndarray().tobytes(),
+                            sample_rate=self._pipecat_resampler.rate,
+                            num_channels=1,
+                        ),
+                    )
 
     async def _consume_and_process_video(self):
         await self._pipecat_resampler_event.wait()

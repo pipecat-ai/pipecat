@@ -35,6 +35,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             audio_in_enabled=True,
             audio_out_enabled=True,
             camera_out_enabled=True,
+            camera_out_is_live=True,
             camera_out_width=512,
             camera_out_height=512,
             vad_enabled=True,
