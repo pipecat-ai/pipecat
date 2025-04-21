@@ -24,7 +24,6 @@ class BaseTurnAnalyzer(ABC):
     """
 
     def __init__(self, *, sample_rate: Optional[int] = None):
-        super().__init__()
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
 
