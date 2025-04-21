@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, EndTaskFrame, TextFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, EndTaskFrame, Frame, TextFrame, TTSSpeakFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -45,7 +45,7 @@ class KickParticipantProcessor(FrameProcessor):
         """Initialize the processor."""
         super().__init__()
 
-    async def process_frame(self, frame, direction):
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TextFrame) and frame.text == "YES":
@@ -57,8 +57,8 @@ class KickParticipantProcessor(FrameProcessor):
 
             # Signal that the task should end after processing this frame
             await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-
-        await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
@@ -162,7 +162,7 @@ community guidelines.
                     moderator_context_aggregator.user(),
                     moderator_llm,
                     kick_participant,
-                    completeness_check,
+                    # completeness_check,
                     NullFilter(),
                 ],
                 [context_aggregator.user(), gated_context_aggregator, llm],
