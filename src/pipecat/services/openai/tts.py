@@ -70,7 +70,7 @@ class OpenAITTSService(TTSService):
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
-                f"Current rate of {self.sample_rate}Hz may cause issues."
+                f"Current rate of {sample_rate}Hz may cause issues."
             )
         super().__init__(sample_rate=sample_rate, **kwargs)
 
