@@ -6,13 +6,14 @@
 
 import time
 from abc import abstractmethod
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
 
 # Default timing parameters
 STOP_SECS = 3
@@ -42,19 +43,10 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_triggered = False
         self._silence_ms = 0
         self._speech_start_time = None
-        self._last_prediction_result = None
 
     @property
     def speech_triggered(self) -> bool:
         return self._speech_triggered
-
-    @property
-    def last_prediction_result(self):
-        """Get and clear the last prediction result."""
-        result = getattr(self, "_last_prediction_result", None)
-        if hasattr(self, "_last_prediction_result"):
-            del self._last_prediction_result
-        return result
 
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         # Convert raw audio to float32 format and append to the buffer
@@ -70,7 +62,6 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             self._speech_triggered = True
             if self._speech_start_time is None:
                 self._speech_start_time = time.time()
-                logger.debug(f"Speech started at {self._speech_start_time}")
         else:
             if self._speech_triggered:
                 chunk_duration_ms = len(audio_int16) / (self._sample_rate / 1000)
@@ -96,28 +87,25 @@ class BaseSmartTurn(BaseTurnAnalyzer):
 
         return state
 
-    def analyze_end_of_turn(self) -> EndOfTurnState:
-        logger.debug("Analyzing End of Turn...")
-        state = self._process_speech_segment(self._audio_buffer)
+    def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+        state, result = self._process_speech_segment(self._audio_buffer)
         if state == EndOfTurnState.COMPLETE or USE_ONLY_LAST_VAD_SEGMENT:
             self._clear(state)
         logger.debug(f"End of Turn result: {state}")
-        return state
+        return state, result
 
     def _clear(self, turn_state: EndOfTurnState):
-        # Reset internal state for next turn
-        logger.debug("Clearing audio buffer...")
         # If the state is still incomplete, keep the _speech_triggered as True
         self._speech_triggered = turn_state == EndOfTurnState.INCOMPLETE
         self._audio_buffer = []
         self._speech_start_time = None
         self._silence_ms = 0
 
-    def _process_speech_segment(self, audio_buffer) -> EndOfTurnState:
+    def _process_speech_segment(self, audio_buffer) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
         state = EndOfTurnState.INCOMPLETE
 
         if not audio_buffer:
-            return state
+            return state, None
 
         # Extract recent audio segment for prediction
         start_time = self._speech_start_time - (self._params.pre_speech_ms / 1000)
@@ -133,15 +121,13 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         segment_audio_chunks = [chunk for _, chunk in audio_buffer[start_index : end_index + 1]]
         segment_audio = np.concatenate(segment_audio_chunks)
 
-        logger.debug(f"Segment audio chunks after start index: {len(segment_audio)}")
-
         # Limit maximum duration
         max_samples = int(self._params.max_duration_secs * self.sample_rate)
         if len(segment_audio) > max_samples:
             # slices the array to keep the last max_samples samples, discarding the earlier part.
             segment_audio = segment_audio[-max_samples:]
 
-        logger.debug(f"Segment audio chunks after limiting duration: {len(segment_audio)}")
+        result_data = None
 
         if len(segment_audio) > 0:
             start_time = time.perf_counter()
@@ -155,33 +141,28 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             e2e_processing_time_ms = (end_time - start_time) * 1000
 
             # Prepare the result data
-            result_data = {
-                "prediction": result["prediction"],
-                "probability": result["probability"],
-                "inference_time_ms": result.get("inference_time", 0) * 1000,
-                "server_total_time_ms": result.get("total_time", 0) * 1000,
-                "e2e_processing_time_ms": e2e_processing_time_ms,
-            }
-
-            # Store the result for later processing in the async context
-            self._last_prediction_result = result_data
-
-            logger.debug("--------")
-            logger.debug(
-                f"Prediction: {'Complete' if result_data['prediction'] == 1 else 'Incomplete'}"
+            result_data = SmartTurnMetricsData(
+                processor="BaseSmartTurn",
+                is_complete=result["prediction"] == 1,
+                probability=result["probability"],
+                inference_time_ms=result.get("inference_time", 0) * 1000,
+                server_total_time_ms=result.get("total_time", 0) * 1000,
+                e2e_processing_time_ms=e2e_processing_time_ms,
             )
-            logger.debug(f"Probability of complete: {result_data['probability']:.4f}")
-            logger.debug(f"Inference time: {result_data['inference_time_ms']:.2f}ms")
-            logger.debug(f"Server total time: {result_data['server_total_time_ms']:.2f}ms")
-            logger.debug(f"E2E processing time: {result_data['e2e_processing_time_ms']:.2f}ms")
-        else:
-            logger.debug(f"params: {self._params}, stop_ms: {self._stop_ms}")
-            logger.debug("Captured empty audio segment, skipping prediction.")
 
-        return state
+            logger.trace(f"Prediction: {'Complete' if result_data.is_complete else 'Incomplete'}")
+            logger.trace(f"Probability of complete: {result_data.probability:.4f}")
+            logger.trace(f"Inference time: {result_data.inference_time_ms:.2f}ms")
+            logger.trace(f"Server total time: {result_data.server_total_time_ms:.2f}ms")
+            logger.trace(f"E2E processing time: {result_data.e2e_processing_time_ms:.2f}ms")
+        else:
+            logger.trace(f"params: {self._params}, stop_ms: {self._stop_ms}")
+            logger.trace("Captured empty audio segment, skipping prediction.")
+
+        return state, result_data
 
     @abstractmethod
-    def _predict_endpoint(self, buffer: np.ndarray) -> Dict[str, any]:
+    def _predict_endpoint(self, buffer: np.ndarray) -> Dict[str, Any]:
         """Abstract method to predict if a turn has ended based on audio.
 
         Args:

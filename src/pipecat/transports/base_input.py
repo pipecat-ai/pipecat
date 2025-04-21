@@ -6,7 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
+from typing import Mapping, Optional
 
 from loguru import logger
 
@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
 )
-from pipecat.metrics.metrics import SmartTurnMetricsData
+from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 
@@ -83,10 +83,6 @@ class BaseInputTransport(FrameProcessor):
         # Configure End of turn analyzer.
         if self._params.turn_analyzer:
             self._params.turn_analyzer.set_sample_rate(self._sample_rate)
-
-            @self._params.turn_analyzer.event_handler("prediction_result")
-            async def on_prediction_result(analyzer, result):
-                await self._handle_prediction_result(result)
 
         # Start audio filter.
         if self._params.audio_in_filter:
@@ -226,15 +222,11 @@ class BaseInputTransport(FrameProcessor):
 
     async def _handle_end_of_turn(self):
         if self.turn_analyzer:
-            state = await self.get_event_loop().run_in_executor(
+            state, prediction = await self.get_event_loop().run_in_executor(
                 self._executor, self.turn_analyzer.analyze_end_of_turn
             )
 
-            # Check for prediction results after analysis
-            result = self.turn_analyzer.last_prediction_result
-            if result:
-                # Now we're in the async context, we can safely call event handlers
-                await self.turn_analyzer._call_event_handler("prediction_result", result)
+            await self._handle_prediction_result(prediction)
 
             await self._handle_end_of_turn_complete(state)
 
@@ -281,21 +273,10 @@ class BaseInputTransport(FrameProcessor):
 
             self._audio_in_queue.task_done()
 
-    async def _handle_prediction_result(self, result: dict):
+    async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer.
 
         Args:
-            result: The prediction result dictionary.
+            result: The prediction result MetricsData.
         """
-        metrics_data = SmartTurnMetricsData(
-            processor="SmartTurnAnalyzer",
-            model=getattr(self._params.turn_analyzer, "model_name", None),
-            is_complete=(result["prediction"] == 1),
-            probability=result["probability"],
-            inference_time_ms=result.get("inference_time_ms", 0),
-            server_total_time_ms=result.get("server_total_time_ms", 0),
-            e2e_processing_time_ms=result.get("e2e_processing_time_ms", 0),
-        )
-
-        # Push metrics frame
-        await self.push_frame(MetricsFrame(data=[metrics_data]))
+        await self.push_frame(MetricsFrame(data=[result]))
