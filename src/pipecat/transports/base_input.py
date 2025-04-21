@@ -10,7 +10,10 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+from pipecat.audio.turn.base_turn_analyzer import (
+    BaseTurnAnalyzer,
+    EndOfTurnState,
+)
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -79,7 +82,11 @@ class BaseInputTransport(FrameProcessor):
         # Configure End of turn analyzer.
         if self._params.turn_analyzer:
             self._params.turn_analyzer.set_sample_rate(self._sample_rate)
-            self._params.turn_analyzer.on_result = self._handle_smart_turn_result
+
+            @self._params.turn_analyzer.event_handler("prediction_result")
+            async def on_prediction_result(analyzer, result):
+                await self._handle_prediction_result(result)
+
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
@@ -221,6 +228,13 @@ class BaseInputTransport(FrameProcessor):
             state = await self.get_event_loop().run_in_executor(
                 self._executor, self.turn_analyzer.analyze_end_of_turn
             )
+
+            # Check for prediction results after analysis
+            result = self.turn_analyzer.last_prediction_result
+            if result:
+                # Now we're in the async context, we can safely call event handlers
+                await self.turn_analyzer._call_event_handler("prediction_result", result)
+
             await self._handle_end_of_turn_complete(state)
 
     async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
@@ -266,26 +280,12 @@ class BaseInputTransport(FrameProcessor):
 
             self._audio_in_queue.task_done()
 
-    def _handle_smart_turn_result(self, result: dict):
-        """Handle smart turn prediction results by pushing a SmartTurnResultFrame.
-
-        This is called potentially from a background thread, so we need to schedule it on the event loop.
+    async def _handle_prediction_result(self, result: dict):
+        """Handle a prediction result event from the turn analyzer.
 
         Args:
-            result: The prediction result dict from the smart turn analyzer.
+            result: The prediction result dictionary.
         """
-        # Get current event loop and schedule the async handler
-        asyncio.run_coroutine_threadsafe(
-            self._async_handle_smart_turn_result(result), self.get_event_loop()
-        )
-
-    async def _async_handle_smart_turn_result(self, result: dict):
-        """Async handler for smart turn results.
-
-        Args:
-            result: The prediction result dict from the smart turn analyzer.
-        """
-        # Create the SmartTurnResultFrame
         frame = SmartTurnResultFrame(
             is_complete=(result["prediction"] == 1),
             probability=result["probability"],
@@ -294,6 +294,4 @@ class BaseInputTransport(FrameProcessor):
             e2e_processing_time_ms=result.get("e2e_processing_time_ms", 0),
         )
 
-        # Push the frame
         await self.push_frame(frame)
-        logger.debug(f"Pushed SmartTurnResultFrame: {frame}")

@@ -42,10 +42,19 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_triggered = False
         self._silence_ms = 0
         self._speech_start_time = None
+        self._last_prediction_result = None
 
     @property
     def speech_triggered(self) -> bool:
         return self._speech_triggered
+
+    @property
+    def last_prediction_result(self):
+        """Get and clear the last prediction result."""
+        result = getattr(self, "_last_prediction_result", None)
+        if hasattr(self, "_last_prediction_result"):
+            del self._last_prediction_result
+        return result
 
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         # Convert raw audio to float32 format and append to the buffer
@@ -149,14 +158,13 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             result_data = {
                 "prediction": result["prediction"],
                 "probability": result["probability"],
-                "inference_time_ms": result.get("inference_time", 0) * 1000,  # Convert to ms
-                "server_total_time_ms": result.get("total_time", 0) * 1000,  # Convert to ms
-                "e2e_processing_time_ms": e2e_processing_time_ms,  # Total time including network
+                "inference_time_ms": result.get("inference_time", 0) * 1000,
+                "server_total_time_ms": result.get("total_time", 0) * 1000,
+                "e2e_processing_time_ms": e2e_processing_time_ms,
             }
 
-            # Call the callback if available
-            if self._on_result:
-                self._on_result(result_data)
+            # Store the result for later processing in the async context
+            self._last_prediction_result = result_data
 
             logger.debug("--------")
             logger.debug(

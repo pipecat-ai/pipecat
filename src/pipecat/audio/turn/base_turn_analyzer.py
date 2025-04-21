@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Dict, Optional
+
+from pipecat.utils.base_object import BaseObject
 
 
 class EndOfTurnState(Enum):
@@ -14,18 +16,20 @@ class EndOfTurnState(Enum):
     INCOMPLETE = 2
 
 
-class BaseTurnAnalyzer(ABC):
-    """Abstract base class for analyzing user end of turn."""
+class BaseTurnAnalyzer(BaseObject):
+    """Abstract base class for analyzing user end of turn.
 
-    def __init__(
-        self,
-        *,
-        sample_rate: Optional[int] = None,
-        on_result: Optional[Callable[[dict], Any]] = None,
-    ):
+    This class inherits from BaseObject to leverage its event handling system
+    while still defining an abstract interface through abstract methods.
+    """
+
+    def __init__(self, *, sample_rate: Optional[int] = None, name: Optional[str] = None):
+        super().__init__(name=name)
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
-        self._on_result = on_result
+
+        # Register the prediction_result event handler
+        self._register_event_handler("prediction_result")
 
     @property
     def sample_rate(self) -> int:
@@ -46,6 +50,19 @@ class BaseTurnAnalyzer(ABC):
             sample_rate (int): The sample rate to set.
         """
         self._sample_rate = self._init_sample_rate or sample_rate
+
+    @property
+    def last_prediction_result(self) -> Optional[Dict[str, Any]]:
+        """Get and clear the last prediction result.
+
+        This method should be implemented by subclasses to provide access
+        to the most recent prediction result. The default implementation
+        returns None.
+
+        Returns:
+            Optional[Dict[str, Any]]: The last prediction result, if any.
+        """
+        return None
 
     @property
     @abstractmethod
@@ -78,17 +95,3 @@ class BaseTurnAnalyzer(ABC):
             EndOfTurnState: The result of the end of turn analysis.
         """
         pass
-
-    @property
-    def on_result(self) -> Optional[Callable[[dict], Any]]:
-        """Returns the current result callback function."""
-        return self._on_result
-
-    @on_result.setter
-    def on_result(self, callback: Optional[Callable[[dict], Any]]):
-        """Sets the callback function to be called when a prediction result is available.
-
-        Args:
-            callback: A function that will be called with the prediction result dictionary.
-        """
-        self._on_result = callback
