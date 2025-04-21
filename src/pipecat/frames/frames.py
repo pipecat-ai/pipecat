@@ -616,26 +616,6 @@ class MetricsFrame(SystemFrame):
 
 
 @dataclass
-class SmartTurnResultFrame(SystemFrame):
-    """A frame containing the result of a smart turn analysis prediction."""
-
-    is_complete: bool
-    probability: float
-    inference_time_ms: float  # Time spent on model computation only
-    server_total_time_ms: float  # Total server processing time (inference + server overhead)
-    e2e_processing_time_ms: float  # Complete end-to-end time (includes network round trip)
-
-    def __str__(self):
-        return (
-            f"{self.name}(is_complete: {self.is_complete}, "
-            f"probability: {self.probability:.4f}, "
-            f"model: {self.inference_time_ms:.2f}ms, "
-            f"server: {self.server_total_time_ms:.2f}ms, "
-            f"e2e: {self.e2e_processing_time_ms:.2f}ms)"
-        )
-
-
-@dataclass
 class FunctionCallInProgressFrame(SystemFrame):
     """A frame signaling that a function call is in progress."""
 

@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     FilterUpdateSettingsFrame,
     Frame,
     InputAudioRawFrame,
-    SmartTurnResultFrame,
+    MetricsFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
 )
+from pipecat.metrics.metrics import SmartTurnMetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 
@@ -286,7 +287,9 @@ class BaseInputTransport(FrameProcessor):
         Args:
             result: The prediction result dictionary.
         """
-        frame = SmartTurnResultFrame(
+        metrics_data = SmartTurnMetricsData(
+            processor="SmartTurnAnalyzer",
+            model=getattr(self._params.turn_analyzer, "model_name", None),
             is_complete=(result["prediction"] == 1),
             probability=result["probability"],
             inference_time_ms=result.get("inference_time_ms", 0),
@@ -294,4 +297,5 @@ class BaseInputTransport(FrameProcessor):
             e2e_processing_time_ms=result.get("e2e_processing_time_ms", 0),
         )
 
-        await self.push_frame(frame)
+        # Push metrics frame
+        await self.push_frame(MetricsFrame(data=[metrics_data]))
