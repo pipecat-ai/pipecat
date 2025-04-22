@@ -10,7 +10,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.http_smart_turn import HttpSmartTurnAnalyzer
+from pipecat.audio.turn.smart_turn.fal_smart_turn import FalSmartTurnAnalyzer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
@@ -30,8 +30,6 @@ load_dotenv(override=True)
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")
 
-    remote_smart_turn_url = os.getenv("REMOTE_SMART_TURN_URL")
-
     async with aiohttp.ClientSession() as session:
         transport = SmallWebRTCTransport(
             webrtc_connection=webrtc_connection,
@@ -41,8 +39,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
                 vad_audio_passthrough=True,
-                turn_analyzer=HttpSmartTurnAnalyzer(
-                    url=remote_smart_turn_url, aiohttp_session=session
+                turn_analyzer=FalSmartTurnAnalyzer(
+                    api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session
                 ),
             ),
         )

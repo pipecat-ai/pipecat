@@ -12,7 +12,7 @@ import aiohttp
 import numpy as np
 from loguru import logger
 
-from pipecat.audio.turn.base_smart_turn import BaseSmartTurn, SmartTurnTimeoutException
+from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn, SmartTurnTimeoutException
 
 
 class HttpSmartTurnAnalyzer(BaseSmartTurn):

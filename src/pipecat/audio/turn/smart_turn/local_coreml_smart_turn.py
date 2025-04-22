@@ -10,7 +10,7 @@ from typing import Any, Dict
 import numpy as np
 from loguru import logger
 
-from pipecat.audio.turn.base_smart_turn import BaseSmartTurn
+from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 
 try:
     import coremltools as ct
@@ -25,7 +25,7 @@ except ModuleNotFoundError as e:
 
 
 class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
-    def __init__(self, smart_turn_model_path: str, **kwargs):
+    def __init__(self, *, smart_turn_model_path: str, **kwargs):
         super().__init__(**kwargs)
 
         if not smart_turn_model_path:
