@@ -7,7 +7,7 @@
 import asyncio
 import json
 import time
-from typing import Any, Literal, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
 from av.frame import Frame
 from loguru import logger
@@ -88,12 +88,9 @@ class SmallWebRTCTrack:
 
 
 class SmallWebRTCConnection(BaseObject):
-    def __init__(self, ice_servers=None):
+    def __init__(self, ice_servers: Optional[List[RTCIceServer]] = None):
         super().__init__()
-        if ice_servers:
-            self.ice_servers = [RTCIceServer(urls=server) for server in ice_servers]
-        else:
-            self.ice_servers = []
+        self.ice_servers: List[RTCIceServer] = ice_servers or []
         self._connect_invoked = False
         self._track_map = {}
         self._track_getters = {
