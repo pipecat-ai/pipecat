@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.local_smart_turn import LocalCoreMLSmartTurnAnalyzer
+from pipecat.audio.turn.local_coreml_smart_turn import LocalCoreMLSmartTurnAnalyzer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
