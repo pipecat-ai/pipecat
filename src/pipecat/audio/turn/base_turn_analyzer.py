@@ -71,7 +71,7 @@ class BaseTurnAnalyzer(ABC):
         pass
 
     @abstractmethod
-    def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+    async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
         """Analyzes if an end of turn has occurred based on the audio input.
 
         Returns:

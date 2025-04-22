@@ -6,14 +6,13 @@
 
 
 import io
-import os
 from typing import Dict
 
+import httpx
 import numpy as np
-import requests
 from loguru import logger
 
-from pipecat.audio.turn.base_smart_turn import BaseSmartTurn
+from pipecat.audio.turn.base_smart_turn import BaseSmartTurn, SmartTurnTimeoutException
 
 
 class SmartTurnAnalyzer(BaseSmartTurn):
@@ -25,9 +24,10 @@ class SmartTurnAnalyzer(BaseSmartTurn):
             logger.error("remote_smart_turn_url is not set.")
             raise Exception("remote_smart_turn_url must be provided.")
 
-        # Use a session to reuse connections (keep-alive)
-        self.session = requests.Session()
-        self.session.headers.update({"Connection": "keep-alive"})
+        self.client = httpx.AsyncClient(
+            headers={"Connection": "keep-alive"},
+            timeout=httpx.Timeout(self._params.stop_secs),
+        )
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
         logger.trace("Serializing NumPy array to bytes...")
@@ -37,28 +37,28 @@ class SmartTurnAnalyzer(BaseSmartTurn):
         logger.trace(f"Serialized size: {len(serialized_bytes)} bytes")
         return serialized_bytes
 
-    def _send_raw_request(self, data_bytes: bytes):
+    async def _send_raw_request(self, data_bytes: bytes):
         headers = {"Content-Type": "application/octet-stream"}
         logger.trace(
             f"Sending {len(data_bytes)} bytes as raw body to {self.remote_smart_turn_url}..."
         )
         try:
-            response = self.session.post(
+            response = await self.client.post(
                 self.remote_smart_turn_url,
-                data=data_bytes,
+                content=data_bytes,
                 headers=headers,
-                timeout=60,
             )
 
             logger.trace("\n--- Response ---")
             logger.trace(f"Status Code: {response.status_code}")
 
-            if response.ok:
+            if response.is_success:
                 try:
+                    json_data = response.json()
                     logger.trace("Response JSON:")
-                    logger.trace(response.json())
-                    return response.json()
-                except requests.exceptions.JSONDecodeError:
+                    logger.trace(json_data)
+                    return json_data
+                except httpx.DecodingError:
                     logger.trace("Response Content (non-JSON):")
                     logger.trace(response.text)
             else:
@@ -66,10 +66,13 @@ class SmartTurnAnalyzer(BaseSmartTurn):
                 logger.trace(response.text)
                 response.raise_for_status()
 
-        except requests.exceptions.RequestException as e:
+        except httpx.TimeoutException:
+            logger.error(f"Request timed out after {self._params.stop_secs} seconds")
+            raise SmartTurnTimeoutException(f"Request exceeded {self._params.stop_secs} seconds.")
+        except httpx.RequestError as e:
             logger.error(f"Failed to send raw request to Daily Smart Turn: {e}")
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
         serialized_array = self._serialize_array(audio_array)
-        return self._send_raw_request(serialized_array)
+        return await self._send_raw_request(serialized_array)
