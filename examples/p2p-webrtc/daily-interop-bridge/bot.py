@@ -26,9 +26,6 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
-
 
 class MirrorProcessor(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):

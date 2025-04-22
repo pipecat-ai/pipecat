@@ -25,9 +25,6 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
-
 
 class EdgeDetectionProcessor(FrameProcessor):
     def __init__(self, camera_out_width, camera_out_height: int):
