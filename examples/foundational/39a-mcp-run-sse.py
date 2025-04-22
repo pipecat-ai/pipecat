@@ -27,9 +27,6 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-logger.remove()
-logger.add(sys.stderr, level="DEBUG")
-
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")

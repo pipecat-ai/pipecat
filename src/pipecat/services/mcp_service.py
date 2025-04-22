@@ -5,6 +5,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.utils.base_object import BaseObject
 
 try:
     from mcp import ClientSession, StdioServerParameters, types
@@ -17,17 +18,15 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class MCPClient:
+class MCPClient(BaseObject):
     def __init__(
         self,
-        server_params: Union[StdioServerParameters, str] = None,
-        pipecat_session: Optional[any] = None,
+        server_params: Union[StdioServerParameters, str],
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._server_params = server_params
         self._session = ClientSession
-        self._pipecat_session = pipecat_session
         if isinstance(server_params, StdioServerParameters):
             self._client = stdio_client
             self._register_tools = self._stdio_register_tools
@@ -35,15 +34,15 @@ class MCPClient:
             self._client = sse_client
             self._register_tools = self._sse_register_tools
         else:
-            logger.exception(
-                f"{self} error - server_params must be either StdioServerParameters or an sse server url string."
+            raise TypeError(
+                f"{self} invalid argument type: `server_params` must be either StdioServerParameters or an SSE server url string."
             )
 
     async def register_tools(self, llm) -> ToolsSchema:
         tools_schema = await self._register_tools(llm)
         return tools_schema
 
-    def convert_mcp_schema_to_pipecat(
+    def _convert_mcp_schema_to_pipecat(
         self, tool_name: str, tool_schema: Dict[str, Any]
     ) -> FunctionSchema:
         """Convert an mcp tool schema to Pipecat's FunctionSchema format.
@@ -55,7 +54,7 @@ class MCPClient:
         """
 
         logger.debug(f"Converting schema for tool '{tool_name}'")
-        logger.debug(f"Original schema: {json.dumps(tool_schema, indent=2)}")
+        logger.trace(f"Original schema: {json.dumps(tool_schema, indent=2)}")
 
         properties = tool_schema["input_schema"].get("properties", {})
         required = tool_schema["input_schema"].get("required", [])
@@ -67,7 +66,7 @@ class MCPClient:
             required=required,
         )
 
-        logger.debug(f"Converted schema: {json.dumps(schema.to_default_dict(), indent=2)}")
+        logger.trace(f"Converted schema: {json.dumps(schema.to_default_dict(), indent=2)}")
 
         return schema
 
@@ -89,7 +88,7 @@ class MCPClient:
         ) -> None:
             """Wrapper for mcp.run tool calls to match Pipecat's function call interface."""
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
-            logger.debug(f"Tool arguments: {json.dumps(arguments, indent=2)}")
+            logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
             try:
                 async with self._client(self._server_params) as (read, write):
                     async with self._session(read, write) as session:
@@ -128,7 +127,7 @@ class MCPClient:
         ) -> None:
             """Wrapper for mcp.run tool calls to match Pipecat's function call interface."""
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
-            logger.debug(f"Tool arguments: {json.dumps(arguments, indent=2)}")
+            logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
             try:
                 async with self._client(self._server_params) as streams:
                     async with self._session(streams[0], streams[1]) as session:
@@ -167,7 +166,7 @@ class MCPClient:
                     # logger.debug(f"Non-text result content: '{content}'")
                     pass
             logger.info(f"Tool '{function_name}' completed successfully")
-            logger.info(f"Final response: {response}")
+            logger.debug(f"Final response: {response}")
         else:
             logger.error(f"Error getting content from {function_name} results.")
 
@@ -189,7 +188,7 @@ class MCPClient:
 
             try:
                 # Convert the schema
-                function_schema = self.convert_mcp_schema_to_pipecat(
+                function_schema = self._convert_mcp_schema_to_pipecat(
                     tool_name,
                     {"description": tool.description, "input_schema": tool.inputSchema},
                 )
@@ -207,7 +206,7 @@ class MCPClient:
                 logger.exception("Full exception details:")
                 continue
 
-        logger.info(f"Completed registration of {len(tool_schemas)} tools")
+        logger.debug(f"Completed registration of {len(tool_schemas)} tools")
         tools_schema = ToolsSchema(standard_tools=tool_schemas)
 
         return tools_schema
