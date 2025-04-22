@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import asyncio
 import io
 from typing import Any, Dict
@@ -16,10 +15,18 @@ from loguru import logger
 from pipecat.audio.turn.base_smart_turn import BaseSmartTurn, SmartTurnTimeoutException
 
 
-class SmartTurnAnalyzer(BaseSmartTurn):
-    def __init__(self, url: str, aiohttp_session: aiohttp.ClientSession, **kwargs):
+class HttpSmartTurnAnalyzer(BaseSmartTurn):
+    def __init__(
+        self,
+        *,
+        url: str,
+        aiohttp_session: aiohttp.ClientSession,
+        headers: Dict[str, str] = {},
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self._url = url
+        self._headers = headers
         self._aiohttp_session = aiohttp_session
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
@@ -32,6 +39,7 @@ class SmartTurnAnalyzer(BaseSmartTurn):
 
     async def _send_raw_request(self, data_bytes: bytes) -> Dict[str, Any]:
         headers = {"Content-Type": "application/octet-stream"}
+        headers.update(self._headers)
         logger.trace(f"Sending {len(data_bytes)} bytes as raw body to {self._url}...")
         try:
             timeout = aiohttp.ClientTimeout(total=self._params.stop_secs)
