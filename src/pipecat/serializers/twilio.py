@@ -4,10 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import base64
 import json
-import os
 from typing import Optional
 
 from loguru import logger
@@ -16,6 +14,7 @@ from pydantic import BaseModel
 from pipecat.audio.utils import create_default_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
     EndFrame,
     Frame,
     InputAudioRawFrame,
@@ -36,9 +35,15 @@ class TwilioFrameSerializer(FrameSerializer):
     media streams protocol. It supports audio conversion, DTMF events, and automatic
     call termination.
 
+    When auto_hang_up is enabled (default), the serializer will automatically terminate
+    the Twilio call when an EndFrame or CancelFrame is processed, but requires Twilio
+    credentials to be provided.
+
     Attributes:
         _stream_sid: The Twilio Media Stream SID.
         _call_sid: The associated Twilio Call SID.
+        _account_sid: Twilio account SID for API access.
+        _auth_token: Twilio authentication token for API access.
         _params: Configuration parameters.
         _twilio_sample_rate: Sample rate used by Twilio (typically 8kHz).
         _sample_rate: Input sample rate for the pipeline.
@@ -58,16 +63,27 @@ class TwilioFrameSerializer(FrameSerializer):
         sample_rate: Optional[int] = None
         auto_hang_up: bool = True
 
-    def __init__(self, stream_sid: str, call_sid: str, params: InputParams = InputParams()):
+    def __init__(
+        self,
+        stream_sid: str,
+        call_sid: str,
+        account_sid: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        params: InputParams = InputParams(),
+    ):
         """Initialize the TwilioFrameSerializer.
 
         Args:
             stream_sid: The Twilio Media Stream SID.
             call_sid: The associated Twilio Call SID.
+            account_sid: Twilio account SID.
+            auth_token: Twilio auth token.
             params: Configuration parameters.
         """
         self._stream_sid = stream_sid
         self._call_sid = call_sid
+        self._account_sid = account_sid
+        self._auth_token = auth_token
         self._params = params
 
         self._twilio_sample_rate = self._params.twilio_sample_rate
@@ -104,8 +120,8 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        if self._params.auto_hang_up and isinstance(frame, (EndFrame)):
-            asyncio.create_task(self._hang_up_call())
+        if self._params.auto_hang_up and isinstance(frame, (EndFrame, CancelFrame)):
+            await self._hang_up_call()
             return None
         elif isinstance(frame, StartInterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
@@ -132,26 +148,41 @@ class TwilioFrameSerializer(FrameSerializer):
         return None
 
     async def _hang_up_call(self):
-        """Hang up the Twilio call using the REST API."""
+        """Hang up the Twilio call using Twilio's REST API."""
         try:
-            from twilio.rest import Client
+            import aiohttp
 
-            account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-            auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+            account_sid = self._account_sid
+            auth_token = self._auth_token
 
             if not account_sid or not auth_token:
                 logger.warning(
-                    "Missing Twilio credentials (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), cannot hang up call"
+                    "Cannot hang up Twilio call: account_sid and auth_token must be provided"
                 )
                 return
 
-            # Create Twilio client and hang up the call using the correct CallSid
-            client = Client(account_sid, auth_token)
-            client.calls(self._call_sid).update(status="completed")
+            # Twilio API endpoint for updating calls
+            endpoint = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{self._call_sid}.json"
 
-            logger.info(f"Successfully terminated Twilio call {self._call_sid}")
-        except ImportError:
-            logger.warning("Twilio Python SDK not installed. Install with: pip install twilio")
+            # Create basic auth from account_sid and auth_token
+            auth = aiohttp.BasicAuth(account_sid, auth_token)
+
+            # Parameters to set the call status to "completed" (hang up)
+            params = {"Status": "completed"}
+
+            # Make the POST request to update the call
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint, auth=auth, data=params) as response:
+                    if response.status == 200:
+                        logger.info(f"Successfully terminated Twilio call {self._call_sid}")
+                    else:
+                        # Get the error details for better debugging
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to terminate Twilio call {self._call_sid}: "
+                            f"Status {response.status}, Response: {error_text}"
+                        )
+
         except Exception as e:
             logger.exception(f"Failed to hang up Twilio call: {e}")
 
