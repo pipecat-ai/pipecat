@@ -30,12 +30,42 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 
 
 class TwilioFrameSerializer(FrameSerializer):
+    """Serializer for Twilio Media Streams WebSocket protocol.
+
+    This serializer handles converting between Pipecat frames and Twilio's WebSocket
+    media streams protocol. It supports audio conversion, DTMF events, and automatic
+    call termination.
+
+    Attributes:
+        _stream_sid: The Twilio Media Stream SID.
+        _call_sid: The associated Twilio Call SID.
+        _params: Configuration parameters.
+        _twilio_sample_rate: Sample rate used by Twilio (typically 8kHz).
+        _sample_rate: Input sample rate for the pipeline.
+        _resampler: Audio resampler for format conversion.
+    """
+
     class InputParams(BaseModel):
-        twilio_sample_rate: int = 8000  # Default Twilio rate (8kHz)
-        sample_rate: Optional[int] = None  # Pipeline input rate
-        auto_hang_up: bool = True  # Whether to automatically hang up on EndFrame/CancelFrame
+        """Configuration parameters for TwilioFrameSerializer.
+
+        Attributes:
+            twilio_sample_rate: Sample rate used by Twilio, defaults to 8000 Hz.
+            sample_rate: Optional override for pipeline input sample rate.
+            auto_hang_up: Whether to automatically terminate call on EndFrame.
+        """
+
+        twilio_sample_rate: int = 8000
+        sample_rate: Optional[int] = None
+        auto_hang_up: bool = True
 
     def __init__(self, stream_sid: str, call_sid: str, params: InputParams = InputParams()):
+        """Initialize the TwilioFrameSerializer.
+
+        Args:
+            stream_sid: The Twilio Media Stream SID.
+            call_sid: The associated Twilio Call SID.
+            params: Configuration parameters.
+        """
         self._stream_sid = stream_sid
         self._call_sid = call_sid
         self._params = params
@@ -47,12 +77,33 @@ class TwilioFrameSerializer(FrameSerializer):
 
     @property
     def type(self) -> FrameSerializerType:
+        """Gets the serializer type.
+
+        Returns:
+            The serializer type, either TEXT or BINARY.
+        """
         return FrameSerializerType.TEXT
 
     async def setup(self, frame: StartFrame):
+        """Sets up the serializer with pipeline configuration.
+
+        Args:
+            frame: The StartFrame containing pipeline configuration.
+        """
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Serializes a Pipecat frame to Twilio WebSocket format.
+
+        Handles conversion of various frame types to Twilio WebSocket messages.
+        For EndFrames, initiates call termination if auto_hang_up is enabled.
+
+        Args:
+            frame: The Pipecat frame to serialize.
+
+        Returns:
+            Serialized data as string or bytes, or None if the frame isn't handled.
+        """
         if self._params.auto_hang_up and isinstance(frame, (EndFrame)):
             asyncio.create_task(self._hang_up_call())
         elif isinstance(frame, StartInterruptionFrame):
@@ -101,6 +152,16 @@ class TwilioFrameSerializer(FrameSerializer):
             logger.exception(f"Failed to hang up Twilio call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Deserializes Twilio WebSocket data to Pipecat frames.
+
+        Handles conversion of Twilio media events to appropriate Pipecat frames.
+
+        Args:
+            data: The raw WebSocket data from Twilio.
+
+        Returns:
+            A Pipecat frame corresponding to the Twilio event, or None if unhandled.
+        """
         message = json.loads(data)
 
         if message["event"] == "media":
