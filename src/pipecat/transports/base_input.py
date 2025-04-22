@@ -222,12 +222,8 @@ class BaseInputTransport(FrameProcessor):
 
     async def _handle_end_of_turn(self):
         if self.turn_analyzer:
-            state, prediction = await self.get_event_loop().run_in_executor(
-                self._executor, self.turn_analyzer.analyze_end_of_turn
-            )
-
+            state, prediction = await self.turn_analyzer.analyze_end_of_turn()
             await self._handle_prediction_result(prediction)
-
             await self._handle_end_of_turn_complete(state)
 
     async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
