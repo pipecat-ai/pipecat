@@ -5,10 +5,11 @@
 #
 
 
+import asyncio
 import io
 from typing import Dict
 
-import httpx
+import aiohttp
 import numpy as np
 from loguru import logger
 
@@ -16,18 +17,14 @@ from pipecat.audio.turn.base_smart_turn import BaseSmartTurn, SmartTurnTimeoutEx
 
 
 class SmartTurnAnalyzer(BaseSmartTurn):
-    def __init__(self, url: str, **kwargs):
+    def __init__(self, url: str, aiohttp_session: aiohttp.ClientSession, **kwargs):
         super().__init__(**kwargs)
         self.remote_smart_turn_url = url
+        self._aiohttp_session = aiohttp_session
 
         if not self.remote_smart_turn_url:
             logger.error("remote_smart_turn_url is not set.")
             raise Exception("remote_smart_turn_url must be provided.")
-
-        self.client = httpx.AsyncClient(
-            headers={"Connection": "keep-alive"},
-            timeout=httpx.Timeout(self._params.stop_secs),
-        )
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
         logger.trace("Serializing NumPy array to bytes...")
@@ -43,33 +40,36 @@ class SmartTurnAnalyzer(BaseSmartTurn):
             f"Sending {len(data_bytes)} bytes as raw body to {self.remote_smart_turn_url}..."
         )
         try:
-            response = await self.client.post(
-                self.remote_smart_turn_url,
-                content=data_bytes,
-                headers=headers,
-            )
+            timeout = aiohttp.ClientTimeout(total=self._params.stop_secs)
 
-            logger.trace("\n--- Response ---")
-            logger.trace(f"Status Code: {response.status_code}")
+            async with self._aiohttp_session.post(
+                self.remote_smart_turn_url, data=data_bytes, headers=headers, timeout=timeout
+            ) as response:
+                logger.trace("\n--- Response ---")
+                logger.trace(f"Status Code: {response.status}")
 
-            if response.is_success:
-                try:
-                    json_data = response.json()
-                    logger.trace("Response JSON:")
-                    logger.trace(json_data)
-                    return json_data
-                except httpx.DecodingError:
-                    logger.trace("Response Content (non-JSON):")
-                    logger.trace(response.text)
-            else:
-                logger.trace("Response Content (Error):")
-                logger.trace(response.text)
-                response.raise_for_status()
+                if response.status == 200:
+                    try:
+                        json_data = await response.json()
+                        logger.trace("Response JSON:")
+                        logger.trace(json_data)
+                        return json_data
+                    except aiohttp.ContentTypeError:
+                        # Non-JSON response
+                        text = await response.text()
+                        logger.trace("Response Content (non-JSON):")
+                        logger.trace(text)
+                        raise Exception(f"Non-JSON response: {text}")
+                else:
+                    error_text = await response.text()
+                    logger.trace("Response Content (Error):")
+                    logger.trace(error_text)
+                    response.raise_for_status()
 
-        except httpx.TimeoutException:
+        except asyncio.TimeoutError:
             logger.error(f"Request timed out after {self._params.stop_secs} seconds")
             raise SmartTurnTimeoutException(f"Request exceeded {self._params.stop_secs} seconds.")
-        except httpx.RequestError as e:
+        except aiohttp.ClientError as e:
             logger.error(f"Failed to send raw request to Daily Smart Turn: {e}")
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
