@@ -8,7 +8,7 @@ from typing import Optional
 
 import aiohttp
 
-from pipecat.audio.turn.http_smart_turn import HttpSmartTurnAnalyzer
+from pipecat.audio.turn.smart_turn.http_smart_turn import HttpSmartTurnAnalyzer
 
 
 class FalSmartTurnAnalyzer(HttpSmartTurnAnalyzer):
