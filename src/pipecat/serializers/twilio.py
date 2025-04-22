@@ -106,6 +106,7 @@ class TwilioFrameSerializer(FrameSerializer):
         """
         if self._params.auto_hang_up and isinstance(frame, (EndFrame)):
             asyncio.create_task(self._hang_up_call())
+            return None
         elif isinstance(frame, StartInterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
@@ -126,6 +127,9 @@ class TwilioFrameSerializer(FrameSerializer):
             return json.dumps(answer)
         elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
             return json.dumps(frame.message)
+
+        # Return None for unhandled frames
+        return None
 
     async def _hang_up_call(self):
         """Hang up the Twilio call using the REST API."""
