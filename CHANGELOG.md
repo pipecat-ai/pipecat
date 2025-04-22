@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added automatic hangup logic to the Twilio serializer. This feature hangs up
+  the Twilio call when an `EndFrame` or `CancelFrame` is received. It is
+  enabled by default and is configurable via the `auto_hang_up` `InputParam`.
+
 - Added `SmartTurnMetricsData`, which contains end-of-turn prediction metrics,
   to the `MetricsFrame`. Using `MetricsFrame`, you can now retrieve prediction
   confidence scores and processing time metrics from the smart turn analyzers.
@@ -44,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GrokLLMService` now uses `grok-3-beta` as its default model.
+
 - Daily's REST helpers now include an `eject_at_token_exp` param, which ejects
   the user when their token expires. This new parameter defaults to False.
   Also, the default value for `enable_prejoin_ui` changed to False and
@@ -77,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where LLM input parameters were not working and applied correctly in `GoogleVertexLLMService`, causing
   unexpected behavior during inference.
+
+### Other
+
+- Updated the `twilio-chatbot` example to use the auto-hangup feature.
 
 ## [0.0.63] - 2025-04-11
 
