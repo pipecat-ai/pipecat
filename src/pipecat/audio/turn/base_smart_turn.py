@@ -46,7 +46,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._audio_buffer = []
         self._speech_triggered = False
         self._silence_ms = 0
-        self._speech_start_time = None
+        self._speech_start_time = 0
 
     @property
     def speech_triggered(self) -> bool:
@@ -64,7 +64,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             # Reset silence tracking on speech
             self._silence_ms = 0
             self._speech_triggered = True
-            if self._speech_start_time is None:
+            if self._speech_start_time == 0:
                 self._speech_start_time = time.time()
         else:
             if self._speech_triggered:
@@ -102,7 +102,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         # If the state is still incomplete, keep the _speech_triggered as True
         self._speech_triggered = turn_state == EndOfTurnState.INCOMPLETE
         self._audio_buffer = []
-        self._speech_start_time = None
+        self._speech_start_time = 0
         self._silence_ms = 0
 
     async def _process_speech_segment(
@@ -179,11 +179,11 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         return state, result_data
 
     @abstractmethod
-    async def _predict_endpoint(self, buffer: np.ndarray) -> Dict[str, Any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Abstract method to predict if a turn has ended based on audio.
 
         Args:
-            buffer: Float32 numpy array of audio samples at 16kHz.
+            audio_array: Float32 numpy array of audio samples at 16kHz.
 
         Returns:
             Dictionary with:

@@ -7,7 +7,7 @@
 
 import asyncio
 import io
-from typing import Dict
+from typing import Any, Dict
 
 import aiohttp
 import numpy as np
@@ -19,12 +19,8 @@ from pipecat.audio.turn.base_smart_turn import BaseSmartTurn, SmartTurnTimeoutEx
 class SmartTurnAnalyzer(BaseSmartTurn):
     def __init__(self, url: str, aiohttp_session: aiohttp.ClientSession, **kwargs):
         super().__init__(**kwargs)
-        self.remote_smart_turn_url = url
+        self._url = url
         self._aiohttp_session = aiohttp_session
-
-        if not self.remote_smart_turn_url:
-            logger.error("remote_smart_turn_url is not set.")
-            raise Exception("remote_smart_turn_url must be provided.")
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
         logger.trace("Serializing NumPy array to bytes...")
@@ -34,16 +30,14 @@ class SmartTurnAnalyzer(BaseSmartTurn):
         logger.trace(f"Serialized size: {len(serialized_bytes)} bytes")
         return serialized_bytes
 
-    async def _send_raw_request(self, data_bytes: bytes):
+    async def _send_raw_request(self, data_bytes: bytes) -> Dict[str, Any]:
         headers = {"Content-Type": "application/octet-stream"}
-        logger.trace(
-            f"Sending {len(data_bytes)} bytes as raw body to {self.remote_smart_turn_url}..."
-        )
+        logger.trace(f"Sending {len(data_bytes)} bytes as raw body to {self._url}...")
         try:
             timeout = aiohttp.ClientTimeout(total=self._params.stop_secs)
 
             async with self._aiohttp_session.post(
-                self.remote_smart_turn_url, data=data_bytes, headers=headers, timeout=timeout
+                self._url, data=data_bytes, headers=headers, timeout=timeout
             ) as response:
                 logger.trace("\n--- Response ---")
                 logger.trace(f"Status Code: {response.status}")
@@ -73,6 +67,6 @@ class SmartTurnAnalyzer(BaseSmartTurn):
             logger.error(f"Failed to send raw request to Daily Smart Turn: {e}")
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         serialized_array = self._serialize_array(audio_array)
         return await self._send_raw_request(serialized_array)
