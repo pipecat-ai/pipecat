@@ -200,6 +200,10 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         await super().stop(frame)
         await self._write_frame(frame)
 
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._write_frame(frame)
+
     async def cleanup(self):
         await super().cleanup()
         await self._transport.cleanup()
