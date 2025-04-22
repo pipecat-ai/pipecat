@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GoogleSTTService`, `GoogleTTSService`, and `GoogleVertexLLMService`.
 
 - Added support for Smart Turn Detection via the `turn_analyzer` transport
-  parameter. You can now choose between `SmartTurnAnalyzer()` for remote
-  inference or `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using
-  Core ML.
+  parameter. You can now choose between `HttpSmartTurnAnalyzer()` or
+  `FalSmartTurnAnalyzer()` for remote inference or
+  `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using Core ML.
 
 - `DeepgramTTSService` accepts `base_url` argument again, allowing you to
   connect to an on-prem service.
