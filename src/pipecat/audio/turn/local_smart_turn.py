@@ -41,7 +41,7 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
         self._turn_model = ct.models.MLModel(core_ml_model_path)
         logger.debug("Loaded Local Smart Turn")
 
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
         inputs = self._turn_processor(
             audio_array,
             sampling_rate=16000,
