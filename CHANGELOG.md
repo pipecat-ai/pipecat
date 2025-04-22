@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GrokLLMService` now uses `grok-3-beta` as its default model.
+
 - Daily's REST helpers now include an `eject_at_token_exp` param, which ejects
   the user when their token expires. This new parameter defaults to False.
   Also, the default value for `enable_prejoin_ui` changed to False and
