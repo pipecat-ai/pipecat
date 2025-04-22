@@ -157,7 +157,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self, websocket: websockets.WebSocketServerProtocol, session_timeout: int
     ):
         """Wait for session_timeout seconds, if the websocket is still open,
-        trigger timeout event."""
+        trigger timeout event.
+        """
         try:
             await asyncio.sleep(session_timeout)
             if not websocket.closed:
@@ -205,6 +206,8 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         if isinstance(frame, StartInterruptionFrame):
             await self._write_frame(frame)
             self._next_send_time = 0
+        elif isinstance(frame, EndFrame):
+            await self._write_frame(frame)
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)

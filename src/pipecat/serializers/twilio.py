@@ -4,15 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import json
+import os
 from typing import Optional
 
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import create_default_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
@@ -29,9 +33,11 @@ class TwilioFrameSerializer(FrameSerializer):
     class InputParams(BaseModel):
         twilio_sample_rate: int = 8000  # Default Twilio rate (8kHz)
         sample_rate: Optional[int] = None  # Pipeline input rate
+        auto_hang_up: bool = True  # Whether to automatically hang up on EndFrame/CancelFrame
 
-    def __init__(self, stream_sid: str, params: InputParams = InputParams()):
+    def __init__(self, stream_sid: str, call_sid: str, params: InputParams = InputParams()):
         self._stream_sid = stream_sid
+        self._call_sid = call_sid
         self._params = params
 
         self._twilio_sample_rate = self._params.twilio_sample_rate
@@ -47,7 +53,9 @@ class TwilioFrameSerializer(FrameSerializer):
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
-        if isinstance(frame, StartInterruptionFrame):
+        if self._params.auto_hang_up and isinstance(frame, (EndFrame)):
+            asyncio.create_task(self._hang_up_call())
+        elif isinstance(frame, StartInterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
@@ -67,6 +75,30 @@ class TwilioFrameSerializer(FrameSerializer):
             return json.dumps(answer)
         elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
             return json.dumps(frame.message)
+
+    async def _hang_up_call(self):
+        """Hang up the Twilio call using the REST API."""
+        try:
+            from twilio.rest import Client
+
+            account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+            auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+
+            if not account_sid or not auth_token:
+                logger.warning(
+                    "Missing Twilio credentials (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN), cannot hang up call"
+                )
+                return
+
+            # Create Twilio client and hang up the call using the correct CallSid
+            client = Client(account_sid, auth_token)
+            client.calls(self._call_sid).update(status="completed")
+
+            logger.info(f"Successfully terminated Twilio call {self._call_sid}")
+        except ImportError:
+            logger.warning("Twilio Python SDK not installed. Install with: pip install twilio")
+        except Exception as e:
+            logger.exception(f"Failed to hang up Twilio call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
