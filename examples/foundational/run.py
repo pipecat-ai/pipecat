@@ -7,7 +7,6 @@
 import argparse
 import asyncio
 import importlib.util
-import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -18,20 +17,13 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import RedirectResponse
+from loguru import logger
 from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 # Load environment variables
 load_dotenv(override=True)
-
-# Configure logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    handlers=[logging.StreamHandler()],
-)
-logger = logging.getLogger("pipecat-server")
 
 app = FastAPI()
 
@@ -162,10 +154,11 @@ def main():
     parser.add_argument("--verbose", "-v", action="count", default=0)
     args = parser.parse_args()
 
+    logger.remove(0)
     if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logger.add(sys.stderr, level="TRACE")
     else:
-        logging.basicConfig(level=logging.INFO)
+        logger.add(sys.stderr, level="DEBUG")
 
     # Infer the bot file from the caller if not provided explicitly
     bot_file = args.bot_file
