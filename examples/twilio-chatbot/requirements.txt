@@ -1,5 +1,4 @@
-pipecat-ai[cartesia,openai,silero,deepgram]
-fastapi
+pipecat-ai[cartesia,openai,silero,deepgram,twilio]
 uvicorn
 python-dotenv
 loguru
