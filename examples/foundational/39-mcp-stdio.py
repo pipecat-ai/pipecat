@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import io
 import os
 import re
 import shutil
 import sys
-import time
 
 import aiohttp
 from dotenv import load_dotenv
@@ -38,14 +38,11 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-logger.remove()
-logger.add(sys.stderr, level="DEBUG")
-
 
 class UrlToImageProcessor(FrameProcessor):
-    def __init__(self, **kwargs):
+    def __init__(self, aiohttp_session: aiohttp.ClientSession, **kwargs):
         super().__init__(**kwargs)
-        self._pipecat_session = kwargs["pipecat_session"]
+        self._aiohttp_session = aiohttp_session
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -56,9 +53,7 @@ class UrlToImageProcessor(FrameProcessor):
             if image_url:
                 await self.run_image_process(image_url)
                 # sometimes we get multiple image urls- process 1 at a time
-                time.sleep(1)
-            else:
-                pass
+                await asyncio.sleep(1)
         else:
             await self.push_frame(frame, direction)
 
@@ -72,7 +67,7 @@ class UrlToImageProcessor(FrameProcessor):
     async def run_image_process(self, image_url: str):
         try:
             logger.debug(f"handling image from url: '{image_url}'")
-            async with self._pipecat_session.get(image_url) as response:
+            async with self._aiohttp_session.get(image_url) as response:
                 image_stream = io.BytesIO(await response.content.read())
                 image = Image.open(image_stream)
                 image = image.convert("RGB")
@@ -128,7 +123,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             logger.error(f"error setting up mcp")
             logger.exception("error trace:")
 
-        mcp_image = UrlToImageProcessor(pipecat_session=session)
+        mcp_image = UrlToImageProcessor(aiohttp_session=session)
 
         tools = await mcp.register_tools(llm)
 
