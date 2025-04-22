@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added automatic hangup logic to the Twilio serializer. This feature hangs up
+  the Twilio call when an `EndFrame` is received. It is enabled by default and
+  is configurable via the `auto_hang_up` `InputParam`. To use this feature, set
+  up the following env vars: `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`.
+
 - Added `SmartTurnMetricsData`, which contains end-of-turn prediction metrics,
   to the `MetricsFrame`. Using `MetricsFrame`, you can now retrieve prediction
   confidence scores and processing time metrics from the smart turn analyzers.

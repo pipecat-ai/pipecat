@@ -207,6 +207,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
+        await self._write_frame(frame)
         await self._client.disconnect()
 
     async def cancel(self, frame: CancelFrame):
