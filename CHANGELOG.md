@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Telnyx call when an `EndFrame` or `CancelFrame` is received. It is
   enabled by default and is configurable via the `auto_hang_up` `InputParam`.
 
+- Added a keepalive task to `GladiaSTTService` to prevent the websocket from
+  disconnecting after 30 seconds of no audio input.
+
 ### Changed
 
 - In `TwilioFrameSerializer`, `call_sid` is Optional so as to avoid a breaking
