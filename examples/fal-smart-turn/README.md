@@ -34,6 +34,7 @@ In the client UI, you can see the transcription messages along with the smart-tu
    - GOOGLE_API_KEY
    - CARTESIA_API_KEY
    - DEEPGRAM_API_KEY
+   - DAILY_API_KEY
    - FAL_SMART_TURN_API_KEY
 
 4. Run the server:
@@ -59,7 +60,7 @@ In the client UI, you can see the transcription messages along with the smart-tu
 3. Create your .env.local file:
 
    ```bash
-   cp env.example .env.local
+   cp env.local.example .env.local
    ```
 
    > Note: No keys need to be modified. `NEXT_PUBLIC_API_BASE_URL` is already configured for local use.
