@@ -32,6 +32,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         webrtc_connection=webrtc_connection,
         params=TransportParams(
             audio_in_enabled=True,
+            audio_in_sample_rate=16000,
             audio_out_enabled=True,
             camera_in_enabled=False,
             vad_enabled=True,
@@ -43,12 +44,16 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     )
 
     # Create the AWS Nova Sonic LLM service
-    system_instruction = f"""
-    You are a helpful AI assistant.
-    Your goal is to demonstrate your capabilities in a helpful and engaging way.
-    Your output will be converted to audio so don't include special characters in your answers.
-    Respond to what the user said in a creative and helpful way.
-    """
+    # system_instruction = f"""
+    # You are a helpful AI assistant.
+    # Your goal is to demonstrate your capabilities in a helpful and engaging way.
+    # Your output will be converted to audio so don't include special characters in your answers.
+    # Respond to what the user said in a creative and helpful way.
+    # """
+    # TODO: looks like Nova Sonic can't handle new lines?
+    system_instruction = "You are a friendly assistant. The user and you will engage in a spoken dialog " \
+            "exchanging the transcripts of a natural real-time conversation. Keep your responses short, " \
+            "generally two or three sentences for chatty scenarios."
 
     llm = AWSNovaSonicService(
         instruction=system_instruction,
