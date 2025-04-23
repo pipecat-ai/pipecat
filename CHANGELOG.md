@@ -5,6 +5,24 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added automatic hangup logic to the Telnyx serializer. This feature hangs up
+  the Telnyx call when an `EndFrame` or `CancelFrame` is received. It is
+  enabled by default and is configurable via the `auto_hang_up` `InputParam`.
+
+### Changed
+
+- In `TwilioFrameSerializer`, `call_sid` is Optional so as to avoid a breaking
+  changed. `call_sid` is required to automatically hang up.
+
+### Fixed
+
+- Fixed an issue where `TwilioFrameSerializer` would send two hang up commands:
+  one for the `EndFrame` and one for the `CancelFrame`.
+
 ## [0.0.64] - 2025-04-22
 
 ### Added

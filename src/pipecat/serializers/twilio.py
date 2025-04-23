@@ -66,7 +66,7 @@ class TwilioFrameSerializer(FrameSerializer):
     def __init__(
         self,
         stream_sid: str,
-        call_sid: str,
+        call_sid: Optional[str] = None,
         account_sid: Optional[str] = None,
         auth_token: Optional[str] = None,
         params: InputParams = InputParams(),
@@ -75,9 +75,9 @@ class TwilioFrameSerializer(FrameSerializer):
 
         Args:
             stream_sid: The Twilio Media Stream SID.
-            call_sid: The associated Twilio Call SID.
-            account_sid: Twilio account SID.
-            auth_token: Twilio auth token.
+            call_sid: The associated Twilio Call SID (optional, but required for auto hang-up).
+            account_sid: Twilio account SID (required for auto hang-up).
+            auth_token: Twilio auth token (required for auto hang-up).
             params: Configuration parameters.
         """
         self._stream_sid = stream_sid
@@ -90,6 +90,7 @@ class TwilioFrameSerializer(FrameSerializer):
         self._sample_rate = 0  # Pipeline input rate
 
         self._resampler = create_default_resampler()
+        self._hangup_attempted = False
 
     @property
     def type(self) -> FrameSerializerType:
@@ -120,7 +121,12 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        if self._params.auto_hang_up and isinstance(frame, (EndFrame, CancelFrame)):
+        if (
+            self._params.auto_hang_up
+            and not self._hangup_attempted
+            and isinstance(frame, (EndFrame, CancelFrame))
+        ):
+            self._hangup_attempted = True
             await self._hang_up_call()
             return None
         elif isinstance(frame, StartInterruptionFrame):
@@ -154,15 +160,26 @@ class TwilioFrameSerializer(FrameSerializer):
 
             account_sid = self._account_sid
             auth_token = self._auth_token
+            call_sid = self._call_sid
 
-            if not account_sid or not auth_token:
+            if not call_sid or not account_sid or not auth_token:
+                missing = []
+                if not call_sid:
+                    missing.append("call_sid")
+                if not account_sid:
+                    missing.append("account_sid")
+                if not auth_token:
+                    missing.append("auth_token")
+
                 logger.warning(
-                    "Cannot hang up Twilio call: account_sid and auth_token must be provided"
+                    f"Cannot hang up Twilio call: missing required parameters: {', '.join(missing)}"
                 )
                 return
 
             # Twilio API endpoint for updating calls
-            endpoint = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{self._call_sid}.json"
+            endpoint = (
+                f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
+            )
 
             # Create basic auth from account_sid and auth_token
             auth = aiohttp.BasicAuth(account_sid, auth_token)
@@ -174,12 +191,12 @@ class TwilioFrameSerializer(FrameSerializer):
             async with aiohttp.ClientSession() as session:
                 async with session.post(endpoint, auth=auth, data=params) as response:
                     if response.status == 200:
-                        logger.info(f"Successfully terminated Twilio call {self._call_sid}")
+                        logger.info(f"Successfully terminated Twilio call {call_sid}")
                     else:
                         # Get the error details for better debugging
                         error_text = await response.text()
                         logger.error(
-                            f"Failed to terminate Twilio call {self._call_sid}: "
+                            f"Failed to terminate Twilio call {call_sid}: "
                             f"Status {response.status}, Response: {error_text}"
                         )
 
