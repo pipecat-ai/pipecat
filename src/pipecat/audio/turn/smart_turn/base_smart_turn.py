@@ -149,13 +149,18 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                 # Calculate processing time
                 e2e_processing_time_ms = (end_time - start_time) * 1000
 
+                # Extract metrics from the nested structure
+                metrics = result.get("metrics", {})
+                inference_time = metrics.get("inference_time", 0)
+                total_time = metrics.get("total_time", 0)
+
                 # Prepare the result data
                 result_data = SmartTurnMetricsData(
                     processor="BaseSmartTurn",
                     is_complete=result["prediction"] == 1,
                     probability=result["probability"],
-                    inference_time_ms=result.get("inference_time", 0) * 1000,
-                    server_total_time_ms=result.get("total_time", 0) * 1000,
+                    inference_time_ms=inference_time * 1000,
+                    server_total_time_ms=total_time * 1000,
                     e2e_processing_time_ms=e2e_processing_time_ms,
                 )
 
