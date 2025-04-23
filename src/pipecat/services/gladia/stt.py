@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import json
 import warnings
@@ -224,6 +225,7 @@ class GladiaSTTService(STTService):
         self._params = params
         self._websocket = None
         self._receive_task = None
+        self._keepalive_task = None
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language enum to Gladia's language code."""
@@ -287,14 +289,22 @@ class GladiaSTTService(STTService):
         self._websocket = await websockets.connect(response["url"])
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler())
+        if self._websocket and not self._keepalive_task:
+            self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def stop(self, frame: EndFrame):
         """Stop the Gladia STT websocket connection."""
         await super().stop(frame)
         await self._send_stop_recording()
+
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
         if self._websocket:
             await self._websocket.close()
             self._websocket = None
+
         if self._receive_task:
             await self.wait_for_task(self._receive_task)
             self._receive_task = None
@@ -302,7 +312,15 @@ class GladiaSTTService(STTService):
     async def cancel(self, frame: CancelFrame):
         """Cancel the Gladia STT websocket connection."""
         await super().cancel(frame)
-        await self._websocket.close()
+
+        if self._keepalive_task:
+            await self.cancel_task(self._keepalive_task)
+            self._keepalive_task = None
+
+        if self._websocket:
+            await self._websocket.close()
+            self._websocket = None
+
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -340,6 +358,24 @@ class GladiaSTTService(STTService):
     async def _send_stop_recording(self):
         if self._websocket and not self._websocket.closed:
             await self._websocket.send(json.dumps({"type": "stop_recording"}))
+
+    async def _keepalive_task_handler(self):
+        """Send periodic empty audio chunks to keep the connection alive."""
+        try:
+            while True:
+                # Send keepalive every 20 seconds (Gladia times out after 30 seconds)
+                await asyncio.sleep(20)
+                if self._websocket and not self._websocket.closed:
+                    # Send an empty audio chunk as keepalive
+                    empty_audio = b""
+                    await self._send_audio(empty_audio)
+                else:
+                    logger.debug("Websocket closed, stopping keepalive")
+                    break
+        except websockets.exceptions.ConnectionClosed:
+            logger.debug("Connection closed during keepalive")
+        except Exception as e:
+            logger.error(f"Error in Gladia keepalive task: {e}")
 
     async def _receive_task_handler(self):
         try:
