@@ -6,7 +6,7 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from typing import Mapping, Optional
+from typing import Optional
 
 from loguru import logger
 
@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
 )
-from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 
@@ -54,6 +54,17 @@ class BaseInputTransport(FrameProcessor):
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
         self._audio_task = None
+
+        if self._params.vad_audio_passthrough:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'vad_audio_passthrough' is deprecated, audio passthrough is now always enabled. Use 'audio_in_passthrough' to disable.",
+                    DeprecationWarning,
+                )
+            self._params.audio_in_passthrough = True
 
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
         logger.debug(f"Enabling audio on start. {enabled}")
@@ -247,8 +258,6 @@ class BaseInputTransport(FrameProcessor):
         while True:
             frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
-            audio_passthrough = True
-
             # If an audio filter is available, run it before VAD.
             if self._params.audio_in_filter:
                 frame.audio = await self._params.audio_in_filter.filter(frame.audio)
@@ -258,13 +267,12 @@ class BaseInputTransport(FrameProcessor):
             previous_vad_state = vad_state
             if self._params.vad_enabled:
                 vad_state = await self._handle_vad(frame, vad_state)
-                audio_passthrough = self._params.vad_audio_passthrough
 
             if self._params.turn_analyzer:
                 await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
 
-            # Push audio downstream if passthrough.
-            if audio_passthrough:
+            # Push audio downstream if passthrough is set.
+            if self._params.audio_in_passthrough:
                 await self.push_frame(frame)
 
             self._audio_in_queue.task_done()
