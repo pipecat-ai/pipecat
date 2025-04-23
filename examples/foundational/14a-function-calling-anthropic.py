@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -31,7 +32,7 @@ async def get_weather(function_name, tool_call_id, arguments, llm, context, resu
     await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(

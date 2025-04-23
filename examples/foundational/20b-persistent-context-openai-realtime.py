@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
 import glob
 import json
@@ -164,7 +165,7 @@ tools = [
 ]
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(

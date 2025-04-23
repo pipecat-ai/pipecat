@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -19,7 +20,7 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot with video test source")
 
     transport = SmallWebRTCTransport(

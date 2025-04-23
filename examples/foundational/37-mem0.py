@@ -36,6 +36,7 @@ Requirements:
 The bot runs as part of a pipeline that processes audio frames and manages the conversation flow.
 """
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -112,7 +113,7 @@ async def get_initial_greeting(
         return "Hello! How can I help you today?"
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     """Main bot execution function.
 
     Sets up and runs the bot pipeline including:
