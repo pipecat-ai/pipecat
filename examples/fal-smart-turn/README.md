@@ -1,4 +1,10 @@
-# Smart Turn Demo
+# Smart Turn Detection Demo
+
+This demo showcases Pipecat's Smart Turn Detection feature - an advanced conversational turn detection system that uses machine learning to identify when a speaker has finished their turn in a conversation. Unlike basic Voice Activity Detection (VAD) which only detects speech vs. silence, Smart Turn detects natural conversational cues like intonation patterns, pacing, and linguistic signals.
+
+This demo uses the [pipecat-ai/smart-turn](https://huggingface.co/pipecat-ai/smart-turn) model - an open-source, community-driven conversational turn detection model designed to provide more natural turn-taking in voice interactions. The model is being hosted on Fal's infrastructure for GPU acceleration, offering inference times between 50-70ms.
+
+In the client UI, you can see the transcription messages along with the smart-turn model's prediction results in real-time.
 
 ## Run the demo locally
 
@@ -17,7 +23,7 @@
    pip install -r requirements.txt
    ```
 
-3. Create your .env and set your env vars:
+3. Create your .env file and set your env vars:
 
    ```bash
    cp env.example .env
@@ -50,13 +56,13 @@
    npm install
    ```
 
-3. Created .env.local:
+3. Create your .env.local file:
 
    ```bash
    cp env.example .env.local
    ```
 
-   > Note: No keys need to be changes. `NEXT_PUBLIC_API_BASE_URL` is already configured for local use.
+   > Note: No keys need to be modified. `NEXT_PUBLIC_API_BASE_URL` is already configured for local use.
 
 4. Start the development server:
 
@@ -91,7 +97,7 @@
 
    > Note: This builds, tags and pushes your docker image and assumes Docker Hub is the container registry.
 
-5. Make sure your have the Pipecat Cloud CLI installed:
+5. Make sure you have the Pipecat Cloud CLI installed:
 
    ```bash
    pip install pipecatcloud
