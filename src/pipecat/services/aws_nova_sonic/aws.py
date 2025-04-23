@@ -1,4 +1,5 @@
 import base64
+import json
 import uuid
 from enum import Enum
 
@@ -19,7 +20,14 @@ from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolv
 from smithy_aws_core.identity import AWSCredentialsIdentity
 from smithy_core.aio.eventstream import DuplexEventStream
 
-from pipecat.frames.frames import CancelFrame, EndFrame, Frame, InputAudioRawFrame, StartFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    Frame,
+    InputAudioRawFrame,
+    StartFrame,
+    TTSAudioRawFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 
@@ -91,6 +99,8 @@ class AWSNovaSonicService(LLMService):
 
     async def _connect(self):
         try:
+            # TODO: remove after debugging
+            logger.debug("[pk] started connecting!")
             if self._client:
                 # Here we assume that if we have a client we are connected
                 return
@@ -113,6 +123,8 @@ class AWSNovaSonicService(LLMService):
             await self._send_audio_input_start()
 
             self._receive_task = self.create_task(self._receive_task_handler())
+
+            logger.debug("[pk] finished connecting!")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._client = None
@@ -271,4 +283,43 @@ class AWSNovaSonicService(LLMService):
         await self._stream.input_stream.send(event)
 
     async def _receive_task_handler(self):
-        pass
+        try:
+            while self._client:
+                # TODO: remove after debugging
+                logger.debug(f"[pk] awaiting output from server...")
+
+                output = await self._stream.await_output()
+
+                # TODO: remove after debugging
+                logger.debug(f"[pk] got output from server: {result}")
+
+                result = await output[1].receive()
+
+                # TODO: remove after debugging
+                logger.debug(f"[pk] got result from server: {result}")
+
+                if result.value and result.value.bytes_:
+                    response_data = result.value.bytes_.decode("utf-8")
+                    json_data = json.loads(response_data)
+
+                # TODO: remove after debugging
+                logger.debug(f"[pk] got JSON from server: {json_data}")
+
+                if "audioOutput" in json_data["event"]:
+                    self._handle_audio_output_event(json_data["event"])
+        except Exception as e:
+            logger.error(f"{self} error processing responses: {e}")
+
+    async def _handle_audio_output_event(self, event):
+        # TODO: remove after debugging
+        logger.debug("[pk] got output audio!")
+        audio_content = event["audioOutput"]["content"]
+        audio = base64.b64decode(audio_content)
+        # TODO: how is _current_audio_response used?
+        # TODO: make sample rate + channels (used in multiple places) consts
+        frame = TTSAudioRawFrame(
+            audio=audio,
+            sample_rate=24000,
+            num_channels=1,
+        )
+        await self.push_frame(frame)
