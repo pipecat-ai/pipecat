@@ -306,7 +306,7 @@ class AWSNovaSonicService(LLMService):
                 logger.debug(f"[pk] got JSON from server: {json_data}")
 
                 if "audioOutput" in json_data["event"]:
-                    self._handle_audio_output_event(json_data["event"])
+                    await self._handle_audio_output_event(json_data["event"])
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
 
