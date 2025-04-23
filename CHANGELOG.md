@@ -1,4 +1,3 @@
-
 # Changelog
 
 All notable changes to **Pipecat** will be documented in this file.
@@ -44,6 +43,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where the `SmartTurnMetricsData` was reporting 0ms for
   inference and processing time when using the `FalSmartTurnAnalyzer`.
+
+### Other
+
+- Added 04 foundational examples for client/server transports. Also, renamed
+  `29-livekit-audio-chat.py` to `04b-transports-livekit.py`.
 
 ## [0.0.65] - 2025-04-23 "Sant Jordi's release" 🌹📕
 
