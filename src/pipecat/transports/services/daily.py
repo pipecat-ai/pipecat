@@ -399,7 +399,7 @@ class DailyTransportClient(EventHandler):
                 non_blocking=True,
             )
 
-        if (self._params.audio_in_enabled or self._params.vad_enabled) and not self._speaker:
+        if self._params.audio_in_enabled and not self._speaker:
             self._speaker = Daily.create_speaker_device(
                 self._speaker_name(),
                 sample_rate=self._in_sample_rate,
@@ -846,7 +846,7 @@ class DailyInputTransport(BaseInputTransport):
     def start_audio_in_streaming(self):
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
-        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if not self._audio_in_task and self._params.audio_in_enabled:
             logger.debug(f"Start receiving audio")
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
@@ -863,9 +863,6 @@ class DailyInputTransport(BaseInputTransport):
         await self._client.setup(frame)
         # Join the room.
         await self._client.join()
-        # Inialize WebRTC VAD if needed.
-        if self._params.vad_enabled and not self._params.vad_analyzer:
-            self._vad_analyzer = WebRTCVADAnalyzer(sample_rate=self.sample_rate)
         if self._params.audio_in_stream_on_start:
             self.start_audio_in_streaming()
 
@@ -875,7 +872,7 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_in_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
@@ -885,7 +882,7 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_in_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 

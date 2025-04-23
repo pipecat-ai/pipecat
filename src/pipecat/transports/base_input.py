@@ -55,6 +55,17 @@ class BaseInputTransport(FrameProcessor):
         # if passthrough is enabled.
         self._audio_task = None
 
+        if self._params.vad_enabled:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'vad_enabled' is deprecated, use 'audio_in_enabled' and 'vad_analyzer' instead.",
+                    DeprecationWarning,
+                )
+            self._params.audio_in_enabled = True
+
         if self._params.vad_audio_passthrough:
             import warnings
 
@@ -89,7 +100,7 @@ class BaseInputTransport(FrameProcessor):
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
 
         # Configure VAD analyzer.
-        if self._params.vad_enabled and self._params.vad_analyzer:
+        if self._params.vad_analyzer:
             self._params.vad_analyzer.set_sample_rate(self._sample_rate)
         # Configure End of turn analyzer.
         if self._params.turn_analyzer:
@@ -99,13 +110,13 @@ class BaseInputTransport(FrameProcessor):
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
         # Create audio input queue and task if needed.
-        if not self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if not self._audio_task and self._params.audio_in_enabled:
             self._audio_in_queue = asyncio.Queue()
             self._audio_task = self.create_task(self._audio_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_task)
             self._audio_task = None
         # Stop audio filter.
@@ -114,12 +125,12 @@ class BaseInputTransport(FrameProcessor):
 
     async def cancel(self, frame: CancelFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_task)
             self._audio_task = None
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._params.audio_in_enabled:
             await self._audio_in_queue.put(frame)
 
     #
@@ -265,7 +276,7 @@ class BaseInputTransport(FrameProcessor):
             # Check VAD and push event if necessary. We just care about
             # changes from QUIET to SPEAKING and vice versa.
             previous_vad_state = vad_state
-            if self._params.vad_enabled:
+            if self._params.vad_analyzer:
                 vad_state = await self._handle_vad(frame, vad_state)
 
             if self._params.turn_analyzer:

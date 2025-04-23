@@ -389,9 +389,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
-        if not self._receive_audio_task and (
-            self._params.audio_in_enabled or self._params.vad_enabled
-        ):
+        if not self._receive_audio_task and self._params.audio_in_enabled:
             self._receive_audio_task = self.create_task(self._receive_audio())
         if not self._receive_video_task and self._params.camera_in_enabled:
             self._receive_video_task = self.create_task(self._receive_video())
