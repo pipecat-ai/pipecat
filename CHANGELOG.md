@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `TransportParams.camera_*` parameters are now deprecated, use
+  `TransportParams.video_*` instead.
+
 - `TransportParams.vad_enabled` parameter is now deprecated, use
   `TransportParams.audio_in_enabled` and `TransportParams.vad_analyzer` instead.
 
