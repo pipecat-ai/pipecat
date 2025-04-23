@@ -238,8 +238,8 @@ async def bot(args: DailySessionArguments):
         transport = DailyTransport(
             args.room_url,
             args.token,
-            "Word Wrangler Bot",
-            DailyParams(
+            "Smart Turn Bot",
+            params=DailyParams(
                 audio_in_filter=KrispFilter(),
                 audio_out_enabled=True,
                 camera_out_enabled=True,
@@ -273,7 +273,7 @@ async def local_daily():
             transport = DailyTransport(
                 room_url,
                 token,
-                bot_name="Bot",
+                "Smart Turn Bot",
                 params=DailyParams(
                     audio_out_enabled=True,
                     camera_out_enabled=True,
