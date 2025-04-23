@@ -20,6 +20,10 @@ https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
 
 ### Changed
 
+- The `InputParams` for `ElevenLabsTTSService` and `ElevenLabsHttpTTSService`
+  no longer require that `stability` and `similarity_boost` be set. You can
+  individually set each param.
+
 - In `TwilioFrameSerializer`, `call_sid` is Optional so as to avoid a breaking
   changed. `call_sid` is required to automatically hang up.
 
