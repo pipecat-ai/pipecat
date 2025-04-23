@@ -8,6 +8,8 @@ import base64
 import json
 from typing import Optional
 
+import aiohttp
+from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.audio.utils import (
@@ -19,6 +21,8 @@ from pipecat.audio.utils import (
 )
 from pipecat.frames.frames import (
     AudioRawFrame,
+    CancelFrame,
+    EndFrame,
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
@@ -35,23 +39,39 @@ class TelnyxFrameSerializer(FrameSerializer):
         sample_rate: Optional[int] = None  # Pipeline input rate
         inbound_encoding: str = "PCMU"
         outbound_encoding: str = "PCMU"
+        auto_hang_up: bool = True
 
     def __init__(
         self,
         stream_id: str,
         outbound_encoding: str,
         inbound_encoding: str,
+        call_control_id: Optional[str] = None,
+        api_key: Optional[str] = None,
         params: InputParams = InputParams(),
     ):
+        """Initialize the TelnyxFrameSerializer.
+
+        Args:
+            stream_id: The Stream ID for Telnyx.
+            outbound_encoding: The encoding type for outbound audio (e.g., "PCMU").
+            inbound_encoding: The encoding type for inbound audio (e.g., "PCMU").
+            call_control_id: The Call Control ID for the Telnyx call.
+            api_key: Your Telnyx API key.
+            params: Configuration parameters.
+        """
         self._stream_id = stream_id
         params.outbound_encoding = outbound_encoding
         params.inbound_encoding = inbound_encoding
+        self._call_control_id = call_control_id
+        self._api_key = api_key
         self._params = params
 
         self._telnyx_sample_rate = self._params.telnyx_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
         self._resampler = create_default_resampler()
+        self._hangup_attempted = False
 
     @property
     def type(self) -> FrameSerializerType:
@@ -61,7 +81,18 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._sample_rate = self._params.sample_rate or frame.audio_in_sample_rate
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
-        if isinstance(frame, AudioRawFrame):
+        if (
+            self._params.auto_hang_up
+            and not self._hangup_attempted
+            and isinstance(frame, (EndFrame, CancelFrame))
+        ):
+            self._hangup_attempted = True
+            await self._hang_up_call()
+            return None
+        elif isinstance(frame, StartInterruptionFrame):
+            answer = {"event": "clear"}
+            return json.dumps(answer)
+        elif isinstance(frame, AudioRawFrame):
             data = frame.audio
 
             # Output: Convert PCM at frame's rate to 8kHz encoded for Telnyx
@@ -84,9 +115,42 @@ class TelnyxFrameSerializer(FrameSerializer):
 
             return json.dumps(answer)
 
-        if isinstance(frame, StartInterruptionFrame):
-            answer = {"event": "clear"}
-            return json.dumps(answer)
+        # Return None for unhandled frames
+        return None
+
+    async def _hang_up_call(self):
+        """Hang up the Telnyx call using Telnyx's REST API."""
+        try:
+            call_control_id = self._call_control_id
+            api_key = self._api_key
+
+            if not call_control_id or not api_key:
+                logger.warning(
+                    "Cannot hang up Telnyx call: call_control_id and api_key must be provided"
+                )
+                return
+
+            # Telnyx API endpoint for hanging up a call
+            endpoint = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/hangup"
+
+            # Set headers with API key
+            headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+
+            # Make the POST request to hang up the call
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint, headers=headers) as response:
+                    if response.status == 200:
+                        logger.info(f"Successfully terminated Telnyx call {call_control_id}")
+                    else:
+                        # Get the error details for better debugging
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to terminate Telnyx call {call_control_id}: "
+                            f"Status {response.status}, Response: {error_text}"
+                        )
+
+        except Exception as e:
+            logger.exception(f"Failed to hang up Telnyx call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         message = json.loads(data)
