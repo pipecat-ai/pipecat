@@ -51,13 +51,13 @@ async def run_bot(webrtc_connection):
     pipecat_transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
-            camera_in_enabled=True,
-            camera_out_enabled=True,
-            camera_out_is_live=True,
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_width=1280,
-            camera_out_height=720,
+            video_in_enabled=True,
+            video_out_enabled=True,
+            video_out_is_live=True,
+            video_out_width=1280,
+            video_out_height=720,
         ),
     )
 
@@ -67,13 +67,13 @@ async def run_bot(webrtc_connection):
         None,
         "SmallWebRTC",
         params=DailyParams(
-            camera_in_enabled=True,
-            camera_out_enabled=True,
-            camera_out_is_live=True,
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_width=1280,
-            camera_out_height=720,
+            video_in_enabled=True,
+            video_out_enabled=True,
+            video_out_is_live=True,
+            video_out_width=1280,
+            video_out_height=720,
         ),
     )
 
