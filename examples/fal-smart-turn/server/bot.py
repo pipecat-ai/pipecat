@@ -247,7 +247,6 @@ async def bot(args: DailySessionArguments):
                 camera_out_height=576,
                 vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-                vad_audio_passthrough=True,
                 turn_analyzer=FalSmartTurnAnalyzer(
                     api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session
                 ),
@@ -281,7 +280,6 @@ async def local_daily():
                     camera_out_height=576,
                     vad_enabled=True,
                     vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-                    vad_audio_passthrough=True,
                     turn_analyzer=FalSmartTurnAnalyzer(
                         api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session
                     ),

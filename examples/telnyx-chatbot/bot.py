@@ -52,7 +52,6 @@ async def run_bot(
             add_wav_header=False,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
             serializer=serializer,
         ),
     )
