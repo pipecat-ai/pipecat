@@ -212,10 +212,10 @@ class BaseOutputTransport(FrameProcessor):
             self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
 
     async def _handle_image(self, frame: OutputImageRawFrame | SpriteFrame):
-        if not self._params.camera_out_enabled:
+        if not self._params.video_out_enabled:
             return
 
-        if self._params.camera_out_is_live:
+        if self._params.video_out_is_live:
             await self._camera_out_queue.put(frame)
         else:
             await self._sink_queue.put(frame)
@@ -373,18 +373,18 @@ class BaseOutputTransport(FrameProcessor):
 
     def _create_camera_task(self):
         # Create camera output queue and task if needed.
-        if not self._camera_out_task and self._params.camera_out_enabled:
+        if not self._camera_out_task and self._params.video_out_enabled:
             self._camera_out_queue = asyncio.Queue()
             self._camera_out_task = self.create_task(self._camera_out_task_handler())
 
     async def _cancel_camera_task(self):
         # Stop camera output task.
-        if self._camera_out_task and self._params.camera_out_enabled:
+        if self._camera_out_task and self._params.video_out_enabled:
             await self.cancel_task(self._camera_out_task)
             self._camera_out_task = None
 
     async def _draw_image(self, frame: OutputImageRawFrame):
-        desired_size = (self._params.camera_out_width, self._params.camera_out_height)
+        desired_size = (self._params.video_out_width, self._params.video_out_height)
 
         # TODO: we should refactor in the future to support dynamic resolutions
         # which is kind of what happens in P2P connections.
@@ -408,10 +408,10 @@ class BaseOutputTransport(FrameProcessor):
     async def _camera_out_task_handler(self):
         self._camera_out_start_time = None
         self._camera_out_frame_index = 0
-        self._camera_out_frame_duration = 1 / self._params.camera_out_framerate
+        self._camera_out_frame_duration = 1 / self._params.video_out_framerate
         self._camera_out_frame_reset = self._camera_out_frame_duration * 5
         while True:
-            if self._params.camera_out_is_live:
+            if self._params.video_out_is_live:
                 await self._camera_out_is_live_handler()
             elif self._camera_images:
                 image = next(self._camera_images)

@@ -77,6 +77,24 @@ class BaseInputTransport(FrameProcessor):
                 )
             self._params.audio_in_passthrough = True
 
+        if self._params.camera_in_enabled or self._params.camera_out_enabled:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameters 'camera_*' are deprecated, use 'video_*' instead.",
+                    DeprecationWarning,
+                )
+            self._params.video_in_enabled = self._params.camera_in_enabled
+            self._params.video_out_enabled = self._params.camera_out_enabled
+            self._params.video_out_is_live = self._params.camera_out_is_live
+            self._params.video_out_width = self._params.camera_out_width
+            self._params.video_out_height = self._params.camera_out_height
+            self._params.video_out_bitrate = self._params.camera_out_bitrate
+            self._params.video_out_framerate = self._params.camera_out_framerate
+            self._params.video_out_color_format = self._params.camera_out_color_format
+
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
         logger.debug(f"Enabling audio on start. {enabled}")
         self._params.audio_in_stream_on_start = enabled
