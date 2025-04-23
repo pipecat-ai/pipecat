@@ -126,7 +126,6 @@ async def main():
                 camera_out_width=1024,
                 camera_out_height=576,
                 vad_enabled=True,
-                vad_audio_passthrough=True,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
             ),
         )

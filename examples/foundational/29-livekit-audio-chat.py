@@ -116,7 +116,6 @@ async def main():
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
                 vad_enabled=True,
-                vad_audio_passthrough=True,
             ),
         )
 

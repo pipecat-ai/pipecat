@@ -95,7 +95,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             audio_out_enabled=True,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

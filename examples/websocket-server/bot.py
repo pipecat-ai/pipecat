@@ -86,7 +86,6 @@ async def main():
             add_wav_header=True,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
             session_timeout=60 * 3,  # 3 minutes
         )
     )

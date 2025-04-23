@@ -80,7 +80,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             camera_out_height=1024,
             vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 
