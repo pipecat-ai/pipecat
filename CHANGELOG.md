@@ -5,6 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed an issue where the `SmartTurnMetricsData` was reporting 0ms for
+  inference and processing time when using the `FalSmartTurnAnalyzer`.
+
 ## [0.0.65] - 2025-04-23 "Sant Jordi's release"
 
 https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
