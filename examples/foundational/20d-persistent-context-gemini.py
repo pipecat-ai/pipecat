@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import glob
 import json
 import os
@@ -221,7 +222,7 @@ tools = [
 ]
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     global tts, webrtc_peer_id
     webrtc_peer_id = webrtc_connection.pc_id
 

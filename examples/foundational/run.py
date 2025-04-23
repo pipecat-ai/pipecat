@@ -35,6 +35,9 @@ ice_servers = ["stun:stun.l.google.com:19302"]
 # Mount the frontend at /
 app.mount("/client", SmallWebRTCPrebuiltUI)
 
+# Store program arguments
+args: argparse.Namespace = argparse.Namespace()
+
 # Store the bot module and function info
 bot_module: Any = None
 run_bot_func: Optional[Callable] = None
@@ -116,7 +119,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
 
         # We've already checked that run_bot_func exists
         assert run_bot_func is not None
-        background_tasks.add_task(run_bot_func, pipecat_connection)
+        background_tasks.add_task(run_bot_func, pipecat_connection, args)
 
     answer = pipecat_connection.get_answer()
     # Updating the peer connection inside the map
@@ -142,8 +145,11 @@ async def run_standalone_bot() -> None:
         raise RuntimeError("No bot function available to run")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
+def main(parser: Optional[argparse.ArgumentParser] = None):
+    global args
+
+    if not parser:
+        parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
     parser.add_argument("bot_file", nargs="?", help="Path to the bot file", default=None)
     parser.add_argument(
         "--host", default="localhost", help="Host for HTTP server (default: localhost)"
