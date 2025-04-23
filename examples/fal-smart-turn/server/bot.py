@@ -243,9 +243,9 @@ async def bot(args: DailySessionArguments):
                 audio_in_enabled=True,
                 audio_in_filter=KrispFilter(),
                 audio_out_enabled=True,
-                camera_out_enabled=True,
-                camera_out_width=1024,
-                camera_out_height=576,
+                video_out_enabled=True,
+                video_out_width=1024,
+                video_out_height=576,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
                 turn_analyzer=FalSmartTurnAnalyzer(
                     api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session
@@ -276,9 +276,9 @@ async def local_daily():
                 params=DailyParams(
                     audio_in_enabled=True,
                     audio_out_enabled=True,
-                    camera_out_enabled=True,
-                    camera_out_width=1024,
-                    camera_out_height=576,
+                    video_out_enabled=True,
+                    video_out_width=1024,
+                    video_out_height=576,
                     vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
                     turn_analyzer=FalSmartTurnAnalyzer(
                         api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session

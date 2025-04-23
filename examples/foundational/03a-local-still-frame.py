@@ -33,9 +33,7 @@ async def main():
 
         transport = TkLocalTransport(
             tk_root,
-            TkTransportParams(
-                camera_out_enabled=True, camera_out_width=1024, camera_out_height=1024
-            ),
+            TkTransportParams(video_out_enabled=True, video_out_width=1024, video_out_height=1024),
         )
 
         imagegen = FalImageGenService(

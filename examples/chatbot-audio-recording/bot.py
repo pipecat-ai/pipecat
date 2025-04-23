@@ -66,7 +66,7 @@ async def main():
             DailyParams(
                 audio_out_enabled=True,
                 audio_in_enabled=True,
-                camera_out_enabled=False,
+                video_out_enabled=False,
                 vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
                 #
