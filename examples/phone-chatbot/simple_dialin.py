@@ -65,7 +65,6 @@ async def main(
             audio_in_enabled=True,
             audio_out_enabled=True,
             camera_out_enabled=False,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             transcription_enabled=True,
         )
@@ -80,7 +79,6 @@ async def main(
             audio_in_enabled=True,
             audio_out_enabled=True,
             camera_out_enabled=False,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             transcription_enabled=True,
         )

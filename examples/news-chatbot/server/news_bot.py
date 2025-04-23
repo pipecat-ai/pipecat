@@ -86,8 +86,8 @@ async def main():
             token,
             "Latest news!",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
         )

@@ -49,10 +49,10 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
                 audio_out_mixer=soundfile_mixer,
                 transcription_enabled=True,
-                vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
         )

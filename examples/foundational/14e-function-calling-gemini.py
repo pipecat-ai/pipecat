@@ -71,7 +71,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             audio_in_enabled=True,
             audio_out_enabled=True,
             camera_in_enabled=True,  # Make sure camera input is enabled
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         ),
     )

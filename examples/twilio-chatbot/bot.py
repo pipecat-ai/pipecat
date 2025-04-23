@@ -68,7 +68,6 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             serializer=serializer,
         ),

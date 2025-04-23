@@ -32,7 +32,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             # set stop_secs to something roughly similar to the internal setting
             # of the Multimodal Live api, just to align events. This doesn't really
             # matter because we can only use the Multimodal Live API's phrase
