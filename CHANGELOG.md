@@ -10,7 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `MCPClient`; a way to connect to MCP servers and use the MCP servers' tools.
+- Added `TransportParams.audio_in_passthrough`. If set (the default), incoming
+  audio will be pushed downstream.
+
+- Added `MCPClient`; a way to connect to MCP servers and use the MCP servers'
+  tools.
+
+### Changed
+
+- Input transports now always push audio downstream unless disabled with
+  `TransportParams.audio_in_passthrough`. After many Pipecat releases, we
+  realized this is the common use case. There are use cases where the input
+  transport already provides STT and you also don't want recordings, in which
+  case there's no need to push audio to the rest of the pipeline, but this is
+  not a very common case.
+
+### Deprecated
+
+- `TransportParams.vad_audio_passthrough` parameter is now deprecated, use
+  `TransportParams.audio_in_passthrough` instead.
 
 ### Fixed
 
