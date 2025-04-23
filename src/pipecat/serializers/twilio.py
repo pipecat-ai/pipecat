@@ -90,6 +90,7 @@ class TwilioFrameSerializer(FrameSerializer):
         self._sample_rate = 0  # Pipeline input rate
 
         self._resampler = create_default_resampler()
+        self._hangup_attempted = False
 
     @property
     def type(self) -> FrameSerializerType:
@@ -120,7 +121,12 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
-        if self._params.auto_hang_up and isinstance(frame, (EndFrame, CancelFrame)):
+        if (
+            self._params.auto_hang_up
+            and not self._hangup_attempted
+            and isinstance(frame, (EndFrame, CancelFrame))
+        ):
+            self._hangup_attempted = True
             await self._hang_up_call()
             return None
         elif isinstance(frame, StartInterruptionFrame):

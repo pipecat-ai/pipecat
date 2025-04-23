@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Telnyx call when an `EndFrame` or `CancelFrame` is received. It is
   enabled by default and is configurable via the `auto_hang_up` `InputParam`.
 
+### Fixed
+
+- Fixed an issue where `TwilioFrameSerializer` would send two hang up commands:
+  one for the `EndFrame` and one for the `CancelFrame`.
+
 ## [0.0.64] - 2025-04-22
 
 ### Added
