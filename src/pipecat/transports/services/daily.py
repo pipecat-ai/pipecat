@@ -373,7 +373,7 @@ class DailyTransportClient(EventHandler):
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
         if not self._camera:
             return None
 
@@ -1035,8 +1035,8 @@ class DailyOutputTransport(BaseOutputTransport):
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
-        await self._client.write_frame_to_camera(frame)
+    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+        await self._client.write_raw_video_frame(frame)
 
 
 class DailyTransport(BaseTransport):
