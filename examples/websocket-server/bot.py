@@ -82,9 +82,9 @@ async def main():
     transport = WebsocketServerTransport(
         params=WebsocketServerParams(
             serializer=ProtobufFrameSerializer(),
+            audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
             session_timeout=60 * 3,  # 3 minutes
         )

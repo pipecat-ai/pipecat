@@ -36,7 +36,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             params=TransportParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
                 turn_analyzer=FalSmartTurnAnalyzer(
                     api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session

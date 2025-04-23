@@ -37,7 +37,6 @@ async def main():
     transport = LocalAudioTransport(
         LocalAudioTransportParams(
             audio_in_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         )
     )

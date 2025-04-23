@@ -58,7 +58,6 @@ async def run_bot(webrtc_connection):
             audio_out_enabled=True,
             camera_out_width=1280,
             camera_out_height=720,
-            vad_enabled=False,
         ),
     )
 
@@ -75,7 +74,6 @@ async def run_bot(webrtc_connection):
             audio_out_enabled=True,
             camera_out_width=1280,
             camera_out_height=720,
-            vad_enabled=False,
         ),
     )
 

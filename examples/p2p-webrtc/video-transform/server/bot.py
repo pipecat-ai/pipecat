@@ -76,7 +76,6 @@ async def run_bot(webrtc_connection):
         camera_out_is_live=True,
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
         audio_out_10ms_chunks=2,
     )
