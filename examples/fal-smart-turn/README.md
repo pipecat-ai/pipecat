@@ -1,59 +1,141 @@
 # Smart Turn Demo
 
-## Run the demo
+## Run the demo locally
 
 ### Run the Server
 
 1. Set up and activate your virtual environment:
 
-```bash
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
 2. Install dependencies:
 
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-3. Run the server (locally):
+3. Create your .env and set your env vars:
 
-```bash
-LOCAL=1 python server.py
-```
+   ```bash
+   cp env.example .env
+   ```
+
+   Keys to provide:
+
+   - GOOGLE_API_KEY
+   - CARTESIA_API_KEY
+   - DEEPGRAM_API_KEY
+   - FAL_SMART_TURN_API_KEY
+
+4. Run the server:
+
+   ```bash
+   LOCAL=1 python server.py
+   ```
 
 ### Run the client
 
-1. Install dependencies:
+1. Open a new terminal and navigate to the client directory:
+
+   ```bash
+   cd client
+   ```
+
+2. Install dependencies:
 
    ```bash
    npm install
    ```
 
-2. Created .env.local:
+3. Created .env.local:
 
    ```bash
    cp env.example .env.local
    ```
 
-3. Set up env vars as needed:
-
-- Run locally:
-  ```bash
-  NEXT_PUBLIC_API_BASE_URL=http://localhost:7860
-  ```
-- Deployed:
-  ```bash
-  NEXT_PUBLIC_API_BASE_URL=/api
-  PIPECAT_CLOUD_API_KEY=
-  AGENT_NAME=
-  ```
+   > Note: No keys need to be changes. `NEXT_PUBLIC_API_BASE_URL` is already configured for local use.
 
 4. Start the development server:
 
-```bash
-npm run dev
-```
+   ```bash
+   npm run dev
+   ```
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser
+5. Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+## Deploy the app
+
+### Deploy the server to Pipecat Cloud
+
+1. Navigate to server
+
+   ```bash
+   cd server
+   ```
+
+2. You should already have a .env set up from running locally. If not, do that now.
+
+3. Update your build and deploy scripts.
+
+   - In build.sh, set `DOCKER_USERNAME` and `AGENT_NAME`.
+   - In pcc-deploy.toml, set `image`, which specifies where your Docker image is stored.
+
+4. Build your Docker image by running the build script:
+
+   ```bash
+   ./build.sh
+   ```
+
+   > Note: This builds, tags and pushes your docker image and assumes Docker Hub is the container registry.
+
+5. Make sure your have the Pipecat Cloud CLI installed:
+
+   ```bash
+   pip install pipecatcloud
+   ```
+
+6. Login via the Pipecat Cloud CLI:
+
+   ```bash
+   pcc auth login
+   ```
+
+   > Note: If you don't have an account, sign up at https://pipecat.daily.co.
+
+7. Add a secrets set:
+
+   ```bash
+   pcc secrets set pcc-smart-turn-secrets --file .env
+   ```
+
+8. Deploy your agent:
+
+   ```bash
+   pcc deploy
+   ```
+
+   > Note: This uses your pcc-deploy.toml settings. Modify as needed.
+
+### Deploy the client to Vercel
+
+This project uses TypeScript, React, and Next.js, making it a perfect fit for [Vercel](https://vercel.com/).
+
+- In your client directory, install Vercel's CLI tool: `npm install -g vercel`
+- Verify it's installed using `vercel --version`
+- Log in your Vercel account using `vercel login`
+- Deploy your client to Vercel using `vercel`
+
+Follow the vercel prompts to deploy your project.
+
+### Test your deployed app
+
+Now with the client and server deployed, you can join the call using your Vercel URL.
+
+See the debug information for the Smart Turn data. It prints a log line for each smart-turn inference:
+
+```
+Smart Turn: COMPLETE, Probability: 95.3%, Model inference: 65.23ms, Server processing: 82.09ms, End-to-end: 245.43ms
+```
