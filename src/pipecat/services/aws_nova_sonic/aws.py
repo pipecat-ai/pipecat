@@ -1,3 +1,7 @@
+import base64
+import uuid
+from enum import Enum
+
 from aws_sdk_bedrock_runtime.client import (
     BedrockRuntimeClient,
     InvokeModelWithBidirectionalStreamOperationInput,
@@ -10,18 +14,26 @@ from aws_sdk_bedrock_runtime.models import (
     InvokeModelWithBidirectionalStreamOperationOutput,
     InvokeModelWithBidirectionalStreamOutput,
 )
+from loguru import logger
 from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolver
 from smithy_aws_core.identity import AWSCredentialsIdentity
 from smithy_core.aio.eventstream import DuplexEventStream
 
-from pipecat.frames.frames import CancelFrame, EndFrame, StartFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, InputAudioRawFrame, StartFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+
+
+class Role(Enum):
+    SYSTEM = "SYSTEM"
+    USER = "USER"
 
 
 class AWSNovaSonicService(LLMService):
     def __init__(
         self,
         *,
+        instruction: str,
         secret_access_key: str,
         access_key_id: str,
         region: str,
@@ -29,6 +41,7 @@ class AWSNovaSonicService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._instruction = instruction
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
         self._region = region
@@ -40,6 +53,8 @@ class AWSNovaSonicService(LLMService):
             InvokeModelWithBidirectionalStreamOperationOutput,
         ] = None
         self._receive_task = None
+        self._prompt_name = str(uuid.uuid4())
+        self._input_audio_content_name = str(uuid.uuid4())
 
     #
     # standard AIService frame handling
@@ -58,24 +73,54 @@ class AWSNovaSonicService(LLMService):
         await self._disconnect()
 
     #
-    # communication
+    # frame processing
+    #
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, InputAudioRawFrame):
+            # TODO: check if _audio_input_paused? what causes that?
+            await self._send_user_audio(frame)
+
+        await self.push_frame(frame, direction)
+
+    #
+    # communication with LLM
     #
 
     async def _connect(self):
-        if self._client:
-            # Here we assume that if we have a client we are connected.
-            return
-        self._initialize_client()
-        self._stream = await self._client.invoke_model_with_bidirectional_stream(
-            InvokeModelWithBidirectionalStreamOperationInput(model_id=self._model)
-        )
-        self._receive_task = self.create_task(self._receive_task_handler())
-        pass
+        try:
+            if self._client:
+                # Here we assume that if we have a client we are connected
+                return
+
+            # Create the client
+            self._client = self._create_client()
+
+            # Start the bidirectional stream
+            self._stream = await self._client.invoke_model_with_bidirectional_stream(
+                InvokeModelWithBidirectionalStreamOperationInput(model_id=self._model)
+            )
+
+            # Send session start events
+            await self._send_session_start()
+
+            # Send initial system instruction
+            await self._send_text(text=self._instruction, role=Role.SYSTEM)
+
+            # Start audio input
+            await self._send_audio_input_start()
+
+            self._receive_task = self.create_task(self._receive_task_handler())
+        except Exception as e:
+            logger.error(f"{self} initialization error: {e}")
+            self._client = None
 
     async def _disconnect(self):
         pass
 
-    def _initialize_client(self) -> BedrockRuntimeClient:
+    def _create_client(self) -> BedrockRuntimeClient:
         config = Config(
             endpoint_uri=f"https://bedrock-runtime.{self._region}.amazonaws.com",
             region=self._region,
@@ -89,9 +134,137 @@ class AWSNovaSonicService(LLMService):
             http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
             http_auth_schemes={"aws.auth#sigv4": SigV4AuthScheme()},
         )
-        self._client = BedrockRuntimeClient(config=config)
+        return BedrockRuntimeClient(config=config)
 
-    async def _send_client_event(self, event_json):
+    # TODO: make params configurable?
+    async def _send_session_start(self):
+        session_start = """
+        {
+          "event": {
+            "sessionStart": {
+              "inferenceConfiguration": {
+                "maxTokens": 1024,
+                "topP": 0.9,
+                "temperature": 0.7
+              }
+            }
+          }
+        }
+        """
+        await self._send_client_event(session_start)
+
+        prompt_start = f'''
+        {{
+          "event": {{
+            "promptStart": {{
+              "promptName": "{self._prompt_name}",
+              "textOutputConfiguration": {{
+                "mediaType": "text/plain"
+              }},
+              "audioOutputConfiguration": {{
+                "mediaType": "audio/lpcm",
+                "sampleRateHertz": 24000,
+                "sampleSizeBits": 16,
+                "channelCount": 1,
+                "voiceId": "matthew",
+                "encoding": "base64",
+                "audioType": "SPEECH"
+              }}
+            }}
+          }}
+        }}
+        '''
+        await self._send_client_event(prompt_start)
+
+    async def _send_audio_input_start(self):
+        audio_content_start = f'''
+        {{
+            "event": {{
+                "contentStart": {{
+                    "promptName": "{self._prompt_name}",
+                    "contentName": "{self._input_audio_content_name}",
+                    "type": "AUDIO",
+                    "interactive": true,
+                    "role": "USER",
+                    "audioInputConfiguration": {{
+                        "mediaType": "audio/lpcm",
+                        "sampleRateHertz": 16000,
+                        "sampleSizeBits": 16,
+                        "channelCount": 1,
+                        "audioType": "SPEECH",
+                        "encoding": "base64"
+                    }}
+                }}
+            }}
+        }}
+        '''
+        await self._send_client_event(audio_content_start)
+
+    async def _send_text(self, text: str, role: Role):
+        content_name = str(uuid.uuid4())
+
+        text_content_start = f'''
+        {{
+            "event": {{
+                "contentStart": {{
+                    "promptName": "{self._prompt_name}",
+                    "contentName": "{content_name}",
+                    "type": "TEXT",
+                    "interactive": true,
+                    "role": "{role.value}",
+                    "textInputConfiguration": {{
+                        "mediaType": "text/plain"
+                    }}
+                }}
+            }}
+        }}
+        '''
+        await self._send_client_event(text_content_start)
+
+        text_input = f'''
+        {{
+            "event": {{
+                "textInput": {{
+                    "promptName": "{self._prompt_name}",
+                    "contentName": "{content_name}",
+                    "content": "{text}"
+                }}
+            }}
+        }}
+        '''
+        await self._send_client_event(text_input)
+
+        text_content_end = f'''
+        {{
+            "event": {{
+                "contentEnd": {{
+                    "promptName": "{self._prompt_name}",
+                    "contentName": "{content_name}"
+                }}
+            }}
+        }}
+        '''
+        await self._send_client_event(text_content_end)
+
+    async def _send_user_audio(self, frame: InputAudioRawFrame):
+        if not self._client:
+            return
+
+        blob = base64.b64encode(frame.audio)
+        audio_event = f'''
+        {{
+            "event": {{
+                "audioInput": {{
+                    "promptName": "{self._prompt_name}",
+                    "contentName": "{self._input_audio_content_name}",
+                    "content": "{blob.decode("utf-8")}"
+                }}
+            }}
+        }}
+        '''
+        await self._send_client_event(audio_event)
+
+    async def _send_client_event(self, event_json: str):
         event = InvokeModelWithBidirectionalStreamInputChunk(
             value=BidirectionalInputPayloadPart(bytes_=event_json.encode("utf-8"))
         )

@@ -43,15 +43,15 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     )
 
     # Create the AWS Nova Sonic LLM service
-    # TODO: system instruction
-    # system_instruction = f"""
-    # You are a helpful AI assistant.
-    # Your goal is to demonstrate your capabilities in a helpful and engaging way.
-    # Your output will be converted to audio so don't include special characters in your answers.
-    # Respond to what the user said in a creative and helpful way.
-    # """
+    system_instruction = f"""
+    You are a helpful AI assistant.
+    Your goal is to demonstrate your capabilities in a helpful and engaging way.
+    Your output will be converted to audio so don't include special characters in your answers.
+    Respond to what the user said in a creative and helpful way.
+    """
 
     llm = AWSNovaSonicService(
+        instruction=system_instruction,
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),
