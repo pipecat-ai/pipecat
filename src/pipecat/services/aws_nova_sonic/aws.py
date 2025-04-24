@@ -89,7 +89,7 @@ class AWSNovaSonicService(LLMService):
 
         if isinstance(frame, InputAudioRawFrame):
             # TODO: check if _audio_input_paused? what causes that?
-            await self._send_user_audio(frame)
+            await self._send_user_audio_event(frame)
 
         await self.push_frame(frame, direction)
 
@@ -112,13 +112,13 @@ class AWSNovaSonicService(LLMService):
             )
 
             # Send session start events
-            await self._send_session_start()
+            await self._send_session_start_event()
 
             # Send initial system instruction
-            await self._send_text(text=self._instruction, role=Role.SYSTEM)
+            await self._send_text_event(text=self._instruction, role=Role.SYSTEM)
 
             # Start audio input
-            await self._send_audio_input_start()
+            await self._send_audio_input_start_event()
 
             self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
@@ -149,7 +149,7 @@ class AWSNovaSonicService(LLMService):
     #
 
     # TODO: make params configurable?
-    async def _send_session_start(self):
+    async def _send_session_start_event(self):
         session_start = """
         {
           "event": {
@@ -188,7 +188,7 @@ class AWSNovaSonicService(LLMService):
         '''
         await self._send_client_event(prompt_start)
 
-    async def _send_audio_input_start(self):
+    async def _send_audio_input_start_event(self):
         audio_content_start = f'''
         {{
             "event": {{
@@ -212,7 +212,7 @@ class AWSNovaSonicService(LLMService):
         '''
         await self._send_client_event(audio_content_start)
 
-    async def _send_text(self, text: str, role: Role):
+    async def _send_text_event(self, text: str, role: Role):
         content_name = str(uuid.uuid4())
 
         text_content_start = f'''
@@ -258,7 +258,7 @@ class AWSNovaSonicService(LLMService):
         '''
         await self._send_client_event(text_content_end)
 
-    async def _send_user_audio(self, frame: InputAudioRawFrame):
+    async def _send_user_audio_event(self, frame: InputAudioRawFrame):
         if not self._client:
             return
 
@@ -357,7 +357,8 @@ class AWSNovaSonicService(LLMService):
     async def _handle_content_end_event(self, event_json):
         content_end = event_json["contentEnd"]
         type = content_end["type"]
-        print(f"[pk] content end. type: {type}")
+        stop_reason = content_end["stopReason"]
+        print(f"[pk] content end. type: {type}, stop_reason: {stop_reason}")
 
     async def _handle_completion_end_event(self, event_json):
         print("[pk] completion end")
