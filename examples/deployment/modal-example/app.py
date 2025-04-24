@@ -10,24 +10,27 @@ import aiohttp
 import modal
 from bot import _voice_bot_process
 from fastapi import HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import RedirectResponse
 from loguru import logger
 
 MAX_SESSION_TIME = 15 * 60  # 15 minutes
 
-app = modal.App("pipecat-modal")
-
-
-image = modal.Image.debian_slim(python_version="3.12").pip_install_from_requirements(
-    "requirements.txt"
+image = (
+    modal.Image.debian_slim(python_version="3.13")
+    .apt_install("ffmpeg")
+    .pip_install_from_requirements("requirements.txt")
+    .pip_install("pipecat-ai[daily,silero,cartesia,openai]")
+    .add_local_python_source("bot")
 )
+
+app = modal.App("pipecat-modal", image=image)
 
 
 @app.function(
     image=image,
     cpu=1.0,
     secrets=[modal.Secret.from_dotenv()],
-    keep_warm=1,
+    min_containers=1,
     enable_memory_snapshot=True,
     max_inputs=1,  # Do not reuse instances across requests
     retries=0,
@@ -40,7 +43,7 @@ def launch_bot_process(room_url: str, token: str):
     image=image,
     secrets=[modal.Secret.from_dotenv()],
 )
-@modal.web_endpoint(method="POST")
+@modal.fastapi_endpoint(method="GET")
 async def start():
     from pipecat.transports.services.helpers.daily_rest import (
         DailyRESTHelper,
@@ -77,4 +80,4 @@ async def start():
 
         # Return room URL to the user to join
         # Note: in production, you would want to return a token to the user
-        return JSONResponse(content={"room_url": room.url, token: token})
+        return RedirectResponse(room.url)
