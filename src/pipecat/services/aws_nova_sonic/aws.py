@@ -99,8 +99,6 @@ class AWSNovaSonicService(LLMService):
 
     async def _connect(self):
         try:
-            # TODO: remove after debugging
-            logger.debug("[pk] started connecting!")
             if self._client:
                 # Here we assume that if we have a client we are connected
                 return
@@ -123,8 +121,6 @@ class AWSNovaSonicService(LLMService):
             await self._send_audio_input_start()
 
             self._receive_task = self.create_task(self._receive_task_handler())
-
-            logger.debug("[pk] finished connecting!")
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._client = None
@@ -285,35 +281,20 @@ class AWSNovaSonicService(LLMService):
     async def _receive_task_handler(self):
         try:
             while self._client:
-                # TODO: remove after debugging
-                logger.debug(f"[pk] awaiting output from server...")
-
                 output = await self._stream.await_output()
-
-                # TODO: remove after debugging
-                logger.debug(f"[pk] got output from server: {result}")
-
                 result = await output[1].receive()
-
-                # TODO: remove after debugging
-                logger.debug(f"[pk] got result from server: {result}")
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
                     json_data = json.loads(response_data)
-
-                # TODO: remove after debugging
-                logger.debug(f"[pk] got JSON from server: {json_data}")
 
                 if "audioOutput" in json_data["event"]:
                     await self._handle_audio_output_event(json_data["event"])
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
 
-    async def _handle_audio_output_event(self, event):
-        # TODO: remove after debugging
-        logger.debug("[pk] got output audio!")
-        audio_content = event["audioOutput"]["content"]
+    async def _handle_audio_output_event(self, event_json):
+        audio_content = event_json["audioOutput"]["content"]
         audio = base64.b64decode(audio_content)
         # TODO: how is _current_audio_response used?
         # TODO: make sample rate + channels (used in multiple places) consts
