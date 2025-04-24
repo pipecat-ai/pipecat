@@ -94,7 +94,7 @@ class AWSNovaSonicService(LLMService):
         await self.push_frame(frame, direction)
 
     #
-    # communication with LLM
+    # LLM communication: lifecycle
     #
 
     async def _connect(self):
@@ -143,6 +143,10 @@ class AWSNovaSonicService(LLMService):
             http_auth_schemes={"aws.auth#sigv4": SigV4AuthScheme()},
         )
         return BedrockRuntimeClient(config=config)
+
+    #
+    # LLM communication: input events (pipecat -> LLM)
+    #
 
     # TODO: make params configurable?
     async def _send_session_start(self):
@@ -278,6 +282,18 @@ class AWSNovaSonicService(LLMService):
         )
         await self._stream.input_stream.send(event)
 
+    #
+    # LLM communication: output events (LLM -> pipecat)
+    #
+
+    # Receive LLM responses ("completions").
+    # Each response contains up to four pieces of content, delivered sequentially:
+    # - User transcription
+    # - Tool use (optional)
+    # - Text response
+    # - Audio response
+    # Each piece of content is wrapped by "contentStart" and "contentEnd" events.
+    # Each overall response is wrapped by "completionStart" and "completionEnd" events.
     async def _receive_task_handler(self):
         try:
             while self._client:
@@ -288,13 +304,46 @@ class AWSNovaSonicService(LLMService):
                     response_data = result.value.bytes_.decode("utf-8")
                     json_data = json.loads(response_data)
 
-                if "audioOutput" in json_data["event"]:
-                    await self._handle_audio_output_event(json_data["event"])
+                if "event" in json_data:
+                    event_json = json_data["event"]
+                    if "completionStart" in event_json:
+                        # Handle the LLM response starting
+                        await self._handle_completion_start_event(event_json)
+                    elif "contentStart" in event_json:
+                        # Handle a piece of content starting
+                        await self._handle_content_start_event(event_json)
+                    elif "textOutput" in event_json:
+                        # Handle text output content
+                        await self._handle_text_output_event(event_json)
+                    elif "audioOutput" in event_json:
+                        # Handle audio output content
+                        await self._handle_audio_output_event(event_json)
+                    elif "contentEnd" in event_json:
+                        # Handle a piece of content ending
+                        await self._handle_content_end_event(event_json)
+                    elif "completionStart" in event_json:
+                        # Handle the LLM response ending
+                        await self._handle_completion_end_event(event_json)
+
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
 
+    async def _handle_completion_start_event(self, event_json):
+        print("[pk] completion start")
+
+    async def _handle_content_start_event(self, event_json):
+        content_start = event_json["contentStart"]
+        type = content_start["type"]
+        role = content_start["role"]
+        print(f"[pk] content start. type: {type}, role: {role}")
+
+    async def _handle_text_output_event(self, event_json):
+        text_content = event_json["textOutput"]["content"]
+        print(f"[pk] text output. content: {text_content}")
+
     async def _handle_audio_output_event(self, event_json):
         audio_content = event_json["audioOutput"]["content"]
+        print(f"[pk] audio output. content: {len(audio_content)}")
         audio = base64.b64decode(audio_content)
         # TODO: how is _current_audio_response used?
         # TODO: make sample rate + channels (used in multiple places) consts
@@ -304,3 +353,11 @@ class AWSNovaSonicService(LLMService):
             num_channels=1,
         )
         await self.push_frame(frame)
+
+    async def _handle_content_end_event(self, event_json):
+        content_end = event_json["contentEnd"]
+        type = content_end["type"]
+        print(f"[pk] content end. type: {type}")
+
+    async def _handle_completion_end_event(self, event_json):
+        print("[pk] completion end")

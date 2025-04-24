@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+# import logging
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import LLMMessagesAppendFrame
@@ -22,6 +23,11 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 # Load environment variables
 load_dotenv(override=True)
+
+# logging.basicConfig(
+#     level=logging.DEBUG,
+#     format='%(asctime)s - %(levelname)s - %(message)s'
+# )
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
@@ -51,9 +57,11 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     # Respond to what the user said in a creative and helpful way.
     # """
     # TODO: looks like Nova Sonic can't handle new lines?
-    system_instruction = "You are a friendly assistant. The user and you will engage in a spoken dialog " \
-            "exchanging the transcripts of a natural real-time conversation. Keep your responses short, " \
-            "generally two or three sentences for chatty scenarios."
+    system_instruction = (
+        "You are a friendly assistant. The user and you will engage in a spoken dialog "
+        "exchanging the transcripts of a natural real-time conversation. Keep your responses short, "
+        "generally two or three sentences for chatty scenarios."
+    )
 
     llm = AWSNovaSonicService(
         instruction=system_instruction,
