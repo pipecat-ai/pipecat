@@ -27,6 +27,8 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
@@ -63,6 +65,7 @@ class AWSNovaSonicService(LLMService):
         self._receive_task = None
         self._prompt_name = str(uuid.uuid4())
         self._input_audio_content_name = str(uuid.uuid4())
+        self._audio_response_ongoing = False
 
     #
     # standard AIService frame handling
@@ -333,7 +336,8 @@ class AWSNovaSonicService(LLMService):
             logger.error(f"{self} error processing responses: {e}")
 
     async def _handle_completion_start_event(self, event_json):
-        print("[pk] completion start")
+        # print("[pk] completion start")
+        pass
 
     async def _handle_content_start_event(self, event_json):
         content_start = event_json["contentStart"]
@@ -343,19 +347,26 @@ class AWSNovaSonicService(LLMService):
         if "additionalModelFields" in content_start:
             additional_model_fields = json.loads(content_start["additionalModelFields"])
             generation_stage = additional_model_fields.get("generationStage")
-        print(
-            f"[pk] content start. type: {type}, role: {role}, generation_stage: {generation_stage}"
-        )
+        # print(
+        #     f"[pk] content start. type: {type}, role: {role}, generation_stage: {generation_stage}"
+        # )
 
     async def _handle_text_output_event(self, event_json):
         text_content = event_json["textOutput"]["content"]
-        print(f"[pk] text output. content: {text_content}")
+        # print(f"[pk] text output. content: {text_content}")
 
     async def _handle_audio_output_event(self, event_json):
         audio_content = event_json["audioOutput"]["content"]
         print(f"[pk] audio output. content: {len(audio_content)}")
+
+        # Report that *equivalent* of TTS (this is a speech-to-speech model) started
+        if not self._audio_response_ongoing:
+            self._audio_response_ongoing = True
+            # print("[pk] starting TTS")
+            await self.push_frame(TTSStartedFrame())
+
+        # Push audio frame
         audio = base64.b64decode(audio_content)
-        # TODO: how is _current_audio_response used?
         # TODO: make sample rate + channels (used in multiple places) consts
         frame = TTSAudioRawFrame(
             audio=audio,
@@ -368,7 +379,14 @@ class AWSNovaSonicService(LLMService):
         content_end = event_json["contentEnd"]
         type = content_end["type"]
         stop_reason = content_end["stopReason"]
-        print(f"[pk] content end. type: {type}, stop_reason: {stop_reason}")
+        # print(f"[pk] content end. type: {type}, stop_reason: {stop_reason}")
+
+        # Report that *equivalent* of TTS (this is a speech-to-speech model) stopped
+        if type == "AUDIO" and self._audio_response_ongoing:
+            print("[pk] stopping TTS")
+            self._audio_response_ongoing = False
+            await self.push_frame(TTSStoppedFrame())
 
     async def _handle_completion_end_event(self, event_json):
-        print("[pk] completion end")
+        # print("[pk] completion end")
+        pass
