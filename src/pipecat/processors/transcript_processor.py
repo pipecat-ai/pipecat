@@ -62,9 +62,7 @@ class UserTranscriptProcessor(BaseTranscriptProcessor):
 
         if isinstance(frame, TranscriptionFrame):
             content = f"{frame.user_id}: {frame.text}" if frame.user_id else frame.text
-            message = TranscriptionMessage(
-                role="user", content=content, timestamp=frame.timestamp
-            )
+            message = TranscriptionMessage(role="user", content=content, timestamp=frame.timestamp)
             await self._emit_update([message])
 
         await self.push_frame(frame, direction)

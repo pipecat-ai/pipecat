@@ -202,9 +202,7 @@ class DeepgramSTTService(STTService):
             await self.stop_ttfb_metrics()
             FrameClass = InterimTranscriptionFrame if not is_final else TranscriptionFrame
             if not self._settings.get("diarize"):
-                await self.push_frame(
-                    FrameClass(transcript, "", time_now_iso8601(), language)
-                )
+                await self.push_frame(FrameClass(transcript, "", time_now_iso8601(), language))
             else:
                 spoken_words = [
                     [word.speaker, word.punctuated_word]
@@ -226,7 +224,6 @@ class DeepgramSTTService(STTService):
 
             if is_final:
                 await self.stop_processing_metrics()
-
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
