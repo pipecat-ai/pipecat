@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import itertools
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -199,15 +200,33 @@ class DeepgramSTTService(STTService):
             language = Language(language)
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
-            if is_final:
+            FrameClass = InterimTranscriptionFrame if not is_final else TranscriptionFrame
+            if not self._settings.get("diarize"):
                 await self.push_frame(
-                    TranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                    FrameClass(transcript, "", time_now_iso8601(), language)
                 )
-                await self.stop_processing_metrics()
             else:
-                await self.push_frame(
-                    InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
-                )
+                spoken_words = [
+                    [word.speaker, word.punctuated_word]
+                    for word in result.channel.alternatives[0].words
+                ]
+                speaker_transcripts = [
+                    (speaker, " ".join(word[1] for word in group))
+                    for speaker, group in itertools.groupby(spoken_words, key=lambda x: x[0])
+                ]
+                for speaker, transcript in speaker_transcripts:
+                    await self.push_frame(
+                        FrameClass(
+                            transcript,
+                            f"Speaker {speaker}",
+                            time_now_iso8601(),
+                            language,
+                        )
+                    )
+
+            if is_final:
+                await self.stop_processing_metrics()
+
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
