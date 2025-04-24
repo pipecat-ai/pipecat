@@ -155,20 +155,21 @@ class MCPClient(BaseObject):
             error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
             logger.error(error_msg)
 
-        response = ""
+        response = "Sorry, could not call the mcp tool"
         image_url = None
-        if hasattr(results, "content") and results.content:
-            for i, content in enumerate(results.content):
-                if hasattr(content, "text") and content.text:
-                    logger.debug(f"Tool response chunk {i}: {content.text}")
-                    response += content.text
-                else:
-                    # logger.debug(f"Non-text result content: '{content}'")
-                    pass
-            logger.info(f"Tool '{function_name}' completed successfully")
-            logger.debug(f"Final response: {response}")
-        else:
-            logger.error(f"Error getting content from {function_name} results.")
+        if results:
+            if hasattr(results, "content") and results.content:
+                for i, content in enumerate(results.content):
+                    if hasattr(content, "text") and content.text:
+                        logger.debug(f"Tool response chunk {i}: {content.text}")
+                        response += content.text
+                    else:
+                        # logger.debug(f"Non-text result content: '{content}'")
+                        pass
+                logger.info(f"Tool '{function_name}' completed successfully")
+                logger.debug(f"Final response: {response}")
+            else:
+                logger.error(f"Error getting content from {function_name} results.")
 
         await result_callback(response)
 

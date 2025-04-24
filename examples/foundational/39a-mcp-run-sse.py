@@ -55,7 +55,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 
     try:
         # https://docs.mcp.run/integrating/tutorials/mcp-run-sse-openai-agents/
-        # ie. "https://www.mcp.run/api/mcp/sse?..."
         mcp = MCPClient(server_params=os.getenv("MCP_RUN_SSE_URL"))
     except Exception as e:
         logger.error(f"error setting up mcp")
@@ -69,6 +68,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     You have access to a number of tools provided by mcp.run. Use any and all tools to help users.
     Your output will be converted to audio so don't include special characters in your answers. 
     Respond to what the user said in a creative and helpful way. 
+    When asked for today's date, use 'https://www.datetoday.net/'.
     Don't overexplain what you are doing. 
     Just respond with short sentences when you are carrying out tool calls.
     """
