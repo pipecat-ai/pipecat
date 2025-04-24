@@ -286,14 +286,18 @@ class AWSNovaSonicService(LLMService):
     # LLM communication: output events (LLM -> pipecat)
     #
 
-    # Receive LLM responses ("completions").
-    # Each response contains up to four pieces of content, delivered sequentially:
-    # - User transcription
-    # - Tool use (optional)
-    # - Text response
-    # - Audio response
-    # Each piece of content is wrapped by "contentStart" and "contentEnd" events.
-    # Each overall response is wrapped by "completionStart" and "completionEnd" events.
+    # Receive the ongoing LLM "completion".
+    # There is generally a single completion per session.
+    # In a completion, a few different kinds of content can be delivered:
+    # - Transcription of user audio
+    # - Tool use
+    # - Text preview of planned response speech before audio delivered
+    # - User interruption notification
+    # - Text of response speech that whose audio was actually delivered
+    # - Audio of response speech
+    # Each piece of content is wrapped by "contentStart" and "contentEnd" events. The content is
+    # delivered sequentially: one piece of content will end before another starts.
+    # The overall completion is wrapped by "completionStart" and "completionEnd" events.
     async def _receive_task_handler(self):
         try:
             while self._client:
@@ -335,7 +339,13 @@ class AWSNovaSonicService(LLMService):
         content_start = event_json["contentStart"]
         type = content_start["type"]
         role = content_start["role"]
-        print(f"[pk] content start. type: {type}, role: {role}")
+        generation_stage = None
+        if "additionalModelFields" in content_start:
+            additional_model_fields = json.loads(content_start["additionalModelFields"])
+            generation_stage = additional_model_fields.get("generationStage")
+        print(
+            f"[pk] content start. type: {type}, role: {role}, generation_stage: {generation_stage}"
+        )
 
     async def _handle_text_output_event(self, event_json):
         text_content = event_json["textOutput"]["content"]
