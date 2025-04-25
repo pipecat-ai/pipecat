@@ -368,7 +368,7 @@ class LiveKitInputTransport(BaseInputTransport):
         await super().start(frame)
         await self._client.setup(frame)
         await self._client.connect()
-        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if not self._audio_in_task and self._params.audio_in_enabled:
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
         logger.info("LiveKitInputTransport started")
 
@@ -382,7 +382,7 @@ class LiveKitInputTransport(BaseInputTransport):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._client.disconnect()
-        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_in_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_in_task)
 
     async def cleanup(self):

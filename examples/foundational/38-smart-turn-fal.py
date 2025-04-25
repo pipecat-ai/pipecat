@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 import aiohttp
@@ -27,7 +28,7 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     async with aiohttp.ClientSession() as session:
@@ -36,9 +37,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             params=TransportParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-                vad_audio_passthrough=True,
                 turn_analyzer=FalSmartTurnAnalyzer(
                     api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=session
                 ),

@@ -39,6 +39,15 @@ class TransportParams(BaseModel):
     audio_in_channels: int = 1
     audio_in_filter: Optional[BaseAudioFilter] = None
     audio_in_stream_on_start: bool = True
+    audio_in_passthrough: bool = True
+    video_in_enabled: bool = False
+    video_out_enabled: bool = False
+    video_out_is_live: bool = False
+    video_out_width: int = 1024
+    video_out_height: int = 768
+    video_out_bitrate: int = 800000
+    video_out_framerate: int = 30
+    video_out_color_format: str = "RGB"
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: Optional[VADAnalyzer] = None

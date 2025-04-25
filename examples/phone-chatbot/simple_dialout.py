@@ -56,8 +56,7 @@ async def main(
         api_key=daily_api_key,
         audio_in_enabled=True,
         audio_out_enabled=True,
-        camera_out_enabled=False,
-        vad_enabled=True,
+        video_out_enabled=False,
         vad_analyzer=SileroVADAnalyzer(),
         transcription_enabled=True,
     )

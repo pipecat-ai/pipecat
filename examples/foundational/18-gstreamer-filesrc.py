@@ -20,30 +20,17 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-# Parse command line arguments
-# This will be used to pass the input video file to the bot
-# You can run the bot with a command like:
-# python 18-gstreamer-filesrc.py -i path/to/video.mp4
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
-    parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
-    return parser.parse_args()
-
-
-args = parse_arguments()
-
-
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Namespace):
     logger.info(f"Starting bot with video input: {args.input}")
 
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
-            audio_in_enabled=True,
-            camera_out_enabled=True,
-            camera_out_is_live=True,
-            camera_out_width=1280,
-            camera_out_height=720,
+            audio_out_enabled=True,
+            video_out_enabled=True,
+            video_out_is_live=True,
+            video_out_width=1280,
+            video_out_height=720,
         ),
     )
 
@@ -72,4 +59,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
 if __name__ == "__main__":
     from run import main
 
-    main()
+    parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
+    parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
+
+    main(parser)

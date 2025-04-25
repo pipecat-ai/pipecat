@@ -44,6 +44,7 @@ Note:
     such as formatting instructions, command recognition, or structured data extraction.
 """
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -73,7 +74,7 @@ VOICE_IDS = {
 }
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -81,9 +82,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 
