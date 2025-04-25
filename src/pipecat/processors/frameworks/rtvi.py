@@ -251,7 +251,7 @@ class RTVIBotReady(BaseModel):
 class RTVILLMFunctionCallMessageData(BaseModel):
     function_name: str
     tool_call_id: str
-    args: dict
+    arguments: Mapping[str, Any]
 
 
 class RTVILLMFunctionCallMessage(BaseModel):
@@ -662,13 +662,12 @@ class RTVIProcessor(FrameProcessor):
         self,
         function_name: str,
         tool_call_id: str,
-        arguments: dict,
-        llm: FrameProcessor,
-        context: OpenAILLMContext,
-        result_callback,
+        arguments: Mapping[str, Any],
     ):
         fn = RTVILLMFunctionCallMessageData(
-            function_name=function_name, tool_call_id=tool_call_id, args=arguments
+            function_name=function_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
@@ -676,6 +675,15 @@ class RTVIProcessor(FrameProcessor):
     async def handle_function_call_start(
         self, function_name: str, llm: FrameProcessor, context: OpenAILLMContext
     ):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Function `RTVIProcessor.handle_function_call_start()` is deprecated, use `RTVIProcessor.handle_function_call()` instead.",
+                DeprecationWarning,
+            )
+
         fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
         message = RTVILLMFunctionCallStartMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
