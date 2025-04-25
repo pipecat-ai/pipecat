@@ -12,6 +12,7 @@ from typing import Dict, List, Literal, Set
 from loguru import logger
 
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
     EmulateUserStartedSpeakingFrame,
@@ -49,7 +50,7 @@ from pipecat.utils.time import time_now_iso8601
 
 @dataclass
 class LLMUserAggregatorParams:
-    aggregation_timeout: float = 1.0
+    aggregation_timeout: float = 0.5
 
 
 @dataclass
@@ -259,9 +260,10 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
             self._params.aggregation_timeout = kwargs["aggregation_timeout"]
 
-        self._seen_interim_results = False
         self._user_speaking = False
+        self._bot_speaking = False
         self._emulating_vad = False
+        self._seen_interim_results = False
         self._waiting_for_aggregation = False
 
         self._aggregation_event = asyncio.Event()
@@ -296,6 +298,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
             await self._handle_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, TranscriptionFrame):
             await self._handle_transcription(frame)
@@ -352,6 +360,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         if not self._seen_interim_results:
             await self.push_aggregation()
 
+    async def _handle_bot_started_speaking(self, _: BotStartedSpeakingFrame):
+        self._bot_speaking = True
+
+    async def _handle_bot_stopped_speaking(self, _: BotStoppedSpeakingFrame):
+        self._bot_speaking = False
+
     async def _handle_transcription(self, frame: TranscriptionFrame):
         text = frame.text
 
@@ -383,7 +397,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 await asyncio.wait_for(
                     self._aggregation_event.wait(), self._params.aggregation_timeout
                 )
-                await self._maybe_push_bot_interruption()
+                await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
                     await self.push_aggregation()
@@ -398,18 +412,27 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             finally:
                 self._aggregation_event.clear()
 
-    async def _maybe_push_bot_interruption(self):
-        """If the user stopped speaking a while back and we got a transcription
-        frame we might want to interrupt the bot.
+    async def _maybe_emulate_user_speaking(self):
+        """Emulate user speaking if we got a transcription but it was not
+        detected by VAD. Only do that if the bot is not speaking.
 
         """
+        # Check if we received a transcription but VAD was not able to detect
+        # voice (e.g. when you whisper a short utterance). In that case, we need
+        # to emulate VAD (i.e. user start/stopped speaking), but we do it only
+        # if the bot is not speaking. If the bot is speaking and we really have
+        # a short utterance we don't really want to interrupt the bot.
         if not self._user_speaking and not self._waiting_for_aggregation:
-            # If we reach this case we received a transcription but VAD was not
-            # able to detect voice (e.g. when you whisper a short
-            # utterance). So, we need to emulate VAD (i.e. user start/stopped
-            # speaking).
-            await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
-            self._emulating_vad = True
+            if self._bot_speaking:
+                # If we reached this case and the bot is speaking, let's ignore
+                # what the user said.
+                logger.debug("Ignoring user speaking emulation, bot is speaking.")
+                self.reset()
+            else:
+                # The bot is not speaking so, let's trigger user speaking
+                # emulation.
+                await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+                self._emulating_vad = True
 
 
 class LLMAssistantContextAggregator(LLMContextResponseAggregator):
