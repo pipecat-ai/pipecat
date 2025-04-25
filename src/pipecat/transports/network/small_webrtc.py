@@ -17,13 +17,19 @@ from pydantic import BaseModel
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    OutputAudioRawFrame,
     OutputImageRawFrame,
+    SpriteFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -51,61 +57,52 @@ class RawAudioTrack(AudioStreamTrack):
     def __init__(self, sample_rate):
         super().__init__()
         self._sample_rate = sample_rate
-        self._samples_per_frame = self._sample_rate // 50  # 20ms per frame
+        self._samples_per_10ms = sample_rate * 10 // 1000
+        self._bytes_per_10ms = self._samples_per_10ms * 2  # 16-bit (2 bytes per sample)
         self._timestamp = 0
-        self._audio_buffer = deque()
         self._start = time.time()
+        # Queue of (bytes, future), broken into 10ms sub chunks as needed
+        self._chunk_queue = deque()
 
     def add_audio_bytes(self, audio_bytes: bytes):
-        """
-        Adds bytes to the audio buffer and returns a Future that completes when the data is processed.
-        """
-        if len(audio_bytes) % 2 != 0:
-            raise ValueError("Audio bytes length must be even (16-bit samples).")
+        """Adds bytes to the audio buffer and returns a Future that completes when the data is processed."""
+        if len(audio_bytes) % self._bytes_per_10ms != 0:
+            raise ValueError("Audio bytes must be a multiple of 10ms size.")
         future = asyncio.get_running_loop().create_future()
-        self._audio_buffer.append((audio_bytes, future))
+
+        # Break input into 10ms chunks
+        for i in range(0, len(audio_bytes), self._bytes_per_10ms):
+            chunk = audio_bytes[i : i + self._bytes_per_10ms]
+            # Only the last chunk carries the future to be resolved once fully consumed
+            fut = future if i + self._bytes_per_10ms >= len(audio_bytes) else None
+            self._chunk_queue.append((chunk, fut))
+
         return future
 
     async def recv(self):
-        """
-        Returns the next audio frame, generating silence if needed.
-        """
+        """Returns the next audio frame, generating silence if needed."""
         # Compute required wait time for synchronization
         if self._timestamp > 0:
             wait = self._start + (self._timestamp / self._sample_rate) - time.time()
             if wait > 0:
                 await asyncio.sleep(wait)
 
-        # Check if we have enough data
-        needed_bytes = self._samples_per_frame * 2  # 16-bit (2 bytes per sample)
-        available_bytes = sum(len(audio_bytes) for audio_bytes, _ in self._audio_buffer)
-        consumed_futures = []  # Track futures for processed data
-        if available_bytes >= needed_bytes:
-            # Extract data from deque
-            chunk = bytearray()
-            while len(chunk) < needed_bytes:
-                audio_bytes, future = self._audio_buffer.popleft()
-                chunk.extend(audio_bytes)
-                consumed_futures.append(future)  # Track the future
-            chunk = bytes(chunk[:needed_bytes])  # Trim excess bytes
+        if self._chunk_queue:
+            chunk, future = self._chunk_queue.popleft()
+            if future and not future.done():
+                future.set_result(True)
         else:
-            chunk = bytes(needed_bytes)  # Generate silent frame
+            chunk = bytes(self._bytes_per_10ms)  # silence
 
         # Convert the byte data to an ndarray of int16 samples
         samples = np.frombuffer(chunk, dtype=np.int16)
 
         # Create AudioFrame
         frame = AudioFrame.from_ndarray(samples[None, :], layout="mono")
-        self._timestamp += self._samples_per_frame
-        frame.pts = self._timestamp
         frame.sample_rate = self._sample_rate
+        frame.pts = self._timestamp
         frame.time_base = fractions.Fraction(1, self._sample_rate)
-
-        # Resolve all futures corresponding to consumed data
-        for future in consumed_futures:
-            if not future.done():
-                future.set_result(True)
-
+        self._timestamp += self._samples_per_10ms
         return frame
 
 
@@ -138,6 +135,13 @@ class RawVideoTrack(VideoStreamTrack):
 
 
 class SmallWebRTCClient:
+    FORMAT_CONVERSIONS = {
+        "yuv420p": cv2.COLOR_YUV2RGB_I420,
+        "yuvj420p": cv2.COLOR_YUV2RGB_I420,  # OpenCV treats both the same
+        "nv12": cv2.COLOR_YUV2RGB_NV12,
+        "gray": cv2.COLOR_GRAY2RGB,
+    }
+
     def __init__(self, webrtc_connection: SmallWebRTCConnection, callbacks: SmallWebRTCCallbacks):
         self._webrtc_connection = webrtc_connection
         self._closing = False
@@ -176,9 +180,31 @@ class SmallWebRTCClient:
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
             await self._handle_app_message(message)
 
-    async def read_video_frame(self):
+    def _convert_frame(self, frame_array: np.ndarray, format_name: str) -> np.ndarray:
+        """Convert a given frame to RGB format based on the input format.
+
+        Args:
+            frame_array (np.ndarray): The input frame.
+            format_name (str): The format of the input frame.
+
+        Returns:
+            np.ndarray: The converted RGB frame.
+
+        Raises:
+            ValueError: If the format is unsupported.
         """
-        Reads a video frame from the given MediaStreamTrack, converts it to RGB,
+        if format_name.startswith("rgb"):  # Already in RGB, no conversion needed
+            return frame_array
+
+        conversion_code = SmallWebRTCClient.FORMAT_CONVERSIONS.get(format_name)
+
+        if conversion_code is None:
+            raise ValueError(f"Unsupported format: {format_name}")
+
+        return cv2.cvtColor(frame_array, conversion_code)
+
+    async def read_video_frame(self):
+        """Reads a video frame from the given MediaStreamTrack, converts it to RGB,
         and creates an InputImageRawFrame.
         """
         while True:
@@ -203,21 +229,9 @@ class SmallWebRTCClient:
                 continue
 
             format_name = frame.format.name
-
             # Convert frame to NumPy array in its native format
             frame_array = frame.to_ndarray(format=format_name)
-
-            # Handle different formats dynamically
-            if format_name == "yuv420p":
-                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_YUV2RGB_I420)
-            elif format_name == "nv12":
-                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_YUV2RGB_NV12)
-            elif format_name == "gray":
-                frame_rgb = cv2.cvtColor(frame_array, cv2.COLOR_GRAY2RGB)
-            elif format_name.startswith("rgb"):  # Already RGB, no conversion needed
-                frame_rgb = frame_array
-            else:
-                raise ValueError(f"Unsupported format: {format_name}")
+            frame_rgb = self._convert_frame(frame_array, format_name)
 
             image_frame = InputImageRawFrame(
                 image=frame_rgb.tobytes(),
@@ -228,9 +242,7 @@ class SmallWebRTCClient:
             yield image_frame
 
     async def read_audio_frame(self):
-        """
-        Reads 20ms of audio from the given MediaStreamTrack and creates an InputAudioRawFrame.
-        """
+        """Reads 20ms of audio from the given MediaStreamTrack and creates an InputAudioRawFrame."""
         while True:
             if self._audio_input_track is None:
                 await asyncio.sleep(0.01)
@@ -276,7 +288,7 @@ class SmallWebRTCClient:
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(data)
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
         if self._can_send() and self._video_output_track:
             self._video_output_track.add_video_frame(frame)
 
@@ -298,7 +310,7 @@ class SmallWebRTCClient:
         if self.is_connected and not self.is_closing:
             logger.info(f"Disconnecting to Small WebRTC")
             self._closing = True
-            await self._webrtc_connection.close()
+            await self._webrtc_connection.disconnect()
             await self._handle_client_disconnected()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
@@ -316,9 +328,9 @@ class SmallWebRTCClient:
             self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
             self._webrtc_connection.replace_audio_track(self._audio_output_track)
 
-        if self._params.camera_out_enabled:
+        if self._params.video_out_enabled:
             self._video_output_track = RawVideoTrack(
-                width=self._params.camera_out_width, height=self._params.camera_out_height
+                width=self._params.video_out_width, height=self._params.video_out_height
             )
             self._webrtc_connection.replace_video_track(self._video_output_track)
 
@@ -365,16 +377,21 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._params = params
         self._receive_audio_task = None
         self._receive_video_task = None
+        self._image_requests = {}
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserImageRequestFrame):
+            await self.request_participant_image(frame)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
-        if not self._receive_audio_task and (
-            self._params.audio_in_enabled or self._params.vad_enabled
-        ):
+        if not self._receive_audio_task and self._params.audio_in_enabled:
             self._receive_audio_task = self.create_task(self._receive_audio())
-        if not self._receive_video_task and self._params.camera_in_enabled:
+        if not self._receive_video_task and self._params.video_in_enabled:
             self._receive_video_task = self.create_task(self._receive_video())
 
     async def _stop_tasks(self):
@@ -410,6 +427,22 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                 if video_frame:
                     await self.push_frame(video_frame)
 
+                    # Check if there are any pending image requests and create UserImageRawFrame
+                    if self._image_requests:
+                        for req_id, request_frame in list(self._image_requests.items()):
+                            # Create UserImageRawFrame using the current video frame
+                            image_frame = UserImageRawFrame(
+                                user_id=request_frame.user_id,
+                                request=request_frame,
+                                image=video_frame.image,
+                                size=video_frame.size,
+                                format=video_frame.format,
+                            )
+                            # Push the frame to the pipeline
+                            await self.push_frame(image_frame)
+                            # Remove from pending requests
+                            del self._image_requests[req_id]
+
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
@@ -417,6 +450,24 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
         frame = TransportMessageUrgentFrame(message=message)
         await self.push_frame(frame)
+
+    # Add this method similar to DailyInputTransport.request_participant_image
+    async def request_participant_image(self, frame: UserImageRequestFrame):
+        """Requests an image frame from the participant's video stream.
+
+        When a UserImageRequestFrame is received, this method will store the request
+        and the next video frame received will be converted to a UserImageRawFrame.
+        """
+        logger.debug(f"Requesting image from participant: {frame.user_id}")
+
+        # Store the request
+        request_id = f"{frame.function_name}:{frame.tool_call_id}"
+        self._image_requests[request_id] = frame
+
+        # If we're not already receiving video, try to get a frame now
+        if not self._receive_video_task and self._params.video_in_enabled:
+            # Start video reception if it's not already running
+            self._receive_video_task = self.create_task(self._receive_video())
 
 
 class SmallWebRTCOutputTransport(BaseOutputTransport):
@@ -449,8 +500,8 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
     async def write_raw_audio_frames(self, frames: bytes):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
-        await self._client.write_frame_to_camera(frame)
+    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+        await self._client.write_raw_video_frame(frame)
 
 
 class SmallWebRTCTransport(BaseTransport):
@@ -473,10 +524,8 @@ class SmallWebRTCTransport(BaseTransport):
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
 
-        self._input = SmallWebRTCInputTransport(self._client, self._params, name=self._input_name)
-        self._output = SmallWebRTCOutputTransport(
-            self._client, self._params, name=self._output_name
-        )
+        self._input: Optional[SmallWebRTCInputTransport] = None
+        self._output: Optional[SmallWebRTCOutputTransport] = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -498,6 +547,14 @@ class SmallWebRTCTransport(BaseTransport):
                 self._client, self._params, name=self._input_name
             )
         return self._output
+
+    async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
+        if self._output:
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
+
+    async def send_audio(self, frame: OutputAudioRawFrame):
+        if self._output:
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def _on_app_message(self, message: Any):
         if self._input:

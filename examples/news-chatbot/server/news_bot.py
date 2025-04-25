@@ -86,10 +86,9 @@ async def main():
             token,
             "Latest news!",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,
             ),
         )
 
@@ -148,10 +147,13 @@ async def main():
         @rtvi.event_handler("on_client_ready")
         async def on_client_ready(rtvi):
             await rtvi.set_bot_ready()
+            # Kick off the conversation
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            logger.debug("First participant joined: {}", participant["id"])
+            await transport.capture_participant_transcription(participant["id"])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):

@@ -1,5 +1,5 @@
-pipecat-ai[daily,elevenlabs,openai,silero]
-fastapi
+pipecat-ai[daily,cartesia,deepgram,openai,google,silero]
+fastapi==0.115.6
 uvicorn
 python-dotenv
 twilio

@@ -18,8 +18,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
 from pipecat.services.azure.common import language_to_azure_language
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -159,8 +159,8 @@ class AzureTTSService(AzureBaseTTSService):
         self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
-            speech_recognition_language=self._settings["language"],
         )
+        self._speech_config.speech_synthesis_language = self._settings["language"]
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )
@@ -254,8 +254,8 @@ class AzureHttpTTSService(AzureBaseTTSService):
         self._speech_config = SpeechConfig(
             subscription=self._api_key,
             region=self._region,
-            speech_recognition_language=self._settings["language"],
         )
+        self._speech_config.speech_synthesis_language = self._settings["language"]
         self._speech_config.set_speech_synthesis_output_format(
             sample_rate_to_output_format(self.sample_rate)
         )

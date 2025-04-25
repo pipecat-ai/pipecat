@@ -38,7 +38,7 @@ class BaseObject(ABC):
     async def cleanup(self):
         if self._event_tasks:
             event_names, tasks = zip(*self._event_tasks)
-            logger.debug(f"{self} wating on event handlers to finish {list(event_names)}...")
+            logger.debug(f"{self} waiting on event handlers to finish {list(event_names)}...")
             await asyncio.wait(tasks)
 
     def event_handler(self, event_name: str):

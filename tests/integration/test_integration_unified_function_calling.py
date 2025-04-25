@@ -17,9 +17,9 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
-from pipecat.services.ai_services import LLMService
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.tests.utils import run_test
 
@@ -80,7 +80,7 @@ async def _test_llm_function_calling(llm: LLMService):
 @pytest.mark.skipif(os.getenv("OPENAI_API_KEY") is None, reason="OPENAI_API_KEY is not set")
 @pytest.mark.asyncio
 async def test_unified_function_calling_openai():
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     # This will fail if an exception is raised
     await _test_llm_function_calling(llm)
 

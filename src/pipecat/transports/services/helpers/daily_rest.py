@@ -68,9 +68,9 @@ class DailyRoomProperties(BaseModel, extra="allow"):
 
     exp: Optional[float] = None
     enable_chat: bool = False
-    enable_prejoin_ui: bool = True
+    enable_prejoin_ui: bool = False
     enable_emoji_reactions: bool = False
-    eject_at_room_exp: bool = True
+    eject_at_room_exp: bool = False
     enable_dialout: Optional[bool] = None
     enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
     geo: Optional[str] = None
@@ -291,6 +291,7 @@ class DailyRESTHelper:
         self,
         room_url: str,
         expiry_time: float = 60 * 60,
+        eject_at_token_exp: bool = False,
         owner: bool = True,
         params: Optional[DailyMeetingTokenParams] = None,
     ) -> str:
@@ -324,12 +325,16 @@ class DailyRESTHelper:
         if params is None:
             params = DailyMeetingTokenParams(
                 properties=DailyMeetingTokenProperties(
-                    room_name=room_name, is_owner=owner, exp=expiration
+                    room_name=room_name,
+                    is_owner=owner,
+                    exp=expiration,
+                    eject_at_token_exp=eject_at_token_exp,
                 )
             )
         else:
             params.properties.room_name = room_name
             params.properties.exp = expiration
+            params.properties.eject_at_token_exp = eject_at_token_exp
             params.properties.is_owner = owner
 
         json = params.model_dump(exclude_none=True)

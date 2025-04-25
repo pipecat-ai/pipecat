@@ -157,7 +157,8 @@ class WebsocketServerInputTransport(BaseInputTransport):
         self, websocket: websockets.WebSocketServerProtocol, session_timeout: int
     ):
         """Wait for session_timeout seconds, if the websocket is still open,
-        trigger timeout event."""
+        trigger timeout event.
+        """
         try:
             await asyncio.sleep(session_timeout)
             if not websocket.closed:
@@ -194,6 +195,14 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         await super().start(frame)
         await self._params.serializer.setup(frame)
         self._send_interval = (self._audio_chunk_size / self.sample_rate) / 2
+
+    async def stop(self, frame: EndFrame):
+        await super().stop(frame)
+        await self._write_frame(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        await super().cancel(frame)
+        await self._write_frame(frame)
 
     async def cleanup(self):
         await super().cleanup()

@@ -93,7 +93,7 @@ async def main():
                         self.frame = frame
                     await self.push_frame(frame, direction)
 
-            llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+            llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
             tts = CartesiaHttpTTSService(
                 api_key=os.getenv("CARTESIA_API_KEY"),
@@ -153,9 +153,9 @@ async def main():
             tk_root,
             TkTransportParams(
                 audio_out_enabled=True,
-                camera_out_enabled=True,
-                camera_out_width=1024,
-                camera_out_height=1024,
+                video_out_enabled=True,
+                video_out_width=1024,
+                video_out_height=1024,
             ),
         )
 

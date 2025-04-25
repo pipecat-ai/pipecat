@@ -4,14 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
-import sys
 import tkinter as tk
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.frames.frames import (
     Frame,
@@ -24,13 +22,12 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 class MirrorProcessor(FrameProcessor):
@@ -53,52 +50,59 @@ class MirrorProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
-        tk_root = tk.Tk()
-        tk_root.title("Local Mirror")
+    p2p_transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            video_in_enabled=True,
+            video_out_enabled=True,
+            video_out_is_live=True,
+            video_out_width=1280,
+            video_out_height=720,
+        ),
+    )
 
-        daily_transport = DailyTransport(
-            room_url, token, "Test", DailyParams(audio_in_enabled=True)
-        )
+    tk_root = tk.Tk()
+    tk_root.title("Local Mirror")
 
-        tk_transport = TkLocalTransport(
-            tk_root,
-            TkTransportParams(
-                audio_out_enabled=True,
-                camera_out_enabled=True,
-                camera_out_is_live=True,
-                camera_out_width=1280,
-                camera_out_height=720,
-            ),
-        )
+    tk_transport = TkLocalTransport(
+        tk_root,
+        TkTransportParams(
+            audio_out_enabled=True,
+            video_out_enabled=True,
+            video_out_is_live=True,
+            video_out_width=1280,
+            video_out_height=720,
+        ),
+    )
 
-        @daily_transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_video(participant["id"])
+    @p2p_transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
 
-        pipeline = Pipeline([daily_transport.input(), MirrorProcessor(), tk_transport.output()])
+    pipeline = Pipeline([p2p_transport.input(), MirrorProcessor(), tk_transport.output()])
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                audio_in_sample_rate=24000,
-                audio_out_sample_rate=24000,
-            ),
-        )
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(),
+    )
 
-        async def run_tk():
-            while not task.has_finished():
-                tk_root.update()
-                tk_root.update_idletasks()
-                await asyncio.sleep(0.1)
+    async def run_tk():
+        while not task.has_finished():
+            tk_root.update()
+            tk_root.update_idletasks()
+            await asyncio.sleep(0.1)
 
-        runner = PipelineRunner()
+    runner = PipelineRunner(handle_sigint=False)
 
-        await asyncio.gather(runner.run(task), run_tk())
+    await asyncio.gather(runner.run(task), run_tk())
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

@@ -4,14 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
+import argparse
 import os
 import sys
 from pathlib import Path
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from openai import audio
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame
@@ -23,15 +23,14 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService, LLMSearchResponseFrame
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 sys.path.append(str(Path(__file__).parent.parent))
-from runner import configure
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 # Function handlers for the LLM
 search_tool = {"google_search_retrieval": {}}
@@ -61,71 +60,80 @@ class LLMSearchLoggerProcessor(FrameProcessor):
         await self.push_frame(frame)
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Latest news!",
-            DailyParams(
-                audio_out_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        )
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
 
-        # Initialize the Gemini Multimodal Live model
-        llm = GoogleLLMService(
-            api_key=os.getenv("GOOGLE_API_KEY"),
-            system_instruction=system_instruction,
-            tools=tools,
-            model="gemini-1.5-flash-002",
-        )
+    # Initialize the Gemini Multimodal Live model
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        system_instruction=system_instruction,
+        tools=tools,
+        model="gemini-1.5-flash-002",
+    )
 
-        context = OpenAILLMContext(
-            [
-                {
-                    "role": "user",
-                    "content": "Start by greeting the user warmly, introducing yourself, and mentioning the current day. Be friendly and engaging to set a positive tone for the interaction.",
-                }
-            ],
-        )
-        context_aggregator = llm.create_context_aggregator(context)
+    context = OpenAILLMContext(
+        [
+            {
+                "role": "user",
+                "content": "Start by greeting the user warmly, introducing yourself, and mentioning the current day. Be friendly and engaging to set a positive tone for the interaction.",
+            }
+        ],
+    )
+    context_aggregator = llm.create_context_aggregator(context)
 
-        llm_search_logger = LLMSearchLoggerProcessor()
+    llm_search_logger = LLMSearchLoggerProcessor()
 
-        pipeline = Pipeline(
-            [
-                transport.input(),
-                stt,
-                context_aggregator.user(),
-                llm,
-                llm_search_logger,
-                tts,
-                transport.output(),
-                context_aggregator.assistant(),
-            ]
-        )
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            context_aggregator.user(),
+            llm,
+            llm_search_logger,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
+        ]
+    )
 
-        task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Start conversation - empty prompt to let LLM follow system instructions
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        runner = PipelineRunner()
-        await runner.run(task)
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
+
+    runner = PipelineRunner(handle_sigint=False)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

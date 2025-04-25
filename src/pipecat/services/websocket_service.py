@@ -31,7 +31,7 @@ class WebsocketService(ABC):
             bool: True if connection is verified working, False otherwise
         """
         try:
-            if not self._websocket:
+            if not self._websocket or self._websocket.closed:
                 return False
             await self._websocket.ping()
             return True

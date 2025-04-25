@@ -24,7 +24,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import AudioContextWordTTSService, TTSService
+from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
@@ -158,7 +158,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
 
         msg = {
-            "transcript": text or " ",  # Text must contain at least one character
+            "transcript": text,
             "continue": continue_transcript,
             "context_id": self._context_id,
             "model_id": self.model_name,
@@ -166,6 +166,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "output_format": self._settings["output_format"],
             "language": self._settings["language"],
             "add_timestamps": add_timestamps,
+            "use_original_timestamps": True,
         }
         return json.dumps(msg)
 
@@ -184,7 +185,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _connect(self):
         await self._connect_websocket()
-        if not self._receive_task:
+
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -196,7 +198,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket:
+            if self._websocket and self._websocket.open:
                 return
             logger.debug("Connecting to Cartesia")
             self._websocket = await websockets.connect(
@@ -214,11 +216,11 @@ class CartesiaTTSService(AudioContextWordTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from Cartesia")
                 await self._websocket.close()
-                self._websocket = None
-
-            self._context_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._context_id = None
+            self._websocket = None
 
     def _get_websocket(self):
         if self._websocket:
@@ -278,7 +280,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket:
+            if not self._websocket or self._websocket.closed:
                 await self._connect()
 
             if not self._context_id:
@@ -287,7 +289,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 self._context_id = str(uuid.uuid4())
                 await self.create_audio_context(self._context_id)
 
-            msg = self._build_msg(text=text or " ")  # Text must contain at least one character
+            msg = self._build_msg(text=text)
 
             try:
                 await self._get_websocket().send(msg)
