@@ -61,7 +61,7 @@ class CurrentContent:
     type: ContentType
     role: Role
     text_stage: TextStage  # None if not text
-    text_content: str # starts as None, then fills in if text
+    text_content: str  # starts as None, then fills in if text
 
     def __str__(self):
         return (
@@ -388,7 +388,7 @@ class AWSNovaSonicService(LLMService):
             type=ContentType(type),
             role=Role(role),
             text_stage=TextStage(generation_stage) if generation_stage else None,
-            text_content=None
+            text_content=None,
         )
         self._content_being_received = content
 
@@ -396,7 +396,7 @@ class AWSNovaSonicService(LLMService):
             if content.type == ContentType.AUDIO:
                 # Report that *equivalent* of TTS (this is a speech-to-speech model) started
                 # print("[pk] TTS started")
-                await self.push_frame(TTSStartedFrame())            
+                await self.push_frame(TTSStartedFrame())
 
         print(f"[pk] content start: {self._content_being_received}")
 
@@ -424,10 +424,7 @@ class AWSNovaSonicService(LLMService):
     async def _handle_content_end_event(self, event_json):
         content_end = event_json["contentEnd"]
         stop_reason = content_end["stopReason"]
-        # print(
-        #     f"[pk] content end: {self._content_being_received}.\n"
-        #     f"  stop_reason: {stop_reason}"
-        # )
+        print(f"[pk] content end: {self._content_being_received}.\n  stop_reason: {stop_reason}")
 
         # Bookkeeping: clear current content being received
         content = self._content_being_received
@@ -443,25 +440,25 @@ class AWSNovaSonicService(LLMService):
                 # Ignore non-final text, and the "interrupted" message (which isn't meaningful text)
                 if content.text_stage == TextStage.FINAL and stop_reason != "INTERRUPTED":
                     # TODO: the way we're tracking the start and stop of the assistant response here
-                    # is rather busted, and results in way too many "responses" being put into the 
+                    # is rather busted, and results in way too many "responses" being put into the
                     # context (every final text content block is treated as its own response).
                     # We *should* only record that an assistant response has ended when:
                     # - the assistant truly finished its turn (stop_reason is END_TURN)
                     # - when this is the next text content block after an INTERRUPTED has occurred
-                    # BUT it seems like there's a bug where, if there are multiple assistant text 
+                    # BUT it seems like there's a bug where, if there are multiple assistant text
                     # content blocks, the *first* one gets marked END_TURN rather than the last.
-                    print("[pk] LLM full response started")
+                    # print("[pk] LLM full response started")
                     self._assistant_is_responding = True
                     await self.push_frame(LLMFullResponseStartFrame())
 
                     if self._assistant_is_responding:
                         # Add text to the ongoing reported assistant response
-                        print(f"[pk] LLM text: {content.text_content}")
+                        # print(f"[pk] LLM text: {content.text_content}")
                         await self.push_frame(LLMTextFrame(content.text_content))
 
                         # Report that the assistant has finished their response.
                         # TODO: kinda busted. see TODO comment above.
-                        print("[pk] LLM full response ended")
+                        # print("[pk] LLM full response ended")
                         await self.push_frame(LLMFullResponseEndFrame())
                         self._assistant_is_responding = False
 
