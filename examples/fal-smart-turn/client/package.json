@@ -11,7 +11,7 @@
   "dependencies": {
     "@pipecat-ai/client-js": "^0.3.5",
     "@pipecat-ai/client-react": "^0.3.5",
-    "@pipecat-ai/daily-transport": "^0.3.7",
+    "@pipecat-ai/daily-transport": "^0.3.10",
     "next": "15.2.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
