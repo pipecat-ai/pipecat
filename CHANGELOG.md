@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `TranslationFrame`, a new frame type that contains a translated
+  transcription.
+
 - Added `TransportParams.audio_in_passthrough`. If set (the default), incoming
   audio will be pushed downstream.
 
@@ -16,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tools.
 
 ### Changed
+
+- Updated `GladiaSTTService` to output a `TranslationFrame` when specifying a
+  `translation` and `translation_config`.
 
 - STT services now passthrough audio frames by default. This allows you to add
   audio recording without worrying about what's wrong in your pipeline when it
@@ -111,9 +117,6 @@ https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
 
 - Added word/timestamp pairs to `ElevenLabsHttpTTSService`.
 
-- Added `TranslationFrame`, a new frame type that contains a translated
-  transcription.
-
 - It is now possible to disable `SoundfileMixer` when created. You can then use
   `MixerEnableFrame` to dynamically enable it when necessary.
 
@@ -134,9 +137,6 @@ https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
 
 - `OpenAILLMService` and `OpenPipeLLMService` now use `gpt-4.1` as their
   default model.
-
-- Updated `GladiaSTTService` to output a `TranslationFrame` when specifying a
-  `translation` and `translation_config`.
 
 - `SoundfileMixer` constructor arguments need to be keywords.
 
