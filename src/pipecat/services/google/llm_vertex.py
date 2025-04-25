@@ -17,6 +17,8 @@ from loguru import logger
 from pipecat.services.openai.llm import OpenAILLMService
 
 try:
+    from google.auth import default
+    from google.auth.exceptions import GoogleAuthError
     from google.auth.transport.requests import Request
     from google.oauth2 import service_account
 
@@ -65,7 +67,9 @@ class GoogleVertexLLMService(OpenAILLMService):
         base_url = self._get_base_url(params)
         self._api_key = self._get_api_token(credentials, credentials_path)
 
-        super().__init__(api_key=self._api_key, base_url=base_url, model=model, **kwargs)
+        super().__init__(
+            api_key=self._api_key, base_url=base_url, model=model, params=params, **kwargs
+        )
 
     @staticmethod
     def _get_base_url(params: InputParams) -> str:
@@ -98,6 +102,13 @@ class GoogleVertexLLMService(OpenAILLMService):
             creds = service_account.Credentials.from_service_account_file(
                 credentials_path, scopes=["https://www.googleapis.com/auth/cloud-platform"]
             )
+        else:
+            try:
+                creds, project_id = default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+            except GoogleAuthError:
+                pass
 
         if not creds:
             raise ValueError("No valid credentials provided.")

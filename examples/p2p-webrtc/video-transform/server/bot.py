@@ -25,15 +25,12 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
-
 
 class EdgeDetectionProcessor(FrameProcessor):
-    def __init__(self, camera_out_width, camera_out_height: int):
+    def __init__(self, video_out_width, video_out_height: int):
         super().__init__()
-        self._camera_out_width = camera_out_width
-        self._camera_out_height = camera_out_height
+        self._video_out_width = video_out_width
+        self._video_out_height = video_out_height
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -48,7 +45,7 @@ class EdgeDetectionProcessor(FrameProcessor):
             img = cv2.cvtColor(cv2.Canny(img, 100, 200), cv2.COLOR_GRAY2BGR)
 
             # convert the size if needed
-            desired_size = (self._camera_out_width, self._camera_out_height)
+            desired_size = (self._video_out_width, self._video_out_height)
             if frame.size != desired_size:
                 resized_image = cv2.resize(img, desired_size)
                 frame = OutputImageRawFrame(resized_image.tobytes(), desired_size, frame.format)
@@ -74,14 +71,13 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 
 async def run_bot(webrtc_connection):
     transport_params = TransportParams(
-        camera_in_enabled=True,
-        camera_out_enabled=True,
-        camera_out_is_live=True,
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_enabled=True,
+        audio_out_10ms_chunks=2,
+        video_in_enabled=True,
+        video_out_enabled=True,
+        video_out_is_live=True,
         vad_analyzer=SileroVADAnalyzer(),
-        vad_audio_passthrough=True,
     )
 
     pipecat_transport = SmallWebRTCTransport(
@@ -92,7 +88,6 @@ async def run_bot(webrtc_connection):
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         transcribe_user_audio=True,
-        transcribe_model_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
     )
 
@@ -116,7 +111,7 @@ async def run_bot(webrtc_connection):
             rtvi,
             llm,  # LLM
             EdgeDetectionProcessor(
-                transport_params.camera_out_width, transport_params.camera_out_height
+                transport_params.video_out_width, transport_params.video_out_height
             ),  # Sending the video back to the user
             pipecat_transport.output(),
             context_aggregator.assistant(),
@@ -135,12 +130,12 @@ async def run_bot(webrtc_connection):
     async def on_client_ready(rtvi):
         logger.info("Pipecat client ready.")
         await rtvi.set_bot_ready()
+        # Kick off the conversation.
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @pipecat_transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Pipecat Client connected")
-        # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

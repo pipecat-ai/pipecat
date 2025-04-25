@@ -16,30 +16,34 @@
  * - Browser with WebRTC support
  */
 
-import {LogLevel, RTVIClient, RTVIClientHelper, RTVIEvent} from '@pipecat-ai/client-js';
+import {
+  LogLevel,
+  RTVIClient,
+  RTVIClientHelper,
+  RTVIEvent,
+} from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
 
 class SearchResponseHelper extends RTVIClientHelper {
-
   constructor(contentPanel) {
-    super()
-    this.contentPanel = contentPanel
+    super();
+    this.contentPanel = contentPanel;
   }
 
   handleMessage(rtviMessage) {
-    console.log("SearchResponseHelper, received message:", rtviMessage)
+    console.log('SearchResponseHelper, received message:', rtviMessage);
     if (rtviMessage.data) {
       // Clear existing content
-      this.contentPanel.innerHTML = "";
+      this.contentPanel.innerHTML = '';
 
       // Create a container for all content
       const contentContainer = document.createElement('div');
-      contentContainer.className = "content-container";
+      contentContainer.className = 'content-container';
 
       // Add the search_result
       if (rtviMessage.data.search_result) {
         const searchResultDiv = document.createElement('div');
-        searchResultDiv.className = "search-result";
+        searchResultDiv.className = 'search-result';
         searchResultDiv.textContent = rtviMessage.data.search_result;
         contentContainer.appendChild(searchResultDiv);
       }
@@ -47,18 +51,18 @@ class SearchResponseHelper extends RTVIClientHelper {
       // Add the sources
       if (rtviMessage.data.origins) {
         const sourcesDiv = document.createElement('div');
-        sourcesDiv.className = "sources";
+        sourcesDiv.className = 'sources';
 
         const sourcesTitle = document.createElement('h3');
-        sourcesTitle.className = "sources-title";
-        sourcesTitle.textContent = "Sources:";
+        sourcesTitle.className = 'sources-title';
+        sourcesTitle.textContent = 'Sources:';
         sourcesDiv.appendChild(sourcesTitle);
 
-        rtviMessage.data.origins.forEach(origin => {
+        rtviMessage.data.origins.forEach((origin) => {
           const sourceLink = document.createElement('a');
-          sourceLink.className = "source-link";
+          sourceLink.className = 'source-link';
           sourceLink.href = origin.site_uri;
-          sourceLink.target = "_blank";
+          sourceLink.target = '_blank';
           sourceLink.textContent = origin.site_title;
           sourcesDiv.appendChild(sourceLink);
         });
@@ -69,7 +73,7 @@ class SearchResponseHelper extends RTVIClientHelper {
       // Add the rendered_content in an iframe
       if (rtviMessage.data.rendered_content) {
         const iframe = document.createElement('iframe');
-        iframe.className = "iframe-container";
+        iframe.className = 'iframe-container';
         iframe.srcdoc = rtviMessage.data.rendered_content;
         contentContainer.appendChild(iframe);
       }
@@ -80,7 +84,7 @@ class SearchResponseHelper extends RTVIClientHelper {
   }
 
   getMessageTypes() {
-    return ["bot-llm-search-response"]
+    return ['bot-llm-search-response'];
   }
 }
 
@@ -105,7 +109,9 @@ class ChatbotClient {
     this.disconnectBtn = document.getElementById('disconnect-btn');
     this.statusSpan = document.getElementById('connection-status');
     this.debugLog = document.getElementById('debug-log');
-    this.searchResultContainer = document.getElementById('search-result-container');
+    this.searchResultContainer = document.getElementById(
+      'search-result-container'
+    );
 
     // Create an audio element for bot's voice output
     this.botAudio = document.createElement('audio');
@@ -211,12 +217,9 @@ class ChatbotClient {
    */
   async connect() {
     try {
-      // Create a new Daily transport for WebRTC communication
-      const transport = new DailyTransport();
-
-      // Initialize the RTVI client with our configuration
+      // Initialize the RTVI client with a Daily WebRTC transport and our configuration
       this.rtviClient = new RTVIClient({
-        transport,
+        transport: new DailyTransport(),
         params: {
           // The baseURL and endpoint of your bot server that the client will connect to
           baseUrl: 'http://localhost:7860',
@@ -279,7 +282,10 @@ class ChatbotClient {
         },
       });
       //this.rtviClient.setLogLevel(LogLevel.DEBUG)
-      this.rtviClient.registerHelper("llm", new SearchResponseHelper(this.searchResultContainer))
+      this.rtviClient.registerHelper(
+        'llm',
+        new SearchResponseHelper(this.searchResultContainer)
+      );
 
       // Set up listeners for media track events
       this.setupTrackListeners();

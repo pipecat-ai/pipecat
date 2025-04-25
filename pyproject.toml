@@ -6,21 +6,21 @@ build-backend = "setuptools.build_meta"
 name = "pipecat-ai"
 dynamic = ["version"]
 description = "An open source framework for voice (and multimodal) assistants"
-license = { text = "BSD 2-Clause License" }
+license = "BSD-2-Clause"
+license-files = ["LICENSE"]
 readme = "README.md"
 requires-python = ">=3.10"
 keywords = ["webrtc", "audio", "video", "ai"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: BSD License",
     "Topic :: Communications :: Conferencing",
     "Topic :: Multimedia :: Sound/Audio",
     "Topic :: Multimedia :: Video",
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiohttp~=3.11.13",
+    "aiohttp~=3.11.12",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "loguru~=0.7.3",
     "Markdown~=3.7",
@@ -31,7 +31,7 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.67.0"
+    "openai~=1.70.0"
 ]
 
 [project.urls]
@@ -47,14 +47,14 @@ canonical = [ "aiofiles~=24.1.0" ]
 cartesia = [ "cartesia~=1.4.0", "websockets~=13.1" ]
 cerebras = []
 deepseek = []
-daily = [ "daily-python~=0.16.1" ]
+daily = [ "daily-python~=0.17.0" ]
 deepgram = [ "deepgram-sdk~=3.8.0" ]
 elevenlabs = [ "websockets~=13.1" ]
 fal = [ "fal-client~=0.5.9" ]
 fireworks = []
 fish = [ "ormsgpack~=1.7.0", "websockets~=13.1" ]
 gladia = [ "websockets~=13.1" ]
-google = [ "google-cloud-speech~=2.31.1", "google-cloud-texttospeech~=2.25.1", "google-genai~=1.7.0", "google-generativeai~=0.8.4" ]
+google = [ "google-cloud-speech~=2.31.1", "google-cloud-texttospeech~=2.25.1", "google-genai~=1.7.0", "google-generativeai~=0.8.4", "websockets~=13.1" ]
 grok = []
 groq = [ "groq~=0.20.0" ]
 gstreamer = [ "pygobject~=3.50.0" ]
@@ -64,6 +64,7 @@ langchain = [ "langchain~=0.3.20", "langchain-community~=0.3.20", "langchain-ope
 livekit = [ "livekit~=0.22.0", "livekit-api~=0.8.2", "tenacity~=9.0.0" ]
 lmnt = [ "websockets~=13.1" ]
 local = [ "pyaudio~=0.2.14" ]
+mcp = [ "mcp[cli]~=1.6.0" ]
 mem0 = [ "mem0ai~=0.1.76" ]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
 moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers~=4.48.0" ]
@@ -79,19 +80,23 @@ qwen = []
 rime = [ "websockets~=13.1" ]
 riva = [ "nvidia-riva-client~=2.19.0" ]
 sentry = [ "sentry-sdk~=2.23.1" ]
+local-smart-turn = [ "coremltools>=8.0", "transformers", "torch==2.5.0", "torchaudio==2.5.0" ]
+remote-smart-turn = []
 silero = [ "onnxruntime~=1.20.1" ]
 simli = [ "simli-ai~=0.1.10"]
 soundfile = [ "soundfile~=0.13.0" ]
 tavus=[]
 together = []
 ultravox = [ "transformers~=4.48.0", "vllm~=0.7.3" ]
-webrtc = [ "aiortc~=1.10.1", "opencv-python~=4.11.0.86" ]
+webrtc = [ "aiortc~=1.11.0", "opencv-python~=4.11.0.86" ]
 websocket = [ "websockets~=13.1", "fastapi~=0.115.6" ]
 whisper = [ "faster-whisper~=1.1.1" ]
 
 [tool.setuptools.packages.find]
-# All the following settings are optional:
 where = ["src"]
+
+[tool.setuptools.package-data]
+"pipecat" = ["py.typed"]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"
@@ -115,6 +120,9 @@ select = [
     "D", # Docstring rules
     "I", # Import rules
 ]
+# We ignore D107 because class docstrings already document __init__ parameters
+# and our Sphinx configuration uses napoleon_include_init_with_doc=True
+ignore = ["D107"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

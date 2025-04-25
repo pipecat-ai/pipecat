@@ -40,7 +40,9 @@
         const createSmallWebRTCConnection = async (audioTrack) => {
             const pc = new RTCPeerConnection()
             pc.ontrack = e => audioEl.srcObject = e.streams[0]
+            // SmallWebRTCTransport expects to receive both transceivers
             pc.addTransceiver(audioTrack, { direction: 'sendrecv' })
+            pc.addTransceiver('video', { direction: 'sendrecv' })
             await pc.setLocalDescription(await pc.createOffer())
             //await waitForIceGatheringComplete(pc)
             const offer = pc.localDescription

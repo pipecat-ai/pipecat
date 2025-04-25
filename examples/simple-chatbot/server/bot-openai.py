@@ -122,11 +122,11 @@ async def main():
             token,
             "Chatbot",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                camera_out_enabled=True,
-                camera_out_width=1024,
-                camera_out_height=576,
-                vad_enabled=True,
+                video_out_enabled=True,
+                video_out_width=1024,
+                video_out_height=576,
                 vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
                 #
@@ -155,7 +155,7 @@ async def main():
         )
 
         # Initialize LLM service
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
         messages = [
             {
@@ -210,11 +210,12 @@ async def main():
         @rtvi.event_handler("on_client_ready")
         async def on_client_ready(rtvi):
             await rtvi.set_bot_ready()
+            # Kick off the conversation
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
             await transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):

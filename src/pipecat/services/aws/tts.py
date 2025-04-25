@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -231,9 +231,9 @@ class PollyTTSService(TTSService):
 
             yield TTSStartedFrame()
 
-            chunk_size = 8192
-            for i in range(0, len(audio_data), chunk_size):
-                chunk = audio_data[i : i + chunk_size]
+            CHUNK_SIZE = 1024
+            for i in range(0, len(audio_data), CHUNK_SIZE):
+                chunk = audio_data[i : i + CHUNK_SIZE]
                 if len(chunk) > 0:
                     await self.stop_ttfb_metrics()
                     frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)

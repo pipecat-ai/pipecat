@@ -15,7 +15,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -58,10 +58,9 @@ async def main():
         token,
         "Instant voice Chatbot",
         DailyParams(
+            audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 
@@ -69,7 +68,6 @@ async def main():
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         transcribe_user_audio=True,
-        transcribe_model_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
     )
 
@@ -93,20 +91,22 @@ async def main():
     task = PipelineTask(
         pipeline,
         params=PipelineParams(allow_interruptions=True),
-        observers=[rtvi.observer()],
+        observers=[RTVIObserver(rtvi)],
     )
 
     @rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         await rtvi.set_bot_ready()
+        # Kick off the conversation
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @daily_transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        logger.debug("First participant joined: {}", participant["id"])
 
     @daily_transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        print(f"Participant left: {participant}")
+        logger.debug(f"Participant left: {participant}")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)

@@ -26,7 +26,11 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
+    LLMUserContextAggregator,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -41,7 +45,10 @@ from pipecat.services.google.llm import (
     GoogleLLMContext,
     GoogleUserContextAggregator,
 )
-from pipecat.services.openai import OpenAIAssistantContextAggregator, OpenAIUserContextAggregator
+from pipecat.services.openai.llm import (
+    OpenAIAssistantContextAggregator,
+    OpenAIUserContextAggregator,
+)
 from pipecat.tests.utils import SleepFrame, run_test
 
 AGGREGATION_TIMEOUT = 0.1
@@ -160,7 +167,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             InterimTranscriptionFrame(text="How ", user_id="cat", timestamp=""),
@@ -186,7 +195,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             InterimTranscriptionFrame(text="How ", user_id="cat", timestamp=""),
@@ -213,7 +224,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             UserStoppedSpeakingFrame(),
@@ -237,7 +250,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             UserStoppedSpeakingFrame(),
@@ -262,7 +277,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
@@ -290,7 +307,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             UserStoppedSpeakingFrame(),
@@ -315,7 +334,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             UserStartedSpeakingFrame(),
             InterimTranscriptionFrame(text="Hello ", user_id="cat", timestamp=""),
@@ -343,7 +364,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
@@ -363,7 +386,9 @@ class BaseTestUserContextAggregator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, aggregation_timeout=AGGREGATION_TIMEOUT)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
+        )
         frames_to_send = [
             InterimTranscriptionFrame(text="Hello ", user_id="cat", timestamp=""),
             SleepFrame(),
@@ -386,8 +411,7 @@ class BaseTestUserContextAggregator:
 
         context = self.CONTEXT_CLASS()
         aggregator = self.AGGREGATOR_CLASS(
-            context,
-            aggregation_timeout=AGGREGATION_TIMEOUT,
+            context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
             UserStartedSpeakingFrame(),
@@ -466,7 +490,9 @@ class BaseTestAssistantContextAggreagator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, expect_stripped_words=False)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+        )
         frames_to_send = [
             LLMFullResponseStartFrame(),
             TextFrame(text="Hello "),
@@ -510,7 +536,9 @@ class BaseTestAssistantContextAggreagator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, expect_stripped_words=False)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+        )
         frames_to_send = [
             LLMFullResponseStartFrame(),
             TextFrame(text="Hello "),
@@ -535,7 +563,9 @@ class BaseTestAssistantContextAggreagator:
         assert self.AGGREGATOR_CLASS is not None, "AGGREGATOR_CLASS must be set in a subclass"
 
         context = self.CONTEXT_CLASS()
-        aggregator = self.AGGREGATOR_CLASS(context, expect_stripped_words=False)
+        aggregator = self.AGGREGATOR_CLASS(
+            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+        )
         frames_to_send = [
             LLMFullResponseStartFrame(),
             TextFrame(text="Hello "),

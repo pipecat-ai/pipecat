@@ -48,8 +48,7 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
             dialin_settings=None,  # Not required for Twilio
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
+            video_out_enabled=False,
             vad_analyzer=SileroVADAnalyzer(),
             transcription_enabled=True,
         ),
@@ -60,7 +59,7 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [
         {

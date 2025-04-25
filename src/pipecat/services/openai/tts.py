@@ -17,17 +17,24 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
+from pipecat.services.tts_service import TTSService
 
-ValidVoice = Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+ValidVoice = Literal[
+    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
+]
 
 VALID_VOICES: Dict[str, ValidVoice] = {
     "alloy": "alloy",
+    "ash": "ash",
+    "ballad": "ballad",
+    "coral": "coral",
     "echo": "echo",
     "fable": "fable",
     "onyx": "onyx",
     "nova": "nova",
+    "sage": "sage",
     "shimmer": "shimmer",
+    "verse": "verse",
 }
 
 
@@ -63,7 +70,7 @@ class OpenAITTSService(TTSService):
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
-                f"Current rate of {self.sample_rate}Hz may cause issues."
+                f"Current rate of {sample_rate}Hz may cause issues."
             )
         super().__init__(sample_rate=sample_rate, **kwargs)
 
@@ -98,7 +105,7 @@ class OpenAITTSService(TTSService):
                 extra_body["instructions"] = self._instructions
 
             async with self._client.audio.speech.with_streaming_response.create(
-                input=text or " ",  # Text must contain at least one character
+                input=text,
                 model=self.model_name,
                 voice=VALID_VOICES[self._voice_id],
                 response_format="pcm",

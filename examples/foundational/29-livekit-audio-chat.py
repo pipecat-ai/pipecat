@@ -115,8 +115,6 @@ async def main():
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-                vad_enabled=True,
-                vad_audio_passthrough=True,
             ),
         )
 
@@ -127,7 +125,7 @@ async def main():
             ),
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),

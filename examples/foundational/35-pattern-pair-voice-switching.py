@@ -44,14 +44,11 @@ Note:
     such as formatting instructions, command recognition, or structured data extraction.
 """
 
-import asyncio
+import argparse
 import os
-import sys
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -59,14 +56,15 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 # Define voice IDs
 VOICE_IDS = {
@@ -76,57 +74,55 @@ VOICE_IDS = {
 }
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Multi-voice storyteller",
-            DailyParams(
-                audio_out_enabled=True,
-                transcription_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
-        # Create pattern pair aggregator for voice switching
-        pattern_aggregator = PatternPairAggregator()
+    # Create pattern pair aggregator for voice switching
+    pattern_aggregator = PatternPairAggregator()
 
-        # Add pattern for voice switching
-        pattern_aggregator.add_pattern_pair(
-            pattern_id="voice_tag",
-            start_pattern="<voice>",
-            end_pattern="</voice>",
-            remove_match=True,
-        )
+    # Add pattern for voice switching
+    pattern_aggregator.add_pattern_pair(
+        pattern_id="voice_tag",
+        start_pattern="<voice>",
+        end_pattern="</voice>",
+        remove_match=True,
+    )
 
-        # Register handler for voice switching
-        def on_voice_tag(match: PatternMatch):
-            voice_name = match.content.strip().lower()
-            if voice_name in VOICE_IDS:
-                voice_id = VOICE_IDS[voice_name]
-                tts.set_voice(voice_id)
-                logger.info(f"Switched to {voice_name} voice")
-            else:
-                logger.warning(f"Unknown voice: {voice_name}")
+    # Register handler for voice switching
+    def on_voice_tag(match: PatternMatch):
+        voice_name = match.content.strip().lower()
+        if voice_name in VOICE_IDS:
+            voice_id = VOICE_IDS[voice_name]
+            tts.set_voice(voice_id)
+            logger.info(f"Switched to {voice_name} voice")
+        else:
+            logger.warning(f"Unknown voice: {voice_name}")
 
-        pattern_aggregator.on_pattern_match("voice_tag", on_voice_tag)
+    pattern_aggregator.on_pattern_match("voice_tag", on_voice_tag)
 
-        # Initialize TTS with narrator voice as default
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id=VOICE_IDS["narrator"],
-            text_aggregator=pattern_aggregator,
-        )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        # Initialize LLM
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    # Initialize TTS with narrator voice as default
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id=VOICE_IDS["narrator"],
+        text_aggregator=pattern_aggregator,
+    )
 
-        # System prompt for storytelling with voice switching
-        system_prompt = """You are an engaging storyteller that uses different voices to bring stories to life.
+    # Initialize LLM
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # System prompt for storytelling with voice switching
+    system_prompt = """You are an engaging storyteller that uses different voices to bring stories to life.
 
 You have three voices to use, but each has a specific purpose:
 
@@ -173,58 +169,60 @@ FOLLOW THESE RULES:
 
 Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue."""
 
-        # Set up LLM context
-        messages = [
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
+    # Set up LLM context
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt,
+        },
+    ]
+
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    # Create pipeline
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            context_aggregator.user(),
+            llm,
+            tts,  # TTS with pattern aggregator
+            transport.output(),
+            context_aggregator.assistant(),
         ]
+    )
 
-        context = OpenAILLMContext(messages)
-        context_aggregator = llm.create_context_aggregator(context)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+            report_only_initial_ttfb=True,
+        ),
+    )
 
-        # Create pipeline
-        pipeline = Pipeline(
-            [
-                transport.input(),
-                context_aggregator.user(),
-                llm,
-                tts,  # TTS with pattern aggregator
-                transport.output(),
-                context_aggregator.assistant(),
-            ]
-        )
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Start conversation - empty prompt to let LLM follow system instructions
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
-            ),
-        )
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            logger.info(f"First participant joined: {participant['id']}")
-            await transport.capture_participant_transcription(participant["id"])
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
 
-            # Start conversation - empty prompt to let LLM follow system instructions
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
-
-        @transport.event_handler("on_participant_left")
-        async def on_participant_left(transport, participant, reason):
-            logger.info(f"Participant left: {participant['id']}")
-            await task.cancel()
-
-        logger.info(f"Starting storytelling bot at: {room_url}")
-        logger.info("Join the room to interact with the bot!")
-
-        runner = PipelineRunner()
-        await runner.run(task)
+    runner = PipelineRunner(handle_sigint=False)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

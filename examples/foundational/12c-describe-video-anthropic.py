@@ -4,32 +4,29 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
+import argparse
 import os
-import sys
 from typing import Optional
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
 from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 class UserImageRequester(FrameProcessor):
@@ -50,60 +47,82 @@ class UserImageRequester(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    # Get WebRTC peer connection ID
+    webrtc_peer_id = webrtc_connection.pc_id
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Describe participant video",
-            DailyParams(
-                audio_out_enabled=True,
-                transcription_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-            ),
-        )
+    logger.info(f"Starting bot with peer_id: {webrtc_peer_id}")
 
-        user_response = UserResponseAggregator()
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            video_in_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
-        image_requester = UserImageRequester()
+    user_response = UserResponseAggregator()
 
-        vision_aggregator = VisionImageFrameAggregator()
+    # Initialize the image requester without setting the participant ID yet
+    image_requester = UserImageRequester()
 
-        anthropic = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    vision_aggregator = VisionImageFrameAggregator()
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await tts.say("Hi there! Feel free to ask me what I see.")
-            await transport.capture_participant_video(participant["id"], framerate=0)
-            await transport.capture_participant_transcription(participant["id"])
-            image_requester.set_participant_id(participant["id"])
+    # Anthropic for vision analysis
+    anthropic = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-        pipeline = Pipeline(
-            [
-                transport.input(),
-                user_response,
-                image_requester,
-                vision_aggregator,
-                anthropic,
-                tts,
-                transport.output(),
-            ]
-        )
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
 
-        task = PipelineTask(pipeline)
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            user_response,
+            image_requester,
+            vision_aggregator,
+            anthropic,
+            tts,
+            transport.output(),
+        ]
+    )
 
-        runner = PipelineRunner()
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(allow_interruptions=True),
+    )
 
-        await runner.run(task)
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected: {client}")
+
+        # Welcome message
+        await tts.say("Hi there! Feel free to ask me what I see.")
+
+        # Set the participant ID in the image requester
+        image_requester.set_participant_id(webrtc_peer_id)
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
+
+    runner = PipelineRunner(handle_sigint=False)
+
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

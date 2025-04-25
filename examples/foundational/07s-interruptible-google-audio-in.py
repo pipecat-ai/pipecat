@@ -4,16 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
+import argparse
 import os
-import sys
 from dataclasses import dataclass
 
-import aiohttp
 import google.ai.generativelanguage as glm
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -32,14 +29,15 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameProcessor
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.google.tts import GoogleTTSService
+from pipecat.transcriptions.language import Language
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 marker = "|----|"
 system_message = f"""
@@ -193,85 +191,88 @@ class TanscriptionContextFixup(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Respond bot",
-            DailyParams(
-                audio_out_enabled=True,
-                # No transcription at all. just audio input to Gemini!
-                # transcription_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        )
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
 
-        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
+    tts = GoogleTTSService(
+        voice_id="en-US-Chirp3-HD-Charon",
+        params=GoogleTTSService.InputParams(language=Language.EN_US),
+        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+    )
 
-        messages = [
-            {
-                "role": "system",
-                "content": system_message,
-            },
-            {
-                "role": "user",
-                "content": "Start by saying hello.",
-            },
+    messages = [
+        {
+            "role": "system",
+            "content": system_message,
+        },
+        {
+            "role": "user",
+            "content": "Start by saying hello.",
+        },
+    ]
+
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
+    audio_collector = UserAudioCollector(context, context_aggregator.user())
+    pull_transcript_out_of_llm_output = TranscriptExtractor(context)
+    fixup_context_messages = TanscriptionContextFixup(context)
+
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            audio_collector,
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            pull_transcript_out_of_llm_output,
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
+            fixup_context_messages,
         ]
+    )
 
-        context = OpenAILLMContext(messages)
-        context_aggregator = llm.create_context_aggregator(context)
-        audio_collector = UserAudioCollector(context, context_aggregator.user())
-        pull_transcript_out_of_llm_output = TranscriptExtractor(context)
-        fixup_context_messages = TanscriptionContextFixup(context)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                audio_collector,
-                context_aggregator.user(),  # User responses
-                llm,  # LLM
-                pull_transcript_out_of_llm_output,
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
-                fixup_context_messages,
-            ]
-        )
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-        )
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
-            # Kick off the conversation.
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
 
-        @transport.event_handler("on_participant_left")
-        async def on_participant_left(transport, participant, reason):
-            await task.cancel()
+    runner = PipelineRunner(handle_sigint=False)
 
-        runner = PipelineRunner()
-
-        await runner.run(task)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

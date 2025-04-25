@@ -1,0 +1,67 @@
+name: Question
+description: Ask a question or get help
+type: Question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Question
+
+        Use this form to ask a question about pipecat.
+
+  - type: markdown
+    attributes:
+      value: |
+        ### Environment (if applicable)
+
+  - type: input
+    id: pipecat-version
+    attributes:
+      label: pipecat version
+      description: Which version are you using? (if applicable)
+      placeholder: e.g., 0.0.63
+    validations:
+      required: false
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Which Python version are you using? (if applicable)
+      placeholder: e.g., 3.12.8
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating System
+      description: Which OS are you using? (if applicable)
+      placeholder: e.g., Ubuntu 24.04, Windows 11, macOS 12.5
+    validations:
+      required: false
+
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: Provide your question in detail here.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What I've tried
+      description: Describe what you've already tried or research you've done.
+      placeholder: I've looked at the documentation and tried...
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Any additional context or information that might help others understand your question better.
+    validations:
+      required: false

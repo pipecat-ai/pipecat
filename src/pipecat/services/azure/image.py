@@ -13,7 +13,7 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.frames.frames import ErrorFrame, Frame, URLImageRawFrame
-from pipecat.services.ai_services import ImageGenService
+from pipecat.services.image_service import ImageGenService
 
 
 class AzureImageGenServiceREST(ImageGenService):

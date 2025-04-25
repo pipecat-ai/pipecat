@@ -30,3 +30,13 @@ class LLMUsageMetricsData(MetricsData):
 
 class TTSUsageMetricsData(MetricsData):
     value: int
+
+
+class SmartTurnMetricsData(MetricsData):
+    """Metrics data for smart turn predictions."""
+
+    is_complete: bool
+    probability: float
+    inference_time_ms: float
+    server_total_time_ms: float
+    e2e_processing_time_ms: float

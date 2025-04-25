@@ -137,7 +137,7 @@ class TkOutputTransport(BaseOutputTransport):
                 self._executor, self._out_stream.write, frames
             )
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
         self.get_event_loop().call_soon(self._write_frame_to_tk, frame)
 
     def _write_frame_to_tk(self, frame: OutputImageRawFrame):
