@@ -411,10 +411,10 @@ class UltravoxSTTService(AIService):
                     yield LLMFullResponseStartFrame()
 
                     async for response in self._model.generate(
-                            messages=[{"role": "user", "content": "<|audio|>\n"}],
-                            temperature=self._temperature,
-                            max_tokens=self._max_tokens,
-                            audio=audio_float32,
+                        messages=[{"role": "user", "content": "<|audio|>\n"}],
+                        temperature=self._temperature,
+                        max_tokens=self._max_tokens,
+                        audio=audio_float32,
                     ):
                         # Stop TTFB metrics after first response
                         await self.stop_ttfb_metrics()
