@@ -71,7 +71,7 @@ class UltravoxModel:
         stop_token_ids: Optional token IDs to stop generation
     """
 
-    def __init__(self, model_name: str = "fixie-ai/ultravox-v0_4_1-llama-3_1-8b"):
+    def __init__(self, model_name: str = "fixie-ai/ultravox-v0_5-llama-3_1-8b"):
         self.model_name = model_name
         self._initialize_engine()
         self._initialize_tokenizer()
@@ -218,8 +218,59 @@ class UltravoxSTTService(AIService):
         self._temperature = temperature
         self._max_tokens = max_tokens
         self._connection_active = False
+        self._warm_up_duration_sec = 1
 
         logger.info(f"Initialized UltravoxSTTService with model: {model_name}")
+
+    async def _warm_up_model(self):
+        """Warm up the model with silent audio to improve first inference performance.
+
+        This method generates a short segment of silent audio and runs it through
+        the model to ensure the model is fully loaded and optimized for the first
+        real inference request.
+        """
+        logger.info("Warming up Ultravox model with silent audio...")
+
+        # Generate silent audio at 16kHz sample rate
+        sample_rate = 16000
+        silent_audio = self._generate_silent_audio(sample_rate, self._warm_up_duration_sec)
+
+        try:
+            # Process the silent audio with the model
+            messages = [{"role": "user", "content": "<|audio|>\n"}]
+            warmup_generator = self._model.generate(
+                messages=messages,
+                temperature=self._temperature,
+                max_tokens=self._max_tokens,
+                audio=silent_audio,
+            )
+
+            # Consume the generator to actually run the inference
+            async for _ in warmup_generator:
+                pass
+
+            logger.info("Model warm-up completed successfully")
+        except Exception as e:
+            logger.warning(f"Model warm-up failed: {e}")
+
+    def _generate_silent_audio(self, sample_rate=16000, duration_sec=1.0):
+        """Generate silent audio as a numpy array.
+
+        Args:
+            sample_rate: Sample rate in Hz
+            duration_sec: Duration of silence in seconds
+
+        Returns:
+            np.ndarray: Float32 array of zeros representing silent audio
+        """
+        # Calculate number of samples
+        num_samples = int(sample_rate * duration_sec)
+
+        # Create silent audio as float32 in the [-1.0, 1.0] range
+        silent_audio = np.zeros(num_samples, dtype=np.float32)
+
+        logger.info(f"Generated {duration_sec}s of silent audio ({num_samples} samples)")
+        return silent_audio
 
     def can_generate_metrics(self) -> bool:
         """Indicates whether this service can generate metrics.
@@ -237,6 +288,9 @@ class UltravoxSTTService(AIService):
         """
         await super().start(frame)
         self._connection_active = True
+
+        await self._warm_up_model()
+
         logger.info("UltravoxSTTService started")
 
     async def stop(self, frame: EndFrame):
@@ -349,11 +403,12 @@ class UltravoxSTTService(AIService):
             if self._model:
                 try:
                     logger.info("Generating text from audio using model...")
-                    full_response = ""
 
                     # Start metrics tracking
                     await self.start_ttfb_metrics()
                     await self.start_processing_metrics()
+
+                    yield LLMFullResponseStartFrame()
 
                     async for response in self._model.generate(
                         messages=[{"role": "user", "content": "<|audio|>\n"}],
@@ -369,17 +424,11 @@ class UltravoxSTTService(AIService):
                             delta = chunk["choices"][0]["delta"]
                             if "content" in delta:
                                 new_text = delta["content"]
-                                full_response += new_text
+                                if new_text:
+                                    yield LLMTextFrame(text=new_text.strip())
 
                     # Stop processing metrics after completion
                     await self.stop_processing_metrics()
-
-                    logger.info(f"Generated text: {full_response}")
-                    # Create a transcription frame with the generated text
-                    yield LLMFullResponseStartFrame()
-
-                    text_frame = LLMTextFrame(text=full_response.strip())
-                    yield text_frame
 
                     yield LLMFullResponseEndFrame()
 
