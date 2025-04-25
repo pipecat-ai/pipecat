@@ -222,7 +222,7 @@ class UltravoxSTTService(AIService):
 
         logger.info(f"Initialized UltravoxSTTService with model: {model_name}")
 
-    async def warm_up_model(self):
+    async def _warm_up_model(self):
         """Warm up the model with silent audio to improve first inference performance.
 
         This method generates a short segment of silent audio and runs it through
@@ -289,7 +289,7 @@ class UltravoxSTTService(AIService):
         await super().start(frame)
         self._connection_active = True
 
-        await self.warm_up_model()
+        await self._warm_up_model()
 
         logger.info("UltravoxSTTService started")
 
