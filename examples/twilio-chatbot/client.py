@@ -92,9 +92,7 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
             audio_out_enabled=True,
             add_wav_header=False,
             serializer=TwilioFrameSerializer(stream_sid),
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=1.5)),
-            vad_audio_passthrough=True,
         ),
     )
 

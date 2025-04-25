@@ -1,3 +1,4 @@
+
 # Changelog
 
 All notable changes to **Pipecat** will be documented in this file.
@@ -9,6 +10,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `TransportParams.audio_in_passthrough`. If set (the default), incoming
+  audio will be pushed downstream.
+
+- Added `MCPClient`; a way to connect to MCP servers and use the MCP servers'
+  tools.
+
+### Changed
+
+- STT services now passthrough audio frames by default. This allows you to add
+  audio recording without worrying about what's wrong in your pipeline when it
+  doesn't work the first time.
+
+- Input transports now always push audio downstream unless disabled with
+  `TransportParams.audio_in_passthrough`. After many Pipecat releases, we
+  realized this is the common use case. There are use cases where the input
+  transport already provides STT and you also don't want recordings, in which
+  case there's no need to push audio to the rest of the pipeline, but this is
+  not a very common case.
+
+### Deprecated
+
+- `TransportParams.camera_*` parameters are now deprecated, use
+  `TransportParams.video_*` instead.
+
+- `TransportParams.vad_enabled` parameter is now deprecated, use
+  `TransportParams.audio_in_enabled` and `TransportParams.vad_analyzer` instead.
+
+- `TransportParams.vad_audio_passthrough` parameter is now deprecated, use
+  `TransportParams.audio_in_passthrough` instead.
+
+### Fixed
+
+- Fixed an issue where the `SmartTurnMetricsData` was reporting 0ms for
+  inference and processing time when using the `FalSmartTurnAnalyzer`.
+
+## [0.0.65] - 2025-04-23 "Sant Jordi's release" 🌹📕
+
+https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
+
+### Added
+
+- Added automatic hangup logic to the Telnyx serializer. This feature hangs up
+  the Telnyx call when an `EndFrame` or `CancelFrame` is received. It is
+  enabled by default and is configurable via the `auto_hang_up` `InputParam`.
+
+- Added a keepalive task to `GladiaSTTService` to prevent the websocket from
+  disconnecting after 30 seconds of no audio input.
+
+### Changed
+
+- The `InputParams` for `ElevenLabsTTSService` and `ElevenLabsHttpTTSService`
+  no longer require that `stability` and `similarity_boost` be set. You can
+  individually set each param.
+
+- In `TwilioFrameSerializer`, `call_sid` is Optional so as to avoid a breaking
+  changed. `call_sid` is required to automatically hang up.
+
+### Fixed
+
+- Fixed an issue where `TwilioFrameSerializer` would send two hang up commands:
+  one for the `EndFrame` and one for the `CancelFrame`.
+
+## [0.0.64] - 2025-04-22
+
+### Added
+
+- Added automatic hangup logic to the Twilio serializer. This feature hangs up
+  the Twilio call when an `EndFrame` or `CancelFrame` is received. It is
+  enabled by default and is configurable via the `auto_hang_up` `InputParam`.
+
 - Added `SmartTurnMetricsData`, which contains end-of-turn prediction metrics,
   to the `MetricsFrame`. Using `MetricsFrame`, you can now retrieve prediction
   confidence scores and processing time metrics from the smart turn analyzers.
@@ -17,9 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GoogleSTTService`, `GoogleTTSService`, and `GoogleVertexLLMService`.
 
 - Added support for Smart Turn Detection via the `turn_analyzer` transport
-  parameter. You can now choose between `SmartTurnAnalyzer()` for remote
-  inference or `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using
-  Core ML.
+  parameter. You can now choose between `HttpSmartTurnAnalyzer()` or
+  `FalSmartTurnAnalyzer()` for remote inference or
+  `LocalCoreMLSmartTurnAnalyzer()` for on-device inference using Core ML.
 
 - `DeepgramTTSService` accepts `base_url` argument again, allowing you to
   connect to an on-prem service.
@@ -43,6 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transports like `SmallWebRTCTransport` and `FastAPIWebsocketTransport`.
 
 ### Changed
+
+- `GrokLLMService` now uses `grok-3-beta` as its default model.
 
 - Daily's REST helpers now include an `eject_at_token_exp` param, which ejects
   the user when their token expires. This new parameter defaults to False.
@@ -77,6 +150,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where LLM input parameters were not working and applied correctly in `GoogleVertexLLMService`, causing
   unexpected behavior during inference.
+
+### Other
+
+- Updated the `twilio-chatbot` example to use the auto-hangup feature.
 
 ## [0.0.63] - 2025-04-11
 

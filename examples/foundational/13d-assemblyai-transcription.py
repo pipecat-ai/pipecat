@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -30,7 +31,7 @@ class TranscriptionLogger(FrameProcessor):
             print(f"Transcription: {frame.text}")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 from typing import Optional
 
@@ -46,7 +47,7 @@ class UserImageRequester(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     # Get WebRTC peer connection ID
     webrtc_peer_id = webrtc_connection.pc_id
 
@@ -57,10 +58,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_in_enabled=True,
-            vad_enabled=True,
+            video_in_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

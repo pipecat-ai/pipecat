@@ -5,21 +5,22 @@
 #
 
 import os
+import sys
 
+import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.local_smart_turn import LocalCoreMLSmartTurnAnalyzer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.mcp_service import MCPClient
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -30,34 +31,14 @@ load_dotenv(override=True)
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")
 
-    # To use this locally, set the environment variable LOCAL_SMART_TURN_MODEL_PATH
-    # to the path where the smart-turn repo is cloned.
-    #
-    # Example setup:
-    #
-    #   # Git LFS (Large File Storage)
-    #   brew install git-lfs
-    #   # Hugging Face uses LFS to store large model files, including .mlpackage
-    #   git lfs install
-    #   # Clone the repo with the smart_turn_classifier.mlpackage
-    #   git clone https://huggingface.co/pipecat-ai/smart-turn
-    #
-    # Then set the env variable:
-    #   export LOCAL_SMART_TURN_MODEL_PATH=./smart-turn
-    # or add it to your .env file
-    smart_turn_model_path = os.getenv("LOCAL_SMART_TURN_MODEL_PATH")
-
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             vad_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+            vad_analyzer=SileroVADAnalyzer(),
             vad_audio_passthrough=True,
-            turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
-                smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
-            ),
         ),
     )
 
@@ -68,27 +49,44 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = AnthropicLLMService(
+        api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
+    )
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
+    try:
+        # https://docs.mcp.run/integrating/tutorials/mcp-run-sse-openai-agents/
+        mcp = MCPClient(server_params=os.getenv("MCP_RUN_SSE_URL"))
+    except Exception as e:
+        logger.error(f"error setting up mcp")
+        logger.exception("error trace:")
 
-    context = OpenAILLMContext(messages)
+    tools = await mcp.register_tools(llm)
+
+    system = f"""
+    You are a helpful LLM in a WebRTC call. 
+    Your goal is to demonstrate your capabilities in a succinct way. 
+    You have access to a number of tools provided by mcp.run. Use any and all tools to help users.
+    Your output will be converted to audio so don't include special characters in your answers. 
+    Respond to what the user said in a creative and helpful way. 
+    When asked for today's date, use 'https://www.datetoday.net/'.
+    Don't overexplain what you are doing. 
+    Just respond with short sentences when you are carrying out tool calls.
+    """
+
+    messages = [{"role": "system", "content": system}]
+
+    context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,
-            context_aggregator.user(),  # User responses
+            context_aggregator.user(),  # User spoken responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            context_aggregator.assistant(),  # Assistant spoken responses and tool context
         ]
     )
 
@@ -97,16 +95,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=PipelineParams(
             allow_interruptions=True,
             enable_metrics=True,
-            enable_usage_metrics=True,
-            report_only_initial_ttfb=True,
         ),
     )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info(f"Client connected: {client}")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")

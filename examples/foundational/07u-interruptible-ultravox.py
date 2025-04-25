@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ ultravox_processor = UltravoxSTTService(
 )
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -43,9 +44,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-            vad_audio_passthrough=True,
         ),
     )
 

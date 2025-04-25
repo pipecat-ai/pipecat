@@ -5,17 +5,16 @@
 #
 
 
-import os
-from typing import Dict
+from typing import Any, Dict
 
 import numpy as np
-import torch
 from loguru import logger
 
-from pipecat.audio.turn.base_smart_turn import BaseSmartTurn
+from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 
 try:
     import coremltools as ct
+    import torch
     from transformers import AutoFeatureExtractor
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -26,7 +25,7 @@ except ModuleNotFoundError as e:
 
 
 class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
-    def __init__(self, smart_turn_model_path: str, **kwargs):
+    def __init__(self, *, smart_turn_model_path: str, **kwargs):
         super().__init__(**kwargs)
 
         if not smart_turn_model_path:
@@ -41,7 +40,7 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
         self._turn_model = ct.models.MLModel(core_ml_model_path)
         logger.debug("Loaded Local Smart Turn")
 
-    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, any]:
+    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         inputs = self._turn_processor(
             audio_array,
             sampling_rate=16000,

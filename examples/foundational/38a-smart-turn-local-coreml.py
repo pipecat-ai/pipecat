@@ -4,12 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.turn.smart_turn import SmartTurnAnalyzer
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_coreml_smart_turn import LocalCoreMLSmartTurnAnalyzer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
@@ -26,20 +28,35 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
-    remote_smart_turn_url = os.getenv("REMOTE_SMART_TURN_URL")
+    # To use this locally, set the environment variable LOCAL_SMART_TURN_MODEL_PATH
+    # to the path where the smart-turn repo is cloned.
+    #
+    # Example setup:
+    #
+    #   # Git LFS (Large File Storage)
+    #   brew install git-lfs
+    #   # Hugging Face uses LFS to store large model files, including .mlpackage
+    #   git lfs install
+    #   # Clone the repo with the smart_turn_classifier.mlpackage
+    #   git clone https://huggingface.co/pipecat-ai/smart-turn
+    #
+    # Then set the env variable:
+    #   export LOCAL_SMART_TURN_MODEL_PATH=./smart-turn
+    # or add it to your .env file
+    smart_turn_model_path = os.getenv("LOCAL_SMART_TURN_MODEL_PATH")
 
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-            vad_audio_passthrough=True,
-            turn_analyzer=SmartTurnAnalyzer(url=remote_smart_turn_url),
+            turn_analyzer=LocalCoreMLSmartTurnAnalyzer(
+                smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
+            ),
         ),
     )
 
