@@ -32,7 +32,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.google import GoogleLLMContext
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.llm_service import LLMService  # Base LLM service class
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -98,35 +98,19 @@ class FunctionHandlers:
         self.session_manager = session_manager
         self.prompt = None  # Can be set externally
 
-    async def voicemail_response(
-        self,
-        function_name,
-        tool_call_id,
-        args,
-        llm: LLMService,
-        context,
-        result_callback,
-    ):
+    async def voicemail_response(self, params: FunctionCallParams):
         """Function the bot can call to leave a voicemail message."""
         message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and then terminate the call:
 
                     'Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you.'"""
 
-        await result_callback(message)
+        await params.result_callback(message)
 
-    async def human_conversation(
-        self,
-        function_name,
-        tool_call_id,
-        args,
-        llm: LLMService,
-        context,
-        result_callback,
-    ):
+    async def human_conversation(self, params: FunctionCallParams):
         """Function called when bot detects it's talking to a human."""
         # Update state to indicate human was detected
         self.session_manager.call_flow_state.set_human_detected()
-        await llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
 
 
 # ------------ MAIN FUNCTION ------------
@@ -182,12 +166,7 @@ async def main(
     # ------------ FUNCTION DEFINITIONS ------------
 
     async def terminate_call(
-        function_name,
-        tool_call_id,
-        args,
-        llm: LLMService,
-        context,
-        result_callback,
+        params: FunctionCallParams,
         session_manager=None,
     ):
         """Function the bot can call to terminate the call."""
@@ -195,7 +174,7 @@ async def main(
             # Set call terminated flag in the session manager
             session_manager.call_flow_state.set_call_terminated()
 
-        await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     # ------------ VOICEMAIL DETECTION PHASE SETUP ------------
 
@@ -275,7 +254,7 @@ async def main(
         "switch_to_human_conversation", handlers.human_conversation
     )
     voicemail_detection_llm.register_function(
-        "terminate_call", functools.partial(terminate_call, session_manager=session_manager)
+        "terminate_call", lambda params: terminate_call(params, session_manager)
     )
 
     # Set up audio collector for handling audio input

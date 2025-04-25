@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Function calls now receive a single parameter `FunctionCallParams` instead of
+  `(function_name, tool_call_id, args, llm, context, result_callback)` which is
+  now deprecated.
+
 - Changed the user aggregator timeout for late transcriptions from 1.0s to 0.5s
   (`LLMUserAggregatorParams.aggregation_timeout`). Sometimes, the STT services
   might give us more than one transcription which could come after the user
@@ -51,6 +55,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not a very common case.
 
 ### Deprecated
+
+- Function calls with parameters `(function_name, tool_call_id, args, llm,
+  context, result_callback)` are deprectated, use a single `FunctionCallParams`
+  parameter instead.
 
 - `TransportParams.camera_*` parameters are now deprecated, use
   `TransportParams.video_*` instead.
