@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
@@ -394,13 +395,14 @@ class AWSNovaSonicService(LLMService):
         )
         self._content_being_received = content
 
+        # print(f"[pk] content start: {self._content_being_received}")
+
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.AUDIO:
-                # Report that *equivalent* of TTS (this is a speech-to-speech model) started
-                # print("[pk] TTS started")
-                await self.push_frame(TTSStartedFrame())
-
-        # print(f"[pk] content start: {self._content_being_received}")
+                if not self._assistant_is_responding:
+                    # The assistant has started responding.
+                    self._assistant_is_responding = True
+                    await self._report_assistant_started_responding()
 
     async def _handle_text_output_event(self, event_json):
         # This should never happen
@@ -448,49 +450,76 @@ class AWSNovaSonicService(LLMService):
         self._content_being_received = None
 
         if content.role == Role.ASSISTANT:
-            if content.type == ContentType.AUDIO:
-                # We got to the end of a chunk of the assistant's audio.
-                # Report that *equivalent* of TTS (this is a speech-to-speech model) stopped.
-                # print("[pk] TTS stopped")
-                await self.push_frame(TTSStoppedFrame())
-            elif content.type == ContentType.TEXT:
+            if content.type == ContentType.TEXT:
                 # Ignore non-final text, and the "interrupted" message (which isn't meaningful text)
                 if content.text_stage == TextStage.FINAL and stop_reason != "INTERRUPTED":
-                    # TODO: the way we're tracking the start and stop of the assistant response here
-                    # is rather busted, and results in way too many "responses" being put into the
-                    # context (every final text content block is treated as its own response).
-                    # We *should* only record that an assistant response has ended when:
-                    # - the assistant truly finished its turn (stop_reason is END_TURN)
-                    # - when this is the next text content block after an INTERRUPTED has occurred
-                    # BUT it seems like there's a bug where, if there are multiple assistant text
-                    # content blocks, the *first* one gets marked END_TURN rather than the last.
-                    print("[pk] LLM full response started")
-                    self._assistant_is_responding = True
-                    await self.push_frame(LLMFullResponseStartFrame())
+                    # TODO: shoot, for now we may need to "restart" the assistant responding because
+                    # every FINAL text block has to be treated as its own response. See below TODO
+                    # for more information.
+                    if not self._assistant_is_responding:
+                        self._assistant_is_responding = True
+                        await self._report_assistant_started_responding()
 
                     if self._assistant_is_responding:
-                        # Add text to the ongoing reported assistant response
-                        print(f"[pk] LLM text: {content.text_content}")
-                        await self.push_frame(LLMTextFrame(content.text_content))
+                        # Text added to the ongoing assistant response
+                        await self._report_assistant_response_text_added(content.text_content)
 
-                        # Report that the assistant has finished their response.
-                        # TODO: kinda busted. see TODO comment above.
-                        print("[pk] LLM full response ended")
-                        await self.push_frame(LLMFullResponseEndFrame())
+                        # Consider the assistant finished with their response.
+                        # TODO: the way we're tracking the start/stop of the assistant response
+                        # is rather busted, and results in way too many "responses" being put into
+                        # the context (every FINAL text content block is treated as its own
+                        # response). We *should* only record that an assistant response has ended
+                        # when:
+                        # - the assistant truly finished its turn (stop_reason is END_TURN)
+                        # - when the assistant has been interrupted, and outputs what's actually
+                        #   been said
+                        # BUT it seems like there's a bug where, if there are multiple assistant
+                        # text content blocks, the *first* one gets marked END_TURN rather than the
+                        # last. It's similarly unclear how to determine what the last text content
+                        # block will be after an interruption.
                         self._assistant_is_responding = False
+                        await self._report_assistant_stopped_responding()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
-                    # Report a bit of user transcription
-                    print(f"[pk] transcription: {content.text_content}")
-                    await self.push_frame(
-                        TranscriptionFrame(
-                            text=content.text_content, user_id="", timestamp=time_now_iso8601()
-                        )
-                    )
+                    # User transcription text added
+                    await self._report_user_transcription_text_added(content.text_content)
 
         self._content_being_received = False
 
     async def _handle_completion_end_event(self, event_json):
         # print("[pk] completion end")
         pass
+
+    async def _report_assistant_started_responding(self):
+        # Report that the assistant has started their response.
+        print("[pk] LLM full response started")
+        await self.push_frame(LLMFullResponseStartFrame())
+
+        # Report that equivalent of TTS (this is a speech-to-speech model) started
+        print("[pk] TTS started")
+        await self.push_frame(TTSStartedFrame())
+
+    async def _report_assistant_response_text_added(self, text):
+        # Report some text added to the ongoing assistant response
+        print(f"[pk] LLM text: {text}")
+        await self.push_frame(LLMTextFrame(text))
+
+        # Report some text added to the *equivalent* of TTS (this is a speech-to-speech model)
+        print(f"[pk] TTS text: {text}")
+        await self.push_frame(TTSTextFrame(text))
+
+    async def _report_assistant_stopped_responding(self):
+        # Report that the assistant has finished their response.
+        print("[pk] LLM full response ended")
+        await self.push_frame(LLMFullResponseEndFrame())
+
+        # Report that equivalent of TTS (this is a speech-to-speech model) stopped.
+        print("[pk] TTS stopped")
+        await self.push_frame(TTSStoppedFrame())
+
+    async def _report_user_transcription_text_added(self, text):
+        print(f"[pk] transcription: {text}")
+        await self.push_frame(
+            TranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
+        )
