@@ -47,6 +47,7 @@ Customization options:
 - change the function calling logic
 """
 
+import argparse
 import json
 import os
 import time
@@ -152,7 +153,7 @@ async def query_knowledge_base(
     await result_callback(response.text)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -160,9 +161,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

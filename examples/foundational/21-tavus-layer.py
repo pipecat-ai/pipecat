@@ -47,9 +47,8 @@ async def main():
             token=None,
             bot_name="Pipecat bot",
             params=DailyParams(
-                vad_enabled=True,
+                audio_in_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,
             ),
         )
 

@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -24,7 +25,7 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     # Initialize the SmallWebRTCTransport with the connection
@@ -33,9 +34,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_in_enabled=False,
-            vad_enabled=True,
-            vad_audio_passthrough=True,
+            video_in_enabled=False,
             # set stop_secs to something roughly similar to the internal setting
             # of the Multimodal Live api, just to align events.
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),

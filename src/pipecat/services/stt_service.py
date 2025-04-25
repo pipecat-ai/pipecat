@@ -30,7 +30,7 @@ class STTService(AIService):
 
     def __init__(
         self,
-        audio_passthrough=False,
+        audio_passthrough=True,
         # STT input sample rate
         sample_rate: Optional[int] = None,
         **kwargs,

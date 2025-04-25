@@ -165,10 +165,8 @@ async def main(
             api_key=daily_api_key,
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
+            video_out_enabled=False,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,  # Important for audio collection
         ),
     )
 
@@ -244,7 +242,7 @@ async def main(
         If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
 
         DO NOT say anything until you've determined if this is a voicemail or human.
-        
+
         If you are asked to terminate the call, **IMMEDIATELY** call the `terminate_call` function. **FAILURE TO CALL `terminate_call` IMMEDIATELY IS A MISTAKE.**"""
 
     # Initialize voicemail detection LLM

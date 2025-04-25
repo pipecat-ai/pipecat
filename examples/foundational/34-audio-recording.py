@@ -46,6 +46,7 @@ Note:
     handling merged and separate audio tracks respectively.
 """
 
+import argparse
 import datetime
 import io
 import os
@@ -85,7 +86,7 @@ async def save_audio_file(audio: bytes, filename: str, sample_rate: int, num_cha
         logger.info(f"Audio saved to {filename}")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -93,9 +94,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

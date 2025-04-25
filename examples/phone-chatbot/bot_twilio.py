@@ -48,8 +48,7 @@ async def main(room_url: str, token: str, callId: str, sipUri: str):
             dialin_settings=None,  # Not required for Twilio
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
+            video_out_enabled=False,
             vad_analyzer=SileroVADAnalyzer(),
             transcription_enabled=True,
         ),

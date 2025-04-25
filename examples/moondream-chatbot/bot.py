@@ -141,12 +141,12 @@ async def main():
             token,
             "Chatbot",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                camera_out_enabled=True,
-                camera_out_width=1024,
-                camera_out_height=576,
+                video_out_enabled=True,
+                video_out_width=1024,
+                video_out_height=576,
                 transcription_enabled=True,
-                vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
         )

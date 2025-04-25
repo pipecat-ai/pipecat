@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 from dataclasses import dataclass
 
@@ -63,7 +64,7 @@ class MonthPrepender(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     """Run the Calendar Month Narration bot using WebRTC transport.
 
     Args:
@@ -77,9 +78,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         webrtc_connection=webrtc_connection,
         params=TransportParams(
             audio_out_enabled=True,
-            camera_out_enabled=True,
-            camera_out_width=1024,
-            camera_out_height=1024,
+            video_out_enabled=True,
+            video_out_width=1024,
+            video_out_height=1024,
         ),
     )
 
