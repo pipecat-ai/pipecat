@@ -20,6 +20,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -27,9 +28,9 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
-    location = arguments["location"]
-    await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
+async def get_weather(params: FunctionCallParams):
+    location = params.arguments["location"]
+    await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):

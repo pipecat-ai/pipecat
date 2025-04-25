@@ -64,6 +64,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -107,11 +108,9 @@ Here is the knowledge base you have access to:
 genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 
-async def query_knowledge_base(
-    function_name, tool_call_id, arguments, llm, context, result_callback
-):
+async def query_knowledge_base(params: FunctionCallParams):
     """Query the knowledge base for the answer to the question."""
-    logger.info(f"Querying knowledge base for question: {arguments['question']}")
+    logger.info(f"Querying knowledge base for question: {params.arguments['question']}")
     client = genai.GenerativeModel(
         model_name=RAG_MODEL,
         system_instruction=RAG_PROMPT,
@@ -122,11 +121,11 @@ async def query_knowledge_base(
     )
     # for our case, the first two messages are the instructions and the user message
     # so we remove them.
-    conversation_turns = context.messages[2:]
+    conversation_turns = params.context.messages[2:]
     # convert to standard messages
     messages = []
     for turn in conversation_turns:
-        messages.extend(context.to_standard_messages(turn))
+        messages.extend(params.context.to_standard_messages(turn))
 
     def _is_tool_call(turn):
         if turn.get("role", None) == "tool":
@@ -150,7 +149,7 @@ async def query_knowledge_base(
     end = time.perf_counter()
     logger.info(f"Time taken: {end - start:.2f} seconds")
     logger.info(response.text)
-    await result_callback(response.text)
+    await params.result_callback(response.text)
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
