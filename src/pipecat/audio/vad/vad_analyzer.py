@@ -6,7 +6,7 @@
 
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -88,24 +88,12 @@ class VADAnalyzer(ABC):
         volume = calculate_audio_volume(audio, self.sample_rate)
         return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
 
-    def analyze_audio(self, buffer) -> Tuple[VADState, Optional[str]]:
-        """Analyze audio for voice activity.
-
-        Args:
-            buffer: Audio buffer to analyze
-
-        Returns:
-            Tuple containing:
-                - VADState: Current VAD state
-                - Optional[str]: Event type if a speech event occurred ("speech_started",
-                "speech_stopped"), or None if no event occurred
-        """
+    def analyze_audio(self, buffer) -> VADState:
         self._vad_buffer += buffer
-        event_type = None
 
         num_required_bytes = self._vad_frames_num_bytes
         if len(self._vad_buffer) < num_required_bytes:
-            return self._vad_state, event_type
+            return self._vad_state
 
         audio_frames = self._vad_buffer[:num_required_bytes]
         self._vad_buffer = self._vad_buffer[num_required_bytes:]
@@ -144,7 +132,6 @@ class VADAnalyzer(ABC):
         ):
             self._vad_state = VADState.SPEAKING
             self._vad_starting_count = 0
-            event_type = "speech_started"
 
         if (
             self._vad_state == VADState.STOPPING
@@ -152,6 +139,5 @@ class VADAnalyzer(ABC):
         ):
             self._vad_state = VADState.QUIET
             self._vad_stopping_count = 0
-            event_type = "speech_stopped"
 
-        return self._vad_state, event_type
+        return self._vad_state
