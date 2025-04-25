@@ -185,9 +185,7 @@ async def bot(args: DailySessionArguments):
         DailyParams(
             audio_in_filter=None if LOCAL_RUN else KrispFilter(),
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 
@@ -213,9 +211,7 @@ async def local_daily():
                 bot_name="Bot",
                 params=DailyParams(
                     audio_out_enabled=True,
-                    vad_enabled=True,
                     vad_analyzer=SileroVADAnalyzer(),
-                    vad_audio_passthrough=True,
                 ),
             )
 
