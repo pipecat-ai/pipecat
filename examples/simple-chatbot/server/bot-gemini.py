@@ -17,13 +17,19 @@ the conversation flow using Gemini's streaming capabilities.
 """
 
 import asyncio
+import datetime
+import io
 import os
 import sys
+import wave
 
+import aiofiles
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
+
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -67,6 +73,28 @@ sprites.extend(flipped)
 # Define static and animated states
 quiet_frame = sprites[0]  # Static frame for when bot is listening
 talking_frame = SpriteFrame(images=sprites)  # Animation sequence for when bot is talking
+
+# Create the recordings directory if it doesn't exist
+os.makedirs("recordings", exist_ok=True)
+
+
+async def save_audio(audio: bytes, sample_rate: int, num_channels: int, name: str):
+    if len(audio) > 0:
+        filename = os.path.join(
+            "recordings",
+            f"{name}_conversation_recording{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav",
+        )
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wf:
+                wf.setsampwidth(2)
+                wf.setnchannels(num_channels)
+                wf.setframerate(sample_rate)
+                wf.writeframes(audio)
+            async with aiofiles.open(filename, "wb") as file:
+                await file.write(buffer.getvalue())
+        print(f"Merged audio saved to {filename}")
+    else:
+        print("No audio data to save")
 
 
 class TalkingAnimation(FrameProcessor):
@@ -121,11 +149,12 @@ async def main():
             token,
             "Chatbot",
             DailyParams(
-                audio_in_enabled=True,
                 audio_out_enabled=True,
-                video_out_enabled=True,
-                video_out_width=1024,
-                video_out_height=576,
+                camera_out_enabled=True,
+                camera_out_width=1024,
+                camera_out_height=576,
+                vad_enabled=True,
+                vad_audio_passthrough=True,
                 vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
             ),
         )
@@ -156,6 +185,8 @@ async def main():
         #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
+        audiobuffer = AudioBufferProcessor(enable_turn_audio=True)
+
         pipeline = Pipeline(
             [
                 transport.input(),
@@ -164,6 +195,7 @@ async def main():
                 llm,
                 ta,
                 transport.output(),
+                audiobuffer,
                 context_aggregator.assistant(),
             ]
         )
@@ -179,6 +211,18 @@ async def main():
         )
         await task.queue_frame(quiet_frame)
 
+        @audiobuffer.event_handler("on_audio_data")
+        async def on_audio_data(buffer, audio, sample_rate, num_channels):
+            await save_audio(audio, sample_rate, num_channels, "full")
+
+        @audiobuffer.event_handler("on_user_turn_audio_data")
+        async def on_user_turn_audio_data(buffer, audio, sample_rate, num_channels):
+            await save_audio(audio, sample_rate, num_channels, "user")
+
+        @audiobuffer.event_handler("on_bot_turn_audio_data")
+        async def on_bot_turn_audio_data(buffer, audio, sample_rate, num_channels):
+            await save_audio(audio, sample_rate, num_channels, "bot")
+
         @rtvi.event_handler("on_client_ready")
         async def on_client_ready(rtvi):
             await rtvi.set_bot_ready()
@@ -187,6 +231,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
+            await audiobuffer.start_recording()
             await transport.capture_participant_transcription(participant["id"])
 
         @transport.event_handler("on_participant_left")
