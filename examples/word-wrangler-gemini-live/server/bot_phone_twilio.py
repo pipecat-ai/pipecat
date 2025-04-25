@@ -585,9 +585,7 @@ async def main(ws: WebSocket):
             audio_in_filter=KrispFilter(),
             audio_out_enabled=True,
             add_wav_header=False,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
             serializer=serializer,
         ),
     )
