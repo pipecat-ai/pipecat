@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `VADUserStartedSpeakingFrame` and `VADUserStoppedSpeakingFrame`,
+  indicating when the VAD detected the user to start and stop speaking. These
+  events are helpful when using smart turn detection, as the user's stop time
+  can differ from when their turn ends (signified by UserStoppedSpeakingFrame).
+
 - Added `TranslationFrame`, a new frame type that contains a translated
   transcription.
 
