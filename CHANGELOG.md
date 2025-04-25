@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `TranslationFrame`, a new frame type that contains a translated
+  transcription.
+
 - Added `TransportParams.audio_in_passthrough`. If set (the default), incoming
   audio will be pushed downstream.
 
@@ -16,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tools.
 
 ### Changed
+
+- Updated `GladiaSTTService` to output a `TranslationFrame` when specifying a
+  `translation` and `translation_config`.
 
 - STT services now passthrough audio frames by default. This allows you to add
   audio recording without worrying about what's wrong in your pipeline when it
@@ -48,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added 04 foundational examples for client/server transports. Also, renamed
   `29-livekit-audio-chat.py` to `04b-transports-livekit.py`.
+
+- Added foundational example `13c-gladia-translation.py` showing how to use
+  `TranscriptionFrame` and `TranslationFrame`.
 
 ## [0.0.65] - 2025-04-23 "Sant Jordi's release" 🌹📕
 
