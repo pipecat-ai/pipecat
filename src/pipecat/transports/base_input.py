@@ -32,6 +32,8 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -228,9 +230,13 @@ class BaseInputTransport(FrameProcessor):
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = VADState.QUIET
         if self.vad_analyzer:
-            state = await self.get_event_loop().run_in_executor(
+            state, event_type = await self.get_event_loop().run_in_executor(
                 self._executor, self.vad_analyzer.analyze_audio, audio_frame.audio
             )
+
+            if event_type:
+                await self._handle_vad_event(event_type)
+
         return state
 
     async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState):
@@ -259,6 +265,16 @@ class BaseInputTransport(FrameProcessor):
 
             vad_state = new_vad_state
         return vad_state
+
+    async def _handle_vad_event(self, event_type: str):
+        """Handle VAD speech events by creating and pushing appropriate frames."""
+        if event_type == "speech_started":
+            logger.debug("VAD detected definitive speech start")
+            await self.push_frame(VADUserStartedSpeakingFrame())
+
+        elif event_type == "speech_stopped":
+            logger.debug("VAD detected definitive speech stop")
+            await self.push_frame(VADUserStoppedSpeakingFrame())
 
     async def _handle_end_of_turn(self):
         if self.turn_analyzer:
