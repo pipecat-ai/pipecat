@@ -50,7 +50,7 @@ from pipecat.utils.time import time_now_iso8601
 
 @dataclass
 class LLMUserAggregatorParams:
-    aggregation_timeout: float = 1.0
+    aggregation_timeout: float = 0.5
 
 
 @dataclass
