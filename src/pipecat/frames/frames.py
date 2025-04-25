@@ -588,6 +588,20 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class VADUserStartedSpeakingFrame(SystemFrame):
+    """Frame emitted when VAD detects the user has definitively started speaking."""
+
+    pass
+
+
+@dataclass
+class VADUserStoppedSpeakingFrame(SystemFrame):
+    """Frame emitted when VAD detects the user has definitively stopped speaking."""
+
+    pass
+
+
+@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
