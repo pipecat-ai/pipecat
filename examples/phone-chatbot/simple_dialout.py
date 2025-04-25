@@ -22,7 +22,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -77,11 +77,9 @@ async def main(
 
     # ------------ FUNCTION DEFINITIONS ------------
 
-    async def terminate_call(
-        function_name, tool_call_id, args, llm: LLMService, context, result_callback
-    ):
+    async def terminate_call(params: FunctionCallParams):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
-        await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     # Define function schemas for tools
     terminate_call_function = FunctionSchema(

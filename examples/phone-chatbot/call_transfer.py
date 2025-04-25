@@ -29,7 +29,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 
@@ -220,12 +220,7 @@ async def main(
 
     async def terminate_call(
         task: PipelineTask,  # Pipeline task reference
-        function_name,
-        tool_call_id,
-        args,
-        llm: LLMService,
-        context: OpenAILLMContext,
-        result_callback,
+        params: FunctionCallParams,
     ):
         """Function the bot can call to terminate the call."""
         # Create a message to add
@@ -237,16 +232,9 @@ async def main(
         await task.queue_frames([LLMMessagesFrame(messages)])
 
         # Then end the call
-        await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
-    async def dial_operator(
-        function_name: str,
-        tool_call_id: str,
-        args: dict,
-        llm: LLMService,
-        context: dict,
-        result_callback: callable,
-    ):
+    async def dial_operator(params: FunctionCallParams):
         """Function the bot can call to dial an operator."""
         dialout_setting = session_manager.call_flow_state.get_current_dialout_setting()
         if call_config_manager.get_transfer_mode() == "dialout":
@@ -306,9 +294,7 @@ async def main(
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     # Register functions with the LLM
-    llm.register_function(
-        "terminate_call", lambda *args, **kwargs: terminate_call(task, *args, **kwargs)
-    )
+    llm.register_function("terminate_call", lambda params: terminate_call(task, params))
     llm.register_function("dial_operator", dial_operator)
 
     # Initialize LLM context and aggregator
