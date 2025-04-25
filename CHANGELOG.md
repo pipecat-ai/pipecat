@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Short utterances not detected by VAD while the bot is speaking are now
+  ignored. This reduces the amount of bot interruptions significantly providing
+  a more natural conversation experience.
+
 - Updated `GladiaSTTService` to output a `TranslationFrame` when specifying a
   `translation` and `translation_config`.
 
