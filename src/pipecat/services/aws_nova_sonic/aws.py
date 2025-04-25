@@ -30,12 +30,14 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     StartFrame,
+    TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.time import time_now_iso8601
 
 
 class Role(Enum):
@@ -398,19 +400,30 @@ class AWSNovaSonicService(LLMService):
                 # print("[pk] TTS started")
                 await self.push_frame(TTSStartedFrame())
 
-        print(f"[pk] content start: {self._content_being_received}")
+        # print(f"[pk] content start: {self._content_being_received}")
 
     async def _handle_text_output_event(self, event_json):
+        # This should never happen
+        if not self._content_being_received:
+            return
+
         text_content = event_json["textOutput"]["content"]
-        print(f"[pk] text output. content: {text_content}")
+        # print(f"[pk] text output. content: {text_content}")
 
         # Bookkeeping: augment the current content being received with text
+        # Assumption: only one text content per content block
         content = self._content_being_received
         content.text_content = text_content
 
     async def _handle_audio_output_event(self, event_json):
+        # This should never happen
+        if not self._content_being_received:
+            return
+
+        # Get audio
         audio_content = event_json["audioOutput"]["content"]
         # print(f"[pk] audio output. content: {len(audio_content)}")
+
         # Push audio frame
         audio = base64.b64decode(audio_content)
         # TODO: make sample rate + channels (used in multiple places) consts
@@ -422,15 +435,19 @@ class AWSNovaSonicService(LLMService):
         await self.push_frame(frame)
 
     async def _handle_content_end_event(self, event_json):
+        # This should never happen
+        if not self._content_being_received:
+            return
+
         content_end = event_json["contentEnd"]
         stop_reason = content_end["stopReason"]
-        print(f"[pk] content end: {self._content_being_received}.\n  stop_reason: {stop_reason}")
+        # print(f"[pk] content end: {self._content_being_received}.\n  stop_reason: {stop_reason}")
 
         # Bookkeeping: clear current content being received
         content = self._content_being_received
         self._content_being_received = None
 
-        if content and content.role == Role.ASSISTANT:
+        if content.role == Role.ASSISTANT:
             if content.type == ContentType.AUDIO:
                 # We got to the end of a chunk of the assistant's audio.
                 # Report that *equivalent* of TTS (this is a speech-to-speech model) stopped.
@@ -447,20 +464,30 @@ class AWSNovaSonicService(LLMService):
                     # - when this is the next text content block after an INTERRUPTED has occurred
                     # BUT it seems like there's a bug where, if there are multiple assistant text
                     # content blocks, the *first* one gets marked END_TURN rather than the last.
-                    # print("[pk] LLM full response started")
+                    print("[pk] LLM full response started")
                     self._assistant_is_responding = True
                     await self.push_frame(LLMFullResponseStartFrame())
 
                     if self._assistant_is_responding:
                         # Add text to the ongoing reported assistant response
-                        # print(f"[pk] LLM text: {content.text_content}")
+                        print(f"[pk] LLM text: {content.text_content}")
                         await self.push_frame(LLMTextFrame(content.text_content))
 
                         # Report that the assistant has finished their response.
                         # TODO: kinda busted. see TODO comment above.
-                        # print("[pk] LLM full response ended")
+                        print("[pk] LLM full response ended")
                         await self.push_frame(LLMFullResponseEndFrame())
                         self._assistant_is_responding = False
+        elif content.role == Role.USER:
+            if content.type == ContentType.TEXT:
+                if content.text_stage == TextStage.FINAL:
+                    # Report a bit of user transcription
+                    print(f"[pk] transcription: {content.text_content}")
+                    await self.push_frame(
+                        TranscriptionFrame(
+                            text=content.text_content, user_id="", timestamp=time_now_iso8601()
+                        )
+                    )
 
         self._content_being_received = False
 
