@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- STT services now passthrough audio frames by default. This allows you to add
+  audio recording without worrying about what's wrong in your pipeline when it
+  doesn't work the first time.
+
 - Input transports now always push audio downstream unless disabled with
   `TransportParams.audio_in_passthrough`. After many Pipecat releases, we
   realized this is the common use case. There are use cases where the input
