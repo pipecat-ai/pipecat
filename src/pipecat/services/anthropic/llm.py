@@ -202,6 +202,12 @@ class AnthropicLLMService(LLMService):
             tool_use_block = None
             json_accumulator = ""
 
+            total_func_calls = 0
+            async for event in response:
+                if event.type == "content_block_start" and event.content_block.type == "tool_use":
+                    total_func_calls += 1
+
+            current_func_call = 0
             async for event in response:
                 # logger.debug(f"Anthropic LLM event: {event}")
 
@@ -226,12 +232,15 @@ class AnthropicLLMService(LLMService):
                     and event.delta.stop_reason == "tool_use"
                 ):
                     if tool_use_block:
+                        run_llm = current_func_call == total_func_calls - 1
                         await self.call_function(
                             context=context,
                             tool_call_id=tool_use_block.id,
                             function_name=tool_use_block.name,
                             arguments=json.loads(json_accumulator) if json_accumulator else dict(),
+                            run_llm=run_llm,
                         )
+                        current_func_call += 1
 
                 # Calculate usage. Do this here in its own if statement, because there may be usage
                 # data embedded in messages that we do other processing for, above.

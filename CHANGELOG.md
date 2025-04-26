@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Function calls can now be executed sequentially (in the order received in the
+  completion) by passing `run_in_parallel=False` when creating your LLM
+  service. By default, function calls run in parallel, so if the LLM completion
+  returns 2 or more function calls they run concurrently. In both cases,
+  concurrently and sequentailly, a new LLM completion will run when the last
+  function call finishes.
+
 - Added `PipelineTask.add_observer()` and `PipelineTask.remove_observer()` to
   allow mangaging observers at runtime. This is useful for cases where the task
   is passed around to other code components that might want to observe the
