@@ -112,8 +112,10 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             logger.debug(
                 f"Function list: {functions_list}, Arguments list: {arguments_list}, Tool ID list: {tool_id_list}"
             )
+
+            total_func_calls = len(functions_list)
             for index, (function_name, arguments, tool_id) in enumerate(
-                zip(functions_list, arguments_list, tool_id_list), start=1
+                zip(functions_list, arguments_list, tool_id_list)
             ):
                 if function_name == "":
                     # TODO: Remove the _process_context method once Google resolves the bug
@@ -121,8 +123,8 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
                     # which currently results in an empty function name('').
                     continue
                 if self.has_function(function_name):
-                    run_llm = False
                     arguments = json.loads(arguments)
+                    run_llm = index == total_func_calls - 1
                     await self.call_function(
                         context=context,
                         function_name=function_name,

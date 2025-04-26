@@ -260,11 +260,12 @@ class BaseOpenAILLMService(LLMService):
             arguments_list.append(arguments)
             tool_id_list.append(tool_call_id)
 
+            total_func_calls = len(functions_list)
             for index, (function_name, arguments, tool_id) in enumerate(
-                zip(functions_list, arguments_list, tool_id_list), start=1
+                zip(functions_list, arguments_list, tool_id_list)
             ):
                 if self.has_function(function_name):
-                    run_llm = False
+                    run_llm = index == total_func_calls - 1
                     arguments = json.loads(arguments)
                     await self.call_function(
                         context=context,
