@@ -891,12 +891,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
             return
         if not self._context:
             logger.error("Function calls are not supported without a context object.")
-        for call in function_calls:
+        total_items = len(function_calls)
+        for index, call in enumerate(function_calls):
+            run_llm = index == total_items - 1
             await self.call_function(
                 context=self._context,
                 tool_call_id=call.id,
                 function_name=call.name,
                 arguments=call.args,
+                run_llm=run_llm,
             )
 
     @traced_gemini_live(operation="llm_response")
