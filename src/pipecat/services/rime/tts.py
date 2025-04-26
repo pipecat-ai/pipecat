@@ -400,6 +400,13 @@ class RimeHttpTTSService(TTSService):
         payload["modelId"] = self._model_name
         payload["samplingRate"] = self.sample_rate
 
+        # Arcana does not support PCM audio
+        if payload["modelId"] == "arcana":
+            headers["Accept"] = "audio/wav"
+            need_to_strip_wav_header = True
+        else:
+            need_to_strip_wav_header = False
+
         try:
             await self.start_ttfb_metrics()
 
@@ -420,6 +427,10 @@ class RimeHttpTTSService(TTSService):
                 CHUNK_SIZE = 1024
 
                 async for chunk in response.content.iter_chunked(CHUNK_SIZE):
+                    if need_to_strip_wav_header and chunk.startswith(b"RIFF"):
+                        chunk = chunk[44:]
+                        need_to_strip_wav_header = False
+
                     if len(chunk) > 0:
                         await self.stop_ttfb_metrics()
                         frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
