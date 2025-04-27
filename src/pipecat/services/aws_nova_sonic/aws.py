@@ -30,11 +30,15 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     StartFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
@@ -131,6 +135,15 @@ class AWSNovaSonicService(LLMService):
         if isinstance(frame, InputAudioRawFrame):
             # TODO: check if _audio_input_paused? what causes that?
             await self._send_user_audio_event(frame)
+        # TODO: do we need to do anything for these?
+        elif isinstance(frame, StartInterruptionFrame):
+            print("[pk] StartInterruptionFrame")
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            print("[pk] UserStartedSpeakingFrame")
+        elif isinstance(frame, StopInterruptionFrame):
+            print("[pk] StopInterruptionFrame")
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            print("[pk] UserStoppedSpeakingFrame")
 
         await self.push_frame(frame, direction)
 
