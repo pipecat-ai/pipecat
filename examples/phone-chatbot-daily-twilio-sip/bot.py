@@ -136,6 +136,25 @@ async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None
             logger.error(f"Failed to forward call: {str(e)}")
             raise
 
+    @transport.event_handler("on_dialin_connected")
+    async def on_dialin_connected(transport, data):
+        logger.debug(f"Dial-in connected: {data}")
+
+    @transport.event_handler("on_dialin_stopped")
+    async def on_dialin_stopped(transport, data):
+        logger.debug(f"Dial-in stopped: {data}")
+
+    @transport.event_handler("on_dialin_error")
+    async def on_dialin_error(transport, data):
+        logger.error(f"Dial-in error: {data}")
+        # If there is an error, the bot should leave the call
+        # This may be also handled in on_participant_left with
+        # await task.cancel()
+
+    @transport.event_handler("on_dialin_warning")
+    async def on_dialin_warning(transport, data):
+        logger.warning(f"Dial-in warning: {data}")
+
     # Run the pipeline
     runner = PipelineRunner()
     await runner.run(task)
