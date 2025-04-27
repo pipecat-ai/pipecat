@@ -29,13 +29,23 @@ async def get_daily_helper(session: Optional[aiohttp.ClientSession] = None) -> D
     )
 
 
-async def create_sip_room(session: Optional[aiohttp.ClientSession] = None) -> Dict[str, str]:
-    """Create a Daily room with SIP capabilities for phone calls."""
+async def create_sip_room(
+    session: Optional[aiohttp.ClientSession] = None, caller_phone: str = "unknown-caller"
+) -> Dict[str, str]:
+    """Create a Daily room with SIP capabilities for phone calls.
+
+    Args:
+        session: Optional aiohttp session to use for API calls
+        caller_phone: The phone number of the caller to use in display name
+
+    Returns:
+        Dictionary with room URL, token, and SIP endpoint
+    """
     daily_helper = await get_daily_helper(session)
 
     # Configure SIP parameters
     sip_params = DailyRoomSipParams(
-        display_name="phone-user",
+        display_name=caller_phone,
         video=False,
         sip_mode="dial-in",
         num_endpoints=1,
