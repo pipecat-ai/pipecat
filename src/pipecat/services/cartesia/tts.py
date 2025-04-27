@@ -166,7 +166,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "output_format": self._settings["output_format"],
             "language": self._settings["language"],
             "add_timestamps": add_timestamps,
-            "use_original_timestamps": True,
+            "use_original_timestamps": True if self.model_name == "sonic-2" else False,
         }
         return json.dumps(msg)
 
