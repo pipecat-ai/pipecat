@@ -1,7 +1,7 @@
 """Helper functions for interacting with the Daily API."""
 
 import os
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 import aiohttp
 from dotenv import load_dotenv

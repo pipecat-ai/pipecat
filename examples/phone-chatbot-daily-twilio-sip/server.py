@@ -21,10 +21,10 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Create aiohttp session to be used for Daily API calls
-    app.session = aiohttp.ClientSession()
+    app.state.session = aiohttp.ClientSession()
     yield
     # Close session when shutting down
-    await app.session.close()
+    await app.state.session.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -51,7 +51,7 @@ async def handle_call(request: Request):
 
         # Create a Daily room with SIP capabilities
         try:
-            room_details = await create_sip_room(request.app.session, caller_phone)
+            room_details = await create_sip_room(request.app.state.session, caller_phone)
         except Exception as e:
             print(f"Error creating Daily room: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to create Daily room: {str(e)}")
