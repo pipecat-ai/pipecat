@@ -83,9 +83,12 @@ async def handle_call(request: Request):
             raise HTTPException(status_code=500, detail=f"Failed to start bot: {str(e)}")
 
         # Generate TwiML response to put the caller on hold with music
+        # You can replace the URL with your own music file
+        # or use Twilio's built-in music on hold
+        # https://www.twilio.com/docs/voice/twiml/play#music-on-hold
         resp = VoiceResponse()
         resp.play(
-            url="http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-Borghestral.mp3",
+            url="https://therapeutic-crayon-2467.twil.io/assets/US_ringback_tone.mp3",
             loop=10,
         )
 
