@@ -45,11 +45,13 @@ async def handle_call(request: Request):
         if not call_sid:
             raise HTTPException(status_code=400, detail="Missing CallSid in request")
 
-        print(f"Processing call with ID: {call_sid}")
+        # Extract the caller's phone number
+        caller_phone = str(data.get("From", "unknown-caller"))
+        print(f"Processing call with ID: {call_sid} from {caller_phone}")
 
         # Create a Daily room with SIP capabilities
         try:
-            room_details = await create_sip_room(request.app.session)
+            room_details = await create_sip_room(request.app.session, caller_phone)
         except Exception as e:
             print(f"Error creating Daily room: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to create Daily room: {str(e)}")
