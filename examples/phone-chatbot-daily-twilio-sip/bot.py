@@ -39,6 +39,8 @@ async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None
     logger.info(f"Starting bot with room: {room_url}")
     logger.info(f"SIP endpoint: {sip_uri}")
 
+    call_already_forwarded = False
+
     # Setup the Daily transport
     transport = DailyTransport(
         room_url,
@@ -113,6 +115,14 @@ async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None
     # Handle call ready to forward
     @transport.event_handler("on_dialin_ready")
     async def on_dialin_ready(transport, cdata):
+        nonlocal call_already_forwarded
+
+        # We only want to forward the call once
+        # The on_dialin_ready event will be triggered for each sip endpoint provisioned
+        if call_already_forwarded:
+            logger.warning("Call already forwarded, ignoring this event.")
+            return
+
         logger.info(f"Forwarding call {call_id} to {sip_uri}")
 
         try:
@@ -121,6 +131,7 @@ async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None
                 twiml=f"<Response><Dial><Sip>{sip_uri}</Sip></Dial></Response>"
             )
             logger.info("Call forwarded successfully")
+            call_already_forwarded = True
         except Exception as e:
             logger.error(f"Failed to forward call: {str(e)}")
             raise
