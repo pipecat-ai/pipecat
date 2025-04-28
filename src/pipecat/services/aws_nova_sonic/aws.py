@@ -90,6 +90,7 @@ class AWSNovaSonicService(LLMService):
         access_key_id: str,
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
+        voice_id: str = "matthew",  # matthew, tiffany, amy
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -99,6 +100,7 @@ class AWSNovaSonicService(LLMService):
         self._region = region
         self._model = model
         self._client: BedrockRuntimeClient = None
+        self._voice_id = voice_id
         self._stream: DuplexEventStream[
             InvokeModelWithBidirectionalStreamInput,
             InvokeModelWithBidirectionalStreamOutput,
@@ -257,7 +259,7 @@ class AWSNovaSonicService(LLMService):
                 "sampleRateHertz": 24000,
                 "sampleSizeBits": 16,
                 "channelCount": 1,
-                "voiceId": "matthew",
+                "voiceId": "{self._voice_id}",
                 "encoding": "base64",
                 "audioType": "SPEECH"
               }}

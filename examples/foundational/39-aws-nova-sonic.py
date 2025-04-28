@@ -66,6 +66,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),
+        voice_id="tiffany", # matthew, tiffany, amy
     )
 
     # Build the pipeline
