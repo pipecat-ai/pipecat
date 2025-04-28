@@ -17,7 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
-    from mem0 import MemoryClient, Memory  # noqa: F401
+    from mem0 import Memory, MemoryClient  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
