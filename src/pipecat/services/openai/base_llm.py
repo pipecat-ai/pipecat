@@ -34,12 +34,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallLLM, LLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
-
-
-class OpenAIUnhandledFunctionException(Exception):
-    pass
 
 
 class BaseOpenAILLMService(LLMService):
@@ -260,24 +256,22 @@ class BaseOpenAILLMService(LLMService):
             arguments_list.append(arguments)
             tool_id_list.append(tool_call_id)
 
-            total_func_calls = len(functions_list)
-            for index, (function_name, arguments, tool_id) in enumerate(
-                zip(functions_list, arguments_list, tool_id_list)
+            function_calls = []
+
+            for function_name, arguments, tool_id in zip(
+                functions_list, arguments_list, tool_id_list
             ):
-                if self.has_function(function_name):
-                    run_llm = index == total_func_calls - 1
-                    arguments = json.loads(arguments)
-                    await self.call_function(
+                arguments = json.loads(arguments)
+                function_calls.append(
+                    FunctionCallLLM(
                         context=context,
+                        tool_call_id=tool_id,
                         function_name=function_name,
                         arguments=arguments,
-                        tool_call_id=tool_id,
-                        run_llm=run_llm,
                     )
-                else:
-                    raise OpenAIUnhandledFunctionException(
-                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
-                    )
+                )
+
+            await self.run_function_calls(function_calls)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

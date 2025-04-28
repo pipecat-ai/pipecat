@@ -52,7 +52,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -891,16 +891,18 @@ class GeminiMultimodalLiveLLMService(LLMService):
             return
         if not self._context:
             logger.error("Function calls are not supported without a context object.")
-        total_items = len(function_calls)
-        for index, call in enumerate(function_calls):
-            run_llm = index == total_items - 1
-            await self.call_function(
+
+        function_calls_llm = [
+            FunctionCallLLM(
                 context=self._context,
-                tool_call_id=call.id,
-                function_name=call.name,
-                arguments=call.args,
-                run_llm=run_llm,
+                tool_call_id=f.id,
+                function_name=f.name,
+                arguments=f.args,
             )
+            for f in function_calls
+        ]
+
+        await self.run_function_calls(function_calls_llm)
 
     @traced_gemini_live(operation="llm_response")
     async def _handle_evt_turn_complete(self, evt):

@@ -21,6 +21,7 @@ from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.frames.frames import (
     Frame,
     FunctionCallCancelFrame,
+    FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     LLMFullResponseEndFrame,
@@ -708,6 +709,7 @@ class AWSBedrockLLMService(LLMService):
             tool_use_block = None
             json_accumulator = ""
 
+            function_calls = []
             for event in response["stream"]:
                 # Handle text content
                 if "contentBlockDelta" in event:
@@ -740,11 +742,13 @@ class AWSBedrockLLMService(LLMService):
 
                             # Only call function if it's not the no_operation tool
                             if not using_noop_tool:
-                                await self.call_function(
-                                    context=context,
-                                    tool_call_id=tool_use_block["id"],
-                                    function_name=tool_use_block["name"],
-                                    arguments=arguments,
+                                function_calls.append(
+                                    FunctionCallFromLLM(
+                                        context=context,
+                                        tool_call_id=tool_use_block["id"],
+                                        function_name=tool_use_block["name"],
+                                        arguments=arguments,
+                                    )
                                 )
                             else:
                                 logger.debug("Ignoring no_operation tool call")
@@ -758,7 +762,7 @@ class AWSBedrockLLMService(LLMService):
                     completion_tokens += usage.get("outputTokens", 0)
                     cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
                     cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
-
+            await self.run_function_calls(function_calls)
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
             # token estimate. The reraise the exception so all the processors running in this task

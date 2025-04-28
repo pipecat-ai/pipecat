@@ -7,7 +7,7 @@
 import asyncio
 import inspect
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Protocol, Type
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Protocol, Sequence, Type
 
 from loguru import logger
 
@@ -45,7 +45,7 @@ class FunctionCallResultCallback(Protocol):
 
 
 @dataclass
-class FunctionCallItem:
+class FunctionCallRegistryItem:
     """Represents an entry of our function call registry.
 
     Attributes:
@@ -61,9 +61,27 @@ class FunctionCallItem:
 
 
 @dataclass
-class FunctionCallRunnerItem:
-    """Represents a function call entry for our function call runner. The runner
-    executes function calls in order.
+class FunctionCallLLM:
+    """Represents a function call returned by the LLM to be registered for execution.
+
+    Attributes:
+        function_name (str): The name of the function.
+        tool_call_id (str): A unique identifier for the function call.
+        arguments (Mapping[str, Any]): The arguments for the function.
+        context (OpenAILLMContext): The LLM context.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+    context: OpenAILLMContext
+
+
+@dataclass
+class FunctionCallRunner:
+    """Represents an internal function call entry to our function call
+    runner. The runner executes function calls in order.
 
     Attributes:
         registry_name (Optional[str]): The function call name registration (could be None).
@@ -74,7 +92,7 @@ class FunctionCallRunnerItem:
 
     """
 
-    registry_item: FunctionCallItem
+    registry_item: FunctionCallRegistryItem
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
@@ -115,7 +133,7 @@ class LLMService(AIService):
         super().__init__(**kwargs)
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
-        self._functions: Dict[Optional[str], FunctionCallItem] = {}
+        self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
         self._function_call_runner_task: Optional[asyncio.Task] = None
 
         self._register_event_handler("on_completion_timeout")
@@ -167,7 +185,7 @@ class LLMService(AIService):
     ):
         # Registering a function with the function_name set to None will run
         # that handler for all functions
-        self._functions[function_name] = FunctionCallItem(
+        self._functions[function_name] = FunctionCallRegistryItem(
             function_name=function_name,
             handler=handler,
             cancel_on_interruption=cancel_on_interruption,
@@ -196,32 +214,32 @@ class LLMService(AIService):
             return True
         return function_name in self._functions.keys()
 
-    async def call_function(
-        self,
-        *,
-        context: OpenAILLMContext,
-        tool_call_id: str,
-        function_name: str,
-        arguments: Mapping[str, Any],
-        run_llm: bool = True,
-    ):
-        if function_name in self._functions.keys():
-            item = self._functions[function_name]
-        elif None in self._functions.keys():
-            item = self._functions[None]
-        else:
-            return
+    async def run_function_calls(self, function_calls: Sequence[FunctionCallLLM]):
+        total_function_calls = len(function_calls)
+        for index, function_call in enumerate(function_calls):
+            if function_call.function_name in self._functions.keys():
+                item = self._functions[function_call.function_name]
+            elif None in self._functions.keys():
+                item = self._functions[None]
+            else:
+                logger.warning(
+                    f"{self} is calling '{function_call.function_name}', but it's not registered."
+                )
+                continue
 
-        runner_item = FunctionCallRunnerItem(
-            registry_item=item,
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
-            context=context,
-            run_llm=run_llm,
-        )
+            # Run inference on the last function call.
+            run_llm = index == total_function_calls - 1
 
-        await self._function_call_runner_queue.put(runner_item)
+            runner_item = FunctionCallRunner(
+                registry_item=item,
+                function_name=function_call.function_name,
+                tool_call_id=function_call.tool_call_id,
+                arguments=function_call.arguments,
+                context=function_call.context,
+                run_llm=run_llm,
+            )
+
+            await self._function_call_runner_queue.put(runner_item)
 
     async def call_start_function(self, context: OpenAILLMContext, function_name: str):
         if function_name in self._start_callbacks.keys():
@@ -251,7 +269,7 @@ class LLMService(AIService):
 
     async def _create_runner_task(self):
         if not self._function_call_runner_task:
-            self._current_runner: Optional[FunctionCallRunnerItem] = None
+            self._current_runner: Optional[FunctionCallRunner] = None
             self._current_task: Optional[asyncio.Task] = None
             self._function_call_runner_queue = asyncio.Queue()
             self._function_call_runner_task = self.create_task(self._function_call_runner_handler())
@@ -269,7 +287,7 @@ class LLMService(AIService):
             self._current_runner = None
             self._current_task = None
 
-    async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
+    async def _run_function_call(self, runner_item: FunctionCallRunner):
         if runner_item.function_name in self._functions.keys():
             item = self._functions[runner_item.function_name]
         elif None in self._functions.keys():
