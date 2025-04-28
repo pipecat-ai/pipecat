@@ -193,7 +193,7 @@ class AWSNovaSonicService(LLMService):
             )
 
             # Send session start events
-            await self._send_session_start_event()
+            await self._send_session_start_events()
 
             # Send initial system instruction
             await self._send_text_event(text=self._instruction, role=Role.SYSTEM)
@@ -230,7 +230,7 @@ class AWSNovaSonicService(LLMService):
     #
 
     # TODO: make params configurable?
-    async def _send_session_start_event(self):
+    async def _send_session_start_events(self):
         session_start = """
         {
           "event": {
