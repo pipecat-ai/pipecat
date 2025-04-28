@@ -675,7 +675,6 @@ class FunctionCallInProgressFrame(SystemFrame):
     tool_call_id: str
     arguments: Any
     cancel_on_interruption: bool = False
-    run_concurrently: bool = False
 
 
 @dataclass

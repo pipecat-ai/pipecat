@@ -603,13 +603,13 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         if frame.result:
             run_llm = False
             if properties and properties.run_llm is not None:
-                # If the tool call result has a run_llm property, use it
+                # If the tool call result has a run_llm property, use it.
                 run_llm = properties.run_llm
             elif frame.run_llm is not None:
                 # If the frame is indicating we should run the LLM, do it.
                 run_llm = frame.run_llm
-            elif in_progress.run_concurrently:
-                # If this was a parallel function call and there are no pending function call, run the LLM.
+            else:
+                # If this is the last function call in progress, run the LLM.
                 run_llm = not bool(self._function_calls_in_progress)
 
             if run_llm:
