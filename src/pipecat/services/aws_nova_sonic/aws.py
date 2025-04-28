@@ -412,7 +412,9 @@ class AWSNovaSonicService(LLMService):
         )
         self._content_being_received = content
 
-        # print(f"[pk] content start: {self._content_being_received}")
+        # print(f"[pk] content start: {content}")
+        if content.role == Role.ASSISTANT:
+            print(f"[pk] assistant content start: {content}")
 
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.AUDIO:
@@ -425,13 +427,15 @@ class AWSNovaSonicService(LLMService):
         # This should never happen
         if not self._content_being_received:
             return
+        content = self._content_being_received
 
         text_content = event_json["textOutput"]["content"]
         # print(f"[pk] text output. content: {text_content}")
+        if content.role == Role.ASSISTANT:
+            print(f"[pk] assistant text output. content: {text_content}")
 
         # Bookkeeping: augment the current content being received with text
         # Assumption: only one text content per content block
-        content = self._content_being_received
         content.text_content = text_content
 
     async def _handle_audio_output_event(self, event_json):
@@ -457,13 +461,15 @@ class AWSNovaSonicService(LLMService):
         # This should never happen
         if not self._content_being_received:
             return
+        content = self._content_being_received
 
         content_end = event_json["contentEnd"]
         stop_reason = content_end["stopReason"]
-        # print(f"[pk] content end: {self._content_being_received}.\n  stop_reason: {stop_reason}")
+        # print(f"[pk] content end: {content}.\n  stop_reason: {stop_reason}")
+        if content.role == Role.ASSISTANT:
+            print(f"[pk] assistant content end: {content}.\n  stop_reason: {stop_reason}")
 
         # Bookkeeping: clear current content being received
-        content = self._content_being_received
         self._content_being_received = None
 
         if content.role == Role.ASSISTANT:
