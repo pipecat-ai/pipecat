@@ -120,7 +120,7 @@ class Mem0MemoryService(FrameProcessor):
                     "user_id": self.user_id,
                     "agent_id": self.agent_id,
                     "run_id": self.run_id,
-                    "limit": self.search_limit
+                    "limit": self.search_limit,
                 }
                 params = {k: v for k, v in params.items() if v is not None}
                 results = self.memory_client.search(**params)
