@@ -43,9 +43,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             camera_in_enabled=False,
             vad_enabled=True,
             vad_audio_passthrough=True,
-            # set stop_secs to something roughly similar to the internal setting
-            # of the Multimodal Live api, just to align events.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
         ),
     )
 

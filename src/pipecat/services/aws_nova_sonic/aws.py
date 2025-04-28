@@ -137,13 +137,17 @@ class AWSNovaSonicService(LLMService):
             await self._send_user_audio_event(frame)
         # TODO: do we need to do anything for these?
         elif isinstance(frame, StartInterruptionFrame):
-            print("[pk] StartInterruptionFrame")
+            # print("[pk] StartInterruptionFrame")
+            pass
         elif isinstance(frame, UserStartedSpeakingFrame):
-            print("[pk] UserStartedSpeakingFrame")
+            # print("[pk] UserStartedSpeakingFrame")
+            pass
         elif isinstance(frame, StopInterruptionFrame):
-            print("[pk] StopInterruptionFrame")
+            # print("[pk] StopInterruptionFrame")
+            pass
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            print("[pk] UserStoppedSpeakingFrame")
+            # print("[pk] UserStoppedSpeakingFrame")
+            pass
 
         await self.push_frame(frame, direction)
 
@@ -415,7 +419,7 @@ class AWSNovaSonicService(LLMService):
                 if not self._assistant_is_responding:
                     # The assistant has started responding.
                     self._assistant_is_responding = True
-                    await self._report_assistant_started_responding()
+                    await self._report_assistant_response_started()
 
     async def _handle_text_output_event(self, event_json):
         # This should never happen
@@ -471,7 +475,7 @@ class AWSNovaSonicService(LLMService):
                     # for more information.
                     if not self._assistant_is_responding:
                         self._assistant_is_responding = True
-                        await self._report_assistant_started_responding()
+                        await self._report_assistant_response_started()
 
                     if self._assistant_is_responding:
                         # Text added to the ongoing assistant response
@@ -491,7 +495,7 @@ class AWSNovaSonicService(LLMService):
                         # last. It's similarly unclear how to determine what the last text content
                         # block will be after an interruption.
                         self._assistant_is_responding = False
-                        await self._report_assistant_stopped_responding()
+                        await self._report_assistant_response_ended()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
@@ -504,7 +508,7 @@ class AWSNovaSonicService(LLMService):
         # print("[pk] completion end")
         pass
 
-    async def _report_assistant_started_responding(self):
+    async def _report_assistant_response_started(self):
         # Report that the assistant has started their response.
         print("[pk] LLM full response started")
         await self.push_frame(LLMFullResponseStartFrame())
@@ -522,7 +526,7 @@ class AWSNovaSonicService(LLMService):
         print(f"[pk] TTS text: {text}")
         await self.push_frame(TTSTextFrame(text))
 
-    async def _report_assistant_stopped_responding(self):
+    async def _report_assistant_response_ended(self):
         # Report that the assistant has finished their response.
         print("[pk] LLM full response ended")
         await self.push_frame(LLMFullResponseEndFrame())
