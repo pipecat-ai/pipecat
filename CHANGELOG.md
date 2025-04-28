@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a TTS services issue that could cause assistant output not to be
+  aggregated to the context when also using `TTSSpeakFrame`s.
+
 - Fixed an issue where the `SmartTurnMetricsData` was reporting 0ms for
   inference and processing time when using the `FalSmartTurnAnalyzer`.
 
