@@ -22,6 +22,7 @@ from smithy_aws_core.identity import AWSCredentialsIdentity
 from smithy_core.aio.eventstream import DuplexEventStream
 
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -148,8 +149,28 @@ class AWSNovaSonicService(LLMService):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # print("[pk] UserStoppedSpeakingFrame")
             pass
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking()
 
         await self.push_frame(frame, direction)
+
+    async def _handle_bot_stopped_speaking(self):
+        if self._assistant_is_responding:
+            # Consider the assistant finished with their response.
+            #
+            # TODO: ideally we could base this solely on the LLM output events, but I couldn't
+            # figure out a reliable way to determine when we've gotten our last FINAL text block
+            # after the LLM is done talking.
+            #
+            # First I looked at stopReason, but it doesn't seem like the last FINAL text block is
+            # reliably marked END_TURN (sometimes the *first* one is, but not the last...bug?)
+            #
+            # Then I considered schemes where we tally or match up SPECULATIVE text blocks with
+            # FINAL text blocks to know how many or which FINAL blocks to expect, but user
+            # interruptions throw a wrench in these schemes: depending on the exact timing of the
+            # interruption, we should or shouldn't expect some FINAL blocks.
+            self._assistant_is_responding = False
+            await self._report_assistant_response_ended()
 
     #
     # LLM communication: lifecycle
@@ -413,11 +434,12 @@ class AWSNovaSonicService(LLMService):
         self._content_being_received = content
 
         # print(f"[pk] content start: {content}")
-        if content.role == Role.ASSISTANT:
-            print(f"[pk] assistant content start: {content}")
+        # if content.role == Role.ASSISTANT:
+        #     print(f"[pk] assistant content start: {content}")
 
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.AUDIO:
+                # Note that an assistant response can comprise of multiple audio blocks
                 if not self._assistant_is_responding:
                     # The assistant has started responding.
                     self._assistant_is_responding = True
@@ -431,8 +453,8 @@ class AWSNovaSonicService(LLMService):
 
         text_content = event_json["textOutput"]["content"]
         # print(f"[pk] text output. content: {text_content}")
-        if content.role == Role.ASSISTANT:
-            print(f"[pk] assistant text output. content: {text_content}")
+        # if content.role == Role.ASSISTANT:
+        #     print(f"[pk] assistant text output. content: {text_content}")
 
         # Bookkeeping: augment the current content being received with text
         # Assumption: only one text content per content block
@@ -466,8 +488,8 @@ class AWSNovaSonicService(LLMService):
         content_end = event_json["contentEnd"]
         stop_reason = content_end["stopReason"]
         # print(f"[pk] content end: {content}.\n  stop_reason: {stop_reason}")
-        if content.role == Role.ASSISTANT:
-            print(f"[pk] assistant content end: {content}.\n  stop_reason: {stop_reason}")
+        # if content.role == Role.ASSISTANT:
+        #     print(f"[pk] assistant content end: {content}.\n  stop_reason: {stop_reason}")
 
         # Bookkeeping: clear current content being received
         self._content_being_received = None
@@ -476,32 +498,9 @@ class AWSNovaSonicService(LLMService):
             if content.type == ContentType.TEXT:
                 # Ignore non-final text, and the "interrupted" message (which isn't meaningful text)
                 if content.text_stage == TextStage.FINAL and stop_reason != "INTERRUPTED":
-                    # TODO: shoot, for now we may need to "restart" the assistant responding because
-                    # every FINAL text block has to be treated as its own response. See below TODO
-                    # for more information.
-                    if not self._assistant_is_responding:
-                        self._assistant_is_responding = True
-                        await self._report_assistant_response_started()
-
                     if self._assistant_is_responding:
                         # Text added to the ongoing assistant response
                         await self._report_assistant_response_text_added(content.text_content)
-
-                        # Consider the assistant finished with their response.
-                        # TODO: the way we're tracking the start/stop of the assistant response
-                        # is rather busted, and results in way too many "responses" being put into
-                        # the context (every FINAL text content block is treated as its own
-                        # response). We *should* only record that an assistant response has ended
-                        # when:
-                        # - the assistant truly finished its turn (stop_reason is END_TURN)
-                        # - when the assistant has been interrupted, and outputs what's actually
-                        #   been said
-                        # BUT it seems like there's a bug where, if there are multiple assistant
-                        # text content blocks, the *first* one gets marked END_TURN rather than the
-                        # last. It's similarly unclear how to determine what the last text content
-                        # block will be after an interruption.
-                        self._assistant_is_responding = False
-                        await self._report_assistant_response_ended()
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
                 if content.text_stage == TextStage.FINAL:
