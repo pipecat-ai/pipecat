@@ -15,16 +15,20 @@ The example:
     2. Uses Mem0 to store and retrieve memories from conversations
     3. Creates personalized greetings based on previous interactions
     4. Handles multi-modal interaction through audio
+    5. Demonstrates two approaches for memory management:
+       - Using Mem0 API (cloud-based memory storage)
+       - Using local configuration with custom LLM (self-hosted memory)
 
 Example usage (run from pipecat root directory):
     $ pip install "pipecat-ai[daily,openai,elevenlabs,silero,mem0]"
-    $ python examples/foundational/35-mem0.py
+    $ python examples/foundational/37-mem0.py
 
 Requirements:
     - OpenAI API key (for GPT-4o-mini)
     - ElevenLabs API key (for text-to-speech)
     - Daily API key (for video/audio transport)
-    - Mem0 API key (for memory storage and retrieval)
+    - Mem0 API key (for cloud-based memory storage)
+    - [Optional] Anthropic API key (if using Claude with local config)
 
     Environment variables (set in .env or in your terminal using `export`):
         DAILY_SAMPLE_ROOM_URL=daily_sample_room_url
@@ -32,16 +36,17 @@ Requirements:
         OPENAI_API_KEY=openai_api_key
         ELEVENLABS_API_KEY=elevenlabs_api_key
         MEM0_API_KEY=mem0_api_key
+        ANTHROPIC_API_KEY=anthropic_api_key (if using Claude with local config)
 
 The bot runs as part of a pipeline that processes audio frames and manages the conversation flow.
 """
 
 import argparse
 import os
+from typing import Union
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai import audio
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -60,7 +65,7 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 try:
-    from mem0 import MemoryClient
+    from mem0 import Memory, MemoryClient  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -70,7 +75,7 @@ except ModuleNotFoundError as e:
 
 
 async def get_initial_greeting(
-    memory_client: MemoryClient, user_id: str, agent_id: str, run_id: str
+    memory_client: Union[MemoryClient, Memory], user_id: str, agent_id: str, run_id: str
 ) -> str:
     """Fetch all memories for the user and create a personalized greeting.
 
@@ -78,13 +83,18 @@ async def get_initial_greeting(
         A personalized greeting based on user memories
     """
     try:
-        # Create filters based on available IDs
-        id_pairs = [("user_id", user_id), ("agent_id", agent_id), ("run_id", run_id)]
-        clauses = [{name: value} for name, value in id_pairs if value is not None]
-        filters = {"AND": clauses} if clauses else {}
+        if isinstance(memory_client, Memory):
+            filters = {"user_id": user_id, "agent_id": agent_id, "run_id": run_id}
+            filters = {k: v for k, v in filters.items() if v is not None}
+            memories = memory_client.get_all(**filters)
+        else:
+            # Create filters based on available IDs
+            id_pairs = [("user_id", user_id), ("agent_id", agent_id), ("run_id", run_id)]
+            clauses = [{name: value} for name, value in id_pairs if value is not None]
+            filters = {"AND": clauses} if clauses else {}
 
-        # Get all memories for this user
-        memories = memory_client.get_all(filters=filters, version="v2")
+            # Get all memories for this user
+            memories = memory_client.get_all(filters=filters, version="v2", output_format="v1.1")
 
         if not memories or len(memories) == 0:
             logger.debug(f"!!! No memories found for this user. {memories}")
@@ -96,7 +106,7 @@ async def get_initial_greeting(
         # Add some personalization based on memories (limit to 3 memories for brevity)
         if len(memories) > 0:
             greeting += "Based on our previous conversations, I remember: "
-            for i, memory in enumerate(memories[:3], 1):
+            for i, memory in enumerate(memories["results"][:3], 1):
                 memory_content = memory.get("memory", "")
                 # Keep memory references brief
                 if len(memory_content) > 100:
@@ -120,7 +130,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     - Daily video transport
     - Speech-to-text and text-to-speech services
     - Language model integration
-    - Mem0 memory service
+    - Mem0 memory service (using either API or local configuration)
     - RTVI event handling
     """
     # Note: You can pass the user_id as a parameter in API call
@@ -145,12 +155,16 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         voice_id="pNInz6obpgDQGcFmaJgB",
     )
 
-    # Initialize Mem0 memory service
+    # =====================================================================
+    # OPTION 1: Using Mem0 API (cloud-based approach)
+    # This approach uses Mem0's cloud service for memory management
+    # Requires: MEM0_API_KEY set in your environment
+    # =====================================================================
     memory = Mem0MemoryService(
-        api_key=os.getenv("MEM0_API_KEY"),
+        api_key=os.getenv("MEM0_API_KEY"),  # Your Mem0 API key
         user_id=USER_ID,  # Unique identifier for the user
-        # agent_id="agent1",  # Optional identifier for the agent
-        # run_id="session1", # Optional identifier for the run
+        agent_id="agent1",  # Optional identifier for the agent
+        run_id="session1",  # Optional identifier for the run
         params=Mem0MemoryService.InputParams(
             search_limit=10,
             search_threshold=0.3,
@@ -160,6 +174,37 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             position=1,
         ),
     )
+
+    # =====================================================================
+    # OPTION 2: Using Mem0 with local configuration (self-hosted approach)
+    # This approach uses a local LLM configuration for memory management
+    # Requires: Anthropic API key if using Claude model
+    # =====================================================================
+    # Uncomment the following code and comment out the previous memory initialization to use local config
+
+    # local_config = {
+    #     "llm": {
+    #         "provider": "anthropic",
+    #         "config": {
+    #             "model": "claude-3-5-sonnet-20240620",
+    #             "api_key": os.getenv("ANTHROPIC_API_KEY"),  # Make sure to set this in your .env
+    #         }
+    #     },
+    #     "embedder": {
+    #         "provider": "openai",
+    #         "config": {
+    #             "model": "text-embedding-3-large"
+    #         }
+    #     }
+    # }
+
+    # # Initialize Mem0 memory service with local configuration
+    # memory = Mem0MemoryService(
+    #     local_config=local_config,  # Use local LLM for memory processing
+    #     user_id=USER_ID,            # Unique identifier for the user
+    #     # agent_id="agent1",        # Optional identifier for the agent
+    #     # run_id="session1",        # Optional identifier for the run
+    # )
 
     # Initialize LLM service
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
