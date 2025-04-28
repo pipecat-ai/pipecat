@@ -161,9 +161,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     # =====================================================================
     memory = Mem0MemoryService(
         api_key=os.getenv("MEM0_API_KEY"),  # Your Mem0 API key
-        user_id=USER_ID,                    # Unique identifier for the user
-        agent_id="agent1",                  # Optional identifier for the agent
-        run_id="session1",                  # Optional identifier for the run
+        user_id=USER_ID,  # Unique identifier for the user
+        agent_id="agent1",  # Optional identifier for the agent
+        run_id="session1",  # Optional identifier for the run
         params=Mem0MemoryService.InputParams(
             search_limit=10,
             search_threshold=0.3,
