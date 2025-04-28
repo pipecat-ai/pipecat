@@ -181,7 +181,7 @@ class LLMService(AIService):
         handler: Any,
         start_callback=None,
         *,
-        cancel_on_interruption: bool = False,
+        cancel_on_interruption: bool = True,
     ):
         # Registering a function with the function_name set to None will run
         # that handler for all functions
