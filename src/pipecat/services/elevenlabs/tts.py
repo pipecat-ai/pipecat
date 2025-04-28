@@ -287,7 +287,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
+                await self.add_word_timestamps([("Reset", 0)])
 
     async def _connect(self):
         await self._connect_websocket()
@@ -526,7 +526,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             self._reset_state()
 
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
+                await self.add_word_timestamps([("Reset", 0)])
 
         elif isinstance(frame, LLMFullResponseEndFrame):
             # End of turn - reset previous text
