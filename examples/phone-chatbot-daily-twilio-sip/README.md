@@ -18,7 +18,7 @@ This project demonstrates how to create a voice bot that can receive phone calls
 - A Daily account with an API key
 - A Twilio account with a phone number that supports voice
 - OpenAI API key for the bot's intelligence
-- ElevenLabs API key for text-to-speech (optional but recommended)
+- Cartesia API key for text-to-speech
 
 ## Setup
 
