@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `MCPClient`; a way to connect to MCP servers and use the MCP servers'
   tools.
 
+- Added `Mem0 OSS`, along with Mem0 cloud support now the OSS version is also available.
+
 ### Changed
 
 - Function calls now receive a single parameter `FunctionCallParams` instead of
