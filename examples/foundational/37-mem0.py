@@ -44,6 +44,7 @@ The bot runs as part of a pipeline that processes audio frames and manages the c
 import argparse
 import os
 from typing import Union
+
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -64,7 +65,7 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 try:
-    from mem0 import MemoryClient, Memory
+    from mem0 import Memory, MemoryClient  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
