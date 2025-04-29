@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Updated `SmallWebRTCConnection` to support `ice_servers` with credentials.
+
 - Added `VADUserStartedSpeakingFrame` and `VADUserStoppedSpeakingFrame`,
   indicating when the VAD detected the user to start and stop speaking. These
   events are helpful when using smart turn detection, as the user's stop time
