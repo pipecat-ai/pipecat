@@ -344,7 +344,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_is_speaking = False
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
-        self._bot_text_buffer = ""
 
         self._sample_rate = 24000
 
@@ -427,7 +426,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def _handle_interruption(self):
-        pass
+        self._bot_is_speaking = False
+        await self.push_frame(TTSStoppedFrame())
+        await self.push_frame(LLMFullResponseEndFrame())
 
     async def _handle_user_started_speaking(self, frame):
         self._user_is_speaking = True
@@ -839,14 +840,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not part:
             return
 
-        text = part.text
-        if text:
-            if not self._bot_text_buffer:
-                await self.push_frame(LLMFullResponseStartFrame())
-
-            self._bot_text_buffer += text
-            await self.push_frame(LLMTextFrame(text=text))
-
         inline_data = part.inlineData
         if not inline_data:
             return
@@ -861,6 +854,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not self._bot_is_speaking:
             self._bot_is_speaking = True
             await self.push_frame(TTSStartedFrame())
+            await self.push_frame(LLMFullResponseStartFrame())
 
         self._bot_audio_buffer.extend(audio)
         frame = TTSAudioRawFrame(
@@ -886,24 +880,20 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
-        text = self._bot_text_buffer
-        self._bot_text_buffer = ""
-
-        if text:
-            await self.push_frame(LLMFullResponseEndFrame())
-
         await self.push_frame(TTSStoppedFrame())
+        await self.push_frame(LLMFullResponseEndFrame())
 
     async def _handle_evt_output_transcription(self, evt):
         if not evt.serverContent.outputTranscription:
             return
 
         text = evt.serverContent.outputTranscription.text
-        if text:
-            await self.push_frame(LLMFullResponseStartFrame())
-            await self.push_frame(LLMTextFrame(text=text))
-            await self.push_frame(TTSTextFrame(text=text))
-            await self.push_frame(LLMFullResponseEndFrame())
+
+        if not text:
+            return
+
+        await self.push_frame(LLMTextFrame(text=text))
+        await self.push_frame(TTSTextFrame(text=text))
 
     def create_context_aggregator(
         self,
@@ -934,6 +924,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         GeminiMultimodalLiveContext.upgrade(context)
         user = GeminiMultimodalLiveUserContextAggregator(context, params=user_params)
 
-        assistant_params.expect_stripped_words = True
+        assistant_params.expect_stripped_words = False
         assistant = GeminiMultimodalLiveAssistantContextAggregator(context, params=assistant_params)
         return GeminiMultimodalLiveContextAggregatorPair(_user=user, _assistant=assistant)
