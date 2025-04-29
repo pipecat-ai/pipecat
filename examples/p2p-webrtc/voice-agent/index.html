@@ -26,7 +26,7 @@
 
         const waitForIceGatheringComplete = async (pc, timeoutMs = 2000) => {
             if (pc.iceGatheringState === 'complete') return;
-            console.log("Waiting for ICE gathering to complete...");
+            console.log("Waiting for ICE gathering to complete. Current state:", pc.iceGatheringState);
             return new Promise((resolve) => {
                 let timeoutId;
                 const checkState = () => {
@@ -47,6 +47,8 @@
                 };
                 pc.addEventListener('icegatheringstatechange', checkState);
                 timeoutId = setTimeout(onTimeout, timeoutMs);
+                // Checking the state again to avoid any eventual race condition
+                checkState();
             });
         };
 
