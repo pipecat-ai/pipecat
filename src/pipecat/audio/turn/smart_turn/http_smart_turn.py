@@ -40,6 +40,7 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
     async def _send_raw_request(self, data_bytes: bytes) -> Dict[str, Any]:
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
+
         try:
             timeout = aiohttp.ClientTimeout(total=self._params.stop_secs)
 
@@ -49,27 +50,30 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
                 logger.trace("\n--- Response ---")
                 logger.trace(f"Status Code: {response.status}")
 
-                if response.status == 200:
-                    try:
-                        json_data = await response.json()
-                        logger.trace("Response JSON:")
-                        logger.trace(json_data)
-                        return json_data
-                    except aiohttp.ContentTypeError:
-                        # Non-JSON response
-                        text = await response.text()
-                        logger.trace("Response Content (non-JSON):")
-                        logger.trace(text)
-                        raise Exception(f"Non-JSON response: {text}")
-                else:
+                # Check if successful
+                if response.status != 200:
                     error_text = await response.text()
                     logger.trace("Response Content (Error):")
                     logger.trace(error_text)
+
                     if response.status == 500:
                         logger.warning(f"Smart turn service returned 500 error: {error_text}")
                         raise Exception(f"Server returned HTTP 500: {error_text}")
                     else:
                         response.raise_for_status()
+
+                # Process successful response
+                try:
+                    json_data = await response.json()
+                    logger.trace("Response JSON:")
+                    logger.trace(json_data)
+                    return json_data
+                except aiohttp.ContentTypeError:
+                    # Non-JSON response
+                    text = await response.text()
+                    logger.trace("Response Content (non-JSON):")
+                    logger.trace(text)
+                    raise Exception(f"Non-JSON response: {text}")
 
         except asyncio.TimeoutError:
             logger.error(f"Request timed out after {self._params.stop_secs} seconds")
