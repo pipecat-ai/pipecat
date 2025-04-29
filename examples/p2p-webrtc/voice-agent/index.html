@@ -56,6 +56,7 @@
               iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
             };
             const pc = new RTCPeerConnection(config)
+            addPeerConnectionEventListeners(pc)
             pc.ontrack = e => audioEl.srcObject = e.streams[0]
             // SmallWebRTCTransport expects to receive both transceivers
             pc.addTransceiver(audioTrack, { direction: 'sendrecv' })
@@ -77,18 +78,28 @@
             _onConnecting()
             const audioStream = await navigator.mediaDevices.getUserMedia({audio: true})
             peerConnection= await createSmallWebRTCConnection(audioStream.getAudioTracks()[0])
-            peerConnection.oniceconnectionstatechange = () => {
-                console.log("oniceconnectionstatechange", peerConnection?.iceConnectionState)
+        }
+
+        const addPeerConnectionEventListeners = (pc) => {
+            pc.oniceconnectionstatechange = () => {
+                console.log("oniceconnectionstatechange", pc?.iceConnectionState)
             }
-            peerConnection.onconnectionstatechange = () => {
-                console.log("onconnectionstatechange", peerConnection?.connectionState)
-                let connectionState = peerConnection?.connectionState
+            pc.onconnectionstatechange = () => {
+                console.log("onconnectionstatechange", pc?.connectionState)
+                let connectionState = pc?.connectionState
                 if (connectionState === 'connected') {
                     _onConnected()
                 } else if (connectionState === 'disconnected') {
                     _onDisconnected()
                 }
             }
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    console.log("New ICE candidate:", event.candidate);
+                } else {
+                    console.log("All ICE candidates have been sent.");
+                }
+            };
         }
 
         const _onConnecting = () => {
