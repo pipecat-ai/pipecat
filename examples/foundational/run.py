@@ -20,7 +20,7 @@ from fastapi.responses import RedirectResponse
 from loguru import logger
 from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.network.webrtc_connection import IceServer, SmallWebRTCConnection
 
 # Load environment variables
 load_dotenv(override=True)
@@ -30,7 +30,11 @@ app = FastAPI()
 # Store connections by pc_id
 pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
-ice_servers = ["stun:stun.l.google.com:19302"]
+ice_servers = [
+    IceServer(
+        urls="stun:stun.l.google.com:19302",
+    )
+]
 
 # Mount the frontend at /
 app.mount("/client", SmallWebRTCPrebuiltUI)
