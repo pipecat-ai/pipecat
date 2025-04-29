@@ -152,7 +152,7 @@ class OutputAudioRawFrame(DataFrame, AudioRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        return f"{self.name}(pts: {pts}, destination: {self.destination}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass

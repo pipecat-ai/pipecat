@@ -131,13 +131,15 @@ class TkOutputTransport(BaseOutputTransport):
             self._out_stream.close()
             self._out_stream = None
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         if self._out_stream:
             await self.get_event_loop().run_in_executor(
                 self._executor, self._out_stream.write, frames
             )
 
-    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         self.get_event_loop().call_soon(self._write_frame_to_tk, frame)
 
     def _write_frame_to_tk(self, frame: OutputImageRawFrame):

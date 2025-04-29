@@ -182,7 +182,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self._send_interval = (self._audio_chunk_size / self.sample_rate) / 2
+        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
@@ -202,7 +202,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         frame = OutputAudioRawFrame(
             audio=frames,
             sample_rate=self.sample_rate,

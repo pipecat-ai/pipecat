@@ -284,11 +284,13 @@ class SmallWebRTCClient:
                 )
                 yield audio_frame
 
-    async def write_raw_audio_frames(self, data: bytes):
+    async def write_raw_audio_frames(self, data: bytes, destination: Optional[str] = None):
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(data)
 
-    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         if self._can_send() and self._video_output_track:
             self._video_output_track.add_video_frame(frame)
 
@@ -497,10 +499,12 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         await self._client.write_raw_video_frame(frame)
 
 
