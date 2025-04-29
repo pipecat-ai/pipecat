@@ -3,6 +3,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from aws_sdk_bedrock_runtime.client import (
     BedrockRuntimeClient,
@@ -41,16 +42,24 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
+)
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.aws_nova_sonic.context import (
+    AWSNovaSonicAssistantContextAggregator,
+    AWSNovaSonicContextAggregatorPair,
+    AWSNovaSonicLLMContext,
+    AWSNovaSonicUserContextAggregator,
+    Role,
+)
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.time import time_now_iso8601
-
-
-class Role(Enum):
-    SYSTEM = "SYSTEM"
-    USER = "USER"
-    ASSISTANT = "ASSISTANT"
-    TOOL = "TOOL"
 
 
 class ContentType(Enum):
@@ -81,36 +90,40 @@ class CurrentContent:
         )
 
 
-class AWSNovaSonicService(LLMService):
+class AWSNovaSonicLLMService(LLMService):
     def __init__(
         self,
         *,
-        instruction: str,
+        # TODO: if we have instruction here as an alternative to using context, we should do the same for tools...right?
         secret_access_key: str,
         access_key_id: str,
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
+        instruction: str = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._instruction = instruction
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
         self._region = region
         self._model = model
         self._client: BedrockRuntimeClient = None
         self._voice_id = voice_id
+        self._instruction = instruction
+        self._context: AWSNovaSonicLLMContext = None
         self._stream: DuplexEventStream[
             InvokeModelWithBidirectionalStreamInput,
             InvokeModelWithBidirectionalStreamOutput,
             InvokeModelWithBidirectionalStreamOperationOutput,
         ] = None
         self._receive_task = None
-        self._prompt_name = str(uuid.uuid4())
-        self._input_audio_content_name = str(uuid.uuid4())
-        self._content_being_received = None  # TODO: clean this up on error or when finished
+        self._prompt_name = None
+        self._input_audio_content_name = None
+        self._content_being_received = None
         self._assistant_is_responding = False
+        self._context_available = False
+        self._ready_to_send_context = False
 
     #
     # standard AIService frame handling
@@ -118,7 +131,14 @@ class AWSNovaSonicService(LLMService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._connect()
+        # TODO: maybe connect but don't send history until we get all of our settings?
+        # how do we know how long to wait?
+        # ah, i think we'll *always* get at least one OpenAILLMContextFrame which kicks things off
+        # so we need to send the initial history when:
+        # - we're connected
+        # - we've gotten the first context
+        # i *think* this is what's controlled by _api_session_ready/_run_llm_when_api_session_ready
+        await self._start_connecting()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -135,10 +155,14 @@ class AWSNovaSonicService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, InputAudioRawFrame):
+        if isinstance(frame, OpenAILLMContextFrame):
+            await self._handle_context(frame.context)
+        elif isinstance(frame, InputAudioRawFrame):
             # TODO: check if _audio_input_paused? what causes that?
             await self._send_user_audio_event(frame)
-        # TODO: do we need to do anything for these?
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking()
+        # TODO: do we need to do anything for the below four frame types?
         elif isinstance(frame, StartInterruptionFrame):
             # print("[pk] StartInterruptionFrame")
             pass
@@ -151,10 +175,18 @@ class AWSNovaSonicService(LLMService):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # print("[pk] UserStoppedSpeakingFrame")
             pass
-        elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._handle_bot_stopped_speaking()
 
         await self.push_frame(frame, direction)
+
+    async def _handle_context(self, context: OpenAILLMContext):
+        # TODO: if context has changed, reconnect
+        # TODO: remove
+        print(f"[pk] _handle_context: {context.get_messages_for_initializing_history()}")
+        if not self._context:
+            # We got our initial context - try to finish connecting
+            self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(context)
+            self._context_available = True
+            await self._finish_connecting_if_context_available()
 
     async def _handle_bot_stopped_speaking(self):
         if self._assistant_is_responding:
@@ -178,11 +210,15 @@ class AWSNovaSonicService(LLMService):
     # LLM communication: lifecycle
     #
 
-    async def _connect(self):
+    async def _start_connecting(self):
         try:
             if self._client:
-                # Here we assume that if we have a client we are connected
+                # Here we assume that if we have a client we are connected or connecting
                 return
+
+            # Set IDs for the connection
+            self._prompt_name = str(uuid.uuid4())
+            self._input_audio_content_name = str(uuid.uuid4())
 
             # Create the client
             self._client = self._create_client()
@@ -195,19 +231,71 @@ class AWSNovaSonicService(LLMService):
             # Send session start events
             await self._send_session_start_events()
 
-            # Send initial system instruction
-            await self._send_text_event(text=self._instruction, role=Role.SYSTEM)
-
-            # Start audio input
-            await self._send_audio_input_start_event()
-
-            self._receive_task = self.create_task(self._receive_task_handler())
+            # Finish connecting
+            self._ready_to_send_context = True
+            await self._finish_connecting_if_context_available()
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
-            self._client = None
+            self._disconnect()
+
+    async def _finish_connecting_if_context_available(self):
+        # We can only finish connecting once we've gotten our initial context and we're ready to
+        # send it
+        if not (self._context_available and self._ready_to_send_context):
+            return
+
+        # Read context
+        history = self._context.get_messages_for_initializing_history()
+
+        # Send system instruction
+        # Instruction from context takes priority
+        instruction = history.instruction if history.instruction else self._instruction
+        if instruction:
+            await self._send_text_event(text=instruction, role=Role.SYSTEM)
+
+        # Send conversation history
+        for message in history.messages:
+            await self._send_text_event(text=message.text, role=message.role)
+
+        # Send initial context (system instruction and conversation history)
+        # TODO: finish implementing
+        # - pass additional message(s)
+        # - merge init-passed system instruction + context instruction (latter takes precedence)
+        # - merge init-passed tools + context tools (latter takes precedence)
+        await self._send_text_event(text=self._instruction, role=Role.SYSTEM)
+
+        # Start audio input
+        await self._send_audio_input_start_event()
+
+        # Start receiving events
+        self._receive_task = self.create_task(self._receive_task_handler())
 
     async def _disconnect(self):
-        pass
+        try:
+            # Clean up receive task
+            if self._receive_task:
+                await self.cancel_task(self._receive_task, timeout=1.0)
+                self._receive_task = None
+
+            # Clean up client
+            if self._client:
+                await self._send_session_end_events()
+                self._client = None
+
+            # Clean up stream
+            if self._stream:
+                await self._stream.input_stream.close()
+                self._stream = None
+
+            # Reset remaining connection-specific state
+            self._prompt_name = None
+            self._input_audio_content_name = None
+            self._content_being_received = None
+            self._assistant_is_responding = False
+            self._context_available = False
+            self._ready_to_send_context = False
+        except Exception as e:
+            logger.error(f"{self} error disconnecting: {e}")
 
     def _create_client(self) -> BedrockRuntimeClient:
         config = Config(
@@ -340,7 +428,7 @@ class AWSNovaSonicService(LLMService):
         await self._send_client_event(text_content_end)
 
     async def _send_user_audio_event(self, frame: InputAudioRawFrame):
-        if not self._client:
+        if not self._stream:
             return
 
         blob = base64.b64encode(frame.audio)
@@ -356,6 +444,30 @@ class AWSNovaSonicService(LLMService):
         }}
         '''
         await self._send_client_event(audio_event)
+
+    async def _send_session_end_events(self):
+        if not self._stream:
+            return
+
+        prompt_end = f'''
+        {{
+            "event": {{
+                "promptEnd": {{
+                    "promptName": "{self._prompt_name}"
+                }}
+            }}
+        }}
+        '''
+        await self._send_client_event(prompt_end)
+
+        session_end = """
+        {
+            "event": {
+                "sessionEnd": {}
+            }
+        }
+        """
+        await self._send_client_event(session_end)
 
     async def _send_client_event(self, event_json: str):
         event = InvokeModelWithBidirectionalStreamInputChunk(
@@ -547,3 +659,18 @@ class AWSNovaSonicService(LLMService):
         await self.push_frame(
             TranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
         )
+
+    #
+    # Context
+    #
+
+    def create_context_aggregator(
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+    ) -> AWSNovaSonicContextAggregatorPair:
+        user = AWSNovaSonicUserContextAggregator(context=context, params=user_params)
+        assistant = AWSNovaSonicAssistantContextAggregator(context=context, params=assistant_params)
+        return AWSNovaSonicContextAggregatorPair(user, assistant)
