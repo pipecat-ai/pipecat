@@ -60,9 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- Function calls with parameters `(function_name, tool_call_id, args, llm,
-  context, result_callback)` are deprectated, use a single `FunctionCallParams`
-  parameter instead.
+- Function calls with parameters
+  `(function_name, tool_call_id, args, llm, context, result_callback)` are
+  deprectated, use a single `FunctionCallParams` parameter instead.
 
 - `TransportParams.camera_*` parameters are now deprecated, use
   `TransportParams.video_*` instead.
@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TransportParams.audio_in_passthrough` instead.
 
 ### Fixed
+
+- Fixed an issue with HTTP Smart Turn handling, where the service returns a 500
+  error. Previously, this would cause an unhandled exception. Now, a 500 error
+  is treated as an incomplete response.
 
 - Fixed a TTS services issue that could cause assistant output not to be
   aggregated to the context when also using `TTSSpeakFrame`s.
