@@ -24,7 +24,7 @@
         let connected = false
         let peerConnection = null
 
-        const waitForIceGatheringComplete = async (pc, timeoutMs = 5000) => {
+        const waitForIceGatheringComplete = async (pc, timeoutMs = 2000) => {
             if (pc.iceGatheringState === 'complete') return;
             console.log("Waiting for ICE gathering to complete...");
             return new Promise((resolve) => {
