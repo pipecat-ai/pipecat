@@ -1,1 +1,1 @@
-from .aws import AWSNovaSonicService
+from .aws import AWSNovaSonicLLMService

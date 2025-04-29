@@ -16,7 +16,8 @@ from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.aws_nova_sonic import AWSNovaSonicService
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.aws_nova_sonic import AWSNovaSonicLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -47,13 +48,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         ),
     )
 
-    # Create the AWS Nova Sonic LLM service
-    # system_instruction = f"""
-    # You are a helpful AI assistant.
-    # Your goal is to demonstrate your capabilities in a helpful and engaging way.
-    # Your output will be converted to audio so don't include special characters in your answers.
-    # Respond to what the user said in a creative and helpful way.
-    # """
+    # Specify initial system instruction
     # TODO: looks like Nova Sonic can't handle new lines?
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog "
@@ -61,20 +56,37 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         "generally two or three sentences for chatty scenarios."
     )
 
-    llm = AWSNovaSonicService(
-        instruction=system_instruction,
+    # Create the AWS Nova Sonic LLM service
+    llm = AWSNovaSonicLLMService(
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),
-        voice_id="tiffany", # matthew, tiffany, amy
+        voice_id="tiffany",  # matthew, tiffany, amy
+        # instruction=system_instruction # could pass instruction here rather than context, below
     )
+
+    # Set up context and context management.
+    # AWSNovaSonicService will adapt OpenAI LLM context objects with standard message format to
+    # what's expected by Nova Sonic.
+    context = OpenAILLMContext(
+        messages=[
+            {"role": "system", "content": f"{system_instruction}"},
+            {
+                "role": "user",
+                "content": "Tell me hello! Don't wait for me to say anything else first!",
+            },
+        ]
+    )
+    context_aggregator = llm.create_context_aggregator(context)
 
     # Build the pipeline
     pipeline = Pipeline(
         [
             transport.input(),
+            context_aggregator.user(),
             llm,
             transport.output(),
+            context_aggregator.assistant(),
         ]
     )
 
@@ -93,18 +105,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames(
-            [
-                LLMMessagesAppendFrame(
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": f"Greet the user and introduce yourself.",
-                        }
-                    ]
-                )
-            ]
-        )
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
