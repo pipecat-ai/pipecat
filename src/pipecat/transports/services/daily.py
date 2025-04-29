@@ -369,7 +369,7 @@ class DailyTransportClient(EventHandler):
             await asyncio.sleep(0.01)
             return None
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         if not self._mic:
             return None
 
@@ -377,7 +377,9 @@ class DailyTransportClient(EventHandler):
         self._mic.write_frames(frames, completion=completion_callback(future))
         await future
 
-    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         if not self._camera:
             return None
 
@@ -1076,10 +1078,12 @@ class DailyOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         await self._client.write_raw_video_frame(frame)
 
 
