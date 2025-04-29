@@ -187,8 +187,8 @@ async def main():
         #
         # RTVI events for Pipecat client UI
         #
-        options = RTVIServiceOptionConfig(name="say")
-        tts_interrupt = RTVIServiceConfig(service="tts", options=[options])
+        # options = RTVIServiceOptionConfig(name="say", value=)
+        # tts_interrupt = RTVIServiceConfig(service="tts", options=[options])
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
         pipeline = Pipeline(
