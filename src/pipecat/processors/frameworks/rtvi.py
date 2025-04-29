@@ -61,6 +61,9 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.llm_service import (
+    FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
+)
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
@@ -658,16 +661,11 @@ class RTVIProcessor(FrameProcessor):
     async def handle_message(self, message: RTVIMessage):
         await self._message_queue.put(message)
 
-    async def handle_function_call(
-        self,
-        function_name: str,
-        tool_call_id: str,
-        arguments: Mapping[str, Any],
-    ):
+    async def handle_function_call(self, params: FunctionCallParams):
         fn = RTVILLMFunctionCallMessageData(
-            function_name=function_name,
-            tool_call_id=tool_call_id,
-            arguments=arguments,
+            function_name=params.function_name,
+            tool_call_id=params.tool_call_id,
+            arguments=params.arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
