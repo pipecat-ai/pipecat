@@ -1,12 +1,25 @@
+#
+# Copyright (c) 2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import copy
 from dataclasses import dataclass, field
 from enum import Enum
 
 from loguru import logger
 
-from pipecat.frames.frames import DataFrame, Frame, LLMMessagesUpdateFrame, LLMSetToolsFrame
+from pipecat.frames.frames import (
+    DataFrame,
+    Frame,
+    FunctionCallResultFrame,
+    LLMMessagesUpdateFrame,
+    LLMSetToolsFrame,
+)
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -106,7 +119,15 @@ class AWSNovaSonicUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class AWSNovaSonicAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    pass
+    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        await super().handle_function_call_result(frame)
+
+        # The standard function callback code path pushes the FunctionCallResultFrame from the llm itself,
+        # so we didn't have a chance to add the result to the openai realtime api context. Let's push a
+        # special frame to do that.
+        await self.push_frame(
+            AWSNovaSonicFunctionCallResultFrame(result_frame=frame), FrameDirection.UPSTREAM
+        )
 
 
 @dataclass

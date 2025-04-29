@@ -1,9 +1,15 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import base64
 import json
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, List
 
 from aws_sdk_bedrock_runtime.client import (
     BedrockRuntimeClient,
@@ -22,6 +28,7 @@ from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolv
 from smithy_aws_core.identity import AWSCredentialsIdentity
 from smithy_core.aio.eventstream import DuplexEventStream
 
+from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -58,8 +65,13 @@ from pipecat.services.aws_nova_sonic.context import (
     AWSNovaSonicUserContextAggregator,
     Role,
 )
+from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.time import time_now_iso8601
+
+
+class AWSNovaSonicUnhandledFunctionException(Exception):
+    pass
 
 
 class ContentType(Enum):
@@ -91,6 +103,9 @@ class CurrentContent:
 
 
 class AWSNovaSonicLLMService(LLMService):
+    # Override the default adapter to use the AWSNovaSonicLLMAdapter one
+    adapter_class = AWSNovaSonicLLMAdapter
+
     def __init__(
         self,
         *,
@@ -162,6 +177,8 @@ class AWSNovaSonicLLMService(LLMService):
             await self._send_user_audio_event(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking()
+        elif isinstance(frame, AWSNovaSonicFunctionCallResultFrame):
+            await self._handle_function_call_result(frame)
         # TODO: do we need to do anything for the below four frame types?
         elif isinstance(frame, StartInterruptionFrame):
             # print("[pk] StartInterruptionFrame")
@@ -206,6 +223,10 @@ class AWSNovaSonicLLMService(LLMService):
             self._assistant_is_responding = False
             await self._report_assistant_response_ended()
 
+    async def _handle_function_call_result(self, frame: AWSNovaSonicFunctionCallResultFrame):
+        result = frame.result_frame
+        await self._send_tool_result(tool_call_id=result.tool_call_id, result=result.result)
+
     #
     # LLM communication: lifecycle
     #
@@ -228,8 +249,8 @@ class AWSNovaSonicLLMService(LLMService):
                 InvokeModelWithBidirectionalStreamOperationInput(model_id=self._model)
             )
 
-            # Send session start events
-            await self._send_session_start_events()
+            # Send session start event
+            await self._send_session_start_event()
 
             # Finish connecting
             self._ready_to_send_context = True
@@ -246,6 +267,10 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Read context
         history = self._context.get_messages_for_initializing_history()
+
+        # Send prompt start event, specifying tools
+        tools = self._context.tools
+        await self._send_prompt_start_event(tools)
 
         # Send system instruction
         # Instruction from context takes priority
@@ -318,7 +343,7 @@ class AWSNovaSonicLLMService(LLMService):
     #
 
     # TODO: make params configurable?
-    async def _send_session_start_events(self):
+    async def _send_session_start_event(self):
         session_start = """
         {
           "event": {
@@ -333,6 +358,20 @@ class AWSNovaSonicLLMService(LLMService):
         }
         """
         await self._send_client_event(session_start)
+
+    async def _send_prompt_start_event(self, tools: List[Any]):
+        tools_config = (
+            f""",
+        "toolUseOutputConfiguration": {{
+          "mediaType": "application/json"
+        }},
+        "toolConfiguration": {{
+          "tools": {json.dumps(tools)}
+        }}
+        """
+            if tools
+            else ""
+        )
 
         prompt_start = f'''
         {{
@@ -350,7 +389,7 @@ class AWSNovaSonicLLMService(LLMService):
                 "voiceId": "{self._voice_id}",
                 "encoding": "base64",
                 "audioType": "SPEECH"
-              }}
+              }}{tools_config}
             }}
           }}
         }}
@@ -382,6 +421,9 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(audio_content_start)
 
     async def _send_text_event(self, text: str, role: Role):
+        if not self._stream:
+            return
+
         content_name = str(uuid.uuid4())
 
         text_content_start = f'''
@@ -469,6 +511,61 @@ class AWSNovaSonicLLMService(LLMService):
         """
         await self._send_client_event(session_end)
 
+    async def _send_tool_result(self, tool_call_id, result):
+        if not self._stream:
+            return
+
+        # print(f"[pk] sending tool result. tool call ID: {tool_call_id}, result: {result}")
+
+        content_name = str(uuid.uuid4())
+
+        result_content_start = f'''
+        {{
+            "event": {{
+                "contentStart": {{
+                    "promptName": "{self._prompt_name}",
+                    "contentName": "{content_name}",
+                    "interactive": false,
+                    "type": "TOOL",
+                    "role": "TOOL",
+                    "toolResultInputConfiguration": {{
+                        "toolUseId": "{tool_call_id}",
+                        "type": "TEXT",
+                        "textInputConfiguration": {{
+                            "mediaType": "text/plain"
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        '''
+        await self._send_client_event(result_content_start)
+
+        result_content = json.dumps(
+            {
+                "event": {
+                    "toolResult": {
+                        "promptName": self._prompt_name,
+                        "contentName": content_name,
+                        "content": json.dumps(result) if isinstance(result, dict) else result,
+                    }
+                }
+            }
+        )
+        await self._send_client_event(result_content)
+
+        result_content_end = f"""
+        {{
+            "event": {{
+                "contentEnd": {{
+                    "promptName": "{self._prompt_name}",
+                    "contentName": "{content_name}"
+                }}
+            }}
+        }}
+        """
+        await self._send_client_event(result_content_end)
+
     async def _send_client_event(self, event_json: str):
         event = InvokeModelWithBidirectionalStreamInputChunk(
             value=BidirectionalInputPayloadPart(bytes_=event_json.encode("utf-8"))
@@ -515,6 +612,9 @@ class AWSNovaSonicLLMService(LLMService):
                     elif "audioOutput" in event_json:
                         # Handle audio output content
                         await self._handle_audio_output_event(event_json)
+                    elif "toolUse" in event_json:
+                        # Handle tool use
+                        await self._handle_tool_use_event(event_json)
                     elif "contentEnd" in event_json:
                         # Handle a piece of content ending
                         await self._handle_content_end_event(event_json)
@@ -592,6 +692,42 @@ class AWSNovaSonicLLMService(LLMService):
             num_channels=1,
         )
         await self.push_frame(frame)
+
+    async def _handle_tool_use_event(self, event_json):
+        # This should never happen
+        if not self._content_being_received:
+            return
+
+        # Get tool use details
+        tool_use = event_json["toolUse"]
+        function_name = tool_use["toolName"]
+        tool_call_id = tool_use["toolUseId"]
+        arguments = json.loads(tool_use["content"])
+
+        # print(
+        #     f"[pk] tool use - function_name: {function_name}, tool_call_id: {tool_call_id}, arguments: {arguments}"
+        # )
+
+        # Call tool function
+        if self.has_function(function_name):
+            if function_name in self._functions.keys():
+                await self.call_function(
+                    context=self._context,
+                    tool_call_id=tool_call_id,
+                    function_name=function_name,
+                    arguments=arguments,
+                )
+            elif None in self._functions.keys():
+                await self.call_function(
+                    context=self._context,
+                    tool_call_id=tool_call_id,
+                    function_name=function_name,
+                    arguments=arguments,
+                )
+        else:
+            raise AWSNovaSonicUnhandledFunctionException(
+                f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+            )
 
     async def _handle_content_end_event(self, event_json):
         # This should never happen
@@ -671,6 +807,9 @@ class AWSNovaSonicLLMService(LLMService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> AWSNovaSonicContextAggregatorPair:
+        context.set_llm_adapter(self.get_llm_adapter())
+
         user = AWSNovaSonicUserContextAggregator(context=context, params=user_params)
         assistant = AWSNovaSonicAssistantContextAggregator(context=context, params=assistant_params)
+
         return AWSNovaSonicContextAggregatorPair(user, assistant)

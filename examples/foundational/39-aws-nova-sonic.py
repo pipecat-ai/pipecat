@@ -5,14 +5,16 @@
 #
 
 import os
+from datetime import datetime
 
 from dotenv import load_dotenv
 from loguru import logger
 
 # import logging
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMMessagesAppendFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -29,6 +31,39 @@ load_dotenv(override=True)
 #     level=logging.DEBUG,
 #     format='%(asctime)s - %(levelname)s - %(message)s'
 # )
+
+
+async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+    temperature = 75 if args["format"] == "fahrenheit" else 24
+    await result_callback(
+        {
+            "conditions": "nice",
+            "temperature": temperature,
+            "format": args["format"],
+            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+        }
+    )
+
+
+weather_function = FunctionSchema(
+    name="get_current_weather",
+    description="Get the current weather",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+        },
+        "format": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "The temperature unit to use. Infer this from the users location.",
+        },
+    },
+    required=["location", "format"],
+)
+
+# Create tools schema
+tools = ToolsSchema(standard_tools=[weather_function])
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
@@ -62,20 +97,27 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),
         voice_id="tiffany",  # matthew, tiffany, amy
-        # instruction=system_instruction # could pass instruction here rather than context, below
+        # instruction=system_instruction # you could pass instruction here rather than in context
     )
+
+    # Register function for function calls
+    # you can either register a single function for all function calls, or specific functions
+    # llm.register_function(None, fetch_weather_from_api)
+    llm.register_function("get_current_weather", fetch_weather_from_api)
 
     # Set up context and context management.
     # AWSNovaSonicService will adapt OpenAI LLM context objects with standard message format to
     # what's expected by Nova Sonic.
+    # TODO: since we can't trigger a response upon joining, this isn't particularly useful
     context = OpenAILLMContext(
         messages=[
             {"role": "system", "content": f"{system_instruction}"},
             {
                 "role": "user",
-                "content": "Tell me hello! Don't wait for me to say anything else first!",
+                "content": "Say hello!",
             },
-        ]
+        ],
+        tools=tools,
     )
     context_aggregator = llm.create_context_aggregator(context)
 
