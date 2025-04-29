@@ -176,6 +176,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                     f"End of Turn complete due to stop_secs. Silence in ms: {self._silence_ms}"
                 )
                 state = EndOfTurnState.COMPLETE
+            except Exception as e:
+                logger.error(f"Error during prediction: {e}")
 
         else:
             logger.trace(f"params: {self._params}, stop_ms: {self._stop_ms}")
