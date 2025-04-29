@@ -40,7 +40,6 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
     async def _send_raw_request(self, data_bytes: bytes) -> Dict[str, Any]:
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
-        logger.trace(f"Sending {len(data_bytes)} bytes as raw body to {self._url}...")
         try:
             timeout = aiohttp.ClientTimeout(total=self._params.stop_secs)
 
@@ -66,7 +65,11 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
                     error_text = await response.text()
                     logger.trace("Response Content (Error):")
                     logger.trace(error_text)
-                    response.raise_for_status()
+                    if response.status == 500:
+                        logger.warning(f"Smart turn service returned 500 error: {error_text}")
+                        raise Exception(f"Server returned HTTP 500: {error_text}")
+                    else:
+                        response.raise_for_status()
 
         except asyncio.TimeoutError:
             logger.error(f"Request timed out after {self._params.stop_secs} seconds")
@@ -76,5 +79,14 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
     async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
-        serialized_array = self._serialize_array(audio_array)
-        return await self._send_raw_request(serialized_array)
+        try:
+            serialized_array = self._serialize_array(audio_array)
+            return await self._send_raw_request(serialized_array)
+        except Exception as e:
+            logger.error(f"Smart turn prediction failed: {str(e)}")
+            # Return an incomplete prediction when a failure occurs
+            return {
+                "prediction": 0,
+                "probability": 0.0,
+                "metrics": {"inference_time": 0.0, "total_time": 0.0},
+            }
