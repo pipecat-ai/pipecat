@@ -265,6 +265,15 @@ class GeminiVADParams(BaseModel):
     silence_duration_ms: Optional[int] = Field(default=None)
 
 
+class ContextWindowCompressionParams(BaseModel):
+    """Parameters for context window compression."""
+
+    enabled: bool = Field(default=False)
+    trigger_tokens: Optional[int] = Field(
+        default=None
+    )  # None = use default (80% of context window)
+
+
 class InputParams(BaseModel):
     frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4096, ge=1)
@@ -280,6 +289,7 @@ class InputParams(BaseModel):
         default=GeminiMediaResolution.UNSPECIFIED
     )
     vad: Optional[GeminiVADParams] = Field(default=None)
+    context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -355,6 +365,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "language": self._language_code,
             "media_resolution": params.media_resolution,
             "vad": params.vad,
+            "context_window_compression": params.context_window_compression.model_dump()
+            if params.context_window_compression
+            else None,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -560,6 +573,21 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     "output_audio_transcription": {},
                 }
             }
+
+            # Add context window compression if enabled
+            if self._settings.get("context_window_compression", {}).get("enabled", False):
+                compression_config = {}
+                # Add sliding window (always true if compression is enabled)
+                compression_config["sliding_window"] = {}
+
+                # Add trigger_tokens if specified
+                trigger_tokens = self._settings.get("context_window_compression", {}).get(
+                    "trigger_tokens"
+                )
+                if trigger_tokens is not None:
+                    compression_config["trigger_tokens"] = trigger_tokens
+
+                config_data["setup"]["context_window_compression"] = compression_config
 
             # Add VAD configuration if provided
             if self._settings.get("vad"):
