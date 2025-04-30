@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `OpenAIRealtimeBetaLLMService` and `GeminiMultimodalLiveLLMService` no longer
+  push `LLMTextFrame`. Instead, they both push only `TTSTextFrame`, which is
+  used to aggregate the assistant context and generate a transcript.
+
 - Function calls now receive a single parameter `FunctionCallParams` instead of
   `(function_name, tool_call_id, args, llm, context, result_callback)` which is
   now deprecated.
