@@ -97,7 +97,10 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),
         voice_id="tiffany",  # matthew, tiffany, amy
-        # instruction=system_instruction # you could pass instruction here rather than in context
+        # you could choose to pass instruction here rather than via context
+        # instruction=system_instruction
+        # you could choose to pass tools here rather than via context
+        # tools=tools
     )
 
     # Register function for function calls

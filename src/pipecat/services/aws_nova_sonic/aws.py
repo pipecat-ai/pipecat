@@ -9,7 +9,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List
+from typing import Any, List, Optional
 
 from aws_sdk_bedrock_runtime.client import (
     BedrockRuntimeClient,
@@ -28,6 +28,7 @@ from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolv
 from smithy_aws_core.identity import AWSCredentialsIdentity
 from smithy_core.aio.eventstream import DuplexEventStream
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -115,7 +116,8 @@ class AWSNovaSonicLLMService(LLMService):
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
-        instruction: str = None,
+        instruction: Optional[str] = None,
+        tools: Optional[ToolsSchema] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -126,6 +128,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._client: BedrockRuntimeClient = None
         self._voice_id = voice_id
         self._instruction = instruction
+        self._tools = tools
         self._context: AWSNovaSonicLLMContext = None
         self._stream: DuplexEventStream[
             InvokeModelWithBidirectionalStreamInput,
@@ -269,11 +272,16 @@ class AWSNovaSonicLLMService(LLMService):
         history = self._context.get_messages_for_initializing_history()
 
         # Send prompt start event, specifying tools
-        tools = self._context.tools
+        # Tools from context take priority over tools from __init__()
+        tools = (
+            self._context.tools
+            if self._context.tools
+            else self.get_llm_adapter().from_standard_tools(self._tools)
+        )
         await self._send_prompt_start_event(tools)
 
         # Send system instruction
-        # Instruction from context takes priority
+        # Instruction from context takes priority over instruction from __init__()
         instruction = history.instruction if history.instruction else self._instruction
         if instruction:
             await self._send_text_event(text=instruction, role=Role.SYSTEM)
