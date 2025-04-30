@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -222,6 +223,14 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
+    # The LLMAssistantContextAggregator uses TextFrames to aggregate the LLM output,
+    # but the GeminiMultimodalLiveAssistantContextAggregator pushes LLMTextFrames and TTSTextFrames. We
+    # need to override this proces_frame for LLMTextFrame, so that only the TTSTextFrames
+    # are process. This ensures that the context gets only one set of messages.
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if not isinstance(frame, LLMTextFrame):
+            await super().process_frame(frame, direction)
+
     async def handle_user_image_frame(self, frame: UserImageRawFrame):
         # We don't want to store any images in the context. Revisit this later
         # when the API evolves.
@@ -365,7 +374,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "vad": params.vad,
             "context_window_compression": params.context_window_compression.model_dump()
             if params.context_window_compression
-            else None,
+            else {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -891,6 +900,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not text:
             return
 
+        await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
 
     def create_context_aggregator(
