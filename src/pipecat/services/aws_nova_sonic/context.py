@@ -73,6 +73,7 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
 
         # Process remaining messages to fill out conversation history.
         # Nova Sonic supports "user" and "assistant" messages in history.
+        print(f"[pk] standard messages: {messages}")
         for message in messages:
             history_message = self.from_standard_message(message)
             if history_message:
@@ -134,9 +135,9 @@ class AWSNovaSonicAssistantContextAggregator(OpenAIAssistantContextAggregator):
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
         await super().handle_function_call_result(frame)
 
-        # The standard function callback code path pushes the FunctionCallResultFrame from the llm itself,
-        # so we didn't have a chance to add the result to the openai realtime api context. Let's push a
-        # special frame to do that.
+        # The standard function callback code path pushes the FunctionCallResultFrame from the LLM
+        # itself, so we didn't have a chance to add the result to the AWS Nova Sonic server-side
+        # context. Let's push a special frame to do that.
         await self.push_frame(
             AWSNovaSonicFunctionCallResultFrame(result_frame=frame), FrameDirection.UPSTREAM
         )
