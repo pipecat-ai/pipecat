@@ -118,6 +118,7 @@ class AWSNovaSonicLLMService(LLMService):
         voice_id: str = "matthew",  # matthew, tiffany, amy
         instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
+        send_transcription_frames: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -129,6 +130,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._voice_id = voice_id
         self._instruction = instruction
         self._tools = tools
+        self._send_transcription_frames = send_transcription_frames
         self._context: AWSNovaSonicLLMContext = None
         self._stream: DuplexEventStream[
             InvokeModelWithBidirectionalStreamInput,
@@ -802,10 +804,12 @@ class AWSNovaSonicLLMService(LLMService):
         # Manually add new user transcription text to context.
         # We can't rely on the user context aggregator to do this since it's upstream from the LLM.
         self._context.add_user_transcription_text_as_message(text)
+
         # Report that some new user transcription text is available.
-        await self.push_frame(
-            TranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
-        )
+        if self._send_transcription_frames:
+            await self.push_frame(
+                TranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
+            )
 
     #
     # Context
