@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `STTMuteFilter` now mutes `InterimTranscriptionFrame` and
+  `TranscriptionFrame` which allows the `STTMuteFilter` to be used in
+  conjunction with transports that generate transcripts, e.g. `DailyTransport`.
+
 - Function calls now receive a single parameter `FunctionCallParams` instead of
   `(function_name, tool_call_id, args, llm, context, result_callback)` which is
   now deprecated.
