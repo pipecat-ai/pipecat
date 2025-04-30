@@ -30,7 +30,6 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMSetToolsFrame,
-    LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -892,7 +891,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not text:
             return
 
-        await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
 
     def create_context_aggregator(
