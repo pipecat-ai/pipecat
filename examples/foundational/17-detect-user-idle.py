@@ -6,6 +6,7 @@
 
 import argparse
 import os
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -36,6 +37,17 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
+@dataclass
+class StartConversationFrame(Frame):
+    """Frame to initiate a conversation.
+
+    This frame is used to signal the start of a conversation in the pipeline.
+    It can be used to trigger specific actions or responses from the system.
+    """
+
+    pass
+
+
 class ConversationStarterProcessor(FrameProcessor):
     def __init__(self, message: str = "Hi! I'm a default message!"):
         super().__init__()
@@ -54,12 +66,16 @@ class ConversationStarterProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStoppedSpeakingFrame):
+        if isinstance(frame, (StartConversationFrame, UserStoppedSpeakingFrame)):
             self._user_stopped_speaking_count += 1
-            logger.info(f"++ User stopped speaking, count: {self._user_stopped_speaking_count}")
+            logger.info(
+                f"++ {frame.name} User stopped speaking, count: {self._user_stopped_speaking_count}"
+            )
             if self._user_stopped_speaking_count == 1:
                 # First time user started speaking, send the message
                 await self.push_frame(TTSSpeakFrame(self.message))
+            else:
+                await self.push_frame(frame)
         else:
             # Pass through other frames
             await self.push_frame(frame)
@@ -100,7 +116,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         logger.info(f"User idle, timeout : {user_idle._timeout} retry count: {retry_count}")
         if retry_count == 1:
             # First attempt: Trigger the conversation starter
-            await user_idle.push_frame(UserStoppedSpeakingFrame())
+            await user_idle.push_frame(StartConversationFrame())
             return True
         elif retry_count == 2:
             # Second attempt: More direct prompt
@@ -117,7 +133,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             await user_idle.push_frame(
                 TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
             )
-            await task.queue_frame(EndFrame())
+            await user_idle.push_frame(EndFrame(), FrameDirection.UPSTREAM)
             return False
 
     user_idle = UserIdleProcessor(callback=handle_user_idle, timeout=4.0)
