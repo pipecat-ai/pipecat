@@ -93,7 +93,13 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
                         logger.error(
                             f"Unhandled content type in context message: {c.get('type')} - {message}"
                         )
-            return AWSNovaSonicConversationHistoryMessage(role=Role[role.upper()], text=content)
+            # There won't be content if this is an assistant tool call entry.
+            # We're ignoring those since they can't be loaded into AWS Nova Sonic conversation 
+            # history
+            if content:
+                return AWSNovaSonicConversationHistoryMessage(role=Role[role.upper()], text=content)
+        # We're ignoring messages with role "tool" since they can't be loaded into AWS Nova Sonic 
+        # conversation history
         logger.error(f"Unhandled message type in from_standard_message: {message}")
 
     def add_user_transcription_text_as_message(self, text):
