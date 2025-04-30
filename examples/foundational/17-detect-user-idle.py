@@ -11,11 +11,20 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSSpeakFrame
+from pipecat.frames.frames import (
+    BotSpeakingFrame,
+    EndFrame,
+    Frame,
+    LLMMessagesFrame,
+    TTSSpeakFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -25,6 +34,35 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
+
+
+class ConversationStarterProcessor(FrameProcessor):
+    def __init__(self, message: str = "Hi! I'm a default message!"):
+        super().__init__()
+        self.message = message
+        self._user_stopped_speaking_count = 0
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        """Say a default message when the user starts speaking.
+
+        This processor listens for the UserStartedSpeakingFrame and sends a default message
+        when the user starts speaking for the first time.
+
+        Args:
+            frame: The frame to process
+            direction: Direction of the frame flow
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_stopped_speaking_count += 1
+            logger.info(f"++ User stopped speaking, count: {self._user_stopped_speaking_count}")
+            if self._user_stopped_speaking_count == 1:
+                # First time user started speaking, send the message
+                await self.push_frame(TTSSpeakFrame(self.message))
+        else:
+            # Pass through other frames
+            await self.push_frame(frame)
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
@@ -59,15 +97,10 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     context_aggregator = llm.create_context_aggregator(context)
 
     async def handle_user_idle(user_idle: UserIdleProcessor, retry_count: int) -> bool:
+        logger.info(f"User idle, timeout : {user_idle._timeout} retry count: {retry_count}")
         if retry_count == 1:
-            # First attempt: Add a gentle prompt to the conversation
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "The user has been quiet. Politely and briefly ask if they're still there.",
-                }
-            )
-            await user_idle.push_frame(LLMMessagesFrame(messages))
+            # First attempt: Trigger the conversation starter
+            await user_idle.push_frame(UserStoppedSpeakingFrame())
             return True
         elif retry_count == 2:
             # Second attempt: More direct prompt
@@ -87,13 +120,16 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             await task.queue_frame(EndFrame())
             return False
 
-    user_idle = UserIdleProcessor(callback=handle_user_idle, timeout=5.0)
+    user_idle = UserIdleProcessor(callback=handle_user_idle, timeout=4.0)
+
+    conversation_starter = ConversationStarterProcessor(message="This is a default message.")
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,
             user_idle,  # Idle user check-in
+            conversation_starter,
             context_aggregator.user(),
             llm,  # LLM
             tts,  # TTS
