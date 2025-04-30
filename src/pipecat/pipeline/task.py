@@ -285,7 +285,7 @@ class PipelineTask(BaseTask):
 
     async def cancel(self):
         """Stops the running pipeline immediately."""
-        logger.debug(f"Canceling pipeline task {self}")
+        logger.debug(f"Cancelling pipeline task {self}")
         # Make sure everything is cleaned up downstream. This is sent
         # out-of-band from the main streaming task which is what we want since
         # we want to cancel right away.

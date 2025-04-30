@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Function calls are now cancelled by default if there's an interruption. To
+  disable this behavior you can set `cancel_on_interruption=False` when
+  registering the function call. Since function calls are executed as tasks you
+  can tell if a function call has been cancelled by catching the
+  `asyncio.CancelledError` exception (and don't forget to raise it again!).
+
+- Function calls are now ran sequentially. They keep running in tasks, but they
+  will be executed in the order received in the completion. A new LLM completion
+  will run when the last function call finishes running.
+
 - Function calls now receive a single parameter `FunctionCallParams` instead of
   `(function_name, tool_call_id, args, llm, context, result_callback)` which is
   now deprecated.
