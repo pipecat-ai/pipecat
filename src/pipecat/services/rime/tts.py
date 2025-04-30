@@ -74,7 +74,7 @@ class RimeTTSService(AudioContextWordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        url: str = "wss://users-ws.rime.ai/ws2",
+        url: str = "wss://users.rime.ai/ws2",
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
