@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a `context_window_compression` InputParam to
+  `GeminiMultimodalLiveLLMService` which allows you to enable a sliding
+  context window for the session as well as set the token limit of the sliding
+  window.
+
 - Updated `SmallWebRTCConnection` to support `ice_servers` with credentials.
 
 - Added `VADUserStartedSpeakingFrame` and `VADUserStoppedSpeakingFrame`,
