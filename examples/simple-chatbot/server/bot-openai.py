@@ -32,13 +32,17 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
+    InterimTranscriptionFrame,
     OutputImageRawFrame,
     SpriteFrame,
+    STTMuteFrame,
+    TranscriptionFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
@@ -101,6 +105,30 @@ class TalkingAnimation(FrameProcessor):
             self._is_talking = False
 
         await self.push_frame(frame, direction)
+
+
+class TranscriptionMuteProcessor(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self._is_muted = False
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, STTMuteFrame):
+            self._is_muted = frame.mute
+
+        if isinstance(
+            frame,
+            (TranscriptionFrame, InterimTranscriptionFrame),
+        ):
+            # Only pass VAD-related frames when not muted
+            if not self._is_muted:
+                await self.push_frame(frame, direction)
+            else:
+                logger.trace(
+                    f"{frame.__class__.__name__} suppressed - Transcription currently muted"
+                )
 
 
 async def main():
@@ -183,10 +211,23 @@ async def main():
         #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
+        # Configure the mute processor with both strategies
+        stt_mute_processor = STTMuteFilter(
+            config=STTMuteConfig(
+                strategies={
+                    STTMuteStrategy.ALWAYS,
+                }
+            ),
+        )
+
+        transcription_mute_processor = TranscriptionMuteProcessor()
+
         pipeline = Pipeline(
             [
                 transport.input(),
                 rtvi,
+                stt_mute_processor,  # Add the mute processor before STT
+                transcription_mute_processor,
                 context_aggregator.user(),
                 llm,
                 tts,
