@@ -461,10 +461,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
         text = await self._transcribe_audio(audio, context)
         if not text:
             return
-        logger.debug(f"[Transcription:user] {text}")
-        context.add_message({"role": "user", "content": [{"type": "text", "text": text}]})
+        # Sometimes the transcription contains newlines; we want to remove them.
+        cleaned_text = text.rstrip("\n")
+        logger.debug(f"[Transcription:user] {cleaned_text}")
+        context.add_message({"role": "user", "content": [{"type": "text", "text": cleaned_text}]})
         await self.push_frame(
-            TranscriptionFrame(text=text, user_id="user", timestamp=time_now_iso8601())
+            TranscriptionFrame(text=cleaned_text, user_id="user", timestamp=time_now_iso8601())
         )
 
     async def _transcribe_audio(self, audio, context):
