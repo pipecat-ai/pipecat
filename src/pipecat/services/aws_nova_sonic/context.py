@@ -96,6 +96,13 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
             return AWSNovaSonicConversationHistoryMessage(role=Role[role.upper()], text=content)
         logger.error(f"Unhandled message type in from_standard_message: {message}")
 
+    def add_user_transcription_text_as_message(self, text):
+        message = {
+            "role": "user",
+            "content": [{"type": "text", "text": text}],
+        }
+        self.add_message(message)
+
 
 @dataclass
 class AWSNovaSonicMessagesUpdateFrame(DataFrame):

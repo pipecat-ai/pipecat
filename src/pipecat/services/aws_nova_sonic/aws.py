@@ -199,9 +199,8 @@ class AWSNovaSonicLLMService(LLMService):
         await self.push_frame(frame, direction)
 
     async def _handle_context(self, context: OpenAILLMContext):
-        # TODO: if context has changed, reconnect
-        # TODO: remove
-        print(f"[pk] _handle_context: {context.get_messages_for_initializing_history()}")
+        # TODO: reset connection if needed (if entirely new context object provided, for instance)
+        print(f"[pk] receive updated context: {context.get_messages_for_initializing_history()}")
         if not self._context:
             # We got our initial context - try to finish connecting
             self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(context)
@@ -800,6 +799,10 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _report_user_transcription_text_added(self, text):
         print(f"[pk] transcription: {text}")
+        # Manually add new user transcription text to context.
+        # We can't rely on the user context aggregator to do this since it's upstream from the LLM.
+        self._context.add_user_transcription_text_as_message(text)
+        # Report that some new user transcription text is available.
         await self.push_frame(
             TranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
         )
