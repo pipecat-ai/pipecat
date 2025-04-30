@@ -27,10 +27,10 @@ except ModuleNotFoundError as e:
     logger.error("In order to use NVIDIA Riva TTS, you need to `pip install pipecat-ai[riva]`.")
     raise Exception(f"Missing module: {e}")
 
-FASTPITCH_TIMEOUT_SECS = 5
+RIVA_TTS_TIMEOUT_SECS = 5
 
 
-class FastPitchTTSService(TTSService):
+class RivaTTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN_US
         quality: Optional[int] = 20
@@ -38,11 +38,12 @@ class FastPitchTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = None,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "English-US.Female-1",
+        voice_id: str = "Magpie-Multilingual.EN-US.Male.Male-1",
         sample_rate: Optional[int] = None,
-        function_id: str = "0149dedb-2be8-4195-b9a0-e57e0e14f972",
+        function_id: str = "877104f7-e885-42b9-8de8-f6e4c6303969",
+        model_name: str = "magpie-tts-multilingual",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -52,7 +53,7 @@ class FastPitchTTSService(TTSService):
         self._language_code = params.language
         self._quality = params.quality
 
-        self.set_model_name("fastpitch-hifigan-tts")
+        self.set_model_name(model_name)
         self.set_voice(voice_id)
 
         metadata = [
@@ -100,7 +101,7 @@ class FastPitchTTSService(TTSService):
             await asyncio.to_thread(read_audio_responses, queue)
 
             # Wait for the thread to start.
-            resp = await asyncio.wait_for(queue.get(), FASTPITCH_TIMEOUT_SECS)
+            resp = await asyncio.wait_for(queue.get(), RIVA_TTS_TIMEOUT_SECS)
             while resp:
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
@@ -109,9 +110,46 @@ class FastPitchTTSService(TTSService):
                     num_channels=1,
                 )
                 yield frame
-                resp = await asyncio.wait_for(queue.get(), FASTPITCH_TIMEOUT_SECS)
+                resp = await asyncio.wait_for(queue.get(), RIVA_TTS_TIMEOUT_SECS)
         except asyncio.TimeoutError:
             logger.error(f"{self} timeout waiting for audio response")
 
         await self.start_tts_usage_metrics(text)
         yield TTSStoppedFrame()
+
+
+class FastPitchTTSService(RivaTTSService):
+    class InputParams(BaseModel):
+        language: Optional[Language] = Language.EN_US
+        quality: Optional[int] = 20
+
+    def __init__(
+        self,
+        *,
+        api_key: str = None,
+        server: str = "grpc.nvcf.nvidia.com:443",
+        voice_id: str = "English-US.Female-1",
+        sample_rate: Optional[int] = None,
+        function_id: str = "0149dedb-2be8-4195-b9a0-e57e0e14f972",
+        model_name: str = "fastpitch-hifigan-tts",
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
+        super().__init__(
+            api_key=api_key,
+            voice_id=voice_id,
+            sample_rate=sample_rate,
+            function_id=function_id,
+            model_name=model_name,
+            params=params,
+            **kwargs,
+        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FastPitchTTSService` is deprecated, use `RivaTTSService` instead.",
+                DeprecationWarning,
+            )
+

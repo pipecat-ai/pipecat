@@ -16,8 +16,8 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.nim.llm import NimLLMService
-from pipecat.services.riva.stt import ParakeetSTTService
-from pipecat.services.riva.tts import FastPitchTTSService
+from pipecat.services.riva.stt import ParakeetSTTService, RivaOfflineSTTService
+from pipecat.services.riva.tts import RivaTTSService, FastPitchTTSService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -37,11 +37,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         ),
     )
 
-    stt = ParakeetSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
+    stt = RivaOfflineSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
+    # stt = ParakeetSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
 
     llm = NimLLMService(api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct")
 
     tts = FastPitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
+    # tts = RivaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
     messages = [
         {
