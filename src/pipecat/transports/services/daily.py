@@ -22,6 +22,7 @@ from daily import (
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.utils import create_default_resampler
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
@@ -333,6 +334,14 @@ class DailyTransportClient(EventHandler):
     @property
     def participant_id(self) -> str:
         return self._participant_id
+
+    @property
+    def in_sample_rate(self) -> int:
+        return self._in_sample_rate
+
+    @property
+    def out_sample_rate(self) -> int:
+        return self._out_sample_rate
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if not self._joined:
@@ -665,9 +674,17 @@ class DailyTransportClient(EventHandler):
         self,
         participant_id: str,
         callback: Callable,
-        audio_source: str = "camera",
+        audio_source: str = "microphone",
     ):
-        self._audio_renderers[participant_id][audio_source] = callback
+        # Only enable the desired audio source subscription on this participant.
+        if audio_source in ("microphone", "screenAudio"):
+            media = {"media": {audio_source: "subscribed"}}
+        else:
+            media = {"media": {"customAudio": {audio_source: "subscribed"}}}
+
+        await self.update_subscriptions(participant_settings={participant_id: media})
+
+        self._audio_renderers[participant_id] = {audio_source: callback}
 
         self._client.set_audio_renderer(
             participant_id,
@@ -683,12 +700,15 @@ class DailyTransportClient(EventHandler):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        # Only enable the desired video source subscription on this participant.
-        await self.update_subscriptions(
-            participant_settings={participant_id: {"media": {video_source: "subscribed"}}}
-        )
+        # Only enable the desired audio source subscription on this participant.
+        if video_source in ("camera", "screenVideo"):
+            media = {"media": {video_source: "subscribed"}}
+        else:
+            media = {"media": {"customVideo": {video_source: "subscribed"}}}
 
-        self._video_renderers[participant_id][video_source] = callback
+        await self.update_subscriptions(participant_settings={participant_id: media})
+
+        self._video_renderers[participant_id] = {video_source: callback}
 
         self._client.set_video_renderer(
             participant_id,
@@ -886,6 +906,8 @@ class DailyInputTransport(BaseInputTransport):
         # internally to be processed.
         self._audio_in_task = None
 
+        self._resampler = create_default_resampler()
+
         self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
 
     @property
@@ -978,10 +1000,14 @@ class DailyInputTransport(BaseInputTransport):
     async def _on_participant_audio_data(
         self, participant_id: str, audio: AudioData, audio_source: str
     ):
+        resampled = await self._resampler.resample(
+            audio.audio_frames, audio.sample_rate, self._client.out_sample_rate
+        )
+
         frame = UserAudioRawFrame(
             user_id=participant_id,
-            audio=audio.audio_frames,
-            sample_rate=audio.sample_rate,
+            audio=resampled,
+            sample_rate=self._client.out_sample_rate,
             num_channels=audio.num_channels,
         )
         frame.source = audio_source
@@ -1004,10 +1030,12 @@ class DailyInputTransport(BaseInputTransport):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        self._video_renderers[participant_id][video_source] = {
-            "framerate": framerate,
-            "timestamp": 0,
-            "render_next_frame": [],
+        self._video_renderers[participant_id] = {
+            video_source: {
+                "framerate": framerate,
+                "timestamp": 0,
+                "render_next_frame": [],
+            }
         }
 
         await self._client.capture_participant_video(
