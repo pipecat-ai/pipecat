@@ -87,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `GeminiMultimodalLiveLLMService` where the context
+  contained tokens instead of words.
+
 - Fixed an issue with HTTP Smart Turn handling, where the service returns a 500
   error. Previously, this would cause an unhandled exception. Now, a 500 error
   is treated as an incomplete response.

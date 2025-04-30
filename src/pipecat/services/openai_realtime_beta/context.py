@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -170,6 +171,14 @@ class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator):
+    # The LLMAssistantContextAggregator uses TextFrames to aggregate the LLM output,
+    # but the OpenAIRealtimeLLMService pushes LLMTextFrames and TTSTextFrames. We
+    # need to override this proces_frame for LLMTextFrame, so that only the TTSTextFrames
+    # are process. This ensures that the context gets only one set of messages.
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if not isinstance(frame, LLMTextFrame):
+            await super().process_frame(frame, direction)
+
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
         await super().handle_function_call_result(frame)
 
