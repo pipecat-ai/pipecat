@@ -9,10 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `RTVIObserverParams` which allows you to configure what RTVI messages
+  are sent to the clients.
+
 - Added a `context_window_compression` InputParam to
-  `GeminiMultimodalLiveLLMService` which allows you to enable a sliding
-  context window for the session as well as set the token limit of the sliding
-  window.
+  `GeminiMultimodalLiveLLMService` which allows you to enable a sliding context
+  window for the session as well as set the token limit of the sliding window.
 
 - Updated `SmallWebRTCConnection` to support `ice_servers` with credentials.
 
@@ -30,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `MCPClient`; a way to connect to MCP servers and use the MCP servers'
   tools.
 
-- Added `Mem0 OSS`, along with Mem0 cloud support now the OSS version is also available.
+- Added `Mem0 OSS`, along with Mem0 cloud support now the OSS version is also
+  available.
 
 ### Changed
 
@@ -205,8 +208,9 @@ https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
 - Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
   client did not create a video transceiver.
 
-- Fixed an issue where LLM input parameters were not working and applied correctly in `GoogleVertexLLMService`, causing
-  unexpected behavior during inference.
+- Fixed an issue where LLM input parameters were not working and applied
+  correctly in `GoogleVertexLLMService`, causing unexpected behavior during
+  inference.
 
 ### Other
 
