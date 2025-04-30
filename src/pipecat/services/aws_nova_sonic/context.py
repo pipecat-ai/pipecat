@@ -98,9 +98,8 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
             # history
             if content:
                 return AWSNovaSonicConversationHistoryMessage(role=Role[role.upper()], text=content)
-        # We're ignoring messages with role "tool" since they can't be loaded into AWS Nova Sonic
-        # conversation history
-        logger.error(f"Unhandled message type in from_standard_message: {message}")
+        # NOTE: we're ignoring messages with role "tool" since they can't be loaded into AWS Nova
+        # Sonic conversation history
 
     def add_user_transcription_text_as_message(self, text):
         message = {
