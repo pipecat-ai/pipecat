@@ -13,20 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implementation supports it (e.g. Daily's custom tracks). With multiple
   destinations it is possible to send different audio or video tracks with a
   single transport simultaneously. To do that, you need to set the new
-  `Frame.destination` field with your desired transport destination (e.g. custom
-  track name), tell the transport you want a new destination with
+  `Frame.transport_destination` field with your desired transport destination
+  (e.g. custom track name), tell the transport you want a new destination with
   `TransportParams.audio_out_destinations` or
   `TransportParams.video_out_destinations` and the transport should take care of
   the rest.
 
-- Similarly to the new `Frame.destination`, there's a new `Frame.source` field
-  which is set by the `BaseInputTransport` if the incoming data comes from a
-  non-default source (e.g. custom tracks).
+- Similarly to the new `Frame.transport_destination`, there's a new
+  `Frame.transport_source` field which is set by the `BaseInputTransport` if the
+  incoming data comes from a non-default source (e.g. custom tracks).
 
-- `TTSService` has a new `destination` constructor parameter. This parameter
-  will be used to update the `Frame.destination` field for each generated
-  `TTSAudioRawFrame`. This allows sending multiple bots' audio to multiple
-  destinations in the same pipeline.
+- `TTSService` has a new `transport_destination` constructor parameter. This
+  parameter will be used to update the `Frame.transport_destination` field for
+  each generated `TTSAudioRawFrame`. This allows sending multiple bots' audio to
+  multiple destinations in the same pipeline.
 
 - Added `RTVIObserverParams` which allows you to configure what RTVI messages
   are sent to the clients.

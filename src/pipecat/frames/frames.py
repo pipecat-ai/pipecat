@@ -60,16 +60,16 @@ class Frame:
     name: str = field(init=False)
     pts: Optional[int] = field(init=False)
     metadata: Dict[str, Any] = field(init=False)
-    source: Optional[str] = field(init=False)
-    destination: Optional[str] = field(init=False)
+    transport_source: Optional[str] = field(init=False)
+    transport_destination: Optional[str] = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self.pts: Optional[int] = None
         self.metadata: Dict[str, Any] = {}
-        self.source: Optional[str] = None
-        self.destination: Optional[str] = None
+        self.transport_source: Optional[str] = None
+        self.transport_destination: Optional[str] = None
 
     def __str__(self):
         return self.name
@@ -152,7 +152,7 @@ class OutputAudioRawFrame(DataFrame, AudioRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, destination: {self.destination}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        return f"{self.name}(pts: {pts}, destination: {self.transport_destination}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
@@ -734,7 +734,7 @@ class InputAudioRawFrame(SystemFrame, AudioRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, source: {self.source}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        return f"{self.name}(pts: {pts}, source: {self.transport_source}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
@@ -747,7 +747,7 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, source: {self.source}, size: {self.size}, format: {self.format})"
+        return f"{self.name}(pts: {pts}, source: {self.transport_source}, size: {self.size}, format: {self.format})"
 
 
 @dataclass
@@ -758,7 +758,7 @@ class UserAudioRawFrame(InputAudioRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.source}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
@@ -770,7 +770,7 @@ class UserImageRawFrame(InputImageRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.source}, size: {self.size}, format: {self.format}, request: {self.request})"
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {self.size}, format: {self.format}, request: {self.request})"
 
 
 @dataclass

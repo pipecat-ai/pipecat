@@ -168,13 +168,13 @@ class BaseOutputTransport(FrameProcessor):
             await self._handle_frame(frame)
 
     async def _handle_frame(self, frame: Frame):
-        if frame.destination not in self._media_senders:
+        if frame.transport_destination not in self._media_senders:
             logger.warning(
-                f"{self} destination [{frame.destination}] not registered for frame {frame}"
+                f"{self} destination [{frame.transport_destination}] not registered for frame {frame}"
             )
             return
 
-        sender = self._media_senders[frame.destination]
+        sender = self._media_senders[frame.transport_destination]
 
         if isinstance(frame, StartInterruptionFrame):
             await sender.handle_interruptions(frame)
@@ -371,9 +371,9 @@ class BaseOutputTransport(FrameProcessor):
                 logger.debug(f"Bot [{self._destination}] started speaking")
 
                 downstream_frame = BotStartedSpeakingFrame()
-                downstream_frame.destination = self._destination
+                downstream_frame.transport_destination = self._destination
                 upstream_frame = BotStartedSpeakingFrame()
-                upstream_frame.destination = self._destination
+                upstream_frame.transport_destination = self._destination
                 await self._transport.push_frame(downstream_frame)
                 await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
@@ -384,9 +384,9 @@ class BaseOutputTransport(FrameProcessor):
                 logger.debug(f"Bot [{self._destination}] stopped speaking")
 
                 downstream_frame = BotStoppedSpeakingFrame()
-                downstream_frame.destination = self._destination
+                downstream_frame.transport_destination = self._destination
                 upstream_frame = BotStoppedSpeakingFrame()
-                upstream_frame.destination = self._destination
+                upstream_frame.transport_destination = self._destination
                 await self._transport.push_frame(downstream_frame)
                 await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
