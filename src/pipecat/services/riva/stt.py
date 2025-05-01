@@ -13,11 +13,13 @@ from pydantic import BaseModel
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
 )
+from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -199,18 +201,15 @@ class RivaSTTService(STTService):
         return self
 
 class RivaOfflineSTTService(SegmentedSTTService):
-# whisper / fal
-# base whisper
-# ex fal stt
     """Speech-to-text service using Fal's Wizper API.
 
     This service uses Fal's Wizper API to perform speech-to-text transcription on audio
     segments. It inherits from SegmentedSTTService to handle audio buffering and speech detection.
 
     Args:
-        api_key: Fal API key. If not provided, will check FAL_KEY environment variable.
+        api_key: NVIDIA_API_KEY.
         sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
-        params: Configuration parameters for the Wizper API.
+        params: Configuration parameters for Riva.
         **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
@@ -232,15 +231,15 @@ class RivaOfflineSTTService(SegmentedSTTService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
+        api_key: str = None,
+        server: str = "grpc.nvcf.nvidia.com:443",
+        function_id: str = "ee8dc628-76de-4acc-8595-1836e7e857bd",
+        model_name: str = "canary-1b-asr",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
     ):
-        super().__init__(
-            sample_rate=sample_rate,
-            **kwargs,
-        )
+        super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
         self._profanity_filter = False
         self._automatic_punctuation = False
@@ -271,7 +270,8 @@ class RivaOfflineSTTService(SegmentedSTTService):
         self._thread_task = None
         self._response_task = None
 
-
+    def can_generate_metrics(self) -> bool:
+        return False
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -281,14 +281,16 @@ class RivaOfflineSTTService(SegmentedSTTService):
 
         # config = riva.client.StreamingRecognitionConfig(
         config=riva.client.RecognitionConfig(
+            # encoding=riva.client.AudioEncoding.LINEAR_PCM,
             language_code=self._language_code,
+            # model="",
             max_alternatives=1,
             profanity_filter=self._profanity_filter,
             enable_automatic_punctuation=self._automatic_punctuation,
             verbatim_transcripts=not self._no_verbatim_transcripts,
-            # sample_rate_hertz=self.sample_rate,
-            # audio_channel_count=1,
-            # enable_word_time_offsets=args.word_time_offsets or args.speaker_diarization,??
+                # sample_rate_hertz=self.sample_rate,
+                # audio_channel_count=1,
+                # enable_word_time_offsets=args.word_time_offsets or args.speaker_diarization,??
             # ),
             # interim_results=True,
         )
@@ -296,7 +298,6 @@ class RivaOfflineSTTService(SegmentedSTTService):
         riva.client.add_word_boosting_to_config(
             config, self._boosted_lm_words, self._boosted_lm_score
         )
-        # riva.client.add_speaker_diarization_to_config(config, args.speaker_diarization, args.diarization_max_speakers)
 
         riva.client.add_endpoint_parameters_to_config(
             config,
@@ -311,29 +312,10 @@ class RivaOfflineSTTService(SegmentedSTTService):
 
         self._config = config
 
-        if not self._thread_task:
-            self._thread_task = self.create_task(self._thread_task_handler())
 
-        if not self._response_task:
-            self._response_queue = asyncio.Queue()
-            self._response_task = self.create_task(self._response_task_handler())
-
-    def can_generate_metrics(self) -> bool:
-        return True
-
-    # def language_to_service_language(self, language: Language) -> Optional[str]:
-    #     return language_to_fal_language(language)
-
-    # async def set_language(self, language: Language):
-    #     logger.info(f"Switching STT language to: [{language}]")
-    #     self._settings["language"] = self.language_to_service_language(language)
-
-    # async def set_model(self, model: str):
-    #     await super().set_model(model)
-    #     logger.info(f"Switching STT model to: [{model}]")
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribes an audio segment using NVIDIA Riva's Canary-1b model.
+        """Transcribe an audio segment
 
         Args:
             audio: Raw audio bytes in WAV format (already converted by base class).
@@ -346,12 +328,15 @@ class RivaOfflineSTTService(SegmentedSTTService):
             Only non-empty transcriptions are yielded.
         """
         try:
-            # Send to Fal directly (audio is already in WAV format from base class)
-            data_uri = fal_client.encode(audio, "audio/x-wav")
-            response = await self._fal_client.run(
-                "fal-ai/wizper",
-                arguments={"audio_url": data_uri, **self._settings},
-            )
+            response = self._asr_service.offline_recognize(audio, self._config)
+            # response = riva.client.print_offline(response=self._asr_service.offline_recognize(audio, self._config))
+            print(f"_____stt.py * response: {response}")
+            # # Send to Fal directly (audio is already in WAV format from base class)
+            # data_uri = fal_client.encode(audio, "audio/x-wav")
+            # response = await self._fal_client.run(
+            #     "fal-ai/wizper",
+            #     arguments={"audio_url": data_uri, **self._settings},
+            # )
 
             if response and "text" in response:
                 text = response["text"].strip()
@@ -362,8 +347,17 @@ class RivaOfflineSTTService(SegmentedSTTService):
                     )
 
         except Exception as e:
-            logger.error(f"Fal Wizper error: {e}")
-            yield ErrorFrame(f"Fal Wizper error: {str(e)}")
+            logger.error(f"Riva Offline STT error: {e}")
+            yield ErrorFrame(f"Riva Offline STT error: {str(e)}")
+
+    def __next__(self) -> bytes:
+        if not self._thread_running:
+            raise StopIteration
+        future = asyncio.run_coroutine_threadsafe(self._queue.get(), self.get_event_loop())
+        return future.result()
+
+    def __iter__(self):
+        return self
 
 class ParakeetSTTService(RivaSTTService):
     class InputParams(BaseModel):
