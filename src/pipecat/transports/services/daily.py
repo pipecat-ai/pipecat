@@ -154,6 +154,8 @@ class DailyParams(TransportParams):
         api_url: Daily API base URL
         api_key: Daily API authentication key
         dialin_settings: Optional settings for dial-in functionality
+        camera_enabled: Whether to enable the main camera track
+        microphone_enabled: Whether to enable the main microphone track
         transcription_enabled: Whether to enable speech transcription
         transcription_settings: Configuration for transcription service
     """
@@ -161,6 +163,8 @@ class DailyParams(TransportParams):
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     dialin_settings: Optional[DailyDialinSettings] = None
+    camera_enabled: bool = True
+    microphone_enabled: bool = True
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
@@ -502,6 +506,9 @@ class DailyTransportClient(EventHandler):
     async def _join(self):
         future = self._get_event_loop().create_future()
 
+        camera_enabled = self._params.video_out_enabled and self._params.camera_enabled
+        microphone_enabled = self._params.audio_out_enabled and self._params.microphone_enabled
+
         self._client.join(
             self._room_url,
             self._token,
@@ -509,13 +516,13 @@ class DailyTransportClient(EventHandler):
             client_settings={
                 "inputs": {
                     "camera": {
-                        "isEnabled": self._params.video_out_enabled,
+                        "isEnabled": camera_enabled,
                         "settings": {
                             "deviceId": self._camera_name(),
                         },
                     },
                     "microphone": {
-                        "isEnabled": self._params.audio_out_enabled,
+                        "isEnabled": microphone_enabled,
                         "settings": {
                             "deviceId": self._mic_name(),
                             "customConstraints": {

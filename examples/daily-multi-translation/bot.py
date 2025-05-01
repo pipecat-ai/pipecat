@@ -57,6 +57,7 @@ async def main():
                     ),
                 },
                 audio_out_destinations=["spanish", "french", "german"],
+                microphone_enabled=False,  # Disable since we just use custom tracks
                 vad_analyzer=SileroVADAnalyzer(),
             ),
         )
