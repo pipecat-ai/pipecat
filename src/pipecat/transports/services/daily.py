@@ -392,10 +392,11 @@ class DailyTransportClient(EventHandler):
         future = self._get_event_loop().create_future()
         if not destination and self._mic:
             self._mic.write_frames(frames, completion=completion_callback(future))
-        elif destination:
+        elif destination and destination in self._audio_sources:
             source = self._audio_sources[destination]
             source.write_frames(frames, completion=completion_callback(future))
         else:
+            logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
             future.set_result(None)
         await future
 
