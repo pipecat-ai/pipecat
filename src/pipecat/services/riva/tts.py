@@ -38,12 +38,12 @@ class RivaTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = None,
         server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str,
+        voice_id: str = "Magpie-Multilingual.EN-US.Male.Male-1",
         sample_rate: Optional[int] = None,
-        function_id: str,
-        model_name: str,
+        function_id: str = "877104f7-e885-42b9-8de8-f6e4c6303969",
+        model_name: str = "magpie-tts-multilingual",
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -126,7 +126,7 @@ class FastPitchTTSService(RivaTTSService):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = None,
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "English-US.Female-1",
         sample_rate: Optional[int] = None,
@@ -144,32 +144,12 @@ class FastPitchTTSService(RivaTTSService):
             params=params,
             **kwargs,
         )
+        import warnings
 
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FastPitchTTSService` is deprecated, use `RivaTTSService` instead.",
+                DeprecationWarning,
+            )
 
-# recommended default
-class MagpieTTSService(RivaTTSService):
-    class InputParams(BaseModel):
-        language: Optional[Language] = Language.EN_US
-        quality: Optional[int] = 20
-
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        server: str = "grpc.nvcf.nvidia.com:443",
-        voice_id: str = "Magpie-Multilingual.EN-US.Male.Male-1",
-        sample_rate: Optional[int] = None,
-        function_id: str = "877104f7-e885-42b9-8de8-f6e4c6303969",
-        model_name: str = "magpie-tts-multilingual",
-        params: InputParams = InputParams(),
-        **kwargs,
-    ):
-        super().__init__(
-            api_key=api_key,
-            voice_id=voice_id,
-            sample_rate=sample_rate,
-            function_id=function_id,
-            model_name=model_name,
-            params=params,
-            **kwargs,
-        )
