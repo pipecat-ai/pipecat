@@ -79,8 +79,8 @@ class FastPitchTTSService(TTSService):
                     self._voice_id,
                     self._language_code,
                     sample_rate_hz=self.sample_rate,
-                    audio_prompt_file=None,
-                    quality=self._quality,
+                    zero_shot_audio_prompt_file=None,
+                    zero_shot_quality=self._quality,
                     custom_dictionary={},
                 )
                 for r in responses:
