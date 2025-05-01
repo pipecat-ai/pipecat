@@ -66,8 +66,8 @@ class TTSService(AIService):
         # Text filter executed after text has been aggregated.
         text_filters: Sequence[BaseTextFilter] = [],
         text_filter: Optional[BaseTextFilter] = None,
-        # Audio destination of the generated frames.
-        destination: Optional[str] = None,
+        # Audio transport destination of the generated frames.
+        transport_destination: Optional[str] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -84,7 +84,7 @@ class TTSService(AIService):
         self._settings: Dict[str, Any] = {}
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
         self._text_filters: Sequence[BaseTextFilter] = text_filters
-        self._destination: Optional[str] = destination
+        self._transport_destination: Optional[str] = transport_destination
 
         if text_filter:
             import warnings
@@ -216,11 +216,11 @@ class TTSService(AIService):
                 sample_rate=self.sample_rate,
                 num_channels=1,
             )
-            silence_frame.destination = self._destination
+            silence_frame.transport_destination = self._transport_destination
             await self.push_frame(silence_frame)
 
         if isinstance(frame, TTSAudioRawFrame):
-            frame.destination = self._destination
+            frame.transport_destination = self._transport_destination
 
         await super().push_frame(frame, direction)
 

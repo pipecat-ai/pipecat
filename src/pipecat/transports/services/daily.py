@@ -1010,7 +1010,7 @@ class DailyInputTransport(BaseInputTransport):
             sample_rate=self._client.out_sample_rate,
             num_channels=audio.num_channels,
         )
-        frame.source = audio_source
+        frame.transport_source = audio_source
         await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):
@@ -1076,7 +1076,7 @@ class DailyInputTransport(BaseInputTransport):
                 size=(video_frame.width, video_frame.height),
                 format=video_frame.color_format,
             )
-            frame.source = video_source
+            frame.transport_source = video_source
             await self.push_frame(frame)
             self._video_renderers[participant_id][video_source]["timestamp"] = curr_time
 

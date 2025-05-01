@@ -66,17 +66,17 @@ async def main():
         tts_spanish = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="cefcb124-080b-4655-b31f-932f3ee743de",
-            destination="spanish",
+            transport_destination="spanish",
         )
         tts_french = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="8832a0b5-47b2-4751-bb22-6a8e2149303d",
-            destination="french",
+            transport_destination="french",
         )
         tts_german = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="38aabb6a-f52b-4fb0-a3d1-988518f4dc06",
-            destination="german",
+            transport_destination="german",
         )
 
         messages_spanish = [
