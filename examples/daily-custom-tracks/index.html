@@ -1,13 +1,8 @@
 <html>
   <head>
-    <title>daily multi translation</title>
+    <title>daily custom tracks</title>
   </head>
   <script crossorigin src="https://unpkg.com/@daily-co/daily-js"></script>
-  <script
-    src="https://code.jquery.com/jquery-3.1.1.min.js"
-    integrity="sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8="
-    crossorigin="anonymous"
-    ></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/fomantic-ui/2.8.6/semantic.min.js"></script>
   <link
     rel="stylesheet"
@@ -38,7 +33,6 @@
     }
 
     function destroyParticipantPlayers(participantId) {
-        destroyPlayers(`video[data-participant-id="${participantId}"]`);
         destroyPlayers(`audio[data-participant-id="${participantId}"]`);
         destroyPlayers(`button[data-participant-id="${participantId}"]`);
     }
@@ -49,19 +43,6 @@
         if (track != null) {
             player.srcObject = new MediaStream([track]);
         }
-    }
-
-    async function buildVideoPlayer(track, participantId) {
-        const videoContainer = document.getElementById("video-container");
-        const player = document.createElement("video");
-        player.dataset.participantId = participantId;
-
-        videoContainer.appendChild(player);
-
-        await startPlayer(player, track);
-        await player.play();
-
-        return player;
     }
 
     async function buildAudioPlayer(track, participantId) {
@@ -104,7 +85,7 @@
         callObject.updateParticipant(participantId, {
             setSubscribedTracks: {
                 audio: true,
-                video: true,
+                video: false,
                 custom: true,
             },
         });
@@ -130,9 +111,7 @@
 
         callObject.on("track-started", async (e) => {
             console.log("track-started", e.track);
-            if (e.track.kind === "video") {
-                await buildVideoPlayer(e.track, e.participant.session_id);
-            } else if (e.track.kind === "audio") {
+            if (e.track.kind === "audio") {
                 await buildAudioPlayer(e.track, e.participant.session_id);
             }
         });
@@ -161,9 +140,6 @@
 
         callObject.leave();
 
-        const videoContainer = document.getElementById("video-container");
-        videoContainer.replaceChildren();
-
         const audioContainer = document.getElementById("audio-container");
         audioContainer.replaceChildren();
     }
@@ -191,11 +167,6 @@
     <div id="tile" class="ui container" style="margin-top: 30px">
       <div id="tile" class="ui center aligned grid">
         <div id="audio-container"></div><br/>
-      </div>
-    </div>
-    <div id="tile" class="ui container" style="margin-top: 30px">
-      <div id="tile" class="ui center aligned grid">
-        <div id="video-container" class="ui segment"></div>
       </div>
     </div>
   </body>

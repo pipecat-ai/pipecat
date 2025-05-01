@@ -145,6 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Added `examples/daily-custom-tracks` to show how to send and receive Daily
+  custom tracks.
+
 - Added `examples/daily-multi-translation` to showcase how to send multiple
   simulataneous translations with the same transport.
 
