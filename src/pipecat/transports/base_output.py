@@ -47,6 +47,15 @@ class BaseOutputTransport(FrameProcessor):
 
         self._params = params
 
+        # Output sample rate. It will be initialized on StartFrame.
+        self._sample_rate = 0
+
+        # We write 10ms*CHUNKS of audio at a time (where CHUNKS is the
+        # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
+        # will chunk them. This helps with interruption handling. It will be
+        # initialized on StartFrame.
+        self._audio_chunk_size = 0
+
         # We will have one media sender per output frame destination. This allow
         # us to send multiple streams at the same time if the transport allows
         # it.
@@ -54,15 +63,21 @@ class BaseOutputTransport(FrameProcessor):
 
     @property
     def sample_rate(self) -> int:
-        sender = self._media_senders.get(None, None)
-        return sender.sample_rate if sender else 0
+        return self._sample_rate
 
     @property
     def audio_chunk_size(self) -> int:
-        sender = self._media_senders.get(None, None)
-        return sender.audio_chunk_size if sender else 0
+        return self._audio_chunk_size
 
     async def start(self, frame: StartFrame):
+        self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
+
+        # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
+        # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
+        # will chunk them. This will help with interruption handling.
+        audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
+        self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
+
         # Register destinations.
         for destination in self._params.audio_out_destinations:
             await self.register_audio_destination(destination)
@@ -72,7 +87,11 @@ class BaseOutputTransport(FrameProcessor):
 
         # Start default media sender.
         self._media_senders[None] = BaseOutputTransport.MediaSender(
-            self, destination=None, sample_rate=self.sample_rate, params=self._params
+            self,
+            destination=None,
+            sample_rate=self.sample_rate,
+            audio_chunk_size=self.audio_chunk_size,
+            params=self._params,
         )
         await self._media_senders[None].start(frame)
 
@@ -85,7 +104,11 @@ class BaseOutputTransport(FrameProcessor):
         # Start media senders.
         for destination in destinations:
             self._media_senders[destination] = BaseOutputTransport.MediaSender(
-                self, destination=destination, sample_rate=self.sample_rate, params=self._params
+                self,
+                destination=destination,
+                sample_rate=self.sample_rate,
+                audio_chunk_size=self.audio_chunk_size,
+                params=self._params,
             )
             await self._media_senders[destination].start(frame)
 
@@ -200,20 +223,16 @@ class BaseOutputTransport(FrameProcessor):
             *,
             destination: Optional[str],
             sample_rate: int,
+            audio_chunk_size: int,
             params: TransportParams,
         ):
             self._transport = transport
             self._destination = destination
             self._sample_rate = sample_rate
+            self._audio_chunk_size = audio_chunk_size
             self._params = params
 
-            # Output sample rate. It will be initialized on StartFrame.
-            self._sample_rate = 0
-
-            # We write 10ms*CHUNKS of audio at a time (where CHUNKS is the
-            # `audio_out_10ms_chunks` parameter). If we receive long audio
-            # frames we will chunk them. This helps with interruption handling.
-            self._audio_chunk_size = 0
+            # Buffer to keep track of incoming audio.
             self._audio_buffer = bytearray()
 
             # This will be used to resample incoming audio to the output sample rate.
@@ -242,13 +261,6 @@ class BaseOutputTransport(FrameProcessor):
             return self._audio_chunk_size
 
         async def start(self, frame: StartFrame):
-            self._sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
-
-            # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
-            # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
-            # will chunk them. This will help with interruption handling.
-            audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
-            self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
             self._audio_buffer = bytearray()
 
             # Create all tasks.
