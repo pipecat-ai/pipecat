@@ -10,7 +10,10 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+from pipecat.audio.turn.base_turn_analyzer import (
+    BaseTurnAnalyzer,
+    EndOfTurnState,
+)
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -21,6 +24,7 @@ from pipecat.frames.frames import (
     FilterUpdateSettingsFrame,
     Frame,
     InputAudioRawFrame,
+    MetricsFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -28,7 +32,10 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 
@@ -49,6 +56,46 @@ class BaseInputTransport(FrameProcessor):
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
         self._audio_task = None
+
+        if self._params.vad_enabled:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'vad_enabled' is deprecated, use 'audio_in_enabled' and 'vad_analyzer' instead.",
+                    DeprecationWarning,
+                )
+            self._params.audio_in_enabled = True
+
+        if self._params.vad_audio_passthrough:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'vad_audio_passthrough' is deprecated, audio passthrough is now always enabled. Use 'audio_in_passthrough' to disable.",
+                    DeprecationWarning,
+                )
+            self._params.audio_in_passthrough = True
+
+        if self._params.camera_in_enabled or self._params.camera_out_enabled:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameters 'camera_*' are deprecated, use 'video_*' instead.",
+                    DeprecationWarning,
+                )
+            self._params.video_in_enabled = self._params.camera_in_enabled
+            self._params.video_out_enabled = self._params.camera_out_enabled
+            self._params.video_out_is_live = self._params.camera_out_is_live
+            self._params.video_out_width = self._params.camera_out_width
+            self._params.video_out_height = self._params.camera_out_height
+            self._params.video_out_bitrate = self._params.camera_out_bitrate
+            self._params.video_out_framerate = self._params.camera_out_framerate
+            self._params.video_out_color_format = self._params.camera_out_color_format
 
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
         logger.debug(f"Enabling audio on start. {enabled}")
@@ -73,22 +120,23 @@ class BaseInputTransport(FrameProcessor):
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
 
         # Configure VAD analyzer.
-        if self._params.vad_enabled and self._params.vad_analyzer:
+        if self._params.vad_analyzer:
             self._params.vad_analyzer.set_sample_rate(self._sample_rate)
         # Configure End of turn analyzer.
         if self._params.turn_analyzer:
             self._params.turn_analyzer.set_sample_rate(self._sample_rate)
+
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
         # Create audio input queue and task if needed.
-        if not self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if not self._audio_task and self._params.audio_in_enabled:
             self._audio_in_queue = asyncio.Queue()
             self._audio_task = self.create_task(self._audio_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_task)
             self._audio_task = None
         # Stop audio filter.
@@ -97,12 +145,12 @@ class BaseInputTransport(FrameProcessor):
 
     async def cancel(self, frame: CancelFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._audio_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_task)
             self._audio_task = None
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
-        if self._params.audio_in_enabled or self._params.vad_enabled:
+        if self._params.audio_in_enabled:
             await self._audio_in_queue.put(frame)
 
     #
@@ -202,10 +250,13 @@ class BaseInputTransport(FrameProcessor):
                 self._params.turn_analyzer is None
                 or not self._params.turn_analyzer.speech_triggered
             )
-            if can_create_user_frames:
-                if new_vad_state == VADState.SPEAKING:
+            if new_vad_state == VADState.SPEAKING:
+                await self.push_frame(VADUserStartedSpeakingFrame())
+                if can_create_user_frames:
                     frame = UserStartedSpeakingFrame()
-                elif new_vad_state == VADState.QUIET:
+            elif new_vad_state == VADState.QUIET:
+                await self.push_frame(VADUserStoppedSpeakingFrame())
+                if can_create_user_frames:
                     frame = UserStoppedSpeakingFrame()
 
             if frame:
@@ -216,9 +267,8 @@ class BaseInputTransport(FrameProcessor):
 
     async def _handle_end_of_turn(self):
         if self.turn_analyzer:
-            state = await self.get_event_loop().run_in_executor(
-                self._executor, self.turn_analyzer.analyze_end_of_turn
-            )
+            state, prediction = await self.turn_analyzer.analyze_end_of_turn()
+            await self._handle_prediction_result(prediction)
             await self._handle_end_of_turn_complete(state)
 
     async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
@@ -242,8 +292,6 @@ class BaseInputTransport(FrameProcessor):
         while True:
             frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
-            audio_passthrough = True
-
             # If an audio filter is available, run it before VAD.
             if self._params.audio_in_filter:
                 frame.audio = await self._params.audio_in_filter.filter(frame.audio)
@@ -251,15 +299,22 @@ class BaseInputTransport(FrameProcessor):
             # Check VAD and push event if necessary. We just care about
             # changes from QUIET to SPEAKING and vice versa.
             previous_vad_state = vad_state
-            if self._params.vad_enabled:
+            if self._params.vad_analyzer:
                 vad_state = await self._handle_vad(frame, vad_state)
-                audio_passthrough = self._params.vad_audio_passthrough
 
             if self._params.turn_analyzer:
                 await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
 
-            # Push audio downstream if passthrough.
-            if audio_passthrough:
+            # Push audio downstream if passthrough is set.
+            if self._params.audio_in_passthrough:
                 await self.push_frame(frame)
 
             self._audio_in_queue.task_done()
+
+    async def _handle_prediction_result(self, result: MetricsData):
+        """Handle a prediction result event from the turn analyzer.
+
+        Args:
+            result: The prediction result MetricsData.
+        """
+        await self.push_frame(MetricsFrame(data=[result]))

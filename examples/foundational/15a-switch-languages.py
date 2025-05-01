@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 from deepgram import LiveOptions
@@ -20,6 +21,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -31,10 +33,12 @@ load_dotenv(override=True)
 current_language = "English"
 
 
-async def switch_language(function_name, tool_call_id, args, llm, context, result_callback):
+async def switch_language(params: FunctionCallParams):
     global current_language
-    current_language = args["language"]
-    await result_callback({"voice": f"Your answers from now on should be in {current_language}."})
+    current_language = params.arguments["language"]
+    await params.result_callback(
+        {"voice": f"Your answers from now on should be in {current_language}."}
+    )
 
 
 async def english_filter(frame) -> bool:
@@ -45,7 +49,7 @@ async def spanish_filter(frame) -> bool:
     return current_language == "Spanish"
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -53,9 +57,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

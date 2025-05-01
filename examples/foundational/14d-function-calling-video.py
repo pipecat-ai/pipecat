@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
 import os
 
@@ -19,6 +20,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -28,23 +30,23 @@ load_dotenv(override=True)
 
 
 # Global variable to store the peer connection ID
-webrtc_peer_id = None
+webrtc_peer_id = ""
 
 
-async def get_weather(function_name, tool_call_id, arguments, llm, context, result_callback):
-    location = arguments["location"]
-    await result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
+async def get_weather(params: FunctionCallParams):
+    location = params.arguments["location"]
+    await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
-async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
-    question = arguments["question"]
+async def get_image(params: FunctionCallParams):
+    question = params.arguments["question"]
     logger.debug(f"Requesting image with user_id={webrtc_peer_id}, question={question}")
 
     # Request the image frame
-    await llm.request_image_frame(
+    await params.llm.request_image_frame(
         user_id=webrtc_peer_id,
-        function_name=function_name,
-        tool_call_id=tool_call_id,
+        function_name=params.function_name,
+        tool_call_id=params.tool_call_id,
         text_content=question,
     )
 
@@ -52,12 +54,12 @@ async def get_image(function_name, tool_call_id, arguments, llm, context, result
     await asyncio.sleep(0.5)
 
     # Return a result to complete the function call
-    await result_callback(
+    await params.result_callback(
         f"I've captured an image from your camera and I'm analyzing what you asked about: {question}"
     )
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     global webrtc_peer_id
     webrtc_peer_id = webrtc_connection.pc_id
 
@@ -68,10 +70,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_in_enabled=True,  # Make sure camera input is enabled
-            vad_enabled=True,
+            video_in_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

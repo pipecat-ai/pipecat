@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     StartFrame,
     StartInterruptionFrame,
     TextFrame,
@@ -308,6 +309,7 @@ class WordTTSService(TTSService):
         self._initial_word_timestamp = -1
         self._words_queue = asyncio.Queue()
         self._words_task = None
+        self._llm_response_started: bool = False
 
     def start_word_timestamps(self):
         if self._initial_word_timestamp == -1:
@@ -335,11 +337,14 @@ class WordTTSService(TTSService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._llm_response_started = True
+        elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
+        self._llm_response_started = False
         self.reset_word_timestamps()
 
     def _create_words_task(self):
@@ -354,13 +359,14 @@ class WordTTSService(TTSService):
     async def _words_task_handler(self):
         last_pts = 0
         while True:
+            frame = None
             (word, timestamp) = await self._words_queue.get()
             if word == "Reset" and timestamp == 0:
                 self.reset_word_timestamps()
-                frame = None
-            elif word == "LLMFullResponseEndFrame" and timestamp == 0:
-                frame = LLMFullResponseEndFrame()
-                frame.pts = last_pts
+                if self._llm_response_started:
+                    self._llm_response_started = False
+                    frame = LLMFullResponseEndFrame()
+                    frame.pts = last_pts
             elif word == "TTSStoppedFrame" and timestamp == 0:
                 frame = TTSStoppedFrame()
                 frame.pts = last_pts

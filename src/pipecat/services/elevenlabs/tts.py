@@ -126,31 +126,14 @@ def build_elevenlabs_voice_settings(
         settings: Dictionary containing voice settings parameters
 
     Returns:
-        Dictionary of voice settings or None if required parameters are missing
+        Dictionary of voice settings or None if no valid settings are provided
     """
+    voice_setting_keys = ["stability", "similarity_boost", "style", "use_speaker_boost", "speed"]
+
     voice_settings = {}
-    if settings["stability"] is not None and settings["similarity_boost"] is not None:
-        voice_settings["stability"] = settings["stability"]
-        voice_settings["similarity_boost"] = settings["similarity_boost"]
-        if settings["style"] is not None:
-            voice_settings["style"] = settings["style"]
-        if settings["use_speaker_boost"] is not None:
-            voice_settings["use_speaker_boost"] = settings["use_speaker_boost"]
-        if settings["speed"] is not None:
-            voice_settings["speed"] = settings["speed"]
-    else:
-        if settings["style"] is not None:
-            logger.warning(
-                "'style' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-            )
-        if settings["use_speaker_boost"] is not None:
-            logger.warning(
-                "'use_speaker_boost' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-            )
-        if settings["speed"] is not None:
-            logger.warning(
-                "'speed' is set but will not be applied because 'stability' and 'similarity_boost' are not both set."
-            )
+    for key in voice_setting_keys:
+        if key in settings and settings[key] is not None:
+            voice_settings[key] = settings[key]
 
     return voice_settings or None
 
@@ -304,7 +287,7 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
+                await self.add_word_timestamps([("Reset", 0)])
 
     async def _connect(self):
         await self._connect_websocket()
@@ -543,7 +526,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             self._reset_state()
 
             if isinstance(frame, TTSStoppedFrame):
-                await self.add_word_timestamps([("LLMFullResponseEndFrame", 0), ("Reset", 0)])
+                await self.add_word_timestamps([("Reset", 0)])
 
         elif isinstance(frame, LLMFullResponseEndFrame):
             # End of turn - reset previous text

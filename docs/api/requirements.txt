@@ -26,20 +26,23 @@ pipecat-ai[grok]
 pipecat-ai[groq]
 # pipecat-ai[krisp] # Mocked
 pipecat-ai[koala]
-pipecat-ai[langchain]
-pipecat-ai[livekit]
+# pipecat-ai[langchain] # Mocked
+# pipecat-ai[livekit] # Mocked
 pipecat-ai[lmnt]
 pipecat-ai[local]
+# pipecat-ai[local-smart-turn] # Mocked
 # pipecat-ai[mem0] # Mocked
 # pipecat-ai[mlx-whisper] # Mocked
-pipecat-ai[moondream]
+# pipecat-ai[moondream] # Mocked
 pipecat-ai[nim]
 # pipecat-ai[neuphonic] # Mocked
 pipecat-ai[noisereduce]
 pipecat-ai[openai]
 # pipecat-ai[openpipe]
 # pipecat-ai[playht] # Mocked due to grpcio conflict with riva
-pipecat-ai[riva]
+pipecat-ai[qwen]
+pipecat-ai[remote-smart-turn]
+# pipecat-ai[riva] # Mocked
 pipecat-ai[silero]
 pipecat-ai[simli]
 pipecat-ai[soundfile]

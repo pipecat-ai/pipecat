@@ -1,6 +1,12 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import argparse
 import asyncio
-import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import Dict
 
@@ -9,21 +15,24 @@ from bot import run_bot
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import RedirectResponse
+from loguru import logger
 from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.network.webrtc_connection import IceServer, SmallWebRTCConnection
 
 # Load environment variables
 load_dotenv(override=True)
-
-logger = logging.getLogger("pc")
 
 app = FastAPI()
 
 # Store connections by pc_id
 pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
-ice_servers = ["stun:stun.l.google.com:19302"]
+ice_servers = [
+    IceServer(
+        urls="stun:stun.l.google.com:19302",
+    )
+]
 
 # Mount the frontend at /
 app.mount("/prebuilt", SmallWebRTCPrebuiltUI)
@@ -81,9 +90,10 @@ if __name__ == "__main__":
     parser.add_argument("--verbose", "-v", action="count")
     args = parser.parse_args()
 
+    logger.remove(0)
     if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        logger.add(sys.stderr, level="TRACE")
     else:
-        logging.basicConfig(level=logging.INFO)
+        logger.add(sys.stderr, level="DEBUG")
 
     uvicorn.run(app, host=args.host, port=args.port)

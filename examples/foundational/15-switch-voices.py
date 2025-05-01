@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 
 from dotenv import load_dotenv
@@ -19,6 +20,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -30,10 +32,10 @@ load_dotenv(override=True)
 current_voice = "News Lady"
 
 
-async def switch_voice(function_name, tool_call_id, args, llm, context, result_callback):
+async def switch_voice(params: FunctionCallParams):
     global current_voice
-    current_voice = args["voice"]
-    await result_callback(
+    current_voice = params.arguments["voice"]
+    await params.result_callback(
         {
             "voice": f"You are now using your {current_voice} voice. Your responses should now be as if you were a {current_voice}."
         }
@@ -52,7 +54,7 @@ async def barbershop_man_filter(frame) -> bool:
     return current_voice == "Barbershop Man"
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -60,9 +62,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

@@ -14,6 +14,7 @@ Example:
     INPUT_AUDIO_PATH=my_audio.mp3 python 23-bot-background-sound.py
 """
 
+import argparse
 import asyncio
 import os
 
@@ -41,7 +42,7 @@ if not audio_path:
     raise ValueError("No INPUT_AUDIO_PATH specified in environment variables")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     soundfile_mixer = SoundfileMixer(
@@ -56,9 +57,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
             audio_in_enabled=True,
             audio_out_enabled=True,
             audio_out_mixer=soundfile_mixer,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 

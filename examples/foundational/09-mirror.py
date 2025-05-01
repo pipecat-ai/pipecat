@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -39,7 +40,6 @@ class MirrorProcessor(FrameProcessor):
                 )
             )
         elif isinstance(frame, InputImageRawFrame):
-            print(f"Received image frame: {frame.size} {frame.format}")
             await self.push_frame(
                 OutputImageRawFrame(image=frame.image, size=frame.size, format=frame.format)
             )
@@ -47,7 +47,7 @@ class MirrorProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -55,11 +55,11 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_in_enabled=True,
-            camera_out_enabled=True,
-            camera_out_is_live=True,
-            camera_out_width=1280,
-            camera_out_height=720,
+            video_in_enabled=True,
+            video_out_enabled=True,
+            video_out_is_live=True,
+            video_out_width=1280,
+            video_out_height=720,
         ),
     )
 
