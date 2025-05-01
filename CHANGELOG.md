@@ -34,6 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   custom tracks and not send the main tracks. Note that you still need
   `audio_out_enabled=True` or `video_out_enabled`.
 
+- Added `DailyTransport.capture_participant_audio()` which allows you to capture
+  an audio source (e.g. "microphone", "screenAudio" or a custom track name) from
+  a remote participant.
+
+- Added `DailyTransport.update_publishing()` which allows you to update the call
+  video and audio publishing settings (e.g. audio and video quality).
+
 - Added `RTVIObserverParams` which allows you to configure what RTVI messages
   are sent to the clients.
 
@@ -61,6 +68,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   available.
 
 ### Changed
+
+- `TransportParams.audio_mixer` now supports a string and also a dictionary to
+  provide a mixer per destination. For example:
+
+```python
+  audio_out_mixer={
+      "track-1": SoundfileMixer(...),
+      "track-2": SoundfileMixer(...),
+      "track-N": SoundfileMixer(...),
+  },
+```
 
 - The `STTMuteFilter` now mutes `InterimTranscriptionFrame` and
   `TranscriptionFrame` which allows the `STTMuteFilter` to be used in
