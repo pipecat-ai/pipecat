@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each generated `TTSAudioRawFrame`. This allows sending multiple bots' audio to
   multiple destinations in the same pipeline.
 
+- Added `DailyTransportParams.camera_enabled` and
+  `DailyTransportParams.microphone_enabled` which allows you to enable/disable
+  the main camera or microphone tracks. This is useful if you only want to use
+  custom tracks and not send the main tracks. Note that you still need
+  `audio_out_enabled=True` or `video_out_enabled`.
+
 - Added `RTVIObserverParams` which allows you to configure what RTVI messages
   are sent to the clients.
 
