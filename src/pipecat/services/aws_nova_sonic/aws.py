@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import json
 import uuid
@@ -211,7 +212,8 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _handle_bot_stopped_speaking(self):
         if self._assistant_is_responding:
-            # Consider the assistant finished with their response.
+            # Consider the assistant finished with their response (after a short delay, to allow for
+            # any FINAL text block to come in).
             #
             # TODO: ideally we could base this solely on the LLM output events, but I couldn't
             # figure out a reliable way to determine when we've gotten our last FINAL text block
@@ -224,6 +226,7 @@ class AWSNovaSonicLLMService(LLMService):
             # FINAL text blocks to know how many or which FINAL blocks to expect, but user
             # interruptions throw a wrench in these schemes: depending on the exact timing of the
             # interruption, we should or shouldn't expect some FINAL blocks.
+            await asyncio.sleep(0.25)
             self._assistant_is_responding = False
             await self._report_assistant_response_ended()
 
