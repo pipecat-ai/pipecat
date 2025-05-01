@@ -219,7 +219,7 @@ class TTSService(AIService):
             silence_frame.transport_destination = self._transport_destination
             await self.push_frame(silence_frame)
 
-        if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(frame, (TTSStartedFrame, TTSStoppedFrame, TTSAudioRawFrame, TTSTextFrame)):
             frame.transport_destination = self._transport_destination
 
         await super().push_frame(frame, direction)
