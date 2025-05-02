@@ -147,7 +147,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
 
-
     #
     # standard AIService frame handling
     #
@@ -760,8 +759,10 @@ class AWSNovaSonicLLMService(LLMService):
         content_end = event_json["contentEnd"]
         stop_reason = content_end["stopReason"]
         # print(f"[pk] content end: {content}.\n  stop_reason: {stop_reason}")
-        # if content.role == Role.ASSISTANT:
-        #     print(f"[pk] assistant content end: {content}.\n  stop_reason: {stop_reason}")
+        if content.role == Role.ASSISTANT:
+            # print(f"[pk] assistant content end: {content}.\n  stop_reason: {stop_reason}")
+            if content.text_stage == TextStage.FINAL:
+                print(f"[pk] assistant FINAL text: {content.text_content}")
 
         # Bookkeeping: clear current content being received
         self._content_being_received = None
@@ -802,6 +803,18 @@ class AWSNovaSonicLLMService(LLMService):
         # Report some text added to the *equivalent* of TTS (this is a speech-to-speech model)
         print(f"[pk] TTS text: {text}")
         await self.push_frame(TTSTextFrame(text))
+
+        # TODO: this is a (hopefully temporary) HACK. Here we directly manipulate the context rather
+        # than relying on the frames pushed to the assistant context aggregator. The pattern of
+        # receiving full-sentence text after the assistant has spoken does not easily fit with the
+        # Pipecat expectation of chunks of text streaming in while the assistant is speaking.
+        # Interruption handling was especially challenging. Rather than spend days trying to fit a
+        # square peg in a round hole, I decided on this hack for the time being. We can most cleanly
+        # abandon this hack if/when AWS Nova Sonic implements streaming smaller text chunks
+        # interspersed with audio. Note that when we move away from this hack, we need to make sure
+        # that on an interruption we avoid sending LLMFullResponseEndFrame, which gets the
+        # LLMAssistantContextAggregator into a bad state.
+        self._context.add_assistant_text_as_message(text)
 
     async def _report_assistant_response_ended(self):
         # Report that the assistant has finished their response.
