@@ -6,7 +6,7 @@
 
 import asyncio
 import os
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Mapping, Optional
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -46,8 +46,10 @@ class RivaTTSService(TTSService):
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "Magpie-Multilingual.EN-US.Ray",
         sample_rate: Optional[int] = None,
-        function_id: str = "877104f7-e885-42b9-8de8-f6e4c6303969",
-        model_name: str = "magpie-tts-multilingual",
+        model_function_map: Mapping[str, str] = {
+            "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
+            "model_name": "magpie-tts-multilingual",
+        },
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -56,12 +58,13 @@ class RivaTTSService(TTSService):
         self._voice_id = voice_id
         self._language_code = params.language
         self._quality = params.quality
+        self._function_id = model_function_map.get("function_id")
 
-        self.set_model_name(model_name)
+        self.set_model_name(model_function_map.get("model_name"))
         self.set_voice(voice_id)
 
         metadata = [
-            ["function-id", function_id],
+            ["function-id", self._function_id],
             ["authorization", f"Bearer {api_key}"],
         ]
         auth = riva.client.Auth(None, True, server, metadata)
@@ -71,6 +74,13 @@ class RivaTTSService(TTSService):
         # warm up the service
         config_response = self._service.stub.GetRivaSynthesisConfig(
             riva.client.proto.riva_tts_pb2.RivaSynthesisConfigRequest()
+        )
+
+    async def set_model(self, model: str):
+        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
+        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
+        logger.warning(
+            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
         )
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -134,8 +144,10 @@ class FastPitchTTSService(RivaTTSService):
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "English-US.Female-1",
         sample_rate: Optional[int] = None,
-        function_id: str = "0149dedb-2be8-4195-b9a0-e57e0e14f972",
-        model_name: str = "fastpitch-hifigan-tts",
+        model_function_map: Mapping[str, str] = {
+            "function_id": "0149dedb-2be8-4195-b9a0-e57e0e14f972",
+            "model_name": "fastpitch-hifigan-tts",
+        },
         params: InputParams = InputParams(),
         **kwargs,
     ):
@@ -143,8 +155,7 @@ class FastPitchTTSService(RivaTTSService):
             api_key=api_key,
             voice_id=voice_id,
             sample_rate=sample_rate,
-            function_id=function_id,
-            model_name=model_name,
+            model_function_map=model_function_map,
             params=params,
             **kwargs,
         )
