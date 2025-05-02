@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    RequestSTTMuteFrame,
+    RequestSTTUnmuteFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -101,6 +103,7 @@ class STTMuteFilter(FrameProcessor):
         self._bot_is_speaking = False
         self._function_call_in_progress = False
         self._is_muted = False  # Initialize as unmuted, will set state on StartFrame if needed
+        self._frame_requested_mute = False
 
     @property
     def is_muted(self) -> bool:
@@ -116,6 +119,10 @@ class STTMuteFilter(FrameProcessor):
 
     async def _should_mute(self) -> bool:
         """Determines if STT should be muted based on current state and strategy."""
+        # First check if a RequestSTTMuteFrame was received
+        if self._frame_requested_mute:
+            return True
+
         for strategy in self._config.strategies:
             match strategy:
                 case STTMuteStrategy.FUNCTION_CALL:
@@ -151,7 +158,13 @@ class STTMuteFilter(FrameProcessor):
         should_mute = None
 
         # Process frames to determine mute state
-        if isinstance(frame, StartFrame):
+        if isinstance(frame, RequestSTTMuteFrame):
+            self._frame_requested_mute = True
+            should_mute = await self._should_mute()
+        elif isinstance(frame, RequestSTTUnmuteFrame):
+            self._frame_requested_mute = False
+            should_mute = await self._should_mute()
+        elif isinstance(frame, StartFrame):
             should_mute = await self._should_mute()
         elif isinstance(frame, FunctionCallInProgressFrame):
             self._function_call_in_progress = True

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added two new frames `RequestSTTMuteFrame`, `RequestSTTUnmuteFrame`. These
+  frames tell the `STTMuteFilter` to directly mute or unmute the user and
+  take precedent over the mute strategies when an `RequestSTTMuteFrame` is
+  processed.
+
 - `BaseOutputTransport` now allows multiple destinations if the transport
   implementation supports it (e.g. Daily's custom tracks). With multiple
   destinations it is possible to send different audio or video tracks with a

@@ -696,6 +696,20 @@ class STTMuteFrame(SystemFrame):
 
 
 @dataclass
+class RequestSTTMuteFrame(Frame):
+    """Request to mute the STT service."""
+
+    pass
+
+
+@dataclass
+class RequestSTTUnmuteFrame(Frame):
+    """Request to unmute the STT service."""
+
+    pass
+
+
+@dataclass
 class TransportMessageUrgentFrame(SystemFrame):
     message: Any
 

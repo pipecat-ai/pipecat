@@ -287,3 +287,50 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_returned_frames,
         )
+
+    async def test_direct_frame_muting(self):
+        """Test that RequestSTTMuteFrame and RequestSTTUnmuteFrame directly control muting."""
+        from pipecat.frames.frames import RequestSTTMuteFrame, RequestSTTUnmuteFrame
+
+        # Create filter with no strategies to isolate direct frame control
+        filter = STTMuteFilter(config=STTMuteConfig(strategies=set()))
+
+        frames_to_send = [
+            # Initially unmuted - frames should pass through
+            UserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),
+            UserStoppedSpeakingFrame(),
+            # Mute via frame - subsequent frames should be suppressed
+            RequestSTTMuteFrame(),
+            SleepFrame(sleep=0.1),
+            UserStartedSpeakingFrame(),  # Should be suppressed
+            InputAudioRawFrame(
+                audio=b"", sample_rate=16000, num_channels=1
+            ),  # Should be suppressed
+            UserStoppedSpeakingFrame(),  # Should be suppressed
+            # Unmute via frame - frames should pass through again
+            RequestSTTUnmuteFrame(),
+            SleepFrame(sleep=0.1),
+            UserStartedSpeakingFrame(),
+            InputAudioRawFrame(audio=b"", sample_rate=16000, num_channels=1),
+            UserStoppedSpeakingFrame(),
+        ]
+
+        expected_returned_frames = [
+            UserStartedSpeakingFrame,
+            InputAudioRawFrame,
+            UserStoppedSpeakingFrame,
+            STTMuteFrame,  # mute=True
+            RequestSTTMuteFrame,
+            STTMuteFrame,  # mute=False
+            RequestSTTUnmuteFrame,
+            UserStartedSpeakingFrame,
+            InputAudioRawFrame,
+            UserStoppedSpeakingFrame,
+        ]
+
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
