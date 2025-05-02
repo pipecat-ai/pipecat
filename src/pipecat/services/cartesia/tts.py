@@ -28,6 +28,13 @@ from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+from pipecat.utils.tracing.helpers import add_service_span_attributes
+from pipecat.utils.tracing.metrics import traced_operation
+from pipecat.utils.tracing.tracing import (
+    AttachmentStrategy,
+    is_tracing_available,
+    traced,
+)
 
 # See .env.example for Cartesia configuration needed
 try:
@@ -274,33 +281,56 @@ class CartesiaTTSService(AudioContextWordTTSService):
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
+    @traced(attachment_strategy=AttachmentStrategy.NONE, name="cartesia_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        try:
-            if not self._websocket or self._websocket.closed:
-                await self._connect()
+        with traced_operation(self, "tts") as metrics:
+            if metrics:
+                metrics.set_character_count(len(text))
 
-            if not self._context_id:
-                await self.start_ttfb_metrics()
-                yield TTSStartedFrame()
-                self._context_id = str(uuid.uuid4())
-                await self.create_audio_context(self._context_id)
+            if is_tracing_available():
+                from opentelemetry import trace
 
-            msg = self._build_msg(text=text)
+                current_span = trace.get_current_span()
+
+                add_service_span_attributes(
+                    self,
+                    current_span,
+                    text=text,
+                    cartesia_version=self._cartesia_version,
+                    context_id=self._context_id,
+                )
 
             try:
-                await self._get_websocket().send(msg)
-                await self.start_tts_usage_metrics(text)
+                if not self._websocket or self._websocket.closed:
+                    await self._connect()
+
+                if not self._context_id:
+                    await self.start_ttfb_metrics()
+                    yield TTSStartedFrame()
+                    self._context_id = str(uuid.uuid4())
+                    await self.create_audio_context(self._context_id)
+
+                msg = self._build_msg(text=text)
+
+                try:
+                    await self._get_websocket().send(msg)
+                    await self.start_tts_usage_metrics(text)
+                except Exception as e:
+                    logger.error(f"{self} error sending message: {e}")
+                    yield TTSStoppedFrame()
+                    await self._disconnect()
+                    await self._connect()
+                    return
+                yield None
             except Exception as e:
-                logger.error(f"{self} error sending message: {e}")
-                yield TTSStoppedFrame()
-                await self._disconnect()
-                await self._connect()
-                return
-            yield None
-        except Exception as e:
-            logger.error(f"{self} exception: {e}")
+                logger.error(f"{self} exception: {e}")
+            finally:
+                if metrics and hasattr(self._metrics, "ttfb_ms"):
+                    ttfb = self._metrics.ttfb_ms
+                    if ttfb is not None:
+                        metrics.set_ttfb(ttfb)
 
 
 class CartesiaHttpTTSService(TTSService):
