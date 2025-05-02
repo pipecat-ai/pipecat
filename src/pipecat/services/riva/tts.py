@@ -5,7 +5,11 @@
 #
 
 import asyncio
+import os
 from typing import AsyncGenerator, Optional
+
+# Suppress gRPC fork warnings
+os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
 from loguru import logger
 from pydantic import BaseModel
@@ -152,4 +156,3 @@ class FastPitchTTSService(RivaTTSService):
                 "`FastPitchTTSService` is deprecated, use `RivaTTSService` instead.",
                 DeprecationWarning,
             )
-
