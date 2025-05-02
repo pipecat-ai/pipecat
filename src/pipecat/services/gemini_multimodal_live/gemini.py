@@ -354,6 +354,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_is_speaking = False
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+        self._bot_text_buffer = ""
 
         self._sample_rate = 24000
 
@@ -852,6 +853,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not part:
             return
 
+        # part.text is added when `modalities` is set to TEXT; otherwise, it's None
+        text = part.text
+        if text:
+            if not self._bot_text_buffer:
+                await self.push_frame(LLMFullResponseStartFrame())
+
+            self._bot_text_buffer += text
+            await self.push_frame(LLMTextFrame(text=text))
+
         inline_data = part.inlineData
         if not inline_data:
             return
@@ -892,6 +902,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
+        text = self._bot_text_buffer
+        self._bot_text_buffer = ""
+
+        # Pertains to modalities set to TEXT only
+        if text:
+            await self.push_frame(LLMFullResponseEndFrame())
+
         await self.push_frame(TTSStoppedFrame())
         await self.push_frame(LLMFullResponseEndFrame())
 
@@ -899,6 +916,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not evt.serverContent.outputTranscription:
             return
 
+        # This is the output transcription text when modalities is set to AUDIO.
+        # In this case, we push LLMTextFrame and TTSTextFrame to be handled by the
+        # downstream assistant context aggregator.
         text = evt.serverContent.outputTranscription.text
 
         if not text:
