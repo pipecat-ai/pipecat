@@ -91,7 +91,7 @@ class RivaSTTService(STTService):
     def __init__(
         self,
         *,
-        api_key: str = None,
+        api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         function_id: str = "1598d209-5e27-4d3c-8079-4751568b1081",
         model_name: str = "parakeet-ctc-1.1b-asr",
@@ -102,7 +102,7 @@ class RivaSTTService(STTService):
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
         self._profanity_filter = False
-        self._automatic_punctuation = False
+        self._automatic_punctuation = True
         self._no_verbatim_transcripts = False
         self._language_code = params.language
         self._boosted_lm_words = None
@@ -471,18 +471,17 @@ class RivaSegmentedSTTService(SegmentedSTTService):
 
 
 class ParakeetSTTService(RivaSTTService):
-    class InputParams(BaseModel):
-        language: Optional[Language] = Language.EN_US
+    """Deprecated: Use RivaSTTService instead."""
 
     def __init__(
         self,
         *,
-        api_key: str = None,
+        api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         function_id: str = "1598d209-5e27-4d3c-8079-4751568b1081",
         model_name: str = "parakeet-ctc-1.1b-asr",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: RivaSTTService.InputParams,  # Use parent class's type
         **kwargs,
     ):
         super().__init__(
