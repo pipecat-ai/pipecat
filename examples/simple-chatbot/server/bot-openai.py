@@ -20,8 +20,7 @@ the conversation flow.
 import asyncio
 import os
 import sys
-from dataclasses import dataclass
-from typing import Any, Dict, List, Union
+from typing import Any, Dict
 
 import aiohttp
 from dotenv import load_dotenv
