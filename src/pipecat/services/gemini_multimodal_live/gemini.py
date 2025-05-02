@@ -905,11 +905,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
         text = self._bot_text_buffer
         self._bot_text_buffer = ""
 
-        # Pertains to modalities set to TEXT only
-        if text:
-            await self.push_frame(LLMFullResponseEndFrame())
+        # Only push the TTSStoppedFrame the bot is outputting audio
+        # when text is found, modalities is set to TEXT and no audio
+        # is produced.
+        if not text:
+            await self.push_frame(TTSStoppedFrame())
 
-        await self.push_frame(TTSStoppedFrame())
         await self.push_frame(LLMFullResponseEndFrame())
 
     async def _handle_evt_output_transcription(self, evt):
