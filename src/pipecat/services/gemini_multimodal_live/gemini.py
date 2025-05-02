@@ -227,10 +227,8 @@ class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggre
     # but the GeminiMultimodalLiveAssistantContextAggregator pushes LLMTextFrames and TTSTextFrames. We
     # need to override this proces_frame for LLMTextFrame, so that only the TTSTextFrames
     # are process. This ensures that the context gets only one set of messages.
-    # GeminiMultimodalLiveLLMService also pushes TranscriptionFrames, so we need to
-    # ignore pushing those as well, as they're also TextFrames.
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        if not isinstance(frame, (LLMTextFrame, TranscriptionFrame)):
+        if not isinstance(frame, LLMTextFrame):
             await super().process_frame(frame, direction)
 
     async def handle_user_image_frame(self, frame: UserImageRawFrame):
@@ -465,9 +463,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Sometimes the transcription contains newlines; we want to remove them.
         cleaned_text = text.rstrip("\n")
         logger.debug(f"[Transcription:user] {cleaned_text}")
-        context.add_message({"role": "user", "content": [{"type": "text", "text": cleaned_text}]})
         await self.push_frame(
-            TranscriptionFrame(text=cleaned_text, user_id="user", timestamp=time_now_iso8601())
+            TranscriptionFrame(text=cleaned_text, user_id="user", timestamp=time_now_iso8601()),
+            FrameDirection.UPSTREAM,
         )
 
     async def _transcribe_audio(self, audio, context):
