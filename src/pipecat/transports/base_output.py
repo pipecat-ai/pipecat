@@ -369,7 +369,7 @@ class BaseOutputTransport(FrameProcessor):
         #
 
         def _create_audio_task(self):
-            if not self._audio_task and self._params.audio_out_enabled:
+            if not self._audio_task:
                 self._audio_queue = asyncio.Queue()
                 self._audio_task = self._transport.create_task(self._audio_task_handler())
 
