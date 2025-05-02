@@ -193,7 +193,7 @@ async def main():
         # RTVI events for Pipecat client UI
         #
 
-        rtvi = RTVIProcessor()
+        rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
         rtvi_tts = RTVIService(
             name="tts",
