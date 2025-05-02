@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for cross-platform local smart turn detection. You can use 
+  `LocalSmartTurnAnalyzer` for on-device inference using Torch.
+
 - `BaseOutputTransport` now allows multiple destinations if the transport
   implementation supports it (e.g. Daily's custom tracks). With multiple
   destinations it is possible to send different audio or video tracks with a
