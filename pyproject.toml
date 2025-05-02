@@ -96,6 +96,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "pipecat" = ["py.typed"]
+"pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"
