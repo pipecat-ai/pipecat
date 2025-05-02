@@ -14,7 +14,7 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 
 try:
     import torch
-    from transformers import Wav2Vec2BertForSequenceClassification, AutoFeatureExtractor
+    from transformers import AutoFeatureExtractor, Wav2Vec2BertForSequenceClassification
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -33,7 +33,9 @@ class LocalSmartTurnAnalyzer(BaseSmartTurn):
 
         logger.debug("Loading Local Smart Turn model...")
         # Load the pretrained model for sequence classification
-        self._turn_model = Wav2Vec2BertForSequenceClassification.from_pretrained(smart_turn_model_path)
+        self._turn_model = Wav2Vec2BertForSequenceClassification.from_pretrained(
+            smart_turn_model_path
+        )
         # Load the corresponding feature extractor for preprocessing audio
         self._turn_processor = AutoFeatureExtractor.from_pretrained(smart_turn_model_path)
         # Set device to GPU if available, else CPU
