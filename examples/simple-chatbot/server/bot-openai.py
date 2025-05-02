@@ -216,19 +216,13 @@ async def main():
         #
         # RTVI events for Pipecat client UI
         #
-        # options = RTVIServiceOptionConfig(name="say", value=)
-        # tts_interrupt = RTVIServiceConfig(service="tts", options=[options])
 
-        default_config = RTVIConfig(
-            config=[
-                RTVIServiceConfig(
-                    service="tts",
-                    options=[],
-                ),
-            ]
+        rtvi = RTVIProcessor()
+
+        rtvi_tts = RTVIService(
+            name="tts",
+            options=[],
         )
-
-        rtvi = RTVIProcessor(config=default_config)
 
         async def action_tts_say_handler(
             rtvi: RTVIProcessor, service: str, arguments: Dict[str, Any]
@@ -267,11 +261,6 @@ async def main():
 
         action_tts_interrupt = RTVIAction(
             service="tts", action="interrupt", result="bool", handler=action_tts_interrupt_handler
-        )
-
-        rtvi_tts = RTVIService(
-            name="tts",
-            options=[],
         )
 
         rtvi.register_service(rtvi_tts)
