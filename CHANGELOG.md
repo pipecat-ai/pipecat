@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TransportParams.video_out_destinations` and the transport should take care of
   the rest.
 
-- Similarly to the new `Frame.transport_destination`, there's a new
+- Similar to the new `Frame.transport_destination`, there's a new
   `Frame.transport_source` field which is set by the `BaseInputTransport` if the
   incoming data comes from a non-default source (e.g. custom tracks).
 
@@ -28,11 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each generated `TTSAudioRawFrame`. This allows sending multiple bots' audio to
   multiple destinations in the same pipeline.
 
-- Added `DailyTransportParams.camera_enabled` and
-  `DailyTransportParams.microphone_enabled` which allows you to enable/disable
-  the main camera or microphone tracks. This is useful if you only want to use
-  custom tracks and not send the main tracks. Note that you still need
-  `audio_out_enabled=True` or `video_out_enabled`.
+- Added `DailyTransportParams.camera_out_enabled` and
+  `DailyTransportParams.microphone_out_enabled` which allows you to
+  enable/disable the main output camera or microphone tracks. This is useful if
+  you only want to use custom tracks and not send the main tracks. Note that you
+  still need `audio_out_enabled=True` or `video_out_enabled`.
 
 - Added `DailyTransport.capture_participant_audio()` which allows you to capture
   an audio source (e.g. "microphone", "screenAudio" or a custom track name) from

@@ -154,8 +154,8 @@ class DailyParams(TransportParams):
         api_url: Daily API base URL
         api_key: Daily API authentication key
         dialin_settings: Optional settings for dial-in functionality
-        camera_enabled: Whether to enable the main camera track
-        microphone_enabled: Whether to enable the main microphone track
+        camera_out_enabled: Whether to enable the main camera output track. If enabled, it still needs `video_out_enabled=True`
+        microphone_out_enabled: Whether to enable the main microphone track. If enabled, it still needs `audio_out_enabled=True`
         transcription_enabled: Whether to enable speech transcription
         transcription_settings: Configuration for transcription service
     """
@@ -163,8 +163,8 @@ class DailyParams(TransportParams):
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     dialin_settings: Optional[DailyDialinSettings] = None
-    camera_enabled: bool = True
-    microphone_enabled: bool = True
+    camera_out_enabled: bool = True
+    microphone_out_enabled: bool = True
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
@@ -507,8 +507,8 @@ class DailyTransportClient(EventHandler):
     async def _join(self):
         future = self._get_event_loop().create_future()
 
-        camera_enabled = self._params.video_out_enabled and self._params.camera_enabled
-        microphone_enabled = self._params.audio_out_enabled and self._params.microphone_enabled
+        camera_enabled = self._params.video_out_enabled and self._params.camera_out_enabled
+        microphone_enabled = self._params.audio_out_enabled and self._params.microphone_out_enabled
 
         self._client.join(
             self._room_url,
