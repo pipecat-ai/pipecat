@@ -41,13 +41,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         ),
     )
 
-    stt = RivaSegmentedSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
+    stt = RivaSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
+    # stt = RivaSegmentedSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
     # stt = ParakeetSTTService(api_key=os.getenv("NVIDIA_API_KEY"))
 
     llm = NimLLMService(api_key=os.getenv("NVIDIA_API_KEY"), model="meta/llama-3.1-405b-instruct")
 
-    tts = FastPitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
-    # tts = RivaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
+    # tts = FastPitchTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
+    tts = RivaTTSService(api_key=os.getenv("NVIDIA_API_KEY"))
 
     messages = [
         {
