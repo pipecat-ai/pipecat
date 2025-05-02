@@ -45,6 +45,7 @@ Note:
 """
 
 import argparse
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -102,8 +103,17 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         voice_name = match.content.strip().lower()
         if voice_name in VOICE_IDS:
             voice_id = VOICE_IDS[voice_name]
-            tts.set_voice(voice_id)
-            logger.info(f"Switched to {voice_name} voice")
+
+            # Create task to reset the TTS context after voice change
+            async def change_voice():
+                # First flush any existing audio to finish the current context
+                await tts.flush_audio()
+                # Then set the new voice
+                tts.set_voice(voice_id)
+                logger.info(f"Switched to {voice_name} voice")
+
+            # Schedule the voice change task
+            asyncio.create_task(change_voice())
         else:
             logger.warning(f"Unknown voice: {voice_name}")
 
