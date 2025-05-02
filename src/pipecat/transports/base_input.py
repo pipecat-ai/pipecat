@@ -79,7 +79,7 @@ class BaseInputTransport(FrameProcessor):
                 )
             self._params.audio_in_passthrough = True
 
-        if self._params.camera_in_enabled or self._params.camera_out_enabled:
+        if self._params.camera_in_enabled:
             import warnings
 
             with warnings.catch_warnings():
