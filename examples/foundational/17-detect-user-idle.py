@@ -14,13 +14,17 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotSpeakingFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     EndFrame,
     Frame,
     LLMMessagesFrame,
+    StartInterruptionFrame,
     TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -35,6 +39,40 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
+
+
+class DebugObserver(BaseObserver):
+    """Observer to log interruptions and bot speaking events to the console.
+
+    Logs all frame instances of:
+    - StartInterruptionFrame
+    - BotStartedSpeakingFrame
+    - BotStoppedSpeakingFrame
+
+    This allows you to see the frame flow from processor to processor through the pipeline for these frames.
+    Log format: [EVENT TYPE]: [source processor] → [destination processor] at [timestamp]s
+    """
+
+    async def on_push_frame(
+        self,
+        src: FrameProcessor,
+        dst: FrameProcessor,
+        frame: Frame,
+        direction: FrameDirection,
+        timestamp: int,
+    ):
+        # Convert timestamp to seconds for readability
+        time_sec = timestamp / 1_000_000_000
+
+        # Create direction arrow
+        arrow = "→" if direction == FrameDirection.DOWNSTREAM else "←"
+
+        if isinstance(frame, StartInterruptionFrame):
+            logger.info(f"⚡ INTERRUPTION START: {src} {arrow} {dst} at {time_sec:.2f}s")
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            logger.info(f"🤖 BOT START SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            logger.info(f"🤖 BOT STOP SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
 
 
 @dataclass
@@ -160,15 +198,15 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             allow_interruptions=True,
             enable_metrics=True,
             report_only_initial_ttfb=True,
+            observers=[DebugObserver()],
         ),
     )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
-        # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        # Start the user idle timer
+        await task.queue_frames([BotSpeakingFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
