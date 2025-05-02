@@ -8,8 +8,10 @@ import asyncio
 import base64
 import json
 import uuid
+import wave
 from dataclasses import dataclass
 from enum import Enum
+from importlib.resources import files
 from typing import Any, List, Optional
 
 from aws_sdk_bedrock_runtime.client import (
@@ -146,6 +148,8 @@ class AWSNovaSonicLLMService(LLMService):
         self._context_available = False
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
+        self._triggering_assistant_response = False
+        self._assistant_response_trigger_audio: bytes = None  # Not cleared on _disconnect()
 
     #
     # standard AIService frame handling
@@ -180,8 +184,7 @@ class AWSNovaSonicLLMService(LLMService):
         if isinstance(frame, OpenAILLMContextFrame):
             await self._handle_context(frame.context)
         elif isinstance(frame, InputAudioRawFrame):
-            # TODO: check if _audio_input_paused? what causes that?
-            await self._send_user_audio_event(frame)
+            await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, AWSNovaSonicFunctionCallResultFrame):
@@ -210,6 +213,15 @@ class AWSNovaSonicLLMService(LLMService):
             self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(context)
             self._context_available = True
             await self._finish_connecting_if_context_available()
+
+    async def _handle_input_audio_frame(self, frame: InputAudioRawFrame):
+        # Wait until we're done sending the assistant response trigger audio before sending audio
+        # from the user's mic
+        if self._triggering_assistant_response:
+            return
+
+        # TODO: check if _audio_input_paused? what causes that?
+        await self._send_user_audio_event(frame.audio)
 
     async def _handle_bot_stopped_speaking(self):
         # Protect against back-to-back BotStoppedSpeaking calls, which I've observed
@@ -316,6 +328,14 @@ class AWSNovaSonicLLMService(LLMService):
         # Start receiving events
         self._receive_task = self.create_task(self._receive_task_handler())
 
+        # If we need to, send assistant response trigger
+        if self._triggering_assistant_response:
+            # If the trigger was the first audio chunk sent on this connection it'd be ignored (I'm
+            # guessing the LLM can't quite "hear" the first little bit of audio sent). So send a bit
+            # of leading blank audio first.
+            await self._send_assistant_response_trigger(lead_with_blank_audio=True)
+            self._triggering_assistant_response = False
+
     async def _disconnect(self):
         try:
             # Clean up receive task
@@ -340,6 +360,8 @@ class AWSNovaSonicLLMService(LLMService):
             self._assistant_is_responding = False
             self._context_available = False
             self._ready_to_send_context = False
+            self._handling_bot_stopped_speaking = False
+            self._triggering_assistant_response = False
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
 
@@ -490,11 +512,11 @@ class AWSNovaSonicLLMService(LLMService):
         '''
         await self._send_client_event(text_content_end)
 
-    async def _send_user_audio_event(self, frame: InputAudioRawFrame):
+    async def _send_user_audio_event(self, audio: bytes):
         if not self._stream:
             return
 
-        blob = base64.b64encode(frame.audio)
+        blob = base64.b64encode(audio)
         audio_event = f'''
         {{
             "event": {{
@@ -639,7 +661,7 @@ class AWSNovaSonicLLMService(LLMService):
                     elif "contentEnd" in event_json:
                         # Handle a piece of content ending
                         await self._handle_content_end_event(event_json)
-                    elif "completionStart" in event_json:
+                    elif "completionEnd" in event_json:
                         # Handle the LLM completion ending
                         await self._handle_completion_end_event(event_json)
 
@@ -839,7 +861,7 @@ class AWSNovaSonicLLMService(LLMService):
             )
 
     #
-    # Context
+    # context
     #
 
     def create_context_aggregator(
@@ -855,3 +877,61 @@ class AWSNovaSonicLLMService(LLMService):
         assistant = AWSNovaSonicAssistantContextAggregator(context=context, params=assistant_params)
 
         return AWSNovaSonicContextAggregatorPair(user, assistant)
+
+    #
+    # assistant response trigger (HACK)
+    #
+
+    # Class variable
+    AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION = (
+        "Start speaking when you hear the user say 'ready', but don't consider that 'ready' to be "
+        "a meaningful part of the conversation other than as a trigger for you to start speaking."
+    )
+
+    async def trigger_assistant_response(self):
+        if self._triggering_assistant_response:
+            return False
+
+        self._triggering_assistant_response = True
+
+        # Read audio bytes, if we don't already have them cached
+        if not self._assistant_response_trigger_audio:
+            file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
+            with wave.open(file_path.open("rb"), "rb") as wav_file:
+                self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
+
+        # Send the trigger audio, if we're fully connected and set up
+        # NOTE: maybe there's a better way to determine whether we're done setting up?
+        if self._receive_task:
+            await self._send_assistant_response_trigger()
+            self._triggering_assistant_response = False
+
+    async def _send_assistant_response_trigger(self, lead_with_blank_audio=False):
+        # TODO: if/when we make bitrate, etc configurable, avoid hard-coding this
+        chunk_size = 640  # equivalent to what we get from InputAudioRawFrame
+        chunk_duration = 640 / (
+            16000 * 2
+        )  # 640 bytes of 16-bit (2-byte) PCM mono audio at 16kHz corresponds to 0.02 seconds
+
+        # Lead with blank audio, if needed
+        if lead_with_blank_audio:
+            blank_audio_duration = 0.5  # much less than this and it doesn't reliably work
+            blank_audio_chunk = b"\x00" * chunk_size
+            num_chunks = int(blank_audio_duration / chunk_duration)
+            for _ in range(num_chunks):
+                await self._send_user_audio_event(blank_audio_chunk)
+                await asyncio.sleep(chunk_duration)
+
+        # Send trigger audio
+        # NOTE: this audio *will* be transcribed and eventually make it into the context. That's OK:
+        # if we ever need to seed this service again with context it would make sense to include it
+        # since the instruction (i.e. the "wait for the trigger" instruction) will be part of the 
+        # context as well.
+        # print(f"[pk] sending trigger audio! {len(self._assistant_response_trigger_audio)}")
+        audio_chunks = [
+            self._assistant_response_trigger_audio[i : i + chunk_size]
+            for i in range(0, len(self._assistant_response_trigger_audio), chunk_size)
+        ]
+        for chunk in audio_chunks:
+            await self._send_user_audio_event(chunk)
+            await asyncio.sleep(chunk_duration)
