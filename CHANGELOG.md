@@ -136,6 +136,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `SimliVideoService` where the bot was continuously outputting
+  audio, which prevents the `BotStoppedSpeakingFrame` from being emitted.
+
 - Fixed an issue where `OpenAIRealtimeBetaLLMService` would add two assistant
   messages to the context.
 
