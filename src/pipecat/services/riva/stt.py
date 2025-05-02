@@ -94,7 +94,7 @@ class RivaSTTService(STTService):
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         function_id: str = "1598d209-5e27-4d3c-8079-4751568b1081",
-        model_name: str = "parakeet-ctc-1.1b-asr",
+        model_name: str = "parakeet-1.1b-rnnt-multilingual-asr",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
