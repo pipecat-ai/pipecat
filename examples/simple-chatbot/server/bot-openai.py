@@ -27,12 +27,10 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
-from pydantic import BaseModel
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
@@ -50,13 +48,9 @@ from pipecat.processors.frameworks.rtvi import (
     ActionResult,
     RTVIAction,
     RTVIActionArgument,
-    RTVIConfig,
     RTVIObserver,
     RTVIProcessor,
     RTVIService,
-    RTVIServiceConfig,
-    RTVIServiceOption,
-    RTVIServiceOptionConfig,
 )
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -118,24 +112,6 @@ class TalkingAnimation(FrameProcessor):
             self._is_talking = False
 
         await self.push_frame(frame, direction)
-
-
-class RTVIArgument(BaseModel):
-    name: str
-    value: Union[str, bool]
-
-
-class RTVIData(BaseModel):
-    action: str
-    service: str
-    arguments: List[RTVIArgument]
-
-
-class RTVIMessage(BaseModel):
-    id: str
-    type: str
-    label: str
-    data: RTVIData
 
 
 async def main():
@@ -296,41 +272,6 @@ async def main():
             await rtvi.set_bot_ready()
             # Kick off the conversation
             await task.queue_frames([context_aggregator.user().get_context_frame()])
-
-        # @transport.event_handler("on_app_message")
-        # async def on_app_message(transport, message, sender: str):
-        #     # Convert the incoming dictionary to an RTVIMessage object
-
-        #     try:
-        #         # Parse the dictionary into an RTVIMessage object
-        #         rtvi_message = RTVIMessage.model_validate(message)
-
-        #         # Log the parsed message
-        #         logger.info(f"Message from {sender}: {rtvi_message.model_dump()}")
-
-        #         if rtvi_message.data.action == "say":
-        #             # Extract the text and interrupt values
-        #             text = next(
-        #                 (arg.value for arg in rtvi_message.data.arguments if arg.name == "text"),
-        #                 None,
-        #             )
-        #             interrupt = next(
-        #                 (
-        #                     arg.value
-        #                     for arg in rtvi_message.data.arguments
-        #                     if arg.name == "interrupt"
-        #                 ),
-        #                 False,
-        #             )
-
-        #             if interrupt:
-        #                 await task.queue_frame(BotInterruptionFrame())
-
-        #             if text:
-        #                 await task.queue_frame(TTSSpeakFrame(text=text))
-
-        #     except Exception as e:
-        #         logger.error(f"Failed to parse message: {e}")
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
