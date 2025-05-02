@@ -53,12 +53,19 @@ class AWSNovaSonicConversationHistory:
     messages: list[AWSNovaSonicConversationHistoryMessage] = field(default_factory=list)
 
 
-@dataclass
 class AWSNovaSonicLLMContext(OpenAILLMContext):
+    def __init__(self, messages=None, tools=None, **kwargs):
+        super().__init__(messages=messages, tools=tools, **kwargs)
+        self.__setup_local()
+
+    def __setup_local(self):
+        self._assistant_text = ""
+
     @staticmethod
     def upgrade_to_nova_sonic(obj: OpenAILLMContext) -> "AWSNovaSonicLLMContext":
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AWSNovaSonicLLMContext):
             obj.__class__ = AWSNovaSonicLLMContext
+            obj.__setup_local()
         return obj
 
     def get_messages_for_initializing_history(self) -> AWSNovaSonicConversationHistory:
@@ -110,7 +117,7 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
         # NOTE: we're ignoring messages with role "tool" since they can't be loaded into AWS Nova
         # Sonic conversation history
 
-    def add_user_transcription_text_as_message(self, text):
+    def add_user_transcription_text(self, text):
         message = {
             "role": "user",
             "content": [{"type": "text", "text": text}],
@@ -118,11 +125,16 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
         self.add_message(message)
         # print(f"[pk] context updated (user): {self.get_messages_for_logging()}")
 
-    def add_assistant_text_as_message(self, text):
+    def buffer_assistant_text(self, text):
+        self._assistant_text += text  # TODO: determine if we need to add space or something
+        # print(f"[pk] assistant text buffered: {self._assistant_text}")
+
+    def flush_aggregated_assistant_text(self):
         message = {
             "role": "assistant",
-            "content": [{"type": "text", "text": text}],
+            "content": [{"type": "text", "text": self._assistant_text}],
         }
+        self._assistant_text = ""
         self.add_message(message)
         # print(f"[pk] context updated (assistant): {self.get_messages_for_logging()}")
 
