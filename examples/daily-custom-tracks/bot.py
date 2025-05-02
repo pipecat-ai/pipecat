@@ -53,7 +53,7 @@ async def main():
             DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                microphone_enabled=False,  # Disable since we just use custom tracks
+                microphone_out_enabled=False,  # Disable since we just use custom tracks
                 audio_out_destinations=["pipecat-mirror"],
             ),
         )
