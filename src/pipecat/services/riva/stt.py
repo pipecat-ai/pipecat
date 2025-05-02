@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Mapping, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -93,8 +93,10 @@ class RivaSTTService(STTService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        function_id: str = "1598d209-5e27-4d3c-8079-4751568b1081",
-        model_name: str = "parakeet-1.1b-rnnt-multilingual-asr",
+        model_function_map: Mapping[str, str] = {
+            "function_id": "1598d209-5e27-4d3c-8079-4751568b1081",
+            "model_name": "parakeet-ctc-1.1b-asr",
+        },
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
@@ -114,11 +116,12 @@ class RivaSTTService(STTService):
         self._stop_history_eou = -1
         self._stop_threshold_eou = -1.0
         self._custom_configuration = ""
+        self._function_id = model_function_map.get("function_id")
 
-        self.set_model_name(model_name)
+        self.set_model_name(model_function_map.get("model_name"))
 
         metadata = [
-            ["function-id", function_id],
+            ["function-id", self._function_id],
             ["authorization", f"Bearer {api_key}"],
         ]
         auth = riva.client.Auth(None, True, server, metadata)
@@ -132,6 +135,13 @@ class RivaSTTService(STTService):
 
     def can_generate_metrics(self) -> bool:
         return False
+
+    async def set_model(self, model: str):
+        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
+        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
+        logger.warning(
+            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
+        )
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
@@ -253,25 +263,22 @@ class RivaSTTService(STTService):
 
 
 class RivaSegmentedSTTService(SegmentedSTTService):
-    """Speech-to-text service using NVIDIA Riva Canary ASR API.
+    """Speech-to-text service using NVIDIA Riva's offline/batch models.
 
-    This service uses NVIDIA's Riva Canary ASR API to perform speech-to-text
+    By default, his service uses NVIDIA's Riva Canary ASR API to perform speech-to-text
     transcription on audio segments. It inherits from SegmentedSTTService to handle
     audio buffering and speech detection.
 
     Args:
         api_key: NVIDIA API key for authentication
         server: Riva server address (defaults to NVIDIA Cloud Function endpoint)
-        function_id: NVIDIA Cloud Function ID for the Canary ASR service
-        model_name: Name of the Canary ASR model to use
+        model_function_map: Mapping of model name and its corresponding NVIDIA Cloud Function ID
         sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
         params: Additional configuration parameters for Riva
         **kwargs: Additional arguments passed to SegmentedSTTService
     """
 
     class InputParams(BaseModel):
-        """Configuration parameters for Riva Canary ASR API."""
-
         language: Optional[Language] = Language.EN_US
         profanity_filter: bool = False
         automatic_punctuation: bool = True
@@ -284,8 +291,10 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        function_id: str = "ee8dc628-76de-4acc-8595-1836e7e857bd",
-        model_name: str = "canary-1b-asr",
+        model_function_map: Mapping[str, str] = {
+            "function_id": "ee8dc628-76de-4acc-8595-1836e7e857bd",
+            "model_name": "canary-1b-asr",
+        },
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
@@ -293,12 +302,13 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Set model name
-        self.set_model_name(model_name)
+        self.set_model_name(model_function_map.get("model_name"))
 
         # Initialize Riva settings
         self._api_key = api_key
         self._server = server
-        self._function_id = function_id
+        self._function_id = model_function_map.get("function_id")
+        self._model_name = model_function_map.get("model_name")
 
         # Store the language as a Language enum and as a string
         self._language_enum = params.language or Language.EN_US
@@ -344,7 +354,7 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         auth = riva.client.Auth(None, True, self._server, metadata)
         self._asr_service = riva.client.ASRService(auth)
 
-        logger.info(f"Initialized Riva Canary ASR service with model: {self.model_name}")
+        logger.info(f"Initialized RivaSegmentedSTTService with model: {self.model_name}")
 
     def _create_recognition_config(self):
         """Create the Riva ASR recognition configuration."""
@@ -384,6 +394,13 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         """Indicates whether this service can generate processing metrics."""
         return True
 
+    async def set_model(self, model: str):
+        logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
+        example = {"function_id": "<UUID>", "model_name": "<model_name>"}
+        logger.warning(
+            f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
+        )
+
     async def start(self, frame: StartFrame):
         """Initialize the service when the pipeline starts."""
         await super().start(frame)
@@ -402,7 +419,7 @@ class RivaSegmentedSTTService(SegmentedSTTService):
             self._config.language_code = self._language
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribe an audio segment using Riva Canary ASR.
+        """Transcribe an audio segment.
 
         Args:
             audio: Raw audio bytes in WAV format (already converted by base class).
@@ -478,17 +495,18 @@ class ParakeetSTTService(RivaSTTService):
         *,
         api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
-        function_id: str = "1598d209-5e27-4d3c-8079-4751568b1081",
-        model_name: str = "parakeet-ctc-1.1b-asr",
+        model_function_map: Mapping[str, str] = {
+            "function_id": "1598d209-5e27-4d3c-8079-4751568b1081",
+            "model_name": "parakeet-ctc-1.1b-asr",
+        },
         sample_rate: Optional[int] = None,
-        params: RivaSTTService.InputParams,  # Use parent class's type
+        params: RivaSTTService.InputParams = RivaSTTService.InputParams(),  # Use parent class's type
         **kwargs,
     ):
         super().__init__(
             api_key=api_key,
             server=server,
-            function_id=function_id,
-            model_name=model_name,
+            model_function_map=model_function_map,
             sample_rate=sample_rate,
             params=params,
             **kwargs,
