@@ -20,20 +20,26 @@ the conversation flow.
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
+from typing import Any, Dict, List, Union
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
+from pydantic import BaseModel
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
+    LLMMessagesAppendFrame,
     OutputImageRawFrame,
     SpriteFrame,
+    TTSSpeakFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -41,10 +47,15 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import (
+    ActionResult,
+    RTVIAction,
+    RTVIActionArgument,
     RTVIConfig,
     RTVIObserver,
     RTVIProcessor,
+    RTVIService,
     RTVIServiceConfig,
+    RTVIServiceOption,
     RTVIServiceOptionConfig,
 )
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
@@ -107,6 +118,24 @@ class TalkingAnimation(FrameProcessor):
             self._is_talking = False
 
         await self.push_frame(frame, direction)
+
+
+class RTVIArgument(BaseModel):
+    name: str
+    value: Union[str, bool]
+
+
+class RTVIData(BaseModel):
+    action: str
+    service: str
+    arguments: List[RTVIArgument]
+
+
+class RTVIMessage(BaseModel):
+    id: str
+    type: str
+    label: str
+    data: RTVIData
 
 
 async def main():
@@ -189,7 +218,65 @@ async def main():
         #
         # options = RTVIServiceOptionConfig(name="say", value=)
         # tts_interrupt = RTVIServiceConfig(service="tts", options=[options])
-        rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
+        default_config = RTVIConfig(
+            config=[
+                RTVIServiceConfig(
+                    service="tts",
+                    options=[],
+                ),
+            ]
+        )
+
+        rtvi = RTVIProcessor(config=default_config)
+
+        async def action_tts_say_handler(
+            rtvi: RTVIProcessor, service: str, arguments: Dict[str, Any]
+        ) -> ActionResult:
+            if "interrupt" in arguments and arguments["interrupt"]:
+                # interrupting breaks function handling
+                await rtvi.interrupt_bot()
+            if "text" in arguments:
+                save = arguments["save"] if "save" in arguments else False
+                frame = TTSSpeakFrame(text=arguments["text"])
+                await rtvi.push_frame(frame)
+                if save:
+                    llm_frame = LLMMessagesAppendFrame(
+                        messages=[{"role": "assistant", "content": arguments["text"]}]
+                    )
+                    await rtvi.push_frame(llm_frame)
+
+            return True
+
+        action_tts_say = RTVIAction(
+            service="tts",
+            action="say",
+            result="bool",
+            arguments=[
+                RTVIActionArgument(name="text", type="string"),
+                RTVIActionArgument(name="save_in_context", type="bool"),
+            ],
+            handler=action_tts_say_handler,
+        )
+
+        async def action_tts_interrupt_handler(
+            rtvi: RTVIProcessor, service: str, arguments: Dict[str, Any]
+        ) -> ActionResult:
+            await rtvi.interrupt_bot()
+            return True
+
+        action_tts_interrupt = RTVIAction(
+            service="tts", action="interrupt", result="bool", handler=action_tts_interrupt_handler
+        )
+
+        rtvi_tts = RTVIService(
+            name="tts",
+            options=[],
+        )
+
+        rtvi.register_service(rtvi_tts)
+        rtvi.register_action(action_tts_say)
+        rtvi.register_action(action_tts_interrupt)
 
         pipeline = Pipeline(
             [
@@ -220,6 +307,41 @@ async def main():
             await rtvi.set_bot_ready()
             # Kick off the conversation
             await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+        # @transport.event_handler("on_app_message")
+        # async def on_app_message(transport, message, sender: str):
+        #     # Convert the incoming dictionary to an RTVIMessage object
+
+        #     try:
+        #         # Parse the dictionary into an RTVIMessage object
+        #         rtvi_message = RTVIMessage.model_validate(message)
+
+        #         # Log the parsed message
+        #         logger.info(f"Message from {sender}: {rtvi_message.model_dump()}")
+
+        #         if rtvi_message.data.action == "say":
+        #             # Extract the text and interrupt values
+        #             text = next(
+        #                 (arg.value for arg in rtvi_message.data.arguments if arg.name == "text"),
+        #                 None,
+        #             )
+        #             interrupt = next(
+        #                 (
+        #                     arg.value
+        #                     for arg in rtvi_message.data.arguments
+        #                     if arg.name == "interrupt"
+        #                 ),
+        #                 False,
+        #             )
+
+        #             if interrupt:
+        #                 await task.queue_frame(BotInterruptionFrame())
+
+        #             if text:
+        #                 await task.queue_frame(TTSSpeakFrame(text=text))
+
+        #     except Exception as e:
+        #         logger.error(f"Failed to parse message: {e}")
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
