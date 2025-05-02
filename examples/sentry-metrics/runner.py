@@ -53,4 +53,3 @@ async def configure(aiohttp_session: aiohttp.ClientSession):
     token = await daily_rest_helper.get_token(url, expiry_time)
 
     return (url, token)
-    return (url, token)
