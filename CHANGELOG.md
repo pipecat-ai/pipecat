@@ -119,6 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case there's no need to push audio to the rest of the pipeline, but this is
   not a very common case.
 
+- Added `RivaSegmentedSTTService`, which allows Riva offline/batch models, such
+  as  to be "canary-1b-asr" used in Pipecat.
+
 ### Deprecated
 
 - Function calls with parameters
@@ -133,6 +136,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `TransportParams.vad_audio_passthrough` parameter is now deprecated, use
   `TransportParams.audio_in_passthrough` instead.
+
+- `ParakeetSTTService` is now deprecated, use `RivaSTTService` instead, which uses
+  the model "parakeet-ctc-1.1b-asr" by default.
+
+- `FastPitchTTSService` is now deprecated, use `RivaTTSService` instead, which uses
+  the model "magpie-tts-multilingual" by default.
 
 ### Fixed
 
