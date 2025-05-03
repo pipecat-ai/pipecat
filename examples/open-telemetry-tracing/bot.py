@@ -40,7 +40,7 @@ if os.getenv("ENABLE_TRACING", "false").lower() == "true":
     setup_tracing(
         service_name="pipecat-demo",
         exporter=otlp_exporter,
-        console_export=False,  # Optional console output for debugging
+        console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
     )
     logger.info("OpenTelemetry tracing initialized")
 
@@ -100,7 +100,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     )
 
     @transport.event_handler("on_client_connected")
-    # @traced(name="client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
@@ -108,12 +107,10 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
-    # @traced(name="client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
 
     @transport.event_handler("on_client_closed")
-    # @traced(name="client_closed")
     async def on_client_closed(transport, client):
         logger.info(f"Client closed connection")
         await task.cancel()
