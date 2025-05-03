@@ -11,14 +11,6 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
 
 import aiohttp
-from daily import (
-    AudioData,
-    CustomAudioSource,
-    VideoFrame,
-    VirtualCameraDevice,
-    VirtualMicrophoneDevice,
-    VirtualSpeakerDevice,
-)
 from loguru import logger
 from pydantic import BaseModel
 
@@ -50,7 +42,17 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio import BaseTaskManager
 
 try:
-    from daily import CallClient, Daily, EventHandler
+    from daily import (
+        AudioData,
+        CallClient,
+        CustomAudioSource,
+        Daily,
+        EventHandler,
+        VideoFrame,
+        VirtualCameraDevice,
+        VirtualMicrophoneDevice,
+        VirtualSpeakerDevice,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
