@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import json
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -22,6 +23,9 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.helpers import add_service_span_attributes
+from pipecat.utils.tracing.metrics import TraceMetricsCollector, traced_operation
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     from deepgram import (
@@ -180,12 +184,59 @@ class DeepgramSTTService(STTService):
         # we just forget about the previous connection and create a new one.
         await self._connect()
 
-    async def _on_speech_started(self, *args, **kwargs):
-        await self.start_metrics()
-        await self._call_event_handler("on_speech_started", *args, **kwargs)
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="deepgram_transcription")
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing.
 
-    async def _on_utterance_end(self, *args, **kwargs):
-        await self._call_event_handler("on_utterance_end", *args, **kwargs)
+        This method is decorated with @traced to automatically create a child span
+        that will be properly nested under the service's main span in Jaeger.
+
+        Args:
+            transcript: The transcribed text
+            is_final: Whether this is a final transcription
+            language: The detected language (optional)
+        """
+        # Add span attributes - the span is created automatically by the @traced decorator
+        from opentelemetry import trace
+
+        current_span = trace.get_current_span()
+
+        # Add service type and name
+        service_name = self.__class__.__name__.replace("STTService", "").lower()
+        current_span.set_attribute("service.type", "stt")
+        current_span.set_attribute("stt.service", service_name)
+
+        # Add transcript details
+        current_span.set_attribute("stt.transcript", transcript)
+        current_span.set_attribute("stt.is_final", is_final)
+        if language:
+            current_span.set_attribute("stt.language", str(language))
+
+        # Add model and VAD status
+        current_span.set_attribute(
+            "stt.model", getattr(self, "_settings", {}).get("model", "unknown")
+        )
+        current_span.set_attribute("stt.vad_enabled", self.vad_enabled)
+
+        # Add TTFB metrics
+        if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+            current_span.set_attribute("metrics.ttfb_ms", self._metrics.ttfb_ms)
+
+        # Add Deepgram-specific settings from LiveOptions
+        if hasattr(self, "_settings") and self._settings:
+            # Add each LiveOption as a separate attribute for better querying
+            for key, value in self._settings.items():
+                if isinstance(value, (str, int, float, bool)):
+                    current_span.set_attribute(f"stt.setting.{key}", value)
+                else:
+                    # For complex types, try JSON serialization
+                    try:
+                        current_span.set_attribute(f"stt.setting.{key}", json.dumps(value))
+                    except (TypeError, ValueError):
+                        # Fall back to string representation
+                        current_span.set_attribute(f"stt.setting.{key}", str(value))
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
@@ -200,11 +251,14 @@ class DeepgramSTTService(STTService):
         if len(transcript) > 0:
             await self.stop_ttfb_metrics()
             if is_final:
+                # This creates the OpenTelemetry child span
+                await self._handle_transcription(transcript, is_final, language)
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
                 await self.stop_processing_metrics()
             else:
+                # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
                     InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
