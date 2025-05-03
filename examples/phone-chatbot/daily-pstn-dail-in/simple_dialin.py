@@ -11,6 +11,7 @@ Daily PSTN Dial-in Bot.
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 
@@ -39,24 +40,32 @@ daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 async def run_bot(
     room_url: str,
     token: str,
-    callId: str = None,
-    callDomain: str = None,
+    body: dict,
 ) -> None:
     """Run the voice bot with the given parameters.
 
     Args:
         room_url: The Daily room URL
         token: The Daily room token
-        callId: The dialin call ID
-        callDomain: The dialin call domain
+        body: Body passed to the bot from the webhook
+
     """
     # ------------ CONFIGURATION AND SETUP ------------
 
-    if not callId or not callDomain:
+    body_data = json.loads(body)
+
+    dialin_settings = body_data.get("dialin_settings")
+    if not dialin_settings:
+        return None
+
+    call_id = dialin_settings.get("callId")
+    call_domain = dialin_settings.get("callDomain")
+
+    if not call_id or not call_domain:
         logger.error("Call ID and Call Domain are required for dial-in.")
         sys.exit(1)
 
-    daily_dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+    daily_dialin_settings = DailyDialinSettings(call_id=call_id, call_domain=call_domain)
     transport_params = DailyParams(
         api_url=daily_api_url,
         api_key=daily_api_key,
@@ -173,18 +182,17 @@ async def main():
     parser = argparse.ArgumentParser(description="Simple Dial-in Bot")
     parser.add_argument("-u", "--url", type=str, help="Daily room URL")
     parser.add_argument("-t", "--token", type=str, help="Daily room token")
-    parser.add_argument("-i", "--id", type=str, help="Call ID")
-    parser.add_argument("-d", "--domain", type=str, help="Call domain")
+    parser.add_argument("-b", "--body", type=str, help="JSON configuration string")
 
     args = parser.parse_args()
 
     # Validate required arguments
-    if not all([args.u, args.t, args.i, args.s]):
-        logger.error("All arguments (-u, -t, -i, -s) are required")
+    if not all([args.u, args.t, args.b]):
+        logger.error("All arguments (-u, -t, -b) are required")
         parser.print_help()
         sys.exit(1)
 
-    await run_bot(args.u, args.t, args.i, args.s)
+    await run_bot(args.u, args.t, args.b)
 
 
 if __name__ == "__main__":

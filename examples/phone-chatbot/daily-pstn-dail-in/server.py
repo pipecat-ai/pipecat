@@ -9,6 +9,7 @@
 Webhook server to handle webhook coming from Daily, create a Daily room and start the bot.
 """
 
+import json
 import os
 import shlex
 import subprocess
@@ -38,7 +39,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.post("/call")
+@app.post("/start")
 async def handle_incoming_daily_webhook(request: Request) -> JSONResponse:
     """Handle incoming Daily call webhook."""
     print("Received webhook from Daily")
@@ -49,14 +50,15 @@ async def handle_incoming_daily_webhook(request: Request) -> JSONResponse:
         if "test" in data:
             # Pass through any webhook checks
             return JSONResponse({"test": True})
-        callId = data.get("callId")
-        callDomain = data.get("callDomain")
-        if not callId or not callDomain:
-            raise HTTPException(status_code=400, detail="Missing properties 'callId', 'callDomain'")
+
+        if not all(key in data for key in ["From", "To", "callId", "callDomain"]):
+            raise HTTPException(
+                status_code=400, detail="Missing properties 'From', 'To', 'callId', 'callDomain'"
+            )
 
         # Extract the caller's phone number
         caller_phone = str(data.get("From"))
-        print(f"Processing call with ID: {callId} from {caller_phone}")
+        print(f"Processing call from {caller_phone}")
 
         # Create a Daily room with dial-in capabilities
         try:
@@ -69,7 +71,9 @@ async def handle_incoming_daily_webhook(request: Request) -> JSONResponse:
         token = room_details["token"]
         print(f"Created Daily room: {room_url} with token: {token}")
 
-        bot_cmd = f"python3 -m bot_daily -u {room_url} -t {token} -i {callId} -d {callDomain}"
+        body_json = json.dumps(data).replace('"', '\\"')
+
+        bot_cmd = f"python3 -m simple_dialin -u {room_url} -t {token} -b {body_json}"
 
         try:
             # Use shlex to properly split the command for subprocess
