@@ -1,0 +1,191 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""simple_dialin.py.
+
+Daily PSTN Dial-in Bot.
+"""
+
+import argparse
+import asyncio
+import os
+import sys
+
+from dotenv import load_dotenv
+from loguru import logger
+
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
+
+# Setup logging
+load_dotenv()
+logger.remove(0)
+logger.add(sys.stderr, level="DEBUG")
+
+
+daily_api_key = os.getenv("DAILY_API_KEY", "")
+daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
+
+
+async def run_bot(
+    room_url: str,
+    token: str,
+    callId: str = None,
+    callDomain: str = None,
+) -> None:
+    """Run the voice bot with the given parameters.
+
+    Args:
+        room_url: The Daily room URL
+        token: The Daily room token
+        callId: The dialin call ID
+        callDomain: The dialin call domain
+    """
+    # ------------ CONFIGURATION AND SETUP ------------
+
+    if not callId or not callDomain:
+        logger.error("Call ID and Call Domain are required for dial-in.")
+        sys.exit(1)
+
+    daily_dialin_settings = DailyDialinSettings(call_id=callId, call_domain=callDomain)
+    transport_params = DailyParams(
+        api_url=daily_api_url,
+        api_key=daily_api_key,
+        dialin_settings=daily_dialin_settings,
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_out_enabled=False,
+        vad_analyzer=SileroVADAnalyzer(),
+        transcription_enabled=True,
+    )
+
+    # Initialize transport with Daily
+    transport = DailyTransport(
+        room_url,
+        token,
+        "Simple Dial-in Bot",
+        transport_params,
+    )
+
+    # Initialize TTS
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY", ""),
+        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
+    )
+
+    # ------------ LLM AND CONTEXT SETUP ------------
+
+    # Set up the system instruction for the LLM
+
+    # Initialize LLM
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Initialize LLM context with system prompt
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a friendly phone assistant. Your responses will be read aloud, "
+                "so keep them concise and conversational. Avoid special characters or "
+                "formatting. Begin by greeting the caller and asking how you can help them today."
+            ),
+        },
+    ]
+
+    # Setup the conversational context
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    # ------------ PIPELINE SETUP ------------
+
+    # Build the pipeline
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
+        ]
+    )
+
+    # Create pipeline task
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True  # Enable barge-in so callers can interrupt the bot
+        ),
+    )
+
+    # ------------ EVENT HANDLERS ------------
+
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant):
+        logger.debug(f"First participant joined: {participant['id']}")
+        await transport.capture_participant_transcription(participant["id"])
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+    @transport.event_handler("on_participant_left")
+    async def on_participant_left(transport, participant, reason):
+        logger.debug(f"Participant left: {participant}, reason: {reason}")
+        await task.cancel()
+
+    @transport.event_handler("on_dialin_ready")
+    async def on_dialin_ready(transport, cdata):
+        logger.debug(f"Dial-in ready: {cdata}")
+
+    @transport.event_handler("on_dialin_connected")
+    async def on_dialin_connected(transport, data):
+        logger.debug(f"Dial-in connected: {data}")
+
+    @transport.event_handler("on_dialin_stopped")
+    async def on_dialin_stopped(transport, data):
+        logger.debug(f"Dial-in stopped: {data}")
+
+    @transport.event_handler("on_dialin_error")
+    async def on_dialin_error(transport, data):
+        logger.error(f"Dial-in error: {data}")
+        # If there is an error, the bot should leave the call
+        # This may be also handled in on_participant_left with
+        # await task.cancel()
+
+    @transport.event_handler("on_dialin_warning")
+    async def on_dialin_warning(transport, data):
+        logger.warning(f"Dial-in warning: {data}")
+
+    # Run the pipeline
+    runner = PipelineRunner()
+    await runner.run(task)
+
+
+async def main():
+    """Parse command line arguments and run the bot."""
+    parser = argparse.ArgumentParser(description="Simple Dial-in Bot")
+    parser.add_argument("-u", "--url", type=str, help="Daily room URL")
+    parser.add_argument("-t", "--token", type=str, help="Daily room token")
+    parser.add_argument("-i", "--id", type=str, help="Call ID")
+    parser.add_argument("-d", "--domain", type=str, help="Call domain")
+
+    args = parser.parse_args()
+
+    # Validate required arguments
+    if not all([args.u, args.t, args.i, args.s]):
+        logger.error("All arguments (-u, -t, -i, -s) are required")
+        parser.print_help()
+        sys.exit(1)
+
+    await run_bot(args.u, args.t, args.i, args.s)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
