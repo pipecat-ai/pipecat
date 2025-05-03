@@ -68,6 +68,56 @@ Call your Twilio phone number. The system should answer the call, put you on hol
 
 You can customize the bot's behavior by modifying the system prompt in `bot.py`.
 
+### Changing the Hold Music
+
+To change the ringing sound or hold music that callers hear while waiting to be connected to the bot, update the URL in `server.py`:
+
+```python
+resp = VoiceResponse()
+resp.play(
+    url="https://your-custom-audio-file-url.mp3",
+    loop=10,
+)
+```
+
+> Read [Twilio's guide](https://www.twilio.com/en-us/blog/adding-mp3-to-voice-call-using-twilio) on how to set up an mp3 in a voice call.
+
+## Handling Multiple SIP Endpoints
+
+The bot is configured to handle multiple `on_dialin_ready` events that might occur with multiple SIP endpoints. It ensures that each call is only forwarded once using a simple flag:
+
+```python
+# Flag to track if call has been forwarded
+call_already_forwarded = False
+
+@transport.event_handler("on_dialin_ready")
+async def on_dialin_ready(transport, cdata):
+    nonlocal call_already_forwarded
+
+    # Skip if already forwarded
+    if call_already_forwarded:
+        logger.info("Call already forwarded, ignoring this event.")
+        return
+
+    # ... forwarding code ...
+    call_already_forwarded = True
+```
+
+Note that normally calls only require a single SIP endpoint. If you are planning to forward the call to a different number, you will need to set up 2 SIP endpoints: one for the initial call and one for the forwarded call. IMPORTANT: ensure that your `on_dialin_ready` handler only handles the first call.
+
+## Daily SIP Configuration
+
+The bot configures Daily rooms with SIP capabilities using these settings:
+
+```python
+sip_params = DailyRoomSipParams(
+    display_name="phone-user",  # This will show up in the Daily UI; optional display the dialer's number
+    video=False,                # Audio-only call
+    sip_mode="dial-in",         # For receiving calls (vs. dial-out)
+    num_endpoints=1,            # Number of SIP endpoints to create
+)
+```
+
 ## Troubleshooting
 
 ### Call is not being answered
@@ -80,7 +130,7 @@ You can customize the bot's behavior by modifying the system prompt in `bot.py`.
 
 - Ensure your Daily API key is correct and has SIP capabilities
 - Check that the SIP endpoint is being correctly passed to the bot
-- Verify that the ElevenLabs API key and voice ID are correct
+- Verify that the Cartesia API key and voice ID are correct
 
 ### Bot starts but disconnects immediately
 
