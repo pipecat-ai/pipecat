@@ -5,6 +5,7 @@
 #
 
 import time
+from typing import Optional
 
 from loguru import logger
 
@@ -23,7 +24,24 @@ class FrameProcessorMetrics:
     def __init__(self):
         self._start_ttfb_time = 0
         self._start_processing_time = 0
+        self._last_ttfb_time = 0
         self._should_report_ttfb = True
+
+    @property
+    def ttfb_ms(self) -> Optional[float]:
+        """Get the current TTFB value in milliseconds.
+
+        Returns:
+            Optional[float]: The TTFB value in milliseconds, or None if not measured
+        """
+        if self._last_ttfb_time > 0:
+            return self._last_ttfb_time
+
+        # If TTFB is in progress, calculate current value
+        if self._start_ttfb_time > 0:
+            return time.time() - self._start_ttfb_time
+
+        return None
 
     def _processor_name(self):
         return self._core_metrics_data.processor
@@ -40,16 +58,17 @@ class FrameProcessorMetrics:
     async def start_ttfb_metrics(self, report_only_initial_ttfb):
         if self._should_report_ttfb:
             self._start_ttfb_time = time.time()
+            self._last_ttfb_time = 0
             self._should_report_ttfb = not report_only_initial_ttfb
 
     async def stop_ttfb_metrics(self):
         if self._start_ttfb_time == 0:
             return None
 
-        value = time.time() - self._start_ttfb_time
-        logger.debug(f"{self._processor_name()} TTFB: {value}")
+        self._last_ttfb_time = time.time() - self._start_ttfb_time
+        logger.debug(f"{self._processor_name()} TTFB: {self._last_ttfb_time}")
         ttfb = TTFBMetricsData(
-            processor=self._processor_name(), value=value, model=self._model_name()
+            processor=self._processor_name(), value=self._last_ttfb_time, model=self._model_name()
         )
         self._start_ttfb_time = 0
         return MetricsFrame(data=[ttfb])
