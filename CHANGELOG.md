@@ -5,9 +5,47 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.66] - 2025-05-02
 
 ### Added
+
+- Added two new input parameters to `RimeTTSService`: `pause_between_brackets`
+  and `phonemize_between_brackets`.
+
+- Added support for cross-platform local smart turn detection. You can use
+  `LocalSmartTurnAnalyzer` for on-device inference using Torch.
+
+- `BaseOutputTransport` now allows multiple destinations if the transport
+  implementation supports it (e.g. Daily's custom tracks). With multiple
+  destinations it is possible to send different audio or video tracks with a
+  single transport simultaneously. To do that, you need to set the new
+  `Frame.transport_destination` field with your desired transport destination
+  (e.g. custom track name), tell the transport you want a new destination with
+  `TransportParams.audio_out_destinations` or
+  `TransportParams.video_out_destinations` and the transport should take care of
+  the rest.
+
+- Similar to the new `Frame.transport_destination`, there's a new
+  `Frame.transport_source` field which is set by the `BaseInputTransport` if the
+  incoming data comes from a non-default source (e.g. custom tracks).
+
+- `TTSService` has a new `transport_destination` constructor parameter. This
+  parameter will be used to update the `Frame.transport_destination` field for
+  each generated `TTSAudioRawFrame`. This allows sending multiple bots' audio to
+  multiple destinations in the same pipeline.
+
+- Added `DailyTransportParams.camera_out_enabled` and
+  `DailyTransportParams.microphone_out_enabled` which allows you to
+  enable/disable the main output camera or microphone tracks. This is useful if
+  you only want to use custom tracks and not send the main tracks. Note that you
+  still need `audio_out_enabled=True` or `video_out_enabled`.
+
+- Added `DailyTransport.capture_participant_audio()` which allows you to capture
+  an audio source (e.g. "microphone", "screenAudio" or a custom track name) from
+  a remote participant.
+
+- Added `DailyTransport.update_publishing()` which allows you to update the call
+  video and audio publishing settings (e.g. audio and video quality).
 
 - Added `RTVIObserverParams` which allows you to configure what RTVI messages
   are sent to the clients.
@@ -36,6 +74,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   available.
 
 ### Changed
+
+- `TransportParams.audio_mixer` now supports a string and also a dictionary to
+  provide a mixer per destination. For example:
+
+```python
+  audio_out_mixer={
+      "track-1": SoundfileMixer(...),
+      "track-2": SoundfileMixer(...),
+      "track-N": SoundfileMixer(...),
+  },
+```
 
 - The `STTMuteFilter` now mutes `InterimTranscriptionFrame` and
   `TranscriptionFrame` which allows the `STTMuteFilter` to be used in
@@ -70,6 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case there's no need to push audio to the rest of the pipeline, but this is
   not a very common case.
 
+- Added `RivaSegmentedSTTService`, which allows Riva offline/batch models, such
+  as  to be "canary-1b-asr" used in Pipecat.
+
 ### Deprecated
 
 - Function calls with parameters
@@ -85,7 +137,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TransportParams.vad_audio_passthrough` parameter is now deprecated, use
   `TransportParams.audio_in_passthrough` instead.
 
+- `ParakeetSTTService` is now deprecated, use `RivaSTTService` instead, which uses
+  the model "parakeet-ctc-1.1b-asr" by default.
+
+- `FastPitchTTSService` is now deprecated, use `RivaTTSService` instead, which uses
+  the model "magpie-tts-multilingual" by default.
+
 ### Fixed
+
+- Fixed an issue with `SimliVideoService` where the bot was continuously outputting
+  audio, which prevents the `BotStoppedSpeakingFrame` from being emitted.
+
+- Fixed an issue where `OpenAIRealtimeBetaLLMService` would add two assistant
+  messages to the context.
 
 - Fixed an issue with `GeminiMultimodalLiveLLMService` where the context
   contained tokens instead of words.
@@ -101,6 +165,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inference and processing time when using the `FalSmartTurnAnalyzer`.
 
 ### Other
+
+- Added `examples/daily-custom-tracks` to show how to send and receive Daily
+  custom tracks.
+
+- Added `examples/daily-multi-translation` to showcase how to send multiple
+  simulataneous translations with the same transport.
 
 - Added 04 foundational examples for client/server transports. Also, renamed
   `29-livekit-audio-chat.py` to `04b-transports-livekit.py`.

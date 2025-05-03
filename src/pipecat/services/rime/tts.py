@@ -68,6 +68,8 @@ class RimeTTSService(AudioContextWordTTSService):
         language: Optional[Language] = Language.EN
         speed_alpha: Optional[float] = 1.0
         reduce_latency: Optional[bool] = False
+        pause_between_brackets: Optional[bool] = False
+        phonemize_between_brackets: Optional[bool] = False
 
     def __init__(
         self,
@@ -117,6 +119,8 @@ class RimeTTSService(AudioContextWordTTSService):
             else "eng",
             "speedAlpha": params.speed_alpha,
             "reduceLatency": params.reduce_latency,
+            "pauseBetweenBrackets": json.dumps(params.pause_between_brackets),
+            "phonemizeBetweenBrackets": json.dumps(params.phonemize_between_brackets),
         }
 
         # State tracking
