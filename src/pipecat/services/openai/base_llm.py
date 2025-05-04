@@ -256,23 +256,6 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
-    def _update_span_metrics(self, span, tokens=None, ttfb_ms=None):
-        """Update span with metrics (token usage and TTFB).
-
-        Args:
-            span: The span to update
-            tokens: Optional LLMTokenUsage object
-            ttfb_ms: Optional TTFB value in milliseconds
-        """
-        # Add token usage metrics if available
-        if tokens:
-            span.set_attribute("llm.prompt_tokens", tokens.prompt_tokens)
-            span.set_attribute("llm.completion_tokens", tokens.completion_tokens)
-
-        # Add TTFB metrics if available
-        if ttfb_ms is not None:
-            span.set_attribute("metrics.ttfb_ms", ttfb_ms)
-
     @traced(attachment_strategy=AttachmentStrategy.CHILD, name="openai_llm_context")
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
