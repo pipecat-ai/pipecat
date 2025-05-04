@@ -30,7 +30,23 @@ def add_nested_settings_as_attributes(span, prefix, settings):
 def add_tts_span_attributes(
     span, service_name: str, model: str, voice_id: str, text: str, **kwargs
 ):
-    """Add standard TTS attributes to a span."""
+    """Add standard TTS attributes to a span.
+
+    Args:
+        span: The span to update with attributes
+        service_name: Name of the TTS service (e.g. "cartesia")
+        model: Model identifier
+        voice_id: Voice identifier
+        text: The text being synthesized
+        **kwargs: Additional attributes including metrics
+            - ttfb_ms: Time to first byte in milliseconds
+            - character_count: Number of characters synthesized
+            - language: Language for synthesis
+            - settings: Dict of TTS settings
+            - context_id: Optional context ID for services like Cartesia
+            - cartesia_version: Optional version info
+            - operation_name: Optional operation identifier
+    """
     # Add core TTS attributes
     span.set_attribute("service.type", "tts")
     span.set_attribute("tts.service", service_name)
@@ -98,7 +114,20 @@ def add_stt_span_attributes(
     settings: Optional[Dict[str, Any]] = None,
     **kwargs,
 ):
-    """Add standard STT attributes to a span."""
+    """Add standard STT attributes to a span.
+
+    Args:
+        span: The span to update with attributes
+        service_name: Name of the STT service (e.g. "deepgram")
+        model: Model identifier
+        transcript: Optional transcript text
+        is_final: Whether this is a final transcript
+        language: Optional language detected/used
+        vad_enabled: Whether VAD was enabled
+        settings: Dict of STT settings
+        **kwargs: Additional attributes including metrics
+            - ttfb_ms: Time to first byte in milliseconds
+    """
     # Add core STT attributes
     span.set_attribute("service.type", "stt")
     span.set_attribute("stt.service", service_name)
@@ -149,7 +178,25 @@ def add_llm_span_attributes(
     token_usage: Optional[Dict[str, int]] = None,
     **kwargs,
 ):
-    """Add standard LLM attributes to a span."""
+    """Add standard LLM attributes to a span.
+
+    Args:
+        span: The span to update with attributes
+        service_name: Name of the LLM service (e.g. "openai")
+        model: Model identifier (e.g. "gpt-4")
+        token_usage: Optional dict with token usage metrics
+            - prompt_tokens: Number of tokens in the prompt
+            - completion_tokens: Number of tokens in the completion
+        **kwargs: Additional attributes including:
+            - stream: Whether streaming was used
+            - messages: The conversation messages
+            - tools: Tools configuration
+            - tool_count: Number of tools
+            - tool_choice: Tool choice configuration
+            - ttfb_ms: Time to first byte in milliseconds
+            - parameters: Model parameters
+            - extra_parameters: Additional parameters
+    """
     # Add core LLM attributes
     span.set_attribute("service.type", "llm")
     span.set_attribute("llm.service", service_name)

@@ -92,9 +92,7 @@ Open your browser to [http://localhost:16686](http://localhost:16686) and select
 The tracing system consists of:
 
 1. **Traceable Base Class**: Provides basic tracing capabilities
-2. **TraceMetricsCollector**: Captures and formats metrics for spans
-3. **Decorators**: `@traceable` for classes, `@traced` for methods
-4. **Context Manager**: `traced_operation` for easy metrics collection
+2. **Decorators**: `@traceable` for classes, `@traced` for methods
 
 ## Troubleshooting
 
