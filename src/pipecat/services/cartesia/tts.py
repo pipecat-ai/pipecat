@@ -28,7 +28,6 @@ from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
-from pipecat.utils.tracing.metrics import traced_operation
 from pipecat.utils.tracing.tracing import (
     AttachmentStrategy,
     is_tracing_available,
@@ -284,21 +283,45 @@ class CartesiaTTSService(AudioContextWordTTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        with traced_operation(self, "tts") as metrics:
-            if metrics:
-                metrics.set_character_count(len(text))
+        try:
+            if not self._websocket or self._websocket.closed:
+                await self._connect()
 
+            if not self._context_id:
+                await self.start_ttfb_metrics()
+                yield TTSStartedFrame()
+                self._context_id = str(uuid.uuid4())
+                await self.create_audio_context(self._context_id)
+
+            msg = self._build_msg(text=text)
+
+            try:
+                await self._get_websocket().send(msg)
+                await self.start_tts_usage_metrics(text)
+            except Exception as e:
+                logger.error(f"{self} error sending message: {e}")
+                yield TTSStoppedFrame()
+                await self._disconnect()
+                await self._connect()
+                return
+            yield None
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+        finally:
             if is_tracing_available():
                 from opentelemetry import trace
 
                 from pipecat.utils.tracing.helpers import add_tts_span_attributes
 
                 current_span = trace.get_current_span()
-
-                # Get service name from class name
                 service_name = self.__class__.__name__.replace("TTSService", "").lower()
 
-                # Use the helper function to add all attributes
+                # Get TTFB if available
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                # Use the helper function to add all attributes including metrics
                 add_tts_span_attributes(
                     span=current_span,
                     service_name=service_name,
@@ -308,37 +331,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
                     cartesia_version=self._cartesia_version,
                     context_id=self._context_id,
                     settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
                 )
-
-            try:
-                if not self._websocket or self._websocket.closed:
-                    await self._connect()
-
-                if not self._context_id:
-                    await self.start_ttfb_metrics()
-                    yield TTSStartedFrame()
-                    self._context_id = str(uuid.uuid4())
-                    await self.create_audio_context(self._context_id)
-
-                msg = self._build_msg(text=text)
-
-                try:
-                    await self._get_websocket().send(msg)
-                    await self.start_tts_usage_metrics(text)
-                except Exception as e:
-                    logger.error(f"{self} error sending message: {e}")
-                    yield TTSStoppedFrame()
-                    await self._disconnect()
-                    await self._connect()
-                    return
-                yield None
-            except Exception as e:
-                logger.error(f"{self} exception: {e}")
-            finally:
-                if metrics and hasattr(self._metrics, "ttfb_ms"):
-                    ttfb = self._metrics.ttfb_ms
-                    if ttfb is not None:
-                        metrics.set_ttfb(ttfb)
 
 
 class CartesiaHttpTTSService(TTSService):
