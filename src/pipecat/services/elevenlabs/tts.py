@@ -32,6 +32,7 @@ from pipecat.services.tts_service import (
     WordTTSService,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 # See .env.example for ElevenLabs configuration needed
 try:
@@ -445,6 +446,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 msg = {"text": text, "context_id": self._context_id}
                 await self._websocket.send(json.dumps(msg))
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="elevenlabs_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -477,6 +479,30 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+        finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self.model_name,
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )
 
 
 class ElevenLabsHttpTTSService(WordTTSService):
@@ -645,6 +671,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         return word_times
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="elevenlabs_http_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs streaming API with timestamps.
 
@@ -773,3 +800,27 @@ class ElevenLabsHttpTTSService(WordTTSService):
         finally:
             await self.stop_ttfb_metrics()
             # Let the parent class handle TTSStoppedFrame
+
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self.model_name,
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )

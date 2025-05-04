@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 # The server below can connect to XTTS through a local running docker
 #
@@ -117,71 +118,103 @@ class XTTSService(TTSService):
                 return
             self._studio_speakers = await r.json()
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="xtts_service")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        if not self._studio_speakers:
-            logger.error(f"{self} no studio speakers available")
-            return
-
-        embeddings = self._studio_speakers[self._voice_id]
-
-        url = self._settings["base_url"] + "/tts_stream"
-
-        payload = {
-            "text": text.replace(".", "").replace("*", ""),
-            "language": self._settings["language"],
-            "speaker_embedding": embeddings["speaker_embedding"],
-            "gpt_cond_latent": embeddings["gpt_cond_latent"],
-            "add_wav_header": False,
-            "stream_chunk_size": 20,
-        }
-
-        await self.start_ttfb_metrics()
-
-        async with self._aiohttp_session.post(url, json=payload) as r:
-            if r.status != 200:
-                text = await r.text()
-                logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
-                yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
+        try:
+            if not self._studio_speakers:
+                logger.error(f"{self} no studio speakers available")
+                yield ErrorFrame("No studio speakers available")
                 return
 
-            await self.start_tts_usage_metrics(text)
+            embeddings = self._studio_speakers[self._voice_id]
 
-            yield TTSStartedFrame()
+            url = self._settings["base_url"] + "/tts_stream"
 
-            CHUNK_SIZE = 1024
+            payload = {
+                "text": text.replace(".", "").replace("*", ""),
+                "language": self._settings["language"],
+                "speaker_embedding": embeddings["speaker_embedding"],
+                "gpt_cond_latent": embeddings["gpt_cond_latent"],
+                "add_wav_header": False,
+                "stream_chunk_size": 20,
+            }
 
-            buffer = bytearray()
-            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
-                if len(chunk) > 0:
-                    await self.stop_ttfb_metrics()
-                    # Append new chunk to the buffer.
-                    buffer.extend(chunk)
+            await self.start_ttfb_metrics()
 
-                    # Check if buffer has enough data for processing.
-                    while (
-                        len(buffer) >= 48000
-                    ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
-                        # Process the buffer up to a safe size for resampling.
-                        process_data = buffer[:48000]
-                        # Remove processed data from buffer.
-                        buffer = buffer[48000:]
+            async with self._aiohttp_session.post(url, json=payload) as r:
+                if r.status != 200:
+                    text = await r.text()
+                    logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
+                    yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
+                    return
 
-                        # XTTS uses 24000 so we need to resample to our desired rate.
-                        resampled_audio = await self._resampler.resample(
-                            bytes(process_data), 24000, self.sample_rate
-                        )
-                        # Create the frame with the resampled audio
-                        frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
-                        yield frame
+                await self.start_tts_usage_metrics(text)
 
-            # Process any remaining data in the buffer.
-            if len(buffer) > 0:
-                resampled_audio = await self._resampler.resample(
-                    bytes(buffer), 24000, self.sample_rate
+                yield TTSStartedFrame()
+
+                CHUNK_SIZE = 1024
+
+                buffer = bytearray()
+                async for chunk in r.content.iter_chunked(CHUNK_SIZE):
+                    if len(chunk) > 0:
+                        await self.stop_ttfb_metrics()
+                        # Append new chunk to the buffer.
+                        buffer.extend(chunk)
+
+                        # Check if buffer has enough data for processing.
+                        while (
+                            len(buffer) >= 48000
+                        ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
+                            # Process the buffer up to a safe size for resampling.
+                            process_data = buffer[:48000]
+                            # Remove processed data from buffer.
+                            buffer = buffer[48000:]
+
+                            # XTTS uses 24000 so we need to resample to our desired rate.
+                            resampled_audio = await self._resampler.resample(
+                                bytes(process_data), 24000, self.sample_rate
+                            )
+                            # Create the frame with the resampled audio
+                            frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                            yield frame
+
+                # Process any remaining data in the buffer.
+                if len(buffer) > 0:
+                    resampled_audio = await self._resampler.resample(
+                        bytes(buffer), 24000, self.sample_rate
+                    )
+                    frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                    yield frame
+
+                yield TTSStoppedFrame()
+
+        except Exception as e:
+            logger.error(f"{self} error during TTS generation: {e}")
+            yield ErrorFrame(f"Error during TTS generation: {str(e)}")
+
+        finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model="",
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
                 )
-                frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
-                yield frame
-
-            yield TTSStoppedFrame()

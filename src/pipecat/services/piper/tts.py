@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 
 # This assumes a running TTS service running: https://github.com/rhasspy/piper/blob/master/src/python_run/README_http.md
@@ -54,6 +55,7 @@ class PiperTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="piper_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Piper API.
 
@@ -101,3 +103,27 @@ class PiperTTSService(TTSService):
             logger.debug(f"{self}: Finished TTS [{text}]")
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
+
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model="",
+                    voice_id=getattr(self, "_voice_id", "unknown"),
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )
