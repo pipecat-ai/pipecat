@@ -28,7 +28,6 @@ from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
-from pipecat.utils.tracing.helpers import add_service_span_attributes
 from pipecat.utils.tracing.metrics import traced_operation
 from pipecat.utils.tracing.tracing import (
     AttachmentStrategy,
@@ -292,14 +291,23 @@ class CartesiaTTSService(AudioContextWordTTSService):
             if is_tracing_available():
                 from opentelemetry import trace
 
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
                 current_span = trace.get_current_span()
 
-                add_service_span_attributes(
-                    self,
-                    current_span,
+                # Get service name from class name
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                # Use the helper function to add all attributes
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self.model_name,
+                    voice_id=self._voice_id,
                     text=text,
                     cartesia_version=self._cartesia_version,
                     context_id=self._context_id,
+                    settings=self._settings,
                 )
 
             try:

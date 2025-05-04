@@ -152,14 +152,14 @@ class BaseOpenAILLMService(LLMService):
         if is_tracing_available():
             from opentelemetry import trace
 
+            from pipecat.utils.tracing.helpers import add_llm_span_attributes
+
             current_span = trace.get_current_span()
 
+            # Get service name
             service_name = self.__class__.__name__.replace("LLMService", "").lower()
-            current_span.set_attribute("llm.service", service_name)
-            current_span.set_attribute("llm.model", params["model"])
-            current_span.set_attribute("llm.stream", params["stream"])
 
-            # Function to handle NOT_GIVEN values in JSON serialization
+            # Prepare messages for serialization
             def prepare_for_json(obj):
                 if isinstance(obj, dict):
                     return {k: prepare_for_json(v) for k, v in obj.items()}
@@ -170,53 +170,62 @@ class BaseOpenAILLMService(LLMService):
                 else:
                     return obj
 
+            serialized_messages = None
+            serialized_tools = None
+            serialized_tool_choice = None
+
             try:
-                current_span.set_attribute("llm.messages", json.dumps(prepare_for_json(messages)))
+                serialized_messages = json.dumps(prepare_for_json(messages))
             except Exception as e:
-                current_span.set_attribute(
-                    "llm.messages_error", f"Error serializing messages: {str(e)}"
-                )
+                serialized_messages = f"Error serializing messages: {str(e)}"
 
             if params["tools"]:
-                current_span.set_attribute("llm.tool_count", len(params["tools"]))
-
                 try:
-                    current_span.set_attribute(
-                        "llm.tools", json.dumps(prepare_for_json(params["tools"]))
-                    )
+                    serialized_tools = json.dumps(prepare_for_json(params["tools"]))
                 except Exception as e:
-                    current_span.set_attribute(
-                        "llm.tools_error", f"Error serializing tools: {str(e)}"
-                    )
+                    serialized_tools = f"Error serializing tools: {str(e)}"
 
-                if params["tool_choice"] is NOT_GIVEN:
-                    current_span.set_attribute("llm.tool_choice", "NOT_GIVEN")
-                else:
-                    try:
-                        current_span.set_attribute(
-                            "llm.tool_choice", json.dumps(prepare_for_json(params["tool_choice"]))
-                        )
-                    except Exception as e:
-                        current_span.set_attribute(
-                            "llm.tool_choice_error", f"Error serializing tool_choice: {str(e)}"
-                        )
+            if params["tool_choice"] is NOT_GIVEN:
+                serialized_tool_choice = "NOT_GIVEN"
+            else:
+                try:
+                    serialized_tool_choice = json.dumps(prepare_for_json(params["tool_choice"]))
+                except Exception as e:
+                    serialized_tool_choice = f"Error serializing tool_choice: {str(e)}"
+
+            # Prepare the parameters
+            parameters = {}
+            extra_parameters = {}
 
             for key, value in params.items():
                 if key in ["messages", "tools", "tool_choice", "stream_options", "model", "stream"]:
-                    # Skip already handled fields
                     continue
 
                 if value is not NOT_GIVEN and isinstance(value, (int, float, bool)):
-                    current_span.set_attribute(f"llm.param.{key}", value)
+                    parameters[key] = value
                 elif value is NOT_GIVEN:
-                    current_span.set_attribute(f"llm.param.{key}", "NOT_GIVEN")
+                    parameters[key] = "NOT_GIVEN"
 
             if self._settings["extra"]:
                 for key, value in self._settings["extra"].items():
                     if value is NOT_GIVEN:
-                        current_span.set_attribute(f"llm.param.extra.{key}", "NOT_GIVEN")
+                        extra_parameters[key] = "NOT_GIVEN"
                     elif isinstance(value, (int, float, bool, str)):
-                        current_span.set_attribute(f"llm.param.extra.{key}", value)
+                        extra_parameters[key] = value
+
+            # Use helper function to add all attributes
+            add_llm_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model=params["model"],
+                stream=params["stream"],
+                messages=serialized_messages,
+                tools=serialized_tools if params["tools"] else None,
+                tool_count=len(params["tools"]) if params["tools"] else 0,
+                tool_choice=serialized_tool_choice,
+                parameters=parameters,
+                extra_parameters=extra_parameters,
+            )
 
         chunks = await self._client.chat.completions.create(**params)
         return chunks
@@ -292,8 +301,23 @@ class BaseOpenAILLMService(LLMService):
                 if is_tracing_available():
                     from opentelemetry import trace
 
+                    from pipecat.utils.tracing.helpers import add_llm_span_attributes
+
                     current_span = trace.get_current_span()
-                    self._update_span_metrics(current_span, tokens=tokens)
+                    service_name = self.__class__.__name__.replace("LLMService", "").lower()
+
+                    # Add token metrics
+                    token_usage = {
+                        "prompt_tokens": tokens.prompt_tokens,
+                        "completion_tokens": tokens.completion_tokens,
+                    }
+
+                    add_llm_span_attributes(
+                        span=current_span,
+                        service_name=service_name,
+                        model=self.model_name,
+                        token_usage=token_usage,
+                    )
 
             if chunk.choices is None or len(chunk.choices) == 0:
                 continue
@@ -307,8 +331,17 @@ class BaseOpenAILLMService(LLMService):
             ):
                 from opentelemetry import trace
 
+                from pipecat.utils.tracing.helpers import add_llm_span_attributes
+
                 current_span = trace.get_current_span()
-                self._update_span_metrics(current_span, ttfb_ms=self._metrics.ttfb_ms)
+                service_name = self.__class__.__name__.replace("LLMService", "").lower()
+
+                add_llm_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self.model_name,
+                    ttfb_ms=self._metrics.ttfb_ms,
+                )
 
             if chunk.choices is None or len(chunk.choices) == 0:
                 continue
