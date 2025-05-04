@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added support to `RimeHttpTTSService` for the `arcana` model.
 
+### Fixed
+
+- Remove custom audio tracks from `DailyTransport` before leaving.
+
 ## [0.0.66] - 2025-05-02
 
 ### Added
