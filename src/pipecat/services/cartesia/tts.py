@@ -279,7 +279,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
-    @traced(attachment_strategy=AttachmentStrategy.NONE, name="cartesia_tts")
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="cartesia_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
