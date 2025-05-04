@@ -122,7 +122,6 @@ class TraceMetricsCollector:
         if self.token_usage is not None:
             span.set_attribute("metrics.llm.prompt_tokens", self.token_usage.prompt_tokens)
             span.set_attribute("metrics.llm.completion_tokens", self.token_usage.completion_tokens)
-            span.set_attribute("metrics.llm.total_tokens", self.token_usage.total_tokens)
 
             if self.token_usage.cache_read_input_tokens is not None:
                 span.set_attribute(

@@ -11,20 +11,22 @@ from dotenv import load_dotenv
 from loguru import logger
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-from pipecat.utils.tracing.tracing import (
-    setup_tracing,
-)
+from pipecat.utils.tracing.tracing import setup_tracing
 
 load_dotenv(override=True)
 
@@ -43,6 +45,11 @@ if os.getenv("ENABLE_TRACING", "false").lower() == "true":
         console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
     )
     logger.info("OpenTelemetry tracing initialized")
+
+
+async def fetch_weather_from_api(params: FunctionCallParams):
+    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
@@ -64,7 +71,31 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"), params=OpenAILLMService.InputParams(temperature=0.5)
+    )
+
+    # You can also register a function_name of None to get all functions
+    # sent to the same callback with an additional function_name parameter.
+    llm.register_function("get_current_weather", fetch_weather_from_api)
+
+    weather_function = FunctionSchema(
+        name="get_current_weather",
+        description="Get the current weather",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+            "format": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "The temperature unit to use. Infer this from the user's location.",
+            },
+        },
+        required=["location", "format"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function])
 
     messages = [
         {
@@ -73,19 +104,18 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         },
     ]
 
-    context = OpenAILLMContext(messages)
+    context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
-    # Build the pipeline with traceable components
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
+            transport.input(),
             stt,
-            context_aggregator.user(),  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
         ]
     )
 
@@ -95,7 +125,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            report_only_initial_ttfb=True,
         ),
     )
 
@@ -103,7 +132,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
