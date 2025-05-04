@@ -9,9 +9,6 @@
 import json
 from typing import Any, Dict, Optional
 
-from pipecat.utils.tracing.metrics import TraceMetricsCollector
-from pipecat.utils.tracing.tracing import is_tracing_available
-
 
 def add_nested_settings_as_attributes(span, prefix, settings):
     """Add nested settings as flattened span attributes."""
@@ -57,9 +54,36 @@ def add_tts_span_attributes(
         # Add flattened nested settings for easier querying
         add_nested_settings_as_attributes(span, "tts.setting", settings)
 
+    # Add metrics attributes
+    if "ttfb_ms" in kwargs and kwargs["ttfb_ms"] is not None:
+        span.set_attribute("metrics.ttfb_ms", kwargs["ttfb_ms"])
+
+    # Add character count metric
+    if "character_count" in kwargs:
+        span.set_attribute("metrics.tts.character_count", kwargs["character_count"])
+
+    # Add operation name if provided
+    if "operation_name" in kwargs:
+        span.set_attribute("metrics.operation.name", kwargs["operation_name"])
+
+    # Add any custom metrics
+    for key, value in kwargs.items():
+        if key.startswith("metric."):
+            # Allow passing custom metrics with metric.* prefix
+            metric_name = key[7:]  # Remove "metric." prefix
+            span.set_attribute(f"metrics.{metric_name}", value)
+
     # Add any additional attributes with tts. prefix
     for key, value in kwargs.items():
-        if key not in ["language", "settings", "cartesia_version", "context_id"]:
+        if key not in [
+            "language",
+            "settings",
+            "cartesia_version",
+            "context_id",
+            "ttfb_ms",
+            "character_count",
+            "operation_name",
+        ] and not key.startswith("metric."):
             span.set_attribute(f"tts.{key}", value)
 
 
@@ -197,51 +221,3 @@ def add_llm_span_attributes(
             "ttfb_ms",
         ]:
             span.set_attribute(f"llm.{key}", value)
-
-
-def add_service_span_attributes(
-    service, span, metrics_collector: Optional[TraceMetricsCollector] = None, **kwargs
-):
-    """Add span attributes based on service type.
-
-    This detects the service type and calls the appropriate attribute helper.
-
-    Args:
-        service: The service instance
-        span: The OpenTelemetry span
-        metrics_collector: Optional metrics collector with metrics data
-        **kwargs: Service-specific attributes and values
-    """
-    if not is_tracing_available():
-        return
-
-    # Import inside function to avoid circular imports
-    from pipecat.services.llm_service import LLMService
-    from pipecat.services.stt_service import STTService
-    from pipecat.services.tts_service import TTSService
-
-    # Get service name
-    service_name = service.__class__.__name__
-    if isinstance(service, TTSService):
-        service_name = service_name.replace("TTSService", "").lower()
-        # Get attributes from service
-        attributes = service.get_trace_attributes(**kwargs)
-        add_tts_span_attributes(span, **attributes)
-    elif isinstance(service, STTService):
-        service_name = service_name.replace("STTService", "").lower()
-        # Get attributes from service
-        attributes = service.get_trace_attributes(**kwargs)
-        add_stt_span_attributes(span, **attributes)
-    elif isinstance(service, LLMService):
-        service_name = service_name.replace("LLMService", "").lower()
-        # Get attributes from service
-        attributes = service.get_trace_attributes(**kwargs)
-        add_llm_span_attributes(span, **attributes)
-    else:
-        # Fallback for unknown service types
-        for key, value in kwargs.items():
-            span.set_attribute(key, value)
-
-    # Apply metrics if provided
-    if metrics_collector:
-        metrics_collector.apply_to_span(span)
