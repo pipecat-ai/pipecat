@@ -5,7 +5,6 @@
 #
 
 import asyncio
-
 import numpy as np
 from loguru import logger
 
@@ -33,11 +32,12 @@ class SimliVideoService(FrameProcessor):
     def __init__(
         self,
         simli_config: SimliConfig,
+        simliURL: str = "https://api.simli.ai",
         use_turn_server: bool = False,
         latency_interval: int = 0,
     ):
         super().__init__()
-        self._simli_client = SimliClient(simli_config, use_turn_server, latency_interval)
+        self._simli_client = SimliClient(simli_config, use_turn_server, latency_interval, simliURL=simliURL)
 
         self._pipecat_resampler_event = asyncio.Event()
         self._pipecat_resampler: AudioResampler = None
@@ -49,6 +49,8 @@ class SimliVideoService(FrameProcessor):
     async def _start_connection(self):
         await self._simli_client.Initialize()
         # Create task to consume and process audio and video
+        # Send a small number of zeros to jumpstart the connection
+        await self._simli_client.sendSilence()
         self._audio_task = asyncio.create_task(self._consume_and_process_audio())
         self._video_task = asyncio.create_task(self._consume_and_process_video())
 
@@ -74,13 +76,13 @@ class SimliVideoService(FrameProcessor):
         try:
             await self._pipecat_resampler_event.wait()
             async for video_frame in self._simli_client.getVideoStreamIterator(
-                targetFormat="rgb24"
+                targetFormat="yuv420p"
             ):
                 # Process the video frame
                 convertedFrame: OutputImageRawFrame = OutputImageRawFrame(
                     image=video_frame.to_rgb().to_image().tobytes(),
                     size=(video_frame.width, video_frame.height),
-                    format="RGB",
+                    format="YUV420",
                 )
                 convertedFrame.pts = video_frame.pts
                 await self.push_frame(convertedFrame)
@@ -92,7 +94,6 @@ class SimliVideoService(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
             await self._start_connection()
         elif isinstance(frame, TTSAudioRawFrame):
             # Send audio frame to Simli
@@ -118,12 +119,10 @@ class SimliVideoService(FrameProcessor):
                 logger.exception(f"{self} exception: {e}")
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
-            await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame):
             await self._simli_client.clearBuffer()
-            await self.push_frame(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
+        
+        await self.push_frame(frame, direction)
 
     async def _stop(self):
         await self._simli_client.stop()
