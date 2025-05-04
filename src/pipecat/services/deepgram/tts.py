@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     from deepgram import DeepgramClient, DeepgramClientOptions, SpeakOptions
@@ -49,6 +50,7 @@ class DeepgramTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="deepgram_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -90,3 +92,28 @@ class DeepgramTTSService(TTSService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
             yield ErrorFrame(f"Error getting audio: {str(e)}")
+
+        finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model="",
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )

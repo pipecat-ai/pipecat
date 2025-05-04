@@ -8,6 +8,8 @@ import asyncio
 import os
 from typing import AsyncGenerator, Mapping, Optional
 
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -83,6 +85,7 @@ class RivaTTSService(TTSService):
             f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
         )
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="riva_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_responses(queue: asyncio.Queue):
             def add_response(r):
@@ -128,8 +131,39 @@ class RivaTTSService(TTSService):
         except asyncio.TimeoutError:
             logger.error(f"{self} timeout waiting for audio response")
 
-        await self.start_tts_usage_metrics(text)
-        yield TTSStoppedFrame()
+        finally:
+            await self.start_tts_usage_metrics(text)
+            yield TTSStoppedFrame()
+
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                settings = {
+                    "language": str(self._language_code),
+                    "quality": self._quality,
+                    "function_id": self._function_id,
+                }
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self.model_name,
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )
 
 
 class FastPitchTTSService(RivaTTSService):

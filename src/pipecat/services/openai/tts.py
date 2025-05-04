@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 ValidVoice = Literal[
     "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
@@ -94,6 +95,7 @@ class OpenAITTSService(TTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="openai_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
@@ -134,3 +136,35 @@ class OpenAITTSService(TTSService):
                 yield TTSStoppedFrame()
         except BadRequestError as e:
             logger.exception(f"{self} error generating TTS: {e}")
+        finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                settings = {
+                    "model": self.model_name,
+                    "voice": self._voice_id,
+                }
+
+                if self._instructions:
+                    settings["instructions"] = self._instructions
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self.model_name,
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )

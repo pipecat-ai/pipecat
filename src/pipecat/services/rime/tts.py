@@ -29,6 +29,7 @@ from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     import websockets
@@ -310,6 +311,7 @@ class RimeTTSService(AudioContextWordTTSService):
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="rime_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text.
 
@@ -344,6 +346,31 @@ class RimeTTSService(AudioContextWordTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+        finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self._model,
+                    voice_id=self._voice_id,
+                    text=text,
+                    context_id=self._context_id,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )
 
 
 class RimeHttpTTSService(TTSService):
@@ -385,6 +412,7 @@ class RimeHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="rime_http_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -441,3 +469,27 @@ class RimeHttpTTSService(TTSService):
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
+
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self._model_name,
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )

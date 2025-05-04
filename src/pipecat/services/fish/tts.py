@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     import ormsgpack
@@ -186,6 +187,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="fishaudio_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating Fish TTS: [{text}]")
         try:
@@ -221,3 +223,30 @@ class FishAudioTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"Error generating TTS: {e}")
             yield ErrorFrame(f"Error: {str(e)}")
+
+        finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                model = self._settings.get("reference_id", self.model_name)
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=model,
+                    voice_id="",
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                )
