@@ -140,6 +140,39 @@ def add_stt_span_attributes(
         span.set_attribute(f"stt.{key}", value)
 
 
+def add_llm_span_attributes(
+    span,
+    service_name: str,
+    model: str,
+    token_usage: Optional[Dict[str, int]] = None,
+    **kwargs,
+):
+    """Add standard LLM attributes to a span.
+
+    Args:
+        span: The OpenTelemetry span
+        service_name: Name of the LLM service (e.g., "openai")
+        model: The LLM model name
+        token_usage: Dictionary with token usage statistics
+        **kwargs: Additional LLM-specific attributes
+    """
+    # Add core LLM attributes
+    span.set_attribute("service.type", "llm")
+    span.set_attribute("llm.service", service_name)
+    span.set_attribute("llm.model", model)
+
+    # Add token usage if available
+    if token_usage:
+        if "prompt_tokens" in token_usage:
+            span.set_attribute("llm.prompt_tokens", token_usage["prompt_tokens"])
+        if "completion_tokens" in token_usage:
+            span.set_attribute("llm.completion_tokens", token_usage["completion_tokens"])
+
+    # Add any additional attributes with llm. prefix
+    for key, value in kwargs.items():
+        span.set_attribute(f"llm.{key}", value)
+
+
 def add_service_span_attributes(
     service, span, metrics_collector: Optional[TraceMetricsCollector] = None, **kwargs
 ):
@@ -157,34 +190,27 @@ def add_service_span_attributes(
         return
 
     # Import inside function to avoid circular imports
+    from pipecat.services.llm_service import LLMService
     from pipecat.services.stt_service import STTService
     from pipecat.services.tts_service import TTSService
 
     if isinstance(service, TTSService) and hasattr(service, "get_trace_attributes"):
         # Get attributes from the service
         attributes = service.get_trace_attributes(**kwargs)
-
-        # Apply to the span
         add_tts_span_attributes(span, **attributes)
-
-        # Apply metrics if provided
-        if metrics_collector:
-            metrics_collector.apply_to_span(span)
     elif isinstance(service, STTService) and hasattr(service, "get_trace_attributes"):
         # Get attributes from the service
         attributes = service.get_trace_attributes(**kwargs)
-
-        # Apply to the span
         add_stt_span_attributes(span, **attributes)
-
-        # Apply metrics if provided
-        if metrics_collector:
-            metrics_collector.apply_to_span(span)
+    elif isinstance(service, LLMService) and hasattr(service, "get_trace_attributes"):
+        # Get attributes from the service
+        attributes = service.get_trace_attributes(**kwargs)
+        add_llm_span_attributes(span, **attributes)
     else:
         # Fallback for unknown service types
         for key, value in kwargs.items():
             span.set_attribute(key, value)
 
-        # Still apply metrics if provided
-        if metrics_collector:
-            metrics_collector.apply_to_span(span)
+    # Apply metrics if provided
+    if metrics_collector:
+        metrics_collector.apply_to_span(span)

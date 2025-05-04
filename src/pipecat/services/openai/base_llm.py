@@ -35,6 +35,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 
 class OpenAIUnhandledFunctionException(Exception):
@@ -126,6 +127,7 @@ class BaseOpenAILLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="openai_chat_completions")
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> AsyncStream[ChatCompletionChunk]:
@@ -146,6 +148,75 @@ class BaseOpenAILLMService(LLMService):
         }
 
         params.update(self._settings["extra"])
+
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("LLMService", "").lower()
+            current_span.set_attribute("llm.service", service_name)
+            current_span.set_attribute("llm.model", params["model"])
+            current_span.set_attribute("llm.stream", params["stream"])
+
+            # Function to handle NOT_GIVEN values in JSON serialization
+            def prepare_for_json(obj):
+                if isinstance(obj, dict):
+                    return {k: prepare_for_json(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [prepare_for_json(item) for item in obj]
+                elif obj is NOT_GIVEN:
+                    return "NOT_GIVEN"
+                else:
+                    return obj
+
+            try:
+                current_span.set_attribute("llm.messages", json.dumps(prepare_for_json(messages)))
+            except Exception as e:
+                current_span.set_attribute(
+                    "llm.messages_error", f"Error serializing messages: {str(e)}"
+                )
+
+            if params["tools"]:
+                current_span.set_attribute("llm.tool_count", len(params["tools"]))
+
+                try:
+                    current_span.set_attribute(
+                        "llm.tools", json.dumps(prepare_for_json(params["tools"]))
+                    )
+                except Exception as e:
+                    current_span.set_attribute(
+                        "llm.tools_error", f"Error serializing tools: {str(e)}"
+                    )
+
+                if params["tool_choice"] is NOT_GIVEN:
+                    current_span.set_attribute("llm.tool_choice", "NOT_GIVEN")
+                else:
+                    try:
+                        current_span.set_attribute(
+                            "llm.tool_choice", json.dumps(prepare_for_json(params["tool_choice"]))
+                        )
+                    except Exception as e:
+                        current_span.set_attribute(
+                            "llm.tool_choice_error", f"Error serializing tool_choice: {str(e)}"
+                        )
+
+            for key, value in params.items():
+                if key in ["messages", "tools", "tool_choice", "stream_options", "model", "stream"]:
+                    # Skip already handled fields
+                    continue
+
+                if value is not NOT_GIVEN and isinstance(value, (int, float, bool)):
+                    current_span.set_attribute(f"llm.param.{key}", value)
+                elif value is NOT_GIVEN:
+                    current_span.set_attribute(f"llm.param.{key}", "NOT_GIVEN")
+
+            if self._settings["extra"]:
+                for key, value in self._settings["extra"].items():
+                    if value is NOT_GIVEN:
+                        current_span.set_attribute(f"llm.param.extra.{key}", "NOT_GIVEN")
+                    elif isinstance(value, (int, float, bool, str)):
+                        current_span.set_attribute(f"llm.param.extra.{key}", value)
 
         chunks = await self._client.chat.completions.create(**params)
         return chunks
@@ -176,6 +247,24 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
+    def _update_span_metrics(self, span, tokens=None, ttfb_ms=None):
+        """Update span with metrics (token usage and TTFB).
+
+        Args:
+            span: The span to update
+            tokens: Optional LLMTokenUsage object
+            ttfb_ms: Optional TTFB value in milliseconds
+        """
+        # Add token usage metrics if available
+        if tokens:
+            span.set_attribute("llm.prompt_tokens", tokens.prompt_tokens)
+            span.set_attribute("llm.completion_tokens", tokens.completion_tokens)
+
+        # Add TTFB metrics if available
+        if ttfb_ms is not None:
+            span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="openai_llm_context")
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []
@@ -200,10 +289,41 @@ class BaseOpenAILLMService(LLMService):
                 )
                 await self.start_llm_usage_metrics(tokens)
 
+                if is_tracing_available():
+                    from opentelemetry import trace
+
+                    current_span = trace.get_current_span()
+                    self._update_span_metrics(current_span, tokens=tokens)
+
             if chunk.choices is None or len(chunk.choices) == 0:
                 continue
 
             await self.stop_ttfb_metrics()
+
+            if (
+                is_tracing_available()
+                and hasattr(self._metrics, "ttfb_ms")
+                and self._metrics.ttfb_ms is not None
+            ):
+                from opentelemetry import trace
+
+                current_span = trace.get_current_span()
+                self._update_span_metrics(current_span, ttfb_ms=self._metrics.ttfb_ms)
+
+            if chunk.choices is None or len(chunk.choices) == 0:
+                continue
+
+            await self.stop_ttfb_metrics()
+
+            if (
+                is_tracing_available()
+                and hasattr(self._metrics, "ttfb_ms")
+                and self._metrics.ttfb_ms is not None
+            ):
+                from opentelemetry import trace
+
+                current_span = trace.get_current_span()
+                current_span.set_attribute("metrics.ttfb_ms", self._metrics.ttfb_ms)
 
             if not chunk.choices[0].delta:
                 continue
