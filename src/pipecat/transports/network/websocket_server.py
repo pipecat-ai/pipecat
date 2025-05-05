@@ -83,6 +83,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         await self._params.serializer.setup(frame)
         if not self._server_task:
             self._server_task = self.create_task(self._server_task_handler())
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -195,6 +196,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         await super().start(frame)
         await self._params.serializer.setup(frame)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
