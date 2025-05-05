@@ -775,10 +775,10 @@
   dependencies:
     expo-build-properties "~0.8.3"
 
-"@daily-co/daily-js@^0.79.0":
-  version "0.79.0"
-  resolved "https://registry.yarnpkg.com/@daily-co/daily-js/-/daily-js-0.79.0.tgz#6628c145951f9951ea213c65e916d6e8a3934b45"
-  integrity sha512-Ii/Zi6cfTl2EZBpX8msRPNkkCHcajA+ErXpbN2Xe2KySd1Nb4IzC/QWJlSl9VA9pIlYPQicRTDoZnoym/0uEAw==
+"@daily-co/daily-js@^0.76.0":
+  version "0.76.0"
+  resolved "https://registry.yarnpkg.com/@daily-co/daily-js/-/daily-js-0.76.0.tgz#5b45fae585de3175985fc008af0fdd022989844b"
+  integrity sha512-v3yPJ6oxz/CViHM1R78YMc7b9cLsTD+G4OxwvVIRX5vfqjn0tFhisqBwdzGK4MGAI/IdnE4oNahuPWAPpKwysA==
   dependencies:
     "@babel/runtime" "^7.12.5"
     "@sentry/browser" "^8.33.1"
@@ -786,12 +786,12 @@
     dequal "^2.0.3"
     events "^3.1.0"
 
-"@daily-co/react-native-daily-js@^0.76.0":
-  version "0.76.0"
-  resolved "https://registry.yarnpkg.com/@daily-co/react-native-daily-js/-/react-native-daily-js-0.76.0.tgz#63a7f55bce975e8af30ca3f7ac4a8018e935bb5e"
-  integrity sha512-/W8FJVIKAF8wgZMJdPyNaRw06r4UHh4MYNlMQS8eQMmIdskFN7kLL3Vpd/9qm3VaH65Aev6RH/n4X/p/yoc4Ug==
+"@daily-co/react-native-daily-js@^0.73.0":
+  version "0.73.0"
+  resolved "https://registry.yarnpkg.com/@daily-co/react-native-daily-js/-/react-native-daily-js-0.73.0.tgz#12b7eb7ad2868f6741c3ad720e1c88fd5864b160"
+  integrity sha512-T8FA7fDq+eXRG7XHYwHJIZUxHE44SCRWCvOaY53W5qBy3GABjGENNE5WxUqdzQVOuXC6jEaVZcCtJielkQwR8g==
   dependencies:
-    "@daily-co/daily-js" "^0.79.0"
+    "@daily-co/daily-js" "^0.76.0"
     "@types/react-native-background-timer" "^2.0.0"
     base-64 "^1.0.0"
     react-native-url-polyfill "^1.1.2"
@@ -4135,10 +4135,10 @@ react-refresh@^0.14.0, react-refresh@^0.14.2:
   resolved "https://registry.yarnpkg.com/react-refresh/-/react-refresh-0.14.2.tgz#3833da01ce32da470f1f936b9d477da5c7028bf9"
   integrity sha512-jCvmsr+1IUSMUyzOkRcvnVbX3ZYC6g9TDrDbFuFmRDq7PD4yaGbLKNQL6k2jnArV8hjYxh7hVhAZB6s9HDGpZA==
 
-react@19.1.0:
-  version "19.1.0"
-  resolved "https://registry.yarnpkg.com/react/-/react-19.1.0.tgz#926864b6c48da7627f004795d6cce50e90793b75"
-  integrity sha512-FS+XFBNvn3GTAWq26joslQgWNoFu08F4kl0J4CgdNKADkdSGXQyTCnKteIAJy96Br6YbpEU1LSzV5dYtjMkMDg==
+react@19.0.0:
+  version "19.0.0"
+  resolved "https://registry.yarnpkg.com/react/-/react-19.0.0.tgz#6e1969251b9f108870aa4bff37a0ce9ddfaaabdd"
+  integrity sha512-V8AVnmPIICiWpGfm6GLzCR/W5FXLchHop40W4nXBmdlEceh16rCN8O8LNWm5bh5XUX91fh7KpA+W0TgMKmgTpQ==
 
 regenerate-unicode-properties@^10.2.0:
   version "10.2.0"
