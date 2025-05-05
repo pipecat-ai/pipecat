@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `UltravoxSTTService` issue that would cause the service to generate
+  all tokens as one word.
+
 - Fixed a `PipelineTask` issue that would cause tasks to not be cancelled if
   task was cancelled from outside of Pipecat.
 
