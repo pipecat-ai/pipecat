@@ -8,6 +8,6 @@ pytest~=8.3.4
 pytest-asyncio~=0.26.0
 pytest-aiohttp==1.1.0
 ruff~=0.11.1
-setuptools~=78.1.0
-setuptools_scm~=8.2.0
+setuptools~=80.4.0
+setuptools_scm~=8.3.0
 python-dotenv~=1.1.0
