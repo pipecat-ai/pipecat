@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    TranslationFrame,
 )
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
@@ -384,16 +385,31 @@ class GladiaSTTService(STTService):
                 if content["type"] == "transcript":
                     utterance = content["data"]["utterance"]
                     confidence = utterance.get("confidence", 0)
+                    language = utterance["language"]
                     transcript = utterance["text"]
                     if confidence >= self._confidence:
                         if content["data"]["is_final"]:
                             await self.push_frame(
-                                TranscriptionFrame(transcript, "", time_now_iso8601())
+                                TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                             )
                         else:
                             await self.push_frame(
-                                InterimTranscriptionFrame(transcript, "", time_now_iso8601())
+                                InterimTranscriptionFrame(
+                                    transcript, "", time_now_iso8601(), language
+                                )
                             )
+                elif content["type"] == "translation":
+                    translated_utterance = content["data"]["translated_utterance"]
+                    original_language = content["data"]["original_language"]
+                    translated_language = translated_utterance["language"]
+                    confidence = translated_utterance.get("confidence", 0)
+                    translation = translated_utterance["text"]
+                    if translated_language != original_language and confidence >= self._confidence:
+                        await self.push_frame(
+                            TranslationFrame(
+                                translation, "", time_now_iso8601(), translated_language
+                            )
+                        )
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection
             pass

@@ -2,9 +2,13 @@
 
 This demo showcases Pipecat's Smart Turn Detection feature - an advanced conversational turn detection system that uses machine learning to identify when a speaker has finished their turn in a conversation. Unlike basic Voice Activity Detection (VAD) which only detects speech vs. silence, Smart Turn detects natural conversational cues like intonation patterns, pacing, and linguistic signals.
 
-This demo uses the [pipecat-ai/smart-turn](https://huggingface.co/pipecat-ai/smart-turn) model - an open-source, community-driven conversational turn detection model designed to provide more natural turn-taking in voice interactions. The model is being hosted on Fal's infrastructure for GPU acceleration, offering inference times between 50-70ms.
+This demo uses the [pipecat-ai/smart-turn](https://huggingface.co/pipecat-ai/smart-turn) model - an open-source, community-driven conversational turn detection model designed to provide more natural turn-taking in voice interactions. The model is being hosted on Fal's infrastructure for GPU acceleration, offering inference times between 50-60ms.
 
 In the client UI, you can see the transcription messages along with the smart-turn model's prediction results in real-time.
+
+## Try the demo
+
+Try the hosted version of the demo here: https://pcc-smart-turn.vercel.app/.
 
 ## Run the demo locally
 

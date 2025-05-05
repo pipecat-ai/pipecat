@@ -18,6 +18,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.rime.tts import RimeHttpTTSService
 from pipecat.transports.base_transport import TransportParams
@@ -27,8 +28,8 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def store_user_emails(function_name, tool_call_id, args, llm, context, result_callback):
-    print(f"User emails: {args}")
+async def store_user_emails(params: FunctionCallParams):
+    print(f"User emails: {params.arguments}")
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):

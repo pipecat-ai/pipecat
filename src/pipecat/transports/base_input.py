@@ -32,6 +32,8 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -77,7 +79,7 @@ class BaseInputTransport(FrameProcessor):
                 )
             self._params.audio_in_passthrough = True
 
-        if self._params.camera_in_enabled or self._params.camera_out_enabled:
+        if self._params.camera_in_enabled:
             import warnings
 
             with warnings.catch_warnings():
@@ -248,10 +250,13 @@ class BaseInputTransport(FrameProcessor):
                 self._params.turn_analyzer is None
                 or not self._params.turn_analyzer.speech_triggered
             )
-            if can_create_user_frames:
-                if new_vad_state == VADState.SPEAKING:
+            if new_vad_state == VADState.SPEAKING:
+                await self.push_frame(VADUserStartedSpeakingFrame())
+                if can_create_user_frames:
                     frame = UserStartedSpeakingFrame()
-                elif new_vad_state == VADState.QUIET:
+            elif new_vad_state == VADState.QUIET:
+                await self.push_frame(VADUserStoppedSpeakingFrame())
+                if can_create_user_frames:
                     frame = UserStoppedSpeakingFrame()
 
             if frame:

@@ -17,7 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 try:
-    from mem0 import MemoryClient  # noqa: F401
+    from mem0 import Memory, MemoryClient  # noqa: F401
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -49,7 +49,8 @@ class Mem0MemoryService(FrameProcessor):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: str = None,
+        local_config: Dict[str, Any] = {},
         user_id: str = None,
         agent_id: str = None,
         run_id: str = None,
@@ -58,7 +59,10 @@ class Mem0MemoryService(FrameProcessor):
         # Important: Call the parent class __init__ first
         super().__init__()
 
-        self.memory_client = MemoryClient(api_key=api_key)
+        if local_config:
+            self.memory_client = Memory.from_config(local_config)
+        else:
+            self.memory_client = MemoryClient(api_key=api_key)
         # At least one of user_id, agent_id, or run_id must be provided
         if not any([user_id, agent_id, run_id]):
             raise ValueError("At least one of user_id, agent_id, or run_id must be provided")
@@ -91,6 +95,9 @@ class Mem0MemoryService(FrameProcessor):
             for id in ["user_id", "agent_id", "run_id"]:
                 if getattr(self, id):
                     params[id] = getattr(self, id)
+
+            if isinstance(self.memory_client, Memory):
+                del params["output_format"]
             # Note: You can run this in background to avoid blocking the conversation
             self.memory_client.add(**params)
         except Exception as e:
@@ -107,20 +114,32 @@ class Mem0MemoryService(FrameProcessor):
         """
         try:
             logger.debug(f"Retrieving memories for query: {query}")
-            id_pairs = [
-                ("user_id", self.user_id),
-                ("agent_id", self.agent_id),
-                ("run_id", self.run_id),
-            ]
-            clauses = [{name: value} for name, value in id_pairs if value is not None]
-            filters = {"AND": clauses} if clauses else {}
-            results = self.memory_client.search(
-                query=query,
-                filters=filters,
-                version=self.api_version,
-                top_k=self.search_limit,
-                threshold=self.search_threshold,
-            )
+            if isinstance(self.memory_client, Memory):
+                params = {
+                    "query": query,
+                    "user_id": self.user_id,
+                    "agent_id": self.agent_id,
+                    "run_id": self.run_id,
+                    "limit": self.search_limit,
+                }
+                params = {k: v for k, v in params.items() if v is not None}
+                results = self.memory_client.search(**params)
+            else:
+                id_pairs = [
+                    ("user_id", self.user_id),
+                    ("agent_id", self.agent_id),
+                    ("run_id", self.run_id),
+                ]
+                clauses = [{name: value} for name, value in id_pairs if value is not None]
+                filters = {"AND": clauses} if clauses else {}
+                results = self.memory_client.search(
+                    query=query,
+                    filters=filters,
+                    version=self.api_version,
+                    top_k=self.search_limit,
+                    threshold=self.search_threshold,
+                    output_format="v1.1",
+                )
 
             logger.debug(f"Retrieved {len(results)} memories from Mem0")
             return results
@@ -147,7 +166,7 @@ class Mem0MemoryService(FrameProcessor):
 
         # Format memories as a message
         memory_text = self.system_prompt
-        for i, memory in enumerate(memories, 1):
+        for i, memory in enumerate(memories["results"], 1):
             memory_text += f"{i}. {memory.get('memory', '')}\n\n"
 
         # Add memories as a system message or user message based on configuration

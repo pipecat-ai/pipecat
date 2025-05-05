@@ -12,10 +12,12 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import TranscriptionMessage
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -69,12 +71,16 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     )
     context_aggregator = llm.create_context_aggregator(context)
 
+    transcript = TranscriptProcessor()
+
     pipeline = Pipeline(
         [
             transport.input(),
             context_aggregator.user(),
+            transcript.user(),
             llm,
             transport.output(),
+            transcript.assistant(),
             context_aggregator.assistant(),
         ]
     )
@@ -102,6 +108,15 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     async def on_client_closed(transport, client):
         logger.info(f"Client closed connection")
         await task.cancel()
+
+    # Register event handler for transcript updates
+    @transcript.event_handler("on_transcript_update")
+    async def on_transcript_update(processor, frame):
+        for msg in frame.messages:
+            if isinstance(msg, TranscriptionMessage):
+                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
+                line = f"{timestamp}{msg.role}: {msg.content}"
+                logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=False)
 

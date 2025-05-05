@@ -17,10 +17,12 @@ from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_response import LLMUserAggregatorParams
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.groq.llm import GroqLLMService
 from pipecat.services.groq.stt import GroqSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -28,9 +30,9 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    await result_callback({"conditions": "nice", "temperature": "75"})
+async def fetch_weather_from_api(params: FunctionCallParams):
+    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
@@ -52,7 +54,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = GroqLLMService(api_key=os.getenv("GROQ_API_KEY"), model="llama-3.3-70b-versatile")
+    llm = GroqLLMService(
+        api_key=os.getenv("GROQ_API_KEY"), model="meta-llama/llama-4-maverick-17b-128e-instruct"
+    )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
@@ -82,7 +86,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     ]
 
     context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = llm.create_context_aggregator(
+        context, user_params=LLMUserAggregatorParams(aggregation_timeout=0.05)
+    )
 
     pipeline = Pipeline(
         [

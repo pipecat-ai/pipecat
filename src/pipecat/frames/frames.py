@@ -60,12 +60,16 @@ class Frame:
     name: str = field(init=False)
     pts: Optional[int] = field(init=False)
     metadata: Dict[str, Any] = field(init=False)
+    transport_source: Optional[str] = field(init=False)
+    transport_destination: Optional[str] = field(init=False)
 
     def __post_init__(self):
         self.id: int = obj_id()
         self.name: str = f"{self.__class__.__name__}#{obj_count(self)}"
         self.pts: Optional[int] = None
         self.metadata: Dict[str, Any] = {}
+        self.transport_source: Optional[str] = None
+        self.transport_destination: Optional[str] = None
 
     def __str__(self):
         return self.name
@@ -136,8 +140,9 @@ class ImageRawFrame:
 
 @dataclass
 class OutputAudioRawFrame(DataFrame, AudioRawFrame):
-    """A chunk of audio. Will be played by the output transport if the
-    transport's microphone has been enabled.
+    """A chunk of audio. Will be played by the output transport. If the
+    transport supports multiple audio destinations (e.g. multiple audio tracks) the
+    destination name can be specified.
 
     """
 
@@ -147,13 +152,14 @@ class OutputAudioRawFrame(DataFrame, AudioRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        return f"{self.name}(pts: {pts}, destination: {self.transport_destination}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
 class OutputImageRawFrame(DataFrame, ImageRawFrame):
-    """An image that will be shown by the transport if the transport's camera is
-    enabled.
+    """An image that will be shown by the transport. If the transport supports
+    multiple video destinations (e.g. multiple video tracks) the destination
+    name can be specified.
 
     """
 
@@ -176,7 +182,7 @@ class URLImageRawFrame(OutputImageRawFrame):
 
     """
 
-    url: Optional[str]
+    url: Optional[str] = None
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -248,6 +254,22 @@ class InterimTranscriptionFrame(TextFrame):
     """
 
     text: str
+    user_id: str
+    timestamp: str
+    language: Optional[Language] = None
+
+    def __str__(self):
+        return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+
+@dataclass
+class TranslationFrame(TextFrame):
+    """A text frame with translated transcription data.
+
+    Will be placed in the transport's receive queue when a participant speaks.
+
+    """
+
     user_id: str
     timestamp: str
     language: Optional[Language] = None
@@ -572,6 +594,20 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class VADUserStartedSpeakingFrame(SystemFrame):
+    """Frame emitted when VAD detects the user has definitively started speaking."""
+
+    pass
+
+
+@dataclass
+class VADUserStoppedSpeakingFrame(SystemFrame):
+    """Frame emitted when VAD detects the user has definitively stopped speaking."""
+
+    pass
+
+
+@dataclass
 class BotInterruptionFrame(SystemFrame):
     """Emitted by when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
@@ -686,7 +722,11 @@ class UserImageRequestFrame(SystemFrame):
 
 @dataclass
 class InputAudioRawFrame(SystemFrame, AudioRawFrame):
-    """A chunk of audio usually coming from an input transport."""
+    """A chunk of audio usually coming from an input transport. If the transport
+    supports multiple audio sources (e.g. multiple audio tracks) the source name
+    will be specified.
+
+    """
 
     def __post_init__(self):
         super().__post_init__()
@@ -694,35 +734,50 @@ class InputAudioRawFrame(SystemFrame, AudioRawFrame):
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
+        return f"{self.name}(pts: {pts}, source: {self.transport_source}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
 class InputImageRawFrame(SystemFrame, ImageRawFrame):
-    """An image usually coming from an input transport."""
+    """An image usually coming from an input transport. If the transport
+    supports multiple video sources (e.g. multiple video tracks) the source name
+    will be specified.
+
+    """
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, size: {self.size}, format: {self.format})"
+        return f"{self.name}(pts: {pts}, source: {self.transport_source}, size: {self.size}, format: {self.format})"
+
+
+@dataclass
+class UserAudioRawFrame(InputAudioRawFrame):
+    """A chunk of audio, usually coming from an input transport, associated to a user."""
+
+    user_id: str = ""
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {len(self.audio)}, frames: {self.num_frames}, sample_rate: {self.sample_rate}, channels: {self.num_channels})"
 
 
 @dataclass
 class UserImageRawFrame(InputImageRawFrame):
     """An image associated to a user."""
 
-    user_id: str
+    user_id: str = ""
     request: Optional[UserImageRequestFrame] = None
 
     def __str__(self):
         pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, user: {self.user_id}, size: {self.size}, format: {self.format}, request: {self.request})"
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {self.size}, format: {self.format}, request: {self.request})"
 
 
 @dataclass
 class VisionImageRawFrame(InputImageRawFrame):
     """An image with an associated text to ask for a description of it."""
 
-    text: Optional[str]
+    text: Optional[str] = None
 
     def __str__(self):
         pts = format_pts(self.pts)

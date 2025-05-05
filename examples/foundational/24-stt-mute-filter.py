@@ -21,6 +21,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.deepgram.tts import DeepgramTTSService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -29,12 +30,12 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
+async def fetch_weather_from_api(params: FunctionCallParams):
     # Add a delay to test interruption during function calls
     logger.info("Weather API call starting...")
     await asyncio.sleep(5)  # 5-second delay
     logger.info("Weather API call completed")
-    await result_callback({"conditions": "nice", "temperature": "75"})
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):

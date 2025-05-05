@@ -57,7 +57,7 @@ app.add_middleware(
 )
 
 # Mount the static directory
-STATIC_DIR = "frontend/out"
+STATIC_DIR = "client/out"
 
 
 # ------------ Fast API Routes ------------ #
@@ -175,7 +175,7 @@ async def virtualize_bot(room_url: str, token: str):
             image = data[0]["config"]["image"]
 
         # Machine configuration
-        cmd = f"python src/bot.py -u {room_url} -t {token}"
+        cmd = f"python server/bot.py -u {room_url} -t {token}"
         cmd = cmd.split()
         worker_props = {
             "config": {

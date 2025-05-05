@@ -193,3 +193,10 @@ def parse_server_event(str):
     except Exception as e:
         print(f"Error parsing server event: {e}")
         return None
+
+
+class ContextWindowCompressionConfig(BaseModel):
+    """Configuration for context window compression."""
+
+    sliding_window: Optional[bool] = Field(default=True)
+    trigger_tokens: Optional[int] = Field(default=None)

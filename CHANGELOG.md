@@ -1,4 +1,3 @@
-
 # Changelog
 
 All notable changes to **Pipecat** will be documented in this file.
@@ -6,9 +5,64 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.66] - 2025-05-02
 
 ### Added
+
+- Added two new input parameters to `RimeTTSService`: `pause_between_brackets`
+  and `phonemize_between_brackets`.
+
+- Added support for cross-platform local smart turn detection. You can use
+  `LocalSmartTurnAnalyzer` for on-device inference using Torch.
+
+- `BaseOutputTransport` now allows multiple destinations if the transport
+  implementation supports it (e.g. Daily's custom tracks). With multiple
+  destinations it is possible to send different audio or video tracks with a
+  single transport simultaneously. To do that, you need to set the new
+  `Frame.transport_destination` field with your desired transport destination
+  (e.g. custom track name), tell the transport you want a new destination with
+  `TransportParams.audio_out_destinations` or
+  `TransportParams.video_out_destinations` and the transport should take care of
+  the rest.
+
+- Similar to the new `Frame.transport_destination`, there's a new
+  `Frame.transport_source` field which is set by the `BaseInputTransport` if the
+  incoming data comes from a non-default source (e.g. custom tracks).
+
+- `TTSService` has a new `transport_destination` constructor parameter. This
+  parameter will be used to update the `Frame.transport_destination` field for
+  each generated `TTSAudioRawFrame`. This allows sending multiple bots' audio to
+  multiple destinations in the same pipeline.
+
+- Added `DailyTransportParams.camera_out_enabled` and
+  `DailyTransportParams.microphone_out_enabled` which allows you to
+  enable/disable the main output camera or microphone tracks. This is useful if
+  you only want to use custom tracks and not send the main tracks. Note that you
+  still need `audio_out_enabled=True` or `video_out_enabled`.
+
+- Added `DailyTransport.capture_participant_audio()` which allows you to capture
+  an audio source (e.g. "microphone", "screenAudio" or a custom track name) from
+  a remote participant.
+
+- Added `DailyTransport.update_publishing()` which allows you to update the call
+  video and audio publishing settings (e.g. audio and video quality).
+
+- Added `RTVIObserverParams` which allows you to configure what RTVI messages
+  are sent to the clients.
+
+- Added a `context_window_compression` InputParam to
+  `GeminiMultimodalLiveLLMService` which allows you to enable a sliding context
+  window for the session as well as set the token limit of the sliding window.
+
+- Updated `SmallWebRTCConnection` to support `ice_servers` with credentials.
+
+- Added `VADUserStartedSpeakingFrame` and `VADUserStoppedSpeakingFrame`,
+  indicating when the VAD detected the user to start and stop speaking. These
+  events are helpful when using smart turn detection, as the user's stop time
+  can differ from when their turn ends (signified by UserStoppedSpeakingFrame).
+
+- Added `TranslationFrame`, a new frame type that contains a translated
+  transcription.
 
 - Added `TransportParams.audio_in_passthrough`. If set (the default), incoming
   audio will be pushed downstream.
@@ -16,7 +70,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `MCPClient`; a way to connect to MCP servers and use the MCP servers'
   tools.
 
+- Added `Mem0 OSS`, along with Mem0 cloud support now the OSS version is also
+  available.
+
 ### Changed
+
+- `TransportParams.audio_mixer` now supports a string and also a dictionary to
+  provide a mixer per destination. For example:
+
+```python
+  audio_out_mixer={
+      "track-1": SoundfileMixer(...),
+      "track-2": SoundfileMixer(...),
+      "track-N": SoundfileMixer(...),
+  },
+```
+
+- The `STTMuteFilter` now mutes `InterimTranscriptionFrame` and
+  `TranscriptionFrame` which allows the `STTMuteFilter` to be used in
+  conjunction with transports that generate transcripts, e.g. `DailyTransport`.
+
+- Function calls now receive a single parameter `FunctionCallParams` instead of
+  `(function_name, tool_call_id, args, llm, context, result_callback)` which is
+  now deprecated.
+
+- Changed the user aggregator timeout for late transcriptions from 1.0s to 0.5s
+  (`LLMUserAggregatorParams.aggregation_timeout`). Sometimes, the STT services
+  might give us more than one transcription which could come after the user
+  stopped speaking. We still want to include these additional transcriptions
+  with the first one because it's part of the user turn. This is what this
+  timeout is helpful with.
+
+- Short utterances not detected by VAD while the bot is speaking are now
+  ignored. This reduces the amount of bot interruptions significantly providing
+  a more natural conversation experience.
+
+- Updated `GladiaSTTService` to output a `TranslationFrame` when specifying a
+  `translation` and `translation_config`.
 
 - STT services now passthrough audio frames by default. This allows you to add
   audio recording without worrying about what's wrong in your pipeline when it
@@ -29,7 +119,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case there's no need to push audio to the rest of the pipeline, but this is
   not a very common case.
 
+- Added `RivaSegmentedSTTService`, which allows Riva offline/batch models, such
+  as  to be "canary-1b-asr" used in Pipecat.
+
 ### Deprecated
+
+- Function calls with parameters
+  `(function_name, tool_call_id, args, llm, context, result_callback)` are
+  deprectated, use a single `FunctionCallParams` parameter instead.
 
 - `TransportParams.camera_*` parameters are now deprecated, use
   `TransportParams.video_*` instead.
@@ -40,10 +137,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TransportParams.vad_audio_passthrough` parameter is now deprecated, use
   `TransportParams.audio_in_passthrough` instead.
 
+- `ParakeetSTTService` is now deprecated, use `RivaSTTService` instead, which uses
+  the model "parakeet-ctc-1.1b-asr" by default.
+
+- `FastPitchTTSService` is now deprecated, use `RivaTTSService` instead, which uses
+  the model "magpie-tts-multilingual" by default.
+
 ### Fixed
+
+- Fixed an issue with `SimliVideoService` where the bot was continuously outputting
+  audio, which prevents the `BotStoppedSpeakingFrame` from being emitted.
+
+- Fixed an issue where `OpenAIRealtimeBetaLLMService` would add two assistant
+  messages to the context.
+
+- Fixed an issue with `GeminiMultimodalLiveLLMService` where the context
+  contained tokens instead of words.
+
+- Fixed an issue with HTTP Smart Turn handling, where the service returns a 500
+  error. Previously, this would cause an unhandled exception. Now, a 500 error
+  is treated as an incomplete response.
+
+- Fixed a TTS services issue that could cause assistant output not to be
+  aggregated to the context when also using `TTSSpeakFrame`s.
 
 - Fixed an issue where the `SmartTurnMetricsData` was reporting 0ms for
   inference and processing time when using the `FalSmartTurnAnalyzer`.
+
+### Other
+
+- Added `examples/daily-custom-tracks` to show how to send and receive Daily
+  custom tracks.
+
+- Added `examples/daily-multi-translation` to showcase how to send multiple
+  simulataneous translations with the same transport.
+
+- Added 04 foundational examples for client/server transports. Also, renamed
+  `29-livekit-audio-chat.py` to `04b-transports-livekit.py`.
+
+- Added foundational example `13c-gladia-translation.py` showing how to use
+  `TranscriptionFrame` and `TranslationFrame`.
 
 ## [0.0.65] - 2025-04-23 "Sant Jordi's release" 🌹📕
 
@@ -148,8 +281,9 @@ https://en.wikipedia.org/wiki/Saint_George%27s_Day_in_Catalonia
 - Fixed an issue in `SmallWebRTCTransport` where an error was thrown if the
   client did not create a video transceiver.
 
-- Fixed an issue where LLM input parameters were not working and applied correctly in `GoogleVertexLLMService`, causing
-  unexpected behavior during inference.
+- Fixed an issue where LLM input parameters were not working and applied
+  correctly in `GoogleVertexLLMService`, causing unexpected behavior during
+  inference.
 
 ### Other
 
