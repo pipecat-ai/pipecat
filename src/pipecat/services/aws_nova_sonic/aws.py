@@ -7,6 +7,7 @@
 import asyncio
 import base64
 import json
+import time
 import uuid
 import wave
 from dataclasses import dataclass
@@ -119,7 +120,7 @@ class AWSNovaSonicLLMService(LLMService):
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
-        instruction: Optional[str] = None,
+        system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
         send_transcription_frames: bool = True,
         **kwargs,
@@ -131,7 +132,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._model = model
         self._client: BedrockRuntimeClient = None
         self._voice_id = voice_id
-        self._instruction = instruction
+        self._system_instruction = system_instruction
         self._tools = tools
         self._send_transcription_frames = send_transcription_frames
         self._context: AWSNovaSonicLLMContext = None
@@ -150,6 +151,8 @@ class AWSNovaSonicLLMService(LLMService):
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
         self._assistant_response_trigger_audio: bytes = None  # Not cleared on _disconnect()
+        self._disconnecting = False
+        self._connected_time: float = None
 
     #
     # standard AIService frame handling
@@ -173,6 +176,18 @@ class AWSNovaSonicLLMService(LLMService):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._disconnect()
+
+    #
+    # conversation resetting
+    #
+
+    async def reset_conversation(self):
+        logger.debug("Resetting conversation")
+        await self._disconnect()
+        await self._start_connecting()
+        # Use existing context
+        self._context_available = True
+        await self._finish_connecting_if_context_available()
 
     #
     # frame processing
@@ -207,10 +222,12 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _handle_context(self, context: OpenAILLMContext):
         # TODO: reset connection if needed (if entirely new context object provided, for instance)
-        print(f"[pk] receive updated context: {context.get_messages_for_initializing_history()}")
+        print(f"[pk] received updated context: {context.get_messages_for_initializing_history()}")
         if not self._context:
             # We got our initial context - try to finish connecting
-            self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(context)
+            self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(
+                context, self._system_instruction
+            )
             self._context_available = True
             await self._finish_connecting_if_context_available()
 
@@ -296,8 +313,8 @@ class AWSNovaSonicLLMService(LLMService):
         # Read context
         history = self._context.get_messages_for_initializing_history()
 
-        # Send prompt start event, specifying tools
-        # Tools from context take priority over tools from __init__()
+        # Send prompt start event, specifying tools.
+        # Tools from context take priority over self._tools.
         tools = (
             self._context.tools
             if self._context.tools
@@ -305,11 +322,14 @@ class AWSNovaSonicLLMService(LLMService):
         )
         await self._send_prompt_start_event(tools)
 
-        # Send system instruction
-        # Instruction from context takes priority over instruction from __init__()
-        instruction = history.instruction if history.instruction else self._instruction
-        if instruction:
-            await self._send_text_event(text=instruction, role=Role.SYSTEM)
+        # Send system instruction.
+        # Instruction from context takes priority over self._system_instruction.
+        # (NOTE: this prioritizing occurred automatically behind the scenes: the context was
+        # initialized with self._system_instruction and then updated itself from its messages when
+        # get_messages_for_initializing_history() was called).
+        # print(f"[pk] connecting, with system instruction: {history.system_instruction}")
+        if history.system_instruction:
+            await self._send_text_event(text=history.system_instruction, role=Role.SYSTEM)
 
         # Send conversation history
         for message in history.messages:
@@ -320,7 +340,7 @@ class AWSNovaSonicLLMService(LLMService):
         # - pass additional message(s)
         # - merge init-passed system instruction + context instruction (latter takes precedence)
         # - merge init-passed tools + context tools (latter takes precedence)
-        await self._send_text_event(text=self._instruction, role=Role.SYSTEM)
+        await self._send_text_event(text=self._system_instruction, role=Role.SYSTEM)
 
         # Start audio input
         await self._send_audio_input_start_event()
@@ -328,30 +348,42 @@ class AWSNovaSonicLLMService(LLMService):
         # Start receiving events
         self._receive_task = self.create_task(self._receive_task_handler())
 
-        # If we need to, send assistant response trigger
+        # Record finished connecting time
+        self._connected_time = time.time()
+
+        # If we need to, send assistant response trigger (depends on self._connected_time)
         if self._triggering_assistant_response:
-            # If the trigger was the first audio chunk sent on this connection it'd be ignored (I'm
-            # guessing the LLM can't quite "hear" the first little bit of audio sent). So send a bit
-            # of leading blank audio first.
-            await self._send_assistant_response_trigger(lead_with_blank_audio=True)
+            await self._send_assistant_response_trigger()
             self._triggering_assistant_response = False
 
     async def _disconnect(self):
         try:
-            # Clean up receive task
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=1.0)
-                self._receive_task = None
+            # NOTE: see explanation of HACK, below
+            self._disconnecting = True
 
             # Clean up client
             if self._client:
+                print("[pk] Cleaning up client")
                 await self._send_session_end_events()
                 self._client = None
 
             # Clean up stream
             if self._stream:
+                print("[pk] Cleaning up stream")
                 await self._stream.input_stream.close()
                 self._stream = None
+
+            # NOTE: see explanation of HACK, below
+            await asyncio.sleep(1)
+
+            # Clean up receive task
+            # HACK: we should ideally be able to cancel the receive task before stopping the input
+            # stream, above (meaning we wouldn't need self._disconnecting). But for some reason if
+            # we don't close the input stream and wait a second first, we're getting an error a lot
+            # like this one: https://github.com/awslabs/amazon-transcribe-streaming-sdk/issues/61.
+            if self._receive_task:
+                await self.cancel_task(self._receive_task, timeout=1.0)
+                self._receive_task = None
 
             # Reset remaining connection-specific state
             self._prompt_name = None
@@ -362,6 +394,8 @@ class AWSNovaSonicLLMService(LLMService):
             self._ready_to_send_context = False
             self._handling_bot_stopped_speaking = False
             self._triggering_assistant_response = False
+            self._disconnecting = False
+            self._connected_time = None
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
 
@@ -619,9 +653,8 @@ class AWSNovaSonicLLMService(LLMService):
     # LLM communication: output events (LLM -> pipecat)
     #
 
-    # Receive the ongoing LLM "completion".
-    # There is generally a single completion per session.
-    # In a completion, a few different kinds of content can be delivered:
+    # Receive events for the session.
+    # A few different kinds of content can be delivered:
     # - Transcription of user audio
     # - Tool use
     # - Text preview of planned response speech before audio delivered
@@ -633,7 +666,7 @@ class AWSNovaSonicLLMService(LLMService):
     # The overall completion is wrapped by "completionStart" and "completionEnd" events.
     async def _receive_task_handler(self):
         try:
-            while self._client:
+            while self._client and not self._disconnecting:
                 output = await self._stream.await_output()
                 result = await output[1].receive()
 
@@ -906,16 +939,25 @@ class AWSNovaSonicLLMService(LLMService):
             await self._send_assistant_response_trigger()
             self._triggering_assistant_response = False
 
-    async def _send_assistant_response_trigger(self, lead_with_blank_audio=False):
+    async def _send_assistant_response_trigger(self):
         # TODO: if/when we make bitrate, etc configurable, avoid hard-coding this
         chunk_size = 640  # equivalent to what we get from InputAudioRawFrame
         chunk_duration = 640 / (
             16000 * 2
         )  # 640 bytes of 16-bit (2-byte) PCM mono audio at 16kHz corresponds to 0.02 seconds
 
-        # Lead with blank audio, if needed
-        if lead_with_blank_audio:
-            blank_audio_duration = 0.5  # much less than this and it doesn't reliably work
+        # Lead with a bit of blank audio, if needed.
+        # It seems like the LLM can't quite "hear" the first little bit of audio sent on a
+        # connection.
+        current_time = time.time()
+        max_blank_audio_duration = 0.5
+        blank_audio_duration = (
+            max_blank_audio_duration - (current_time - self._connected_time)
+            if self._connected_time is not None
+            and (current_time - self._connected_time) < max_blank_audio_duration
+            else None
+        )
+        if blank_audio_duration:
             blank_audio_chunk = b"\x00" * chunk_size
             num_chunks = int(blank_audio_duration / chunk_duration)
             for _ in range(num_chunks):
@@ -925,7 +967,7 @@ class AWSNovaSonicLLMService(LLMService):
         # Send trigger audio
         # NOTE: this audio *will* be transcribed and eventually make it into the context. That's OK:
         # if we ever need to seed this service again with context it would make sense to include it
-        # since the instruction (i.e. the "wait for the trigger" instruction) will be part of the 
+        # since the instruction (i.e. the "wait for the trigger" instruction) will be part of the
         # context as well.
         # print(f"[pk] sending trigger audio! {len(self._assistant_response_trigger_audio)}")
         audio_chunks = [

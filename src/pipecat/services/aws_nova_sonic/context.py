@@ -49,7 +49,7 @@ class AWSNovaSonicConversationHistoryMessage:
 
 @dataclass
 class AWSNovaSonicConversationHistory:
-    instruction: str = None
+    system_instruction: str = None
     messages: list[AWSNovaSonicConversationHistoryMessage] = field(default_factory=list)
 
 
@@ -58,18 +58,22 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
         super().__init__(messages=messages, tools=tools, **kwargs)
         self.__setup_local()
 
-    def __setup_local(self):
+    def __setup_local(self, system_instruction: str = ""):
         self._assistant_text = ""
+        self._system_instruction = system_instruction
 
     @staticmethod
-    def upgrade_to_nova_sonic(obj: OpenAILLMContext) -> "AWSNovaSonicLLMContext":
+    def upgrade_to_nova_sonic(
+        obj: OpenAILLMContext, system_instruction: str
+    ) -> "AWSNovaSonicLLMContext":
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AWSNovaSonicLLMContext):
             obj.__class__ = AWSNovaSonicLLMContext
-            obj.__setup_local()
+            obj.__setup_local(system_instruction)
         return obj
 
+    # NOTE: this method has the side-effect of updating _system_instruction from messages
     def get_messages_for_initializing_history(self) -> AWSNovaSonicConversationHistory:
-        history = AWSNovaSonicConversationHistory()
+        history = AWSNovaSonicConversationHistory(system_instruction=self._system_instruction)
 
         # Bail if there are no messages
         if not self.messages:
@@ -82,19 +86,28 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
             system = messages.pop(0)
             content = system.get("content")
             if isinstance(content, str):
-                history.instruction = content
+                history.system_instruction = content
             elif isinstance(content, list):
-                history.instruction = content[0].get("text")
+                history.system_instruction = content[0].get("text")
+            if history.system_instruction:
+                self._system_instruction = history.system_instruction
 
         # Process remaining messages to fill out conversation history.
         # Nova Sonic supports "user" and "assistant" messages in history.
-        print(f"[pk] standard messages: {messages}")
+        # print(f"[pk] standard messages: {messages}")
         for message in messages:
             history_message = self.from_standard_message(message)
             if history_message:
                 history.messages.append(history_message)
 
         return history
+
+    def get_messages_for_persistent_storage(self):
+        messages = super().get_messages_for_persistent_storage()
+        # If we have a system instruction and messages doesn't already contain it, add it
+        if self._system_instruction and not (messages and messages[0].get("role") == "system"):
+            messages.insert(0, {"role": "system", "content": self._system_instruction})
+        return messages
 
     def from_standard_message(self, message) -> AWSNovaSonicConversationHistoryMessage:
         role = message.get("role")
