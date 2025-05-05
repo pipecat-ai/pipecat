@@ -256,7 +256,7 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="openai_llm_context")
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="openai_process_context")
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []
