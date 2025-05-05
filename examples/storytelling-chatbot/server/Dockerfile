@@ -44,11 +44,11 @@ COPY ./requirements.txt requirements.txt
 RUN pip3 install --no-cache-dir --upgrade -r requirements.txt
 
 # Copy everything else
-COPY --chown=user ./src/ src/
+COPY --chown=user ./server/ server/
 
-# Copy frontend app and build
-COPY --chown=user ./frontend/ frontend/
-RUN cd frontend && npm install && npm run build
+# Copy client app and build
+COPY --chown=user ./client/ client/
+RUN cd client && npm install && npm run build
 
 # Start the FastAPI server
-CMD python3 src/bot_runner.py --port ${FAST_API_PORT}
+CMD python3 server/bot_runner.py --port ${FAST_API_PORT}

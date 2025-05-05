@@ -5,11 +5,14 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.66] - 2025-05-02
 
 ### Added
 
-- Added support for cross-platform local smart turn detection. You can use 
+- Added two new input parameters to `RimeTTSService`: `pause_between_brackets`
+  and `phonemize_between_brackets`.
+
+- Added support for cross-platform local smart turn detection. You can use
   `LocalSmartTurnAnalyzer` for on-device inference using Torch.
 
 - `BaseOutputTransport` now allows multiple destinations if the transport
@@ -116,6 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case there's no need to push audio to the rest of the pipeline, but this is
   not a very common case.
 
+- Added `RivaSegmentedSTTService`, which allows Riva offline/batch models, such
+  as  to be "canary-1b-asr" used in Pipecat.
+
 ### Deprecated
 
 - Function calls with parameters
@@ -131,7 +137,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TransportParams.vad_audio_passthrough` parameter is now deprecated, use
   `TransportParams.audio_in_passthrough` instead.
 
+- `ParakeetSTTService` is now deprecated, use `RivaSTTService` instead, which uses
+  the model "parakeet-ctc-1.1b-asr" by default.
+
+- `FastPitchTTSService` is now deprecated, use `RivaTTSService` instead, which uses
+  the model "magpie-tts-multilingual" by default.
+
 ### Fixed
+
+- Fixed an issue with `SimliVideoService` where the bot was continuously outputting
+  audio, which prevents the `BotStoppedSpeakingFrame` from being emitted.
 
 - Fixed an issue where `OpenAIRealtimeBetaLLMService` would add two assistant
   messages to the context.

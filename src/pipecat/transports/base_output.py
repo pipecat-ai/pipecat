@@ -369,7 +369,7 @@ class BaseOutputTransport(FrameProcessor):
         #
 
         def _create_audio_task(self):
-            if not self._audio_task and self._params.audio_out_enabled:
+            if not self._audio_task:
                 self._audio_queue = asyncio.Queue()
                 self._audio_task = self._transport.create_task(self._audio_task_handler())
 
@@ -380,7 +380,9 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _bot_started_speaking(self):
             if not self._bot_speaking:
-                logger.debug(f"Bot [{self._destination}] started speaking")
+                logger.debug(
+                    f"Bot{f' [{self._destination}]' if self._destination else ''} started speaking"
+                )
 
                 downstream_frame = BotStartedSpeakingFrame()
                 downstream_frame.transport_destination = self._destination
@@ -393,7 +395,9 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _bot_stopped_speaking(self):
             if self._bot_speaking:
-                logger.debug(f"Bot [{self._destination}] stopped speaking")
+                logger.debug(
+                    f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
+                )
 
                 downstream_frame = BotStoppedSpeakingFrame()
                 downstream_frame.transport_destination = self._destination
