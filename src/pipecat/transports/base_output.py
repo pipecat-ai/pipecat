@@ -431,6 +431,9 @@ class BaseOutputTransport(FrameProcessor):
             async def with_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 last_frame_time = 0
                 silence = b"\x00" * self._audio_chunk_size
+                # chunk duration in seconds
+                chunk_duration = ( 10 * self._params.audio_out_10ms_chunks ) / 1000.0
+                next_frame_time = time.time()
                 while True:
                     try:
                         frame = self._audio_queue.get_nowait()
@@ -450,6 +453,11 @@ class BaseOutputTransport(FrameProcessor):
                             num_channels=self._params.audio_out_channels,
                         )
                         yield frame
+                    # Throttle frame generation to maintain real-time pacing and avoid flooding with silence
+                    wait = next_frame_time - time.time()
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    next_frame_time += chunk_duration
 
             if self._mixer:
                 return with_mixer(BOT_VAD_STOP_SECS)
