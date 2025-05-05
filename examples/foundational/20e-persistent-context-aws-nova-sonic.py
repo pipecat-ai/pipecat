@@ -1,16 +1,18 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+import glob
+import json
 import os
 from datetime import datetime
 
 from dotenv import load_dotenv
 from loguru import logger
 
-# import logging
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -19,18 +21,14 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.aws_nova_sonic import AWSNovaSonicLLMService
+from pipecat.services.aws_nova_sonic.aws import AWSNovaSonicLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
-# Load environment variables
 load_dotenv(override=True)
 
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
+BASE_FILENAME = "/tmp/pipecat_conversation_"
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
@@ -45,7 +43,72 @@ async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context
     )
 
 
-weather_function = FunctionSchema(
+async def get_saved_conversation_filenames(
+    function_name, tool_call_id, args, llm, context, result_callback
+):
+    # Construct the full pattern including the BASE_FILENAME
+    full_pattern = f"{BASE_FILENAME}*.json"
+
+    # Use glob to find all matching files
+    matching_files = glob.glob(full_pattern)
+    logger.debug(f"matching files: {matching_files}")
+
+    await result_callback({"filenames": matching_files})
+
+
+# async def get_saved_conversation_filenames(
+#     function_name, tool_call_id, args, llm, context, result_callback
+# ):
+#     pattern = re.compile(re.escape(BASE_FILENAME) + "\\d{8}_\\d{6}\\.json$")
+#     matching_files = []
+
+#     for filename in os.listdir("."):
+#         if pattern.match(filename):
+#             matching_files.append(filename)
+
+#     await result_callback({"filenames": matching_files})
+
+
+async def save_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+    filename = f"{BASE_FILENAME}{timestamp}.json"
+    logger.debug(
+        f"writing conversation to {filename}\n{json.dumps(context.get_messages_for_persistent_storage(), indent=4)}"
+    )
+    try:
+        with open(filename, "w") as file:
+            messages = context.get_messages_for_persistent_storage()
+            # remove the last message, which is the instruction we just gave to save the conversation
+            messages.pop()
+            json.dump(messages, file, indent=2)
+        await result_callback({"success": True})
+    except Exception as e:
+        await result_callback({"success": False, "error": str(e)})
+
+
+async def load_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+    async def _reset():
+        filename = args["filename"]
+        logger.debug(f"loading conversation from {filename}")
+        try:
+            with open(filename, "r") as file:
+                messages = json.load(file)
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
+                    }
+                )
+                context.set_messages(messages)
+                await llm.reset_conversation()
+                await llm.trigger_assistant_response()
+        except Exception as e:
+            await result_callback({"success": False, "error": str(e)})
+
+    asyncio.create_task(_reset())
+
+
+get_current_weather_tool = FunctionSchema(
     name="get_current_weather",
     description="Get the current weather",
     properties={
@@ -56,38 +119,62 @@ weather_function = FunctionSchema(
         "format": {
             "type": "string",
             "enum": ["celsius", "fahrenheit"],
-            "description": "The temperature unit to use. Infer this from the users location.",
+            "description": "The temperature unit to use. Infer this from the user's location.",
         },
     },
     required=["location", "format"],
 )
 
-# Create tools schema
-tools = ToolsSchema(standard_tools=[weather_function])
+save_conversation_tool = FunctionSchema(
+    name="save_conversation",
+    description="Save the current conversation. Use this function to persist the current conversation to external storage.",
+    properties={},
+    required=[],
+)
+
+get_saved_conversation_filenames_tool = FunctionSchema(
+    name="get_saved_conversation_filenames",
+    description="Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
+    properties={},
+    required=[],
+)
+
+load_conversation_tool = FunctionSchema(
+    name="load_conversation",
+    description="Load a conversation history. Use this function to load a conversation history into the current session.",
+    properties={
+        "filename": {
+            "type": "string",
+            "description": "The filename of the conversation history to load.",
+        }
+    },
+    required=["filename"],
+)
+
+tools = ToolsSchema(
+    standard_tools=[
+        get_current_weather_tool,
+        save_conversation_tool,
+        get_saved_conversation_filenames_tool,
+        load_conversation_tool,
+    ]
+)
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection):
     logger.info(f"Starting bot")
 
-    # Initialize the SmallWebRTCTransport with the connection
     transport = SmallWebRTCTransport(
         webrtc_connection=webrtc_connection,
         params=TransportParams(
             audio_in_enabled=True,
-            audio_in_sample_rate=16000,
             audio_out_enabled=True,
-            camera_in_enabled=False,
             vad_enabled=True,
-            vad_audio_passthrough=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
+            vad_audio_passthrough=True,
         ),
     )
 
-    # Specify initial system instruction.
-    # HACK: note that, for now, we need to inject a special bit of text into this instruction to
-    # allow the first assistant response to be programmatically triggered (which happens in the
-    # on_client_connected handler, below)
-    # TODO: looks like Nova Sonic can't handle new lines?
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
@@ -95,61 +182,50 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
     )
 
-    # Create the AWS Nova Sonic LLM service
     llm = AWSNovaSonicLLMService(
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),
         voice_id="tiffany",  # matthew, tiffany, amy
         # you could choose to pass instruction here rather than via context
-        # system_instruction=system_instruction
+        # system_instruction=system_instruction,
         # you could choose to pass tools here rather than via context
         # tools=tools
     )
 
-    # Register function for function calls
-    # you can either register a single function for all function calls, or specific functions
-    # llm.register_function(None, fetch_weather_from_api)
     llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("save_conversation", save_conversation)
+    llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
+    llm.register_function("load_conversation", load_conversation)
 
-    # Set up context and context management.
-    # AWSNovaSonicService will adapt OpenAI LLM context objects with standard message format to
-    # what's expected by Nova Sonic.
-    # TODO: since we can't trigger a response upon joining, this isn't particularly useful
     context = OpenAILLMContext(
         messages=[
             {"role": "system", "content": f"{system_instruction}"},
-            {
-                "role": "user",
-                "content": "Tell me a fun fact!",
-            },
         ],
         tools=tools,
     )
     context_aggregator = llm.create_context_aggregator(context)
 
-    # Build the pipeline
     pipeline = Pipeline(
         [
-            transport.input(),
+            transport.input(),  # Transport user input
             context_aggregator.user(),
-            llm,
-            transport.output(),
+            llm,  # LLM
+            transport.output(),  # Transport bot output
             context_aggregator.assistant(),
         ]
     )
 
-    # Configure the pipeline task
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
+            report_only_initial_ttfb=True,
         ),
     )
 
-    # Handle client connection event
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
@@ -160,7 +236,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         # system instruction. In the future, simply queueing the context frame should be sufficient.
         await llm.trigger_assistant_response()
 
-    # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
@@ -170,8 +245,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         logger.info(f"Client closed connection")
         await task.cancel()
 
-    # Run the pipeline
     runner = PipelineRunner(handle_sigint=False)
+
     await runner.run(task)
 
 
