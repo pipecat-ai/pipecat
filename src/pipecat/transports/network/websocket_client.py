@@ -136,6 +136,7 @@ class WebsocketClientInputTransport(BaseInputTransport):
         await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -186,6 +187,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
