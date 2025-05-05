@@ -29,10 +29,10 @@ class FrameProcessorMetrics:
 
     @property
     def ttfb_ms(self) -> Optional[float]:
-        """Get the current TTFB value in milliseconds.
+        """Get the current TTFB value in seconds.
 
         Returns:
-            Optional[float]: The TTFB value in milliseconds, or None if not measured
+            Optional[float]: The TTFB value in seconds, or None if not measured
         """
         if self._last_ttfb_time > 0:
             return self._last_ttfb_time
