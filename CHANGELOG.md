@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added support to `RimeHttpTTSService` for the `arcana` model.
+
 ### Fixed
 
 - Refactored how the `start` method is handled in `SmallWebRTCOutputTransport` by 
   initializing it before the parent class. This fixes an audio mixer issue when used 
   alongside `SmallWebRTCTransport`, preventing unnecessary CPU usage and avoiding the 
   output being flooded with silent frames when no new audio is available.
+
+- Remove custom audio tracks from `DailyTransport` before leaving.
 
 ## [0.0.66] - 2025-05-02
 
@@ -129,7 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not a very common case.
 
 - Added `RivaSegmentedSTTService`, which allows Riva offline/batch models, such
-  as  to be "canary-1b-asr" used in Pipecat.
+  as to be "canary-1b-asr" used in Pipecat.
 
 ### Deprecated
 

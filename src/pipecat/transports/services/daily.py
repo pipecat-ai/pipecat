@@ -578,6 +578,10 @@ class DailyTransportClient(EventHandler):
         if self._params.transcription_enabled:
             await self._stop_transcription()
 
+        # Remove any custom tracks, if any.
+        for track_name, _ in self._audio_sources.items():
+            await self.remove_custom_audio_track(track_name)
+
         try:
             error = await self._leave()
             if not error:
@@ -740,6 +744,14 @@ class DailyTransportClient(EventHandler):
         await future
 
         return audio_source
+
+    async def remove_custom_audio_track(self, track_name: str):
+        future = self._get_event_loop().create_future()
+        self._client.remove_custom_audio_track(
+            track_name=track_name,
+            completion=completion_callback(future),
+        )
+        await future
 
     async def update_transcription(self, participants=None, instance_id=None):
         future = self._get_event_loop().create_future()
