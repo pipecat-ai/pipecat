@@ -436,7 +436,7 @@ class BaseOutputTransport(FrameProcessor):
                 last_frame_time = 0
                 silence = b"\x00" * self._audio_chunk_size
                 # chunk duration in seconds
-                chunk_duration = ( 10 * self._params.audio_out_10ms_chunks ) / 1000.0
+                chunk_duration = (10 * self._params.audio_out_10ms_chunks) / 1000.0
                 next_frame_time = time.time()
                 while True:
                     try:

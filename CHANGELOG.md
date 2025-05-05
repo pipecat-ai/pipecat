@@ -5,6 +5,15 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Added real-time throttling to the `BaseOutputTransport` when using audio mixer
+  to ensure audio frames (including silence) are emitted at the correct intervals. 
+  This prevents unnecessary CPU usage and avoids flooding the output with silent 
+  frames when no new audio is available.
+
 ## [0.0.66] - 2025-05-02
 
 ### Added
