@@ -10,7 +10,7 @@ export interface SettingsManager {
 const defaultSettings: SettingsManager = {
   enableCam: false,
   enableMic: true,
-  backendURL: process.env.EXPO_PUBLIC_BASE_URL || "https://api.daily.co/v1/bots",
+  backendURL: process.env.EXPO_PUBLIC_BASE_URL || "",
 };
 
 export class SettingsManager {
