@@ -5,6 +5,12 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added support to `RimeHttpTTSService` for the `arcana` model.
+
 ## [0.0.66] - 2025-05-02
 
 ### Added
@@ -120,7 +126,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not a very common case.
 
 - Added `RivaSegmentedSTTService`, which allows Riva offline/batch models, such
-  as  to be "canary-1b-asr" used in Pipecat.
+  as to be "canary-1b-asr" used in Pipecat.
 
 ### Deprecated
 
