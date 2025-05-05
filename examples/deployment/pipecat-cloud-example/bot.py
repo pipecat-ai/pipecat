@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import os
 
 import aiohttp
@@ -21,44 +22,23 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
-# Check if we're in local development mode
-LOCAL_RUN = os.getenv("LOCAL_RUN")
-if LOCAL_RUN:
-    import asyncio
-    import webbrowser
-
-    try:
-        from local_runner import configure
-    except ImportError:
-        logger.error("Could not import local_runner module. Local development mode may not work.")
-
 # Load environment variables
 load_dotenv(override=True)
 
+# Check if we're in local development mode
+LOCAL_RUN = os.getenv("LOCAL_RUN")
 
-async def main(room_url: str, token: str):
+
+async def main(transport: DailyTransport):
     """Main pipeline setup and execution function.
 
     Args:
-        room_url: The Daily room URL
-        token: The Daily room token
+        transport: The DailyTransport object for the bot
     """
-    logger.debug("Starting bot in room: {}", room_url)
-
-    transport = DailyTransport(
-        room_url,
-        token,
-        "bot",
-        DailyParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            transcription_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
+    logger.debug("Starting bot")
 
     tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"), voice_id="79a125e8-cd45-4c13-8a67-188112f4dd22"
+        api_key=os.getenv("CARTESIA_API_KEY"), voice_id="71a7ad14-091c-4e8e-a314-022ece01c121"
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -126,10 +106,25 @@ async def bot(args: DailySessionArguments):
         body: The configuration object from the request body
         session_id: The session ID for logging
     """
+    from pipecat.audio.filters.krisp_filter import KrispFilter
+
     logger.info(f"Bot process initialized {args.room_url} {args.token}")
 
+    transport = DailyTransport(
+        args.room_url,
+        args.token,
+        "Pipecat Bot",
+        DailyParams(
+            audio_in_enabled=True,
+            audio_in_filter=None if LOCAL_RUN else KrispFilter(),
+            audio_out_enabled=True,
+            transcription_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
+
     try:
-        await main(args.room_url, args.token)
+        await main(transport)
         logger.info("Bot process completed")
     except Exception as e:
         logger.exception(f"Error in bot process: {str(e)}")
@@ -137,18 +132,27 @@ async def bot(args: DailySessionArguments):
 
 
 # Local development functions
-async def local_main():
+async def local_daily():
     """Function for local development testing."""
+    from local_runner import configure
+
     try:
         async with aiohttp.ClientSession() as session:
             (room_url, token) = await configure(session)
-            logger.warning("_")
-            logger.warning("_")
-            logger.warning(f"Talk to your voice agent here: {room_url}")
-            logger.warning("_")
-            logger.warning("_")
-            webbrowser.open(room_url)
-            await main(room_url, token)
+            transport = DailyTransport(
+                room_url,
+                token,
+                "Pipecat Bot",
+                DailyParams(
+                    audio_in_enabled=True,
+                    audio_out_enabled=True,
+                    transcription_enabled=True,
+                    vad_analyzer=SileroVADAnalyzer(),
+                ),
+            )
+
+            await main(transport)
+
     except Exception as e:
         logger.exception(f"Error in local development mode: {e}")
 
@@ -156,6 +160,6 @@ async def local_main():
 # Local development entry point
 if LOCAL_RUN and __name__ == "__main__":
     try:
-        asyncio.run(local_main())
+        asyncio.run(local_daily())
     except Exception as e:
         logger.exception(f"Failed to run in local mode: {e}")

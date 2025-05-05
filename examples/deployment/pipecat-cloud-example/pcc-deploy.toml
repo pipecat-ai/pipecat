@@ -1,6 +1,8 @@
 agent_name = "my-first-agent"
 image = "your-username/my-first-agent:0.1"
+image_credentials = "your-dockerhub-creds"
 secret_set = "my-first-agent-secrets"
+enable_krisp = true
 
 [scaling]
 	min_instances = 0
