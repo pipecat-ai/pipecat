@@ -26,6 +26,7 @@ from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     import websockets
@@ -227,6 +228,10 @@ class GladiaSTTService(STTService):
         self._websocket = None
         self._receive_task = None
         self._keepalive_task = None
+        self._settings = {}
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language enum to Gladia's language code."""
@@ -278,6 +283,9 @@ class GladiaSTTService(STTService):
         if self._params.messages_config:
             settings["messages_config"] = self._params.messages_config.model_dump(exclude_none=True)
 
+        # Store settings for tracing
+        self._settings = settings
+
         return settings
 
     async def start(self, frame: StartFrame):
@@ -328,9 +336,9 @@ class GladiaSTTService(STTService):
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Run speech-to-text on audio data."""
+        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self._send_audio(audio)
-        await self.stop_processing_metrics()
         yield None
 
     async def _setup_gladia(self, settings: Dict[str, Any]):
@@ -350,6 +358,40 @@ class GladiaSTTService(STTService):
                     raise Exception(
                         f"Failed to initialize Gladia session: {response.status} - {error_text}"
                     )
+
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="gladia_transcription")
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
+    ):
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            from pipecat.utils.tracing.helpers import add_stt_span_attributes
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+            ttfb_ms = None
+            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                ttfb_ms = self._metrics.ttfb_ms
+
+            add_stt_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model=self._model_name,
+                transcript=transcript,
+                is_final=is_final,
+                language=language,
+                vad_enabled=False,
+                settings=self._settings,
+                confidence_threshold=self._confidence,
+                confidence=confidence,
+                ttfb_ms=ttfb_ms,
+            )
+
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
 
     async def _send_audio(self, audio: bytes):
         data = base64.b64encode(audio).decode("utf-8")
@@ -387,8 +429,9 @@ class GladiaSTTService(STTService):
                     confidence = utterance.get("confidence", 0)
                     language = utterance["language"]
                     transcript = utterance["text"]
+                    is_final = content["data"]["is_final"]
                     if confidence >= self._confidence:
-                        if content["data"]["is_final"]:
+                        if is_final:
                             await self.push_frame(
                                 TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                             )
@@ -398,6 +441,12 @@ class GladiaSTTService(STTService):
                                     transcript, "", time_now_iso8601(), language
                                 )
                             )
+                        await self._handle_transcription(
+                            transcript=transcript,
+                            is_final=is_final,
+                            language=language,
+                            confidence=confidence,
+                        )
                 elif content["type"] == "translation":
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]
