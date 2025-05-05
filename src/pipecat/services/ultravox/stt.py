@@ -425,7 +425,7 @@ class UltravoxSTTService(AIService):
                             if "content" in delta:
                                 new_text = delta["content"]
                                 if new_text:
-                                    yield LLMTextFrame(text=new_text.strip())
+                                    yield LLMTextFrame(text=new_text)
 
                     # Stop processing metrics after completion
                     await self.stop_processing_metrics()
