@@ -30,7 +30,7 @@ You will need to have installed locally on your computer:
 nvm i
 
 # Install dependencies
-npm i
+yarn install
 
 # Before a native app can be compiled, the native source code must be generated.
 npx expo prebuild
