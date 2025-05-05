@@ -944,19 +944,23 @@ class DailyInputTransport(BaseInputTransport):
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
     async def start(self, frame: StartFrame):
-        # Setup client.
-        await self._client.setup(frame)
-
-        # Parent start.
-        await super().start(frame)
-
         if self._initialized:
             return
 
         self._initialized = True
 
+        # Parent start.
+        await super().start(frame)
+
+        # Setup client.
+        await self._client.setup(frame)
+
         # Join the room.
         await self._client.join()
+
+        # Indicate the transport that we are connected.
+        await self.set_transport_ready(frame)
+
         if self._params.audio_in_stream_on_start:
             self.start_audio_in_streaming()
 
@@ -1125,19 +1129,22 @@ class DailyOutputTransport(BaseOutputTransport):
         self._initialized = False
 
     async def start(self, frame: StartFrame):
-        # Setup client.
-        await self._client.setup(frame)
-
-        # Parent start.
-        await super().start(frame)
-
         if self._initialized:
             return
 
         self._initialized = True
 
+        # Parent start.
+        await super().start(frame)
+
+        # Setup client.
+        await self._client.setup(frame)
+
         # Join the room.
         await self._client.join()
+
+        # Indicate the transport that we are connected.
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         # Parent stop.

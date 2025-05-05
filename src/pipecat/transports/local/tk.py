@@ -68,6 +68,8 @@ class TkInputTransport(BaseInputTransport):
         )
         self._in_stream.start_stream()
 
+        await self.set_transport_ready(frame)
+
     async def cleanup(self):
         await super().cleanup()
         if self._in_stream:
@@ -123,6 +125,8 @@ class TkOutputTransport(BaseOutputTransport):
             output_device_index=self._params.audio_output_device_index,
         )
         self._out_stream.start_stream()
+
+        await self.set_transport_ready(frame)
 
     async def cleanup(self):
         await super().cleanup()
