@@ -484,9 +484,10 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         self._params = params
 
     async def start(self, frame: StartFrame):
-        await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
+        # Parent start.
+        await super().start(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)

@@ -5,6 +5,15 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Refactored how the `start` method is handled in `SmallWebRTCOutputTransport` by 
+  initializing it before the parent class. This fixes an audio mixer issue when used 
+  alongside `SmallWebRTCTransport`, preventing unnecessary CPU usage and avoiding the 
+  output being flooded with silent frames when no new audio is available.
+
 ## [0.0.66] - 2025-05-02
 
 ### Added
