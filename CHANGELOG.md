@@ -11,7 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added support to `RimeHttpTTSService` for the `arcana` model.
 
+### Changed
+
+- Observers `on_push_frame()` now take a single argument `FramePushed` instead
+  of multiple arguments.
+
+### Removed
+
+- `StartFrame.observer` has been replaced by `StartFrame.observers`. This allows
+  a user to pass all observers instead of a single proxy one.
+
+### Deprecated
+
+- Observer `on_push_frame(src, dst, frame, direction, timestamp)` is now
+  deprecated, use `on_push_frame(data: FramePushed)` instead.
+
 ### Fixed
+
+- Fixed a `UltravoxSTTService` issue that would cause the service to generate
+  all tokens as one word.
 
 - Remove custom audio tracks from `DailyTransport` before leaving.
 

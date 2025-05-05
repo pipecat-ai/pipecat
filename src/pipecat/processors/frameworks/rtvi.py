@@ -55,7 +55,7 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -445,14 +445,7 @@ class RTVIObserver(BaseObserver):
         self._frames_seen = set()
         rtvi.set_errors_enabled(self._params.errors_enabled)
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
 
         Args:
@@ -462,6 +455,10 @@ class RTVIObserver(BaseObserver):
             direction: Direction of frame flow in pipeline
             timestamp: Time when frame was pushed
         """
+        src = data.source
+        frame = data.frame
+        direction = data.direction
+
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
             return

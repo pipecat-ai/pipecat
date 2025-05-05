@@ -16,6 +16,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Sequence,
     Tuple,
 )
 
@@ -449,12 +450,12 @@ class StartFrame(SystemFrame):
 
     clock: BaseClock
     task_manager: BaseTaskManager
+    observers: Sequence["BaseObserver"]
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
-    observer: Optional["BaseObserver"] = None
     report_only_initial_ttfb: bool = False
 
 

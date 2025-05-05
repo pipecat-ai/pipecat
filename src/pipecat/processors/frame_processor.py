@@ -5,8 +5,9 @@
 #
 
 import asyncio
+import inspect
 from enum import Enum
-from typing import Awaitable, Callable, Coroutine, Optional
+from typing import Awaitable, Callable, Coroutine, List, Optional, Sequence
 
 from loguru import logger
 
@@ -21,14 +22,61 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.asyncio import BaseTaskManager, TaskManager
 from pipecat.utils.base_object import BaseObject
 
 
 class FrameDirection(Enum):
     DOWNSTREAM = 1
     UPSTREAM = 2
+
+
+class FrameObserverProxy:
+    def __init__(self, task_manager: TaskManager, observer: BaseObserver) -> None:
+        self._task_manager = task_manager
+        self._observer = observer
+        self._queue = asyncio.Queue()
+        self._task: Optional[asyncio.Task] = None
+        self._warning_reported = False
+
+    def start(self):
+        if not self._task:
+            self._task = self._task_manager.create_task(
+                self._observer_task_handler(), f"ObserverProxy::{self._observer.__class__.__name__}"
+            )
+
+    async def stop(self):
+        if self._task:
+            await self._task_manager.cancel_task(self._task)
+            self._task = None
+
+    async def observe(self, data: FramePushed):
+        await self._queue.put(data)
+
+    async def _observer_task_handler(self):
+        while True:
+            data = await self._queue.get()
+
+            signature = inspect.signature(self._observer.on_push_frame)
+            if len(signature.parameters) > 1:
+                if not self._warning_reported:
+                    import warnings
+
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("always")
+                        warnings.warn(
+                            "Observer `on_push_frame(source, destination, frame, direction, timestamp)` is deprecated, use `on_push_frame(data: FramePushed)` instead.",
+                            DeprecationWarning,
+                        )
+                    self._warning_reported = True
+                await self._observer.on_push_frame(
+                    data.source, data.destination, data.frame, data.direction, data.timestamp
+                )
+            else:
+                await self._observer.on_push_frame(data)
+            self._queue.task_done()
 
 
 class FrameProcessor(BaseObject):
@@ -55,7 +103,7 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
-        self._observer = None
+        self._observer_proxies: List[FrameObserverProxy] = []
 
         # Cancellation is done through CancelFrame (a system frame). This could
         # cause other events being triggered (e.g. closing a transport) which
@@ -77,9 +125,15 @@ class FrameProcessor(BaseObject):
         self.__input_frame_task: Optional[asyncio.Task] = None
 
         # Every processor in Pipecat should only output frames from a single
-        # task. This avoid problems like audio overlapping. System frames are the
-        # exception to this rule. This create this task.
+        # task. This avoids problems like audio overlapping. System frames are
+        # the exception to this rule.
         self.__push_frame_task: Optional[asyncio.Task] = None
+
+        # The observers task will push observed frames to the observers'
+        # proxies. This task avoids the pipeline to block. Then, there is one
+        # proxy per observer and each proxy has its own task. This way each
+        # observer is independent to the rest.
+        self.__observers_task: Optional[asyncio.Task] = None
 
     @property
     def id(self) -> int:
@@ -170,6 +224,7 @@ class FrameProcessor(BaseObject):
         await super().cleanup()
         await self.__cancel_input_task()
         await self.__cancel_push_task()
+        await self.__cancel_observers_task()
 
     def link(self, processor: "FrameProcessor"):
         self._next = processor
@@ -232,7 +287,9 @@ class FrameProcessor(BaseObject):
             self._enable_metrics = frame.enable_metrics
             self._enable_usage_metrics = frame.enable_usage_metrics
             self._report_only_initial_ttfb = frame.report_only_initial_ttfb
-            self._observer = frame.observer
+            self._observer_proxies = self._create_observer_proxies(
+                frame.task_manager, frame.observers
+            )
             await self.__start(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._start_interruption()
@@ -255,6 +312,7 @@ class FrameProcessor(BaseObject):
             await self.__push_queue.put((frame, direction))
 
     async def __start(self, frame: StartFrame):
+        self.__create_observers_task()
         self.__create_input_task()
         self.__create_push_task()
 
@@ -262,6 +320,7 @@ class FrameProcessor(BaseObject):
         self._cancelling = True
         await self.__cancel_input_task()
         await self.__cancel_push_task()
+        await self.__cancel_observers_task()
 
     #
     # Handle interruptions
@@ -294,17 +353,25 @@ class FrameProcessor(BaseObject):
             timestamp = self._clock.get_time() if self._clock else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
-                if self._observer:
-                    await self._observer.on_push_frame(
-                        self, self._next, frame, direction, timestamp
-                    )
+                data = FramePushed(
+                    source=self,
+                    destination=self._next,
+                    frame=frame,
+                    direction=direction,
+                    timestamp=timestamp,
+                )
+                await self.__observe_frame(data)
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
                 logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
-                if self._observer:
-                    await self._observer.on_push_frame(
-                        self, self._prev, frame, direction, timestamp
-                    )
+                data = FramePushed(
+                    source=self,
+                    destination=self._prev,
+                    frame=frame,
+                    direction=direction,
+                    timestamp=timestamp,
+                )
+                await self.__observe_frame(data)
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
@@ -368,3 +435,36 @@ class FrameProcessor(BaseObject):
             (frame, direction) = await self.__push_queue.get()
             await self.__internal_push_frame(frame, direction)
             self.__push_queue.task_done()
+
+    def _create_observer_proxies(
+        self, task_manager: TaskManager, observers: Sequence[BaseObserver]
+    ) -> List[FrameObserverProxy]:
+        result = []
+        for observer in observers:
+            proxy = FrameObserverProxy(task_manager, observer)
+            proxy.start()
+            result.append(proxy)
+        return result
+
+    def __create_observers_task(self):
+        if not self.__observers_task:
+            self.__observers_queue = asyncio.Queue()
+            self.__observers_task = self.create_task(self.__observers_task_handler())
+
+    async def __cancel_observers_task(self):
+        if self.__observers_task:
+            for proxy in self._observer_proxies:
+                await proxy.stop()
+            await self.cancel_task(self.__observers_task)
+            self.__observers_task = None
+
+    async def __observe_frame(self, data: FramePushed):
+        await self.__observers_queue.put(data)
+
+    async def __observers_task_handler(self):
+        while True:
+            data = await self.__observers_queue.get()
+            # Proxy observation to all observers.
+            for observer in self._observer_proxies:
+                await observer.observe(data)
+            self.__observers_queue.task_done()
