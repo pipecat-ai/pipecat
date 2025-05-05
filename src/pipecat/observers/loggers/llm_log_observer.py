@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMTextFrame,
 )
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
@@ -38,14 +38,13 @@ class LLMLogObserver(BaseObserver):
 
     """
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
+        src = data.source
+        dst = data.destination
+        frame = data.frame
+        direction = data.direction
+        timestamp = data.timestamp
+
         if not isinstance(src, LLMService) and not isinstance(dst, LLMService):
             return
 

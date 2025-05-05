@@ -14,16 +14,15 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    Frame,
     StartInterruptionFrame,
 )
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.loggers.llm_log_observer import LLMLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -46,14 +45,13 @@ class DebugObserver(BaseObserver):
     Log format: [EVENT TYPE]: [source processor] → [destination processor] at [timestamp]s
     """
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
+        src = data.source
+        dst = data.destination
+        frame = data.frame
+        direction = data.direction
+        timestamp = data.timestamp
+
         # Convert timestamp to seconds for readability
         time_sec = timestamp / 1_000_000_000
 
