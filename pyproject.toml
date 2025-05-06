@@ -24,7 +24,7 @@ dependencies = [
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "loguru~=0.7.3",
     "Markdown~=3.7",
-    "numpy~=1.26.4",
+    "numpy>=1.26.4",
     "Pillow~=11.1.0",
     "protobuf~=5.29.3",
     "pydantic~=2.10.6",
