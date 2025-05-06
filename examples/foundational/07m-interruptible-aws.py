@@ -13,7 +13,8 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.services.aws.llm import BedrockLLMContext, BedrockLLMService
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.aws.llm import BedrockLLMService
 from pipecat.services.aws.stt import TranscribeSTTService
 from pipecat.services.aws.tts import PollyTTSService
 from pipecat.transcriptions.language import Language
@@ -55,15 +56,11 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     messages = [
         {
             "role": "system",
-            "content": [
-                {
-                    "text": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way."
-                }
-            ],
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
         },
     ]
 
-    context = BedrockLLMContext(messages)
+    context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
@@ -92,14 +89,16 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append(
-            {"role": "user", "content": [{"text": "Please introduce yourself to the user."}]}
-        )
+        messages.append({"role": "user", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
+
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)
