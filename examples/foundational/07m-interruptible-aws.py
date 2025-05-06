@@ -14,9 +14,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.aws.llm import BedrockLLMService
-from pipecat.services.aws.stt import TranscribeSTTService
-from pipecat.services.aws.tts import PollyTTSService
+from pipecat.services.aws.llm import AWSBedrockLLMService
+from pipecat.services.aws.stt import AWSTranscribeSTTService
+from pipecat.services.aws.tts import AWSPollyTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -37,20 +37,20 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         ),
     )
 
-    stt = TranscribeSTTService()
+    stt = AWSTranscribeSTTService()
 
-    tts = PollyTTSService(
+    tts = AWSPollyTTSService(
         region="us-west-2",  # only specific regions support generative TTS
         voice_id="Joanna",
-        params=PollyTTSService.InputParams(
+        params=AWSPollyTTSService.InputParams(
             engine="generative", language=Language.EN_US, rate="1.1"
         ),
     )
 
-    llm = BedrockLLMService(
+    llm = AWSBedrockLLMService(
         aws_region="us-west-2",
         model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
-        params=BedrockLLMService.InputParams(temperature=0.8, latency="optimized"),
+        params=AWSBedrockLLMService.InputParams(temperature=0.8, latency="optimized"),
     )
 
     messages = [

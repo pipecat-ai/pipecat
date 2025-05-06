@@ -107,7 +107,7 @@ def language_to_aws_language(language: Language) -> Optional[str]:
     return language_map.get(language)
 
 
-class PollyTTSService(TTSService):
+class AWSPollyTTSService(TTSService):
     class InputParams(BaseModel):
         engine: Optional[str] = None
         language: Optional[Language] = Language.EN
@@ -190,7 +190,6 @@ class PollyTTSService(TTSService):
             prosody_attrs.append(f"rate='{self._settings['rate']}'")
         if self._settings["volume"]:
             prosody_attrs.append(f"volume='{self._settings['volume']}'")
-        # logger.warning("Prosody tags are not supported for generative engine. Ignoring.")
 
         if prosody_attrs:
             ssml += f"<prosody {' '.join(prosody_attrs)}>"
@@ -269,7 +268,7 @@ class PollyTTSService(TTSService):
             yield TTSStoppedFrame()
 
 
-class AWSTTSService(PollyTTSService):
+class PollyTTSService(AWSPollyTTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -278,5 +277,6 @@ class AWSTTSService(PollyTTSService):
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
-                "'AWSTTSService' is deprecated, use 'PollyTTSService' instead.", DeprecationWarning
+                "'PollyTTSService' is deprecated, use 'AWSPollyTTSService' instead.",
+                DeprecationWarning,
             )

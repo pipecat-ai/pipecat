@@ -41,9 +41,9 @@ from pipecat.services.anthropic.llm import (
     AnthropicUserContextAggregator,
 )
 from pipecat.services.aws.llm import (
-    BedrockAssistantContextAggregator,
-    BedrockLLMContext,
-    BedrockUserContextAggregator,
+    AWSBedrockAssistantContextAggregator,
+    AWSBedrockLLMContext,
+    AWSBedrockUserContextAggregator,
 )
 from pipecat.services.google.llm import (
     GoogleAssistantContextAggregator,
@@ -714,11 +714,11 @@ class TestAnthropicAssistantContextAggregator(
 #
 
 
-class TestBedrockUserContextAggregator(
+class TestAWSBedrockUserContextAggregator(
     BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
 ):
-    CONTEXT_CLASS = BedrockLLMContext
-    AGGREGATOR_CLASS = BedrockUserContextAggregator
+    CONTEXT_CLASS = AWSBedrockLLMContext
+    AGGREGATOR_CLASS = AWSBedrockUserContextAggregator
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
@@ -727,11 +727,11 @@ class TestBedrockUserContextAggregator(
         assert messages["content"][index]["text"] == content
 
 
-class TestBedrockAssistantContextAggregator(
+class TestAWSBedrockAssistantContextAggregator(
     BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
 ):
-    CONTEXT_CLASS = BedrockLLMContext
-    AGGREGATOR_CLASS = BedrockAssistantContextAggregator
+    CONTEXT_CLASS = AWSBedrockLLMContext
+    AGGREGATOR_CLASS = AWSBedrockAssistantContextAggregator
     EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
     def check_message_multi_content(

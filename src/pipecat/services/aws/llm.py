@@ -57,18 +57,18 @@ except ModuleNotFoundError as e:
 
 
 @dataclass
-class BedrockContextAggregatorPair:
-    _user: "BedrockUserContextAggregator"
-    _assistant: "BedrockAssistantContextAggregator"
+class AWSBedrockContextAggregatorPair:
+    _user: "AWSBedrockUserContextAggregator"
+    _assistant: "AWSBedrockAssistantContextAggregator"
 
-    def user(self) -> "BedrockUserContextAggregator":
+    def user(self) -> "AWSBedrockUserContextAggregator":
         return self._user
 
-    def assistant(self) -> "BedrockAssistantContextAggregator":
+    def assistant(self) -> "AWSBedrockAssistantContextAggregator":
         return self._assistant
 
 
-class BedrockLLMContext(OpenAILLMContext):
+class AWSBedrockLLMContext(OpenAILLMContext):
     def __init__(
         self,
         messages: Optional[List[dict]] = None,
@@ -81,10 +81,10 @@ class BedrockLLMContext(OpenAILLMContext):
         self.system = system
 
     @staticmethod
-    def upgrade_to_bedrock(obj: OpenAILLMContext) -> "BedrockLLMContext":
-        logger.debug(f"Upgrading to Bedrock: {obj}")
-        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, BedrockLLMContext):
-            obj.__class__ = BedrockLLMContext
+    def upgrade_to_bedrock(obj: OpenAILLMContext) -> "AWSBedrockLLMContext":
+        logger.debug(f"Upgrading to AWS Bedrock: {obj}")
+        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AWSBedrockLLMContext):
+            obj.__class__ = AWSBedrockLLMContext
             obj._restructure_from_openai_messages()
         else:
             obj._restructure_from_bedrock_messages()
@@ -103,13 +103,13 @@ class BedrockLLMContext(OpenAILLMContext):
         return self
 
     @classmethod
-    def from_messages(cls, messages: List[dict]) -> "BedrockLLMContext":
+    def from_messages(cls, messages: List[dict]) -> "AWSBedrockLLMContext":
         self = cls(messages=messages)
         # self._restructure_from_openai_messages()
         return self
 
     @classmethod
-    def from_image_frame(cls, frame: VisionImageRawFrame) -> "BedrockLLMContext":
+    def from_image_frame(cls, frame: VisionImageRawFrame) -> "AWSBedrockLLMContext":
         context = cls()
         context.add_image_frame_message(
             format=frame.format, size=frame.size, image=frame.image, text=frame.text
@@ -120,14 +120,14 @@ class BedrockLLMContext(OpenAILLMContext):
         self._messages[:] = messages
         # self._restructure_from_openai_messages()
 
-    # convert a message in Bedrock format into one or more messages in OpenAI format
+    # convert a message in AWS Bedrock format into one or more messages in OpenAI format
     def to_standard_messages(self, obj):
-        """Convert Bedrock message format to standard structured format.
+        """Convert AWS Bedrock message format to standard structured format.
 
         Handles text content and function calls for both user and assistant messages.
 
         Args:
-            obj: Message in Bedrock format:
+            obj: Message in AWS Bedrock format:
                 {
                     "role": "user/assistant",
                     "content": [{"text": str} | {"toolUse": {...}} | {"toolResult": {...}}]
@@ -208,7 +208,7 @@ class BedrockLLMContext(OpenAILLMContext):
                 return messages
 
     def from_standard_message(self, message):
-        """Convert standard format message to Bedrock format.
+        """Convert standard format message to AWS Bedrock format.
 
         Handles conversion of text content, tool calls, and tool results.
         Empty text content is converted to "(empty)".
@@ -222,7 +222,7 @@ class BedrockLLMContext(OpenAILLMContext):
                 }
 
         Returns:
-            Message in Bedrock format:
+            Message in AWS Bedrock format:
             {
                 "role": "user/assistant",
                 "content": [
@@ -306,8 +306,9 @@ class BedrockLLMContext(OpenAILLMContext):
     def add_message(self, message):
         try:
             if self.messages:
-                # Bedrock requires that roles alternate. If this message's role is the same as the
-                # last message, we should add this message's content to the last message.
+                # AWS Bedrock requires that roles alternate. If this message's
+                # role is the same as the last message, we should add this
+                # message's content to the last message.
                 if self.messages[-1]["role"] == message["role"]:
                     # if the last message has just a content string, convert it to a list
                     # in the proper format
@@ -327,8 +328,10 @@ class BedrockLLMContext(OpenAILLMContext):
             logger.error(f"Error adding message: {e}")
 
     def _restructure_from_bedrock_messages(self):
-        """Restructure messages in Bedrock format by handling system messages,
-        merging consecutive messages with the same role, and ensuring proper content formatting.
+        """Restructure messages in AWS Bedrock format by handling system
+        messages, merging consecutive messages with the same role, and ensuring
+        proper content formatting.
+
         """
         # Handle system message if present at the beginning
         logger.debug(f"_restructure_from_bedrock_messages: {self.messages}")
@@ -431,13 +434,13 @@ class BedrockLLMContext(OpenAILLMContext):
         return json.dumps(msgs)
 
 
-class BedrockUserContextAggregator(LLMUserContextAggregator):
+class AWSBedrockUserContextAggregator(LLMUserContextAggregator):
     pass
 
 
-class BedrockAssistantContextAggregator(LLMAssistantContextAggregator):
+class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
-        # Format tool use according to Bedrock API
+        # Format tool use according to AWS Bedrock API
         self._context.add_message(
             {
                 "role": "assistant",
@@ -505,10 +508,13 @@ class BedrockAssistantContextAggregator(LLMAssistantContextAggregator):
         )
 
 
-class BedrockLLMService(LLMService):
-    """This class implements inference with AWS Bedrock models including Amazon Nova and Anthropic Claude.
+class AWSBedrockLLMService(LLMService):
+    """This class implements inference with AWS Bedrock models including Amazon
+    Nova and Anthropic Claude.
 
-    Requires AWS credentials to be configured in the environment or through boto3 configuration.
+    Requires AWS credentials to be configured in the environment or through
+    boto3 configuration.
+
     """
 
     class InputParams(BaseModel):
@@ -533,7 +539,7 @@ class BedrockLLMService(LLMService):
     ):
         super().__init__(**kwargs)
 
-        # Initialize the Bedrock client
+        # Initialize the AWS Bedrock client
         if not client_config:
             client_config = Config(
                 connect_timeout=300,  # 5 minutes
@@ -570,8 +576,8 @@ class BedrockLLMService(LLMService):
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> BedrockContextAggregatorPair:
-        """Create an instance of BedrockContextAggregatorPair from an
+    ) -> AWSBedrockContextAggregatorPair:
+        """Create an instance of AWSBedrockContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
         assistant aggregators can be provided.
 
@@ -583,20 +589,20 @@ class BedrockLLMService(LLMService):
                 aggregator parameters.
 
         Returns:
-            BedrockContextAggregatorPair: A pair of context aggregators, one
+            AWSBedrockContextAggregatorPair: A pair of context aggregators, one
             for the user and one for the assistant, encapsulated in an
-            BedrockContextAggregatorPair.
+            AWSBedrockContextAggregatorPair.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
         if isinstance(context, OpenAILLMContext):
-            context = BedrockLLMContext.from_openai_context(context)
+            context = AWSBedrockLLMContext.from_openai_context(context)
 
-        user = BedrockUserContextAggregator(context, params=user_params)
-        assistant = BedrockAssistantContextAggregator(context, params=assistant_params)
-        return BedrockContextAggregatorPair(_user=user, _assistant=assistant)
+        user = AWSBedrockUserContextAggregator(context, params=user_params)
+        assistant = AWSBedrockAssistantContextAggregator(context, params=assistant_params)
+        return AWSBedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
-    async def _process_context(self, context: BedrockLLMContext):
+    async def _process_context(self, context: AWSBedrockLLMContext):
         # Usage tracking
         prompt_tokens = 0
         completion_tokens = 0
@@ -608,10 +614,6 @@ class BedrockLLMService(LLMService):
         try:
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
-
-            # logger.debug(
-            #     f"{self}: Generating chat with Bedrock model {self.model_name} | [{context.get_messages_for_logging()}]"
-            # )
 
             await self.start_ttfb_metrics()
 
@@ -657,9 +659,9 @@ class BedrockLLMService(LLMService):
             if self._settings["latency"] in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings["latency"]}
 
-            logger.debug(f"Calling Bedrock model with: {request_params}")
+            logger.debug(f"Calling AWS Bedrock model with: {request_params}")
 
-            # Call Bedrock with streaming
+            # Call AWS Bedrock with streaming
             response = self._client.converse_stream(**request_params)
 
             await self.stop_ttfb_metrics()
@@ -744,15 +746,15 @@ class BedrockLLMService(LLMService):
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            context = BedrockLLMContext.upgrade_to_bedrock(frame.context)
+            context = AWSBedrockLLMContext.upgrade_to_bedrock(frame.context)
         elif isinstance(frame, LLMMessagesFrame):
-            context = BedrockLLMContext.from_messages(frame.messages)
+            context = AWSBedrockLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             # This is only useful in very simple pipelines because it creates
             # a new context. Generally we want a context manager to catch
             # UserImageRawFrames coming through the pipeline and add them
             # to the context.
-            context = BedrockLLMContext.from_image_frame(frame)
+            context = AWSBedrockLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
