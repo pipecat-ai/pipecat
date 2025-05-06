@@ -13,13 +13,13 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.services.aws.llm import BedrockLLMContext, BedrockLLMService
+from pipecat.services.aws.stt import TranscribeSTTService
+from pipecat.services.aws.tts import PollyTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-from pipecat.services.aws.llm import BedrockLLMService, BedrockLLMContext
-from pipecat.services.aws.stt import TranscribeSTTService
-from pipecat.services.aws.tts import PollyTTSService
 
 load_dotenv(override=True)
 
@@ -42,28 +42,26 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         region="us-west-2",  # only specific regions support generative TTS
         voice_id="Joanna",
         params=PollyTTSService.InputParams(
-            engine="generative",
-            language=Language.EN_US,
-            rate="1.1"
+            engine="generative", language=Language.EN_US, rate="1.1"
         ),
     )
 
     llm = BedrockLLMService(
         aws_region="us-west-2",
         model="us.anthropic.claude-3-5-haiku-20241022-v1:0",
-        params=BedrockLLMService.InputParams(
-            temperature=0.8,
-            latency="optimized"
-        )
+        params=BedrockLLMService.InputParams(temperature=0.8, latency="optimized"),
     )
 
     messages = [
-            {
-                "role": "system",
-                "content": [{"text": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way."}],
-            },
-        ]
-    )
+        {
+            "role": "system",
+            "content": [
+                {
+                    "text": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way."
+                }
+            ],
+        },
+    ]
 
     context = BedrockLLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
@@ -77,8 +75,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             tts,  # TTS
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses
-         ]
-     )
+        ]
+    )
 
     task = PipelineTask(
         pipeline,
@@ -94,7 +92,9 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "user", "content": [{"text": "Please introduce yourself to the user."}]})
+        messages.append(
+            {"role": "user", "content": [{"text": "Please introduce yourself to the user."}]}
+        )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")

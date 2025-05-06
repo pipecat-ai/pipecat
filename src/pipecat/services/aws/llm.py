@@ -135,7 +135,7 @@ class BedrockLLMContext(OpenAILLMContext):
         """
         role = obj.get("role")
         content = obj.get("content")
-        
+
         if role == "assistant":
             if isinstance(content, str):
                 return [{"role": role, "content": [{"type": "text", "text": content}]}]
@@ -184,7 +184,7 @@ class BedrockLLMContext(OpenAILLMContext):
                                     result_content = json.dumps(content_item["json"])
                         else:
                             result_content = tool_result["content"]
-                            
+
                         tool_items.append(
                             {
                                 "role": "tool",
@@ -226,26 +226,28 @@ class BedrockLLMContext(OpenAILLMContext):
         if message["role"] == "tool":
             # Try to parse the content as JSON if it looks like JSON
             try:
-                if message["content"].strip().startswith('{') and message["content"].strip().endswith('}'):
+                if message["content"].strip().startswith("{") and message[
+                    "content"
+                ].strip().endswith("}"):
                     content_json = json.loads(message["content"])
                     tool_result_content = [{"json": content_json}]
                 else:
                     tool_result_content = [{"text": message["content"]}]
             except:
                 tool_result_content = [{"text": message["content"]}]
-                
+
             return {
                 "role": "user",
                 "content": [
                     {
                         "toolResult": {
                             "toolUseId": message["tool_call_id"],
-                            "content": tool_result_content
+                            "content": tool_result_content,
                         },
                     },
                 ],
             }
-            
+
         if message.get("tool_calls"):
             tc = message["tool_calls"]
             ret = {"role": "assistant", "content": []}
@@ -261,7 +263,7 @@ class BedrockLLMContext(OpenAILLMContext):
                 }
                 ret["content"].append(new_tool_use)
             return ret
-            
+
         # Handle text content
         content = message.get("content")
         if isinstance(content, str):
@@ -276,7 +278,7 @@ class BedrockLLMContext(OpenAILLMContext):
                     text_content = item["text"] if item["text"] != "" else "(empty)"
                     new_content.append({"text": text_content})
             return {"role": message["role"], "content": new_content}
-            
+
         return message
 
     def add_image_frame_message(
@@ -287,15 +289,7 @@ class BedrockLLMContext(OpenAILLMContext):
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         # Image should be the first content block in the message
-        content = [
-            {
-                "type": "image",
-                "format": "jpeg",
-                "source": {
-                    "bytes": encoded_image
-                }
-            }
-        ]
+        content = [{"type": "image", "format": "jpeg", "source": {"bytes": encoded_image}}]
         if text:
             content.append({"text": text})
         self.add_message({"role": "user", "content": content})
@@ -309,9 +303,7 @@ class BedrockLLMContext(OpenAILLMContext):
                     # if the last message has just a content string, convert it to a list
                     # in the proper format
                     if isinstance(self.messages[-1]["content"], str):
-                        self.messages[-1]["content"] = [
-                            {"text": self.messages[-1]["content"]}
-                        ]
+                        self.messages[-1]["content"] = [{"text": self.messages[-1]["content"]}]
                     # if this message has just a content string, convert it to a list
                     # in the proper format
                     if isinstance(message["content"], str):
@@ -326,7 +318,7 @@ class BedrockLLMContext(OpenAILLMContext):
             logger.error(f"Error adding message: {e}")
 
     def _restructure_from_bedrock_messages(self):
-        """Restructure messages in Bedrock format by handling system messages, 
+        """Restructure messages in Bedrock format by handling system messages,
         merging consecutive messages with the same role, and ensuring proper content formatting.
         """
         # Handle system message if present at the beginning
@@ -338,7 +330,7 @@ class BedrockLLMContext(OpenAILLMContext):
                 system_content = self.messages.pop(0)["content"]
                 if isinstance(system_content, str):
                     system_content = [{"text": system_content}]
-                
+
                 if self.system:
                     if isinstance(self.system, str):
                         self.system = [{"text": self.system}]
@@ -366,7 +358,7 @@ class BedrockLLMContext(OpenAILLMContext):
                 merged_messages[-1]["content"].extend(msg["content"])
             else:
                 merged_messages.append(msg)
-        
+
         self.messages.clear()
         self.messages.extend(merged_messages)
 
@@ -452,7 +444,7 @@ class BedrockAssistantContextAggregator(LLMAssistantContextAggregator):
                         "toolUse": {
                             "toolUseId": frame.tool_call_id,
                             "name": frame.function_name,
-                            "input": frame.arguments if frame.arguments else {}
+                            "input": frame.arguments if frame.arguments else {},
                         }
                     }
                 ],
@@ -465,11 +457,7 @@ class BedrockAssistantContextAggregator(LLMAssistantContextAggregator):
                     {
                         "toolResult": {
                             "toolUseId": frame.tool_call_id,
-                            "content": [
-                                {
-                                    "text": "IN_PROGRESS"
-                                }
-                            ],
+                            "content": [{"text": "IN_PROGRESS"}],
                         }
                     }
                 ],
@@ -517,9 +505,10 @@ class BedrockAssistantContextAggregator(LLMAssistantContextAggregator):
 
 class BedrockLLMService(LLMService):
     """This class implements inference with AWS Bedrock models including Amazon Nova and Anthropic Claude.
-    
+
     Requires AWS credentials to be configured in the environment or through boto3 configuration.
     """
+
     class InputParams(BaseModel):
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
         temperature: Optional[float] = Field(default_factory=lambda: 0.7, ge=0.0, le=1.0)
@@ -541,34 +530,33 @@ class BedrockLLMService(LLMService):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        
+
         # Initialize the Bedrock client
         if not client_config:
             client_config = Config(
                 connect_timeout=300,  # 5 minutes
-                read_timeout=300,     # 5 minutes
-                retries={'max_attempts': 3}
+                read_timeout=300,  # 5 minutes
+                retries={"max_attempts": 3},
             )
         session = boto3.Session(
             aws_access_key_id=aws_access_key,
             aws_secret_access_key=aws_secret_key,
             aws_session_token=aws_session_token,
-            region_name=aws_region
+            region_name=aws_region,
         )
-        self._client = session.client(
-            service_name='bedrock-runtime',
-            config=client_config
-        )
-        
+        self._client = session.client(service_name="bedrock-runtime", config=client_config)
+
         self.set_model_name(model)
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
             "top_p": params.top_p,
             "latency": params.latency,
-            "additional_model_request_fields": params.additional_model_request_fields if isinstance(params.additional_model_request_fields, dict) else {},
+            "additional_model_request_fields": params.additional_model_request_fields
+            if isinstance(params.additional_model_request_fields, dict)
+            else {},
         }
-        
+
         logger.info(f"Using AWS Bedrock model: {model}")
 
     def can_generate_metrics(self) -> bool:
@@ -603,7 +591,7 @@ class BedrockLLMService(LLMService):
 
         if isinstance(context, OpenAILLMContext) and not isinstance(context, BedrockLLMContext):
             context = BedrockLLMContext.from_openai_context(context)
-                
+
         user = BedrockUserContextAggregator(context, **user_kwargs)
         assistant = BedrockAssistantContextAggregator(context, **assistant_kwargs)
         return BedrockContextAggregatorPair(_user=user, _assistant=assistant)
@@ -626,31 +614,29 @@ class BedrockLLMService(LLMService):
             # )
 
             await self.start_ttfb_metrics()
-            
+
             # Set up inference config
             inference_config = {
                 "maxTokens": self._settings["max_tokens"],
                 "temperature": self._settings["temperature"],
                 "topP": self._settings["top_p"],
             }
-            
+
             # Prepare request parameters
             request_params = {
                 "modelId": self.model_name,
                 "messages": context.messages,
                 "inferenceConfig": inference_config,
-                "additionalModelRequestFields": self._settings["additional_model_request_fields"]
+                "additionalModelRequestFields": self._settings["additional_model_request_fields"],
             }
-            
+
             # Add system message
             request_params["system"] = context.system
-                
+
             # Add tools if present
             if context.tools:
-                tool_config = {
-                    "tools": context.tools
-                }
-                
+                tool_config = {"tools": context.tools}
+
                 # Add tool_choice if specified
                 if context.tool_choice:
                     if context.tool_choice == "auto":
@@ -658,32 +644,30 @@ class BedrockLLMService(LLMService):
                     elif context.tool_choice == "none":
                         # Skip adding toolChoice for "none"
                         pass
-                    elif isinstance(context.tool_choice, dict) and "function" in context.tool_choice:
+                    elif (
+                        isinstance(context.tool_choice, dict) and "function" in context.tool_choice
+                    ):
                         tool_config["toolChoice"] = {
-                            "tool": {
-                                "name": context.tool_choice["function"]["name"]
-                            }
+                            "tool": {"name": context.tool_choice["function"]["name"]}
                         }
-                
+
                 request_params["toolConfig"] = tool_config
-            
+
             # Add performance config if latency is specified
             if self._settings["latency"] in ["standard", "optimized"]:
-                request_params["performanceConfig"] = {
-                    "latency": self._settings["latency"]
-                }
-            
+                request_params["performanceConfig"] = {"latency": self._settings["latency"]}
+
             logger.debug(f"Calling Bedrock model with: {request_params}")
-            
+
             # Call Bedrock with streaming
             response = self._client.converse_stream(**request_params)
-            
+
             await self.stop_ttfb_metrics()
-            
+
             # Process the streaming response
             tool_use_block = None
             json_accumulator = ""
-            
+
             for event in response["stream"]:
                 # Handle text content
                 if "contentBlockDelta" in event:
@@ -694,18 +678,20 @@ class BedrockLLMService(LLMService):
                     elif "toolUse" in delta and "input" in delta["toolUse"]:
                         # Handle partial JSON for tool use
                         json_accumulator += delta["toolUse"]["input"]
-                        completion_tokens_estimate += self._estimate_tokens(delta["toolUse"]["input"])
-                
+                        completion_tokens_estimate += self._estimate_tokens(
+                            delta["toolUse"]["input"]
+                        )
+
                 # Handle tool use start
                 elif "contentBlockStart" in event:
-                    content_block_start = event["contentBlockStart"]['start']
+                    content_block_start = event["contentBlockStart"]["start"]
                     if "toolUse" in content_block_start:
                         tool_use_block = {
                             "id": content_block_start["toolUse"].get("toolUseId", ""),
-                            "name": content_block_start["toolUse"].get("name", "")
+                            "name": content_block_start["toolUse"].get("name", ""),
                         }
                         json_accumulator = ""
-                
+
                 # Handle message completion with tool use
                 elif "messageStop" in event and "stopReason" in event["messageStop"]:
                     if event["messageStop"]["stopReason"] == "tool_use" and tool_use_block:
@@ -719,7 +705,7 @@ class BedrockLLMService(LLMService):
                             )
                         except json.JSONDecodeError:
                             logger.error(f"Failed to parse tool arguments: {json_accumulator}")
-                
+
                 # Handle usage metrics if available
                 if "metadata" in event and "usage" in event["metadata"]:
                     usage = event["metadata"]["usage"]
@@ -750,7 +736,7 @@ class BedrockLLMService(LLMService):
                 prompt_tokens=prompt_tokens,
                 completion_tokens=comp_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
-                cache_creation_input_tokens=cache_creation_input_tokens
+                cache_creation_input_tokens=cache_creation_input_tokens,
             )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -783,7 +769,7 @@ class BedrockLLMService(LLMService):
         prompt_tokens: int,
         completion_tokens: int,
         cache_read_input_tokens: int,
-        cache_creation_input_tokens: int
+        cache_creation_input_tokens: int,
     ):
         if prompt_tokens or completion_tokens:
             tokens = LLMTokenUsage(
@@ -791,6 +777,6 @@ class BedrockLLMService(LLMService):
                 completion_tokens=completion_tokens,
                 total_tokens=prompt_tokens + completion_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
-                cache_creation_input_tokens=cache_creation_input_tokens
+                cache_creation_input_tokens=cache_creation_input_tokens,
             )
             await self.start_llm_usage_metrics(tokens)

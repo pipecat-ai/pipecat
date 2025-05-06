@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     Frame,
     TranscriptionFrame,
     InterimTranscriptionFrame,
-    StartFrame
+    StartFrame,
 )
 from pipecat.services.ai_services import STTService
 from pipecat.transcriptions.language import Language
