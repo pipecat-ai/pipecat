@@ -24,7 +24,7 @@ class BedrockLLMAdapter(BaseLLMAdapter):
                         "properties": function.properties,
                         "required": function.required,
                     },
-                }
+                },
             }
         }
 

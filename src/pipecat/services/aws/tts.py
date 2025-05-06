@@ -17,7 +17,7 @@ from pipecat.frames.frames import (
     Frame,
     TTSAudioRawFrame,
     TTSStartedFrame,
-    TTSStoppedFrame
+    TTSStoppedFrame,
 )
 from pipecat.services.ai_services import TTSService
 from pipecat.transcriptions.language import Language
@@ -187,7 +187,7 @@ class PollyTTSService(TTSService):
         if self._settings["engine"] == "standard":
             if self._settings["pitch"]:
                 prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
-        
+
         if self._settings["rate"]:
             prosody_attrs.append(f"rate='{self._settings['rate']}'")
         if self._settings["volume"]:
@@ -195,7 +195,7 @@ class PollyTTSService(TTSService):
         # logger.warning("Prosody tags are not supported for generative engine. Ignoring.")
 
         if prosody_attrs:
-                ssml += f"<prosody {' '.join(prosody_attrs)}>"
+            ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         ssml += text
 
