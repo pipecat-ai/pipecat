@@ -35,7 +35,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class TranscribeSTTService(STTService):
+class AWSTranscribeSTTService(STTService):
     def __init__(
         self,
         *,
