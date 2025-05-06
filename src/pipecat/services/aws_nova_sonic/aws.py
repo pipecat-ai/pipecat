@@ -519,7 +519,7 @@ class AWSNovaSonicLLMService(LLMService):
         '''
         await self._send_client_event(text_content_start)
 
-        escaped_text = json.dumps(text) # includes quotes
+        escaped_text = json.dumps(text)  # includes quotes
         text_input = f'''
         {{
             "event": {{
@@ -673,29 +673,29 @@ class AWSNovaSonicLLMService(LLMService):
                     response_data = result.value.bytes_.decode("utf-8")
                     json_data = json.loads(response_data)
 
-                if "event" in json_data:
-                    event_json = json_data["event"]
-                    if "completionStart" in event_json:
-                        # Handle the LLM completion starting
-                        await self._handle_completion_start_event(event_json)
-                    elif "contentStart" in event_json:
-                        # Handle a piece of content starting
-                        await self._handle_content_start_event(event_json)
-                    elif "textOutput" in event_json:
-                        # Handle text output content
-                        await self._handle_text_output_event(event_json)
-                    elif "audioOutput" in event_json:
-                        # Handle audio output content
-                        await self._handle_audio_output_event(event_json)
-                    elif "toolUse" in event_json:
-                        # Handle tool use
-                        await self._handle_tool_use_event(event_json)
-                    elif "contentEnd" in event_json:
-                        # Handle a piece of content ending
-                        await self._handle_content_end_event(event_json)
-                    elif "completionEnd" in event_json:
-                        # Handle the LLM completion ending
-                        await self._handle_completion_end_event(event_json)
+                    if "event" in json_data:
+                        event_json = json_data["event"]
+                        if "completionStart" in event_json:
+                            # Handle the LLM completion starting
+                            await self._handle_completion_start_event(event_json)
+                        elif "contentStart" in event_json:
+                            # Handle a piece of content starting
+                            await self._handle_content_start_event(event_json)
+                        elif "textOutput" in event_json:
+                            # Handle text output content
+                            await self._handle_text_output_event(event_json)
+                        elif "audioOutput" in event_json:
+                            # Handle audio output content
+                            await self._handle_audio_output_event(event_json)
+                        elif "toolUse" in event_json:
+                            # Handle tool use
+                            await self._handle_tool_use_event(event_json)
+                        elif "contentEnd" in event_json:
+                            # Handle a piece of content ending
+                            await self._handle_content_end_event(event_json)
+                        elif "completionEnd" in event_json:
+                            # Handle the LLM completion ending
+                            await self._handle_completion_end_event(event_json)
 
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
