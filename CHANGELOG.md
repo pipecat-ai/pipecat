@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `TaskManager` that was causing dangling tasks to be reported.
+
 - Fixed an issue that could cause data to be sent to the transports when they
   were still not ready.
 

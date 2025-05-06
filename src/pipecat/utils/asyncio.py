@@ -6,7 +6,7 @@
 
 import asyncio
 from abc import ABC, abstractmethod
-from typing import Coroutine, Optional, Set
+from typing import Coroutine, Dict, Optional, Sequence, Set
 
 from loguru import logger
 
@@ -69,14 +69,14 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    def current_tasks(self) -> Set[asyncio.Task]:
+    def current_tasks(self) -> Sequence[asyncio.Task]:
         """Returns the list of currently created/registered tasks."""
         pass
 
 
 class TaskManager(BaseTaskManager):
     def __init__(self) -> None:
-        self._tasks: Set[asyncio.Task] = set()
+        self._tasks: Dict[str, asyncio.Task] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
@@ -179,16 +179,17 @@ class TaskManager(BaseTaskManager):
         finally:
             self._remove_task(task)
 
-    def current_tasks(self) -> Set[asyncio.Task]:
+    def current_tasks(self) -> Sequence[asyncio.Task]:
         """Returns the list of currently created/registered tasks."""
-        return self._tasks
+        return list(self._tasks.values())
 
     def _add_task(self, task: asyncio.Task):
-        self._tasks.add(task)
+        name = task.get_name()
+        self._tasks[name] = task
 
     def _remove_task(self, task: asyncio.Task):
         name = task.get_name()
         try:
-            self._tasks.remove(task)
+            del self._tasks[name]
         except KeyError as e:
             logger.trace(f"{name}: unable to remove task (already removed?): {e}")
