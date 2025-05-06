@@ -28,6 +28,7 @@ from aws_sdk_bedrock_runtime.models import (
     InvokeModelWithBidirectionalStreamOutput,
 )
 from loguru import logger
+from pydantic import BaseModel, Field
 from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolver
 from smithy_aws_core.identity import AWSCredentialsIdentity
 from smithy_core.aio.eventstream import DuplexEventStream
@@ -107,6 +108,23 @@ class CurrentContent:
         )
 
 
+class Params(BaseModel):
+    # Audio input
+    input_sample_rate: Optional[int] = Field(default=16000)
+    input_sample_size: Optional[int] = Field(default=16)
+    input_channel_count: Optional[int] = Field(default=1)
+
+    # Audio output
+    output_sample_rate: Optional[int] = Field(default=24000)
+    output_sample_size: Optional[int] = Field(default=16)
+    output_channel_count: Optional[int] = Field(default=1)
+
+    # Inference
+    max_tokens: Optional[int] = Field(default=1024)
+    top_p: Optional[float] = Field(default=0.9)
+    temperature: Optional[float] = Field(default=0.7)
+
+
 class AWSNovaSonicLLMService(LLMService):
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
     adapter_class = AWSNovaSonicLLMAdapter
@@ -120,6 +138,7 @@ class AWSNovaSonicLLMService(LLMService):
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
+        params: Params = Params(),
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
         send_transcription_frames: bool = True,
@@ -132,6 +151,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._model = model
         self._client: BedrockRuntimeClient = None
         self._voice_id = voice_id
+        self._params = params
         self._system_instruction = system_instruction
         self._tools = tools
         self._send_transcription_frames = send_transcription_frames
@@ -419,18 +439,18 @@ class AWSNovaSonicLLMService(LLMService):
 
     # TODO: make params configurable?
     async def _send_session_start_event(self):
-        session_start = """
-        {
-          "event": {
-            "sessionStart": {
-              "inferenceConfiguration": {
-                "maxTokens": 1024,
-                "topP": 0.9,
-                "temperature": 0.7
-              }
-            }
-          }
-        }
+        session_start = f"""
+        {{
+          "event": {{
+            "sessionStart": {{
+              "inferenceConfiguration": {{
+                "maxTokens": {self._params.max_tokens},
+                "topP": {self._params.top_p},
+                "temperature": {self._params.temperature}
+              }}
+            }}
+          }}
+        }}
         """
         await self._send_client_event(session_start)
 
@@ -458,9 +478,9 @@ class AWSNovaSonicLLMService(LLMService):
               }},
               "audioOutputConfiguration": {{
                 "mediaType": "audio/lpcm",
-                "sampleRateHertz": 24000,
-                "sampleSizeBits": 16,
-                "channelCount": 1,
+                "sampleRateHertz": {self._params.output_sample_rate},
+                "sampleSizeBits": {self._params.output_sample_size},
+                "channelCount": {self._params.output_channel_count},
                 "voiceId": "{self._voice_id}",
                 "encoding": "base64",
                 "audioType": "SPEECH"
@@ -483,9 +503,9 @@ class AWSNovaSonicLLMService(LLMService):
                     "role": "USER",
                     "audioInputConfiguration": {{
                         "mediaType": "audio/lpcm",
-                        "sampleRateHertz": 16000,
-                        "sampleSizeBits": 16,
-                        "channelCount": 1,
+                        "sampleRateHertz": {self._params.input_sample_rate},
+                        "sampleSizeBits": {self._params.input_sample_size},
+                        "channelCount": {self._params.input_channel_count},
                         "audioType": "SPEECH",
                         "encoding": "base64"
                     }}
@@ -762,11 +782,10 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Push audio frame
         audio = base64.b64decode(audio_content)
-        # TODO: make sample rate + channels (used in multiple places) consts
         frame = TTSAudioRawFrame(
             audio=audio,
-            sample_rate=24000,
-            num_channels=1,
+            sample_rate=self._params.output_sample_rate,
+            num_channels=self._params.output_channel_count,
         )
         await self.push_frame(frame)
 
@@ -941,11 +960,13 @@ class AWSNovaSonicLLMService(LLMService):
             self._triggering_assistant_response = False
 
     async def _send_assistant_response_trigger(self):
-        # TODO: if/when we make bitrate, etc configurable, avoid hard-coding this
-        chunk_size = 640  # equivalent to what we get from InputAudioRawFrame
-        chunk_duration = 640 / (
-            16000 * 2
-        )  # 640 bytes of 16-bit (2-byte) PCM mono audio at 16kHz corresponds to 0.02 seconds
+        chunk_duration = 0.02  # what we might get from InputAudioRawFrame
+        chunk_size = int(
+            chunk_duration
+            * self._params.input_sample_rate
+            * self._params.input_channel_count
+            * (self._params.input_sample_size / 8)
+        )  # e.g. 0.02 seconds of 16-bit (2-byte) PCM mono audio at 16kHz is 640 bytes
 
         # Lead with a bit of blank audio, if needed.
         # It seems like the LLM can't quite "hear" the first little bit of audio sent on a
