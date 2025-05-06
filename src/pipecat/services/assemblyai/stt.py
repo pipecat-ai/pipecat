@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     import assemblyai as aai
@@ -51,6 +52,9 @@ class AssemblyAISTTService(STTService):
             "language": language,
         }
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def set_language(self, language: Language):
         logger.info(f"Switching STT language to: [{language}]")
         self._settings["language"] = language
@@ -77,10 +81,43 @@ class AssemblyAISTTService(STTService):
         :yield: None (transcription frames are pushed via self.push_frame in callbacks)
         """
         if self._transcriber:
+            await self.start_ttfb_metrics()
             await self.start_processing_metrics()
             self._transcriber.stream(audio)
-            await self.stop_processing_metrics()
         yield None
+
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="assemblyai_transcription")
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            from pipecat.utils.tracing.helpers import add_stt_span_attributes
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+            ttfb_ms = None
+            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                ttfb_ms = self._metrics.ttfb_ms
+
+            add_stt_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model="",
+                transcript=transcript,
+                is_final=is_final,
+                language=str(language) if language else None,
+                vad_enabled=False,
+                settings=self._settings,
+                ttfb_ms=ttfb_ms,
+            )
+
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
 
     async def _connect(self):
         """Establish a connection to the AssemblyAI real-time transcription service.
@@ -88,7 +125,6 @@ class AssemblyAISTTService(STTService):
         This method sets up the necessary callback functions and initializes the
         AssemblyAI transcriber.
         """
-
         if self._transcriber:
             return
 
@@ -107,15 +143,18 @@ class AssemblyAISTTService(STTService):
                 return
 
             timestamp = time_now_iso8601()
+            is_final = isinstance(transcript, aai.RealtimeFinalTranscript)
+            language = self._settings["language"]
 
-            if isinstance(transcript, aai.RealtimeFinalTranscript):
-                frame = TranscriptionFrame(
-                    transcript.text, "", timestamp, self._settings["language"]
-                )
+            if is_final:
+                frame = TranscriptionFrame(transcript.text, "", timestamp, language)
             else:
-                frame = InterimTranscriptionFrame(
-                    transcript.text, "", timestamp, self._settings["language"]
-                )
+                frame = InterimTranscriptionFrame(transcript.text, "", timestamp, language)
+
+            asyncio.run_coroutine_threadsafe(
+                self._handle_transcription(transcript.text, is_final, language),
+                self.get_event_loop(),
+            )
 
             # Schedule the coroutine to run in the main event loop
             # This is necessary because this callback runs in a different thread

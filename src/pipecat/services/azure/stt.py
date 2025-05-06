@@ -20,6 +20,7 @@ from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     from azure.cognitiveservices.speech import (
@@ -58,12 +59,20 @@ class AzureSTTService(STTService):
 
         self._audio_stream = None
         self._speech_recognizer = None
+        self._settings = {
+            "region": region,
+            "language": language_to_azure_language(language),
+            "sample_rate": sample_rate,
+        }
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_processing_metrics()
+        await self.start_ttfb_metrics()
         if self._audio_stream:
             self._audio_stream.write(audio)
-        await self.stop_processing_metrics()
         yield None
 
     async def start(self, frame: StartFrame):
@@ -101,7 +110,42 @@ class AzureSTTService(STTService):
         if self._audio_stream:
             self._audio_stream.close()
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="azure_transcription")
+    async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
+        """Handle a transcription result with tracing."""
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            from pipecat.utils.tracing.helpers import add_stt_span_attributes
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+            ttfb_ms = None
+            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                ttfb_ms = self._metrics.ttfb_ms
+
+            add_stt_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model="",
+                transcript=transcript,
+                is_final=True,  # Azure only provides final transcriptions
+                language=language or self._settings.get("language"),
+                vad_enabled=False,
+                settings=self._settings,
+                ttfb_ms=ttfb_ms,
+            )
+
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
+
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
-            frame = TranscriptionFrame(event.result.text, "", time_now_iso8601())
+            language = getattr(event.result, "language", None) or self._settings.get("language")
+            frame = TranscriptionFrame(event.result.text, "", time_now_iso8601(), language)
+            asyncio.run_coroutine_threadsafe(
+                self._handle_transcription(event.result.text, language), self.get_event_loop()
+            )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
