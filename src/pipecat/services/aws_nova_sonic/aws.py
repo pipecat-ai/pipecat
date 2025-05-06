@@ -229,25 +229,10 @@ class AWSNovaSonicLLMService(LLMService):
             await self._handle_bot_stopped_speaking()
         elif isinstance(frame, AWSNovaSonicFunctionCallResultFrame):
             await self._handle_function_call_result(frame)
-        # TODO: do we need to do anything for the below four frame types?
-        elif isinstance(frame, StartInterruptionFrame):
-            # print("[pk] StartInterruptionFrame")
-            pass
-        elif isinstance(frame, UserStartedSpeakingFrame):
-            # print("[pk] UserStartedSpeakingFrame")
-            pass
-        elif isinstance(frame, StopInterruptionFrame):
-            # print("[pk] StopInterruptionFrame")
-            pass
-        elif isinstance(frame, UserStoppedSpeakingFrame):
-            # print("[pk] UserStoppedSpeakingFrame")
-            pass
 
         await self.push_frame(frame, direction)
 
     async def _handle_context(self, context: OpenAILLMContext):
-        # TODO: reset connection if needed (if entirely new context object provided, for instance)
-        print(f"[pk] received updated context: {context.get_messages_for_initializing_history()}")
         if not self._context:
             # We got our initial context - try to finish connecting
             self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(
@@ -303,6 +288,8 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _start_connecting(self):
         try:
+            logger.info("Connecting...")
+
             if self._client:
                 # Here we assume that if we have a client we are connected or connecting
                 return
@@ -335,6 +322,8 @@ class AWSNovaSonicLLMService(LLMService):
         if not (self._context_available and self._ready_to_send_context):
             return
 
+        logger.info("Finishing connecting (setting up session)...")
+
         # Read context
         history = self._context.get_messages_for_initializing_history()
 
@@ -345,6 +334,7 @@ class AWSNovaSonicLLMService(LLMService):
             if self._context.tools
             else self.get_llm_adapter().from_standard_tools(self._tools)
         )
+        logger.debug(f"Using tools: {tools}")
         await self._send_prompt_start_event(tools)
 
         # Send system instruction.
@@ -352,7 +342,7 @@ class AWSNovaSonicLLMService(LLMService):
         # (NOTE: this prioritizing occurred automatically behind the scenes: the context was
         # initialized with self._system_instruction and then updated itself from its messages when
         # get_messages_for_initializing_history() was called).
-        # print(f"[pk] connecting, with system instruction: {history.system_instruction}")
+        logger.debug(f"Using system instruction: {history.system_instruction}")
         if history.system_instruction:
             await self._send_text_event(text=history.system_instruction, role=Role.SYSTEM)
 
@@ -366,8 +356,10 @@ class AWSNovaSonicLLMService(LLMService):
         # Start receiving events
         self._receive_task = self.create_task(self._receive_task_handler())
 
-        # Record finished connecting time
+        # Record finished connecting time (must be done before sending assistant response trigger)
         self._connected_time = time.time()
+
+        logger.info("Finished connecting")
 
         # If we need to, send assistant response trigger (depends on self._connected_time)
         if self._triggering_assistant_response:
@@ -376,18 +368,18 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _disconnect(self):
         try:
+            logger.info("Disconnecting...")
+
             # NOTE: see explanation of HACK, below
             self._disconnecting = True
 
             # Clean up client
             if self._client:
-                print("[pk] Cleaning up client")
                 await self._send_session_end_events()
                 self._client = None
 
             # Clean up stream
             if self._stream:
-                print("[pk] Cleaning up stream")
                 await self._stream.input_stream.close()
                 self._stream = None
 
@@ -414,6 +406,8 @@ class AWSNovaSonicLLMService(LLMService):
             self._triggering_assistant_response = False
             self._disconnecting = False
             self._connected_time = None
+
+            logger.info("Finished disconnecting")
         except Exception as e:
             logger.error(f"{self} error disconnecting: {e}")
 
@@ -611,8 +605,6 @@ class AWSNovaSonicLLMService(LLMService):
         if not self._stream:
             return
 
-        # print(f"[pk] sending tool result. tool call ID: {tool_call_id}, result: {result}")
-
         content_name = str(uuid.uuid4())
 
         result_content_start = f'''
@@ -723,7 +715,6 @@ class AWSNovaSonicLLMService(LLMService):
                 await self.reset_conversation()
 
     async def _handle_completion_start_event(self, event_json):
-        # print("[pk] completion start")
         pass
 
     async def _handle_content_start_event(self, event_json):
@@ -744,10 +735,6 @@ class AWSNovaSonicLLMService(LLMService):
         )
         self._content_being_received = content
 
-        # print(f"[pk] content start: {content}")
-        # if content.role == Role.ASSISTANT:
-        #     print(f"[pk] assistant content start: {content}")
-
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.AUDIO:
                 # Note that an assistant response can comprise of multiple audio blocks
@@ -763,9 +750,6 @@ class AWSNovaSonicLLMService(LLMService):
         content = self._content_being_received
 
         text_content = event_json["textOutput"]["content"]
-        # print(f"[pk] text output. content: {text_content}")
-        # if content.role == Role.ASSISTANT:
-        #     print(f"[pk] assistant text output. content: {text_content}")
 
         # Bookkeeping: augment the current content being received with text
         # Assumption: only one text content per content block
@@ -778,7 +762,6 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Get audio
         audio_content = event_json["audioOutput"]["content"]
-        # print(f"[pk] audio output. content: {len(audio_content)}")
 
         # Push audio frame
         audio = base64.b64decode(audio_content)
@@ -799,10 +782,6 @@ class AWSNovaSonicLLMService(LLMService):
         function_name = tool_use["toolName"]
         tool_call_id = tool_use["toolUseId"]
         arguments = json.loads(tool_use["content"])
-
-        # print(
-        #     f"[pk] tool use - function_name: {function_name}, tool_call_id: {tool_call_id}, arguments: {arguments}"
-        # )
 
         # Call tool function
         if self.has_function(function_name):
@@ -833,9 +812,6 @@ class AWSNovaSonicLLMService(LLMService):
 
         content_end = event_json["contentEnd"]
         stop_reason = content_end["stopReason"]
-        # print(f"[pk] content end: {content}.\n  stop_reason: {stop_reason}")
-        # if content.role == Role.ASSISTANT:
-        # print(f"[pk] assistant content end: {content}.\n  stop_reason: {stop_reason}")
 
         # Bookkeeping: clear current content being received
         self._content_being_received = None
@@ -856,25 +832,24 @@ class AWSNovaSonicLLMService(LLMService):
         self._content_being_received = False
 
     async def _handle_completion_end_event(self, event_json):
-        # print("[pk] completion end")
         pass
 
     async def _report_assistant_response_started(self):
+        logger.debug("Assistant response started")
+
         # Report that the assistant has started their response.
-        print("[pk] LLM full response started")
         await self.push_frame(LLMFullResponseStartFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) started
-        print("[pk] TTS started")
         await self.push_frame(TTSStartedFrame())
 
     async def _report_assistant_response_text_added(self, text):
+        logger.debug(f"Assistant response text added: {text}")
+
         # Report some text added to the ongoing assistant response
-        print(f"[pk] LLM text: {text}")
         await self.push_frame(LLMTextFrame(text))
 
         # Report some text added to the *equivalent* of TTS (this is a speech-to-speech model)
-        print(f"[pk] TTS text: {text}")
         await self.push_frame(TTSTextFrame(text))
 
         # TODO: this is a (hopefully temporary) HACK. Here we directly manipulate the context rather
@@ -890,19 +865,20 @@ class AWSNovaSonicLLMService(LLMService):
         self._context.buffer_assistant_text(text)
 
     async def _report_assistant_response_ended(self):
+        logger.debug("Assistant response ended")
+
         # Report that the assistant has finished their response.
-        print("[pk] LLM full response ended")
         await self.push_frame(LLMFullResponseEndFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) stopped.
-        print("[pk] TTS stopped")
         await self.push_frame(TTSStoppedFrame())
 
         # For an explanation of this hack, see _report_assistant_response_text_added.
         self._context.flush_aggregated_assistant_text()
 
     async def _report_user_transcription_text_added(self, text):
-        print(f"[pk] transcription: {text}")
+        logger.debug(f"User transcription text added: {text}")
+
         # Manually add new user transcription text to context.
         # We can't rely on the user context aggregator to do this since it's upstream from the LLM.
         self._context.add_user_transcription_text(text)
@@ -960,6 +936,8 @@ class AWSNovaSonicLLMService(LLMService):
             self._triggering_assistant_response = False
 
     async def _send_assistant_response_trigger(self):
+        logger.debug("Sending assistant response trigger...")
+
         chunk_duration = 0.02  # what we might get from InputAudioRawFrame
         chunk_size = int(
             chunk_duration
@@ -980,6 +958,9 @@ class AWSNovaSonicLLMService(LLMService):
             else None
         )
         if blank_audio_duration:
+            logger.debug(
+                f"Leading assistant response trigger with {blank_audio_duration}s of blank audio"
+            )
             blank_audio_chunk = b"\x00" * chunk_size
             num_chunks = int(blank_audio_duration / chunk_duration)
             for _ in range(num_chunks):
@@ -991,7 +972,6 @@ class AWSNovaSonicLLMService(LLMService):
         # if we ever need to seed this service again with context it would make sense to include it
         # since the instruction (i.e. the "wait for the trigger" instruction) will be part of the
         # context as well.
-        # print(f"[pk] sending trigger audio! {len(self._assistant_response_trigger_audio)}")
         audio_chunks = [
             self._assistant_response_trigger_audio[i : i + chunk_size]
             for i in range(0, len(self._assistant_response_trigger_audio), chunk_size)

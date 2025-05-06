@@ -94,7 +94,6 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
 
         # Process remaining messages to fill out conversation history.
         # Nova Sonic supports "user" and "assistant" messages in history.
-        # print(f"[pk] standard messages: {messages}")
         for message in messages:
             history_message = self.from_standard_message(message)
             if history_message:
@@ -136,11 +135,11 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
             "content": [{"type": "text", "text": text}],
         }
         self.add_message(message)
-        # print(f"[pk] context updated (user): {self.get_messages_for_logging()}")
+        # logger.debug(f"Context updated (user): {self.get_messages_for_logging()}")
 
     def buffer_assistant_text(self, text):
-        self._assistant_text += text  # TODO: determine if we need to add space or something
-        # print(f"[pk] assistant text buffered: {self._assistant_text}")
+        self._assistant_text += text
+        # logger.debug(f"Assistant text buffered: {self._assistant_text}")
 
     def flush_aggregated_assistant_text(self):
         if not self._assistant_text:

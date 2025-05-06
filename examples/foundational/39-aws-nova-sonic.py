@@ -10,7 +10,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
-# import logging
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -26,11 +25,6 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 # Load environment variables
 load_dotenv(override=True)
-
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
 
 
 async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
