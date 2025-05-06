@@ -169,6 +169,8 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
         auto_mode: Optional[bool] = True
+        enable_ssml_parsing: Optional[bool] = None
+        enable_logging: Optional[bool] = None
 
         @model_validator(mode="after")
         def validate_voice_settings(self):
@@ -227,6 +229,8 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
             "use_speaker_boost": params.use_speaker_boost,
             "speed": params.speed,
             "auto_mode": str(params.auto_mode).lower(),
+            "enable_ssml_parsing": params.enable_ssml_parsing,
+            "enable_logging": params.enable_logging,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -323,6 +327,12 @@ class ElevenLabsTTSService(InterruptibleWordTTSService):
 
             if self._settings["optimize_streaming_latency"]:
                 url += f"&optimize_streaming_latency={self._settings['optimize_streaming_latency']}"
+
+            if self._settings["enable_ssml_parsing"]:
+                url += f"&enable_ssml_parsing={self._settings['enable_ssml_parsing']}"
+
+            if self._settings["enable_logging"]:
+                url += f"&enable_logging={self._settings['enable_logging']}"
 
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
