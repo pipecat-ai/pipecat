@@ -335,13 +335,6 @@ class AWSNovaSonicLLMService(LLMService):
         for message in history.messages:
             await self._send_text_event(text=message.text, role=message.role)
 
-        # Send initial context (system instruction and conversation history)
-        # TODO: finish implementing
-        # - pass additional message(s)
-        # - merge init-passed system instruction + context instruction (latter takes precedence)
-        # - merge init-passed tools + context tools (latter takes precedence)
-        await self._send_text_event(text=self._system_instruction, role=Role.SYSTEM)
-
         # Start audio input
         await self._send_audio_input_start_event()
 
