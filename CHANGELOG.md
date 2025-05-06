@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added support to `RimeHttpTTSService` for the `arcana` model.
 
+### Changed
+
+- Updated the default voice for `DeepgramTTSService` to `aura-2-helena-en`.
+
 ### Fixed
 
 - Fixed a `PipelineTask` issue that would cause tasks to not be cancelled if
