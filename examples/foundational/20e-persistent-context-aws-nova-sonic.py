@@ -175,6 +175,10 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         ),
     )
 
+    # Specify initial system instruction.
+    # HACK: note that, for now, we need to inject a special bit of text into this instruction to
+    # allow the first assistant response to be programmatically triggered (which happens in the
+    # on_client_connected handler, below)
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "

@@ -87,7 +87,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     # HACK: note that, for now, we need to inject a special bit of text into this instruction to
     # allow the first assistant response to be programmatically triggered (which happens in the
     # on_client_connected handler, below)
-    # TODO: looks like Nova Sonic can't handle new lines?
     system_instruction = (
         "You are a friendly assistant. The user and you will engage in a spoken dialog exchanging "
         "the transcripts of a natural real-time conversation. Keep your responses short, generally "
