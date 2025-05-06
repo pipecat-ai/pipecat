@@ -286,12 +286,7 @@ class PipelineTask(BaseTask):
     async def cancel(self):
         """Stops the running pipeline immediately."""
         logger.debug(f"Canceling pipeline task {self}")
-        # Make sure everything is cleaned up downstream. This is sent
-        # out-of-band from the main streaming task which is what we want since
-        # we want to cancel right away.
-        await self._source.push_frame(CancelFrame())
-        # Only cancel the push task. Everything else will be cancelled in run().
-        await self._task_manager.cancel_task(self._process_push_task)
+        await self._cancel()
 
     async def run(self):
         """Starts and manages the pipeline execution until completion or cancellation."""
@@ -309,11 +304,17 @@ class PipelineTask(BaseTask):
             # well, because you get a CancelledError in every place you are
             # awaiting a task.
             pass
-        await self._cancel_tasks()
-        await self._cleanup(cleanup_pipeline)
-        if self._check_dangling_tasks:
-            self._print_dangling_tasks()
-        self._finished = True
+        finally:
+            # It's possibe that we get an asyncio.CancelledError from the
+            # outside, if so we need to make sure everything gets cancelled
+            # properly.
+            if cleanup_pipeline:
+                await self._cancel()
+            await self._cancel_tasks()
+            await self._cleanup(cleanup_pipeline)
+            if self._check_dangling_tasks:
+                self._print_dangling_tasks()
+            self._finished = True
 
     async def queue_frame(self, frame: Frame):
         """Queue a single frame to be pushed down the pipeline.
@@ -335,6 +336,14 @@ class PipelineTask(BaseTask):
         elif isinstance(frames, Iterable):
             for frame in frames:
                 await self.queue_frame(frame)
+
+    async def _cancel(self):
+        # Make sure everything is cleaned up downstream. This is sent
+        # out-of-band from the main streaming task which is what we want since
+        # we want to cancel right away.
+        await self._source.push_frame(CancelFrame())
+        # Only cancel the push task. Everything else will be cancelled in run().
+        await self._task_manager.cancel_task(self._process_push_task)
 
     async def _create_tasks(self):
         self._process_up_task = self._task_manager.create_task(
