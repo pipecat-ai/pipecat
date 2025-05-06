@@ -39,7 +39,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Example app: Simple Chatbot
+      - name: "Example app: Simple Chatbot"
         working-directory: examples/simple-chatbot/client/android
         run: ./gradlew :simple-chatbot-client:assembleDebug
 
@@ -49,7 +49,7 @@ jobs:
           name: Simple Chatbot Android Client
           path: examples/simple-chatbot/client/android/simple-chatbot-client/build/outputs/apk/debug/simple-chatbot-client-debug.apk
 
-      - name: Example app: Small WebRTC Client
+      - name: "Example app: Small WebRTC Client"
         working-directory: examples/p2p-webrtc/video-transform/client/android
         run: ./gradlew :small-webrtc-client:assembleDebug
 
