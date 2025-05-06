@@ -14,6 +14,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     import fal_client
@@ -211,6 +212,37 @@ class FalSTTService(SegmentedSTTService):
         await super().set_model(model)
         logger.info(f"Switching STT model to: [{model}]")
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="fal_wizper_transcription")
+    async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
+        """Handle a transcription result with tracing."""
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            from pipecat.utils.tracing.helpers import add_stt_span_attributes
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+            ttfb_ms = None
+            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                ttfb_ms = self._metrics.ttfb_ms
+
+            add_stt_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model=f"wizper-{self._settings.get('version', '3')}",
+                transcript=transcript,
+                is_final=True,  # Fal Wizper only provides final transcripts
+                language=self._settings["language"],
+                vad_enabled=False,
+                settings=self._settings,
+                ttfb_ms=ttfb_ms,
+            )
+
+            await self.stop_ttfb_metrics()
+            await self.stop_processing_metrics()
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes an audio segment using Fal's Wizper API.
 
@@ -225,6 +257,9 @@ class FalSTTService(SegmentedSTTService):
             Only non-empty transcriptions are yielded.
         """
         try:
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
+
             # Send to Fal directly (audio is already in WAV format from base class)
             data_uri = fal_client.encode(audio, "audio/x-wav")
             response = await self._fal_client.run(
@@ -235,6 +270,7 @@ class FalSTTService(SegmentedSTTService):
             if response and "text" in response:
                 text = response["text"].strip()
                 if text:  # Only yield non-empty text
+                    await self._handle_transcription(text, self._settings["language"])
                     logger.debug(f"Transcription: [{text}]")
                     yield TranscriptionFrame(
                         text, "", time_now_iso8601(), Language(self._settings["language"])
