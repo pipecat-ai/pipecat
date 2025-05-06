@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `enable_ssml_parsing` to `InputParams` in `ElevenLabsTTSService`.
+- Added `enable_ssml_parsing` and `enable_logging` to `InputParams` in
+  `ElevenLabsTTSService`.
 
 - Added support to `RimeHttpTTSService` for the `arcana` model.
 
