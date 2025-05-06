@@ -498,7 +498,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(audio_content_start)
 
     async def _send_text_event(self, text: str, role: Role):
-        if not self._stream:
+        if not self._stream or not text:
             return
 
         content_name = str(uuid.uuid4())
@@ -521,13 +521,14 @@ class AWSNovaSonicLLMService(LLMService):
         '''
         await self._send_client_event(text_content_start)
 
+        escaped_text = json.dumps(text) # includes quotes
         text_input = f'''
         {{
             "event": {{
                 "textInput": {{
                     "promptName": "{self._prompt_name}",
                     "contentName": "{content_name}",
-                    "content": "{text}"
+                    "content": {escaped_text}
                 }}
             }}
         }}
