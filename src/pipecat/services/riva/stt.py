@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     import riva.client
@@ -117,6 +118,15 @@ class RivaSTTService(STTService):
         self._stop_threshold_eou = -1.0
         self._custom_configuration = ""
         self._function_id = model_function_map.get("function_id")
+
+        self._settings = {
+            "language": str(params.language),
+            "profanity_filter": self._profanity_filter,
+            "automatic_punctuation": self._automatic_punctuation,
+            "verbatim_transcripts": not self._no_verbatim_transcripts,
+            "boosted_lm_words": self._boosted_lm_words,
+            "boosted_lm_score": self._boosted_lm_score,
+        }
 
         self.set_model_name(model_function_map.get("model_name"))
 
@@ -225,6 +235,36 @@ class RivaSTTService(STTService):
             self._thread_running = False
             raise
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="riva_transcription")
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            from pipecat.utils.tracing.helpers import add_stt_span_attributes
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+            ttfb_ms = None
+            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                ttfb_ms = self._metrics.ttfb_ms
+
+            add_stt_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model=self.model_name,
+                transcript=transcript,
+                is_final=is_final,
+                language=self._language_code,
+                vad_enabled=False,
+                settings=self._settings,
+                ttfb_ms=ttfb_ms,
+            )
+
     async def _handle_response(self, response):
         for result in response.results:
             if result and not result.alternatives:
@@ -236,11 +276,18 @@ class RivaSTTService(STTService):
                 if result.is_final:
                     await self.stop_processing_metrics()
                     await self.push_frame(
-                        TranscriptionFrame(transcript, "", time_now_iso8601(), None)
+                        TranscriptionFrame(transcript, "", time_now_iso8601(), self._language_code)
+                    )
+                    await self._handle_transcription(
+                        transcript=transcript,
+                        is_final=result.is_final,
+                        language=self._language_code,
                     )
                 else:
                     await self.push_frame(
-                        InterimTranscriptionFrame(transcript, "", time_now_iso8601(), None)
+                        InterimTranscriptionFrame(
+                            transcript, "", time_now_iso8601(), self._language_code
+                        )
                     )
 
     async def _response_task_handler(self):
@@ -249,6 +296,8 @@ class RivaSTTService(STTService):
             await self._handle_response(response)
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        await self.start_ttfb_metrics()
+        await self.start_processing_metrics()
         await self._queue.put(audio)
         yield None
 
@@ -418,6 +467,43 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         if self._config:
             self._config.language_code = self._language
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="riva_segmented_transcription")
+    async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
+        """Handle a transcription result with tracing."""
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            from pipecat.utils.tracing.helpers import add_stt_span_attributes
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+            ttfb_ms = None
+            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                ttfb_ms = self._metrics.ttfb_ms
+
+            settings = {
+                "server": self._server,
+                "function_id": self._function_id,
+                "language": str(language) if language else str(self._language_enum),
+                "profanity_filter": self._profanity_filter,
+                "automatic_punctuation": self._automatic_punctuation,
+                "verbatim_transcripts": self._verbatim_transcripts,
+            }
+
+            add_stt_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model=self.model_name,
+                transcript=transcript,
+                is_final=True,  # Always final for batch transcription
+                language=str(language) if language else str(self._language_enum),
+                vad_enabled=False,
+                settings=settings,
+                ttfb_ms=ttfb_ms,
+            )
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribe an audio segment.
 
@@ -474,6 +560,8 @@ class RivaSegmentedSTTService(SegmentedSTTService):
                                 text, "", time_now_iso8601(), self._language_enum
                             )
                             transcription_found = True
+
+                            await self._handle_transcription(text, self._language_enum)
 
                 if not transcription_found:
                     logger.debug("No transcription results found in Riva response")

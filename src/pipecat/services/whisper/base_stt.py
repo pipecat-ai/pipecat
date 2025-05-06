@@ -14,6 +14,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -126,6 +127,13 @@ class BaseWhisperSTTService(SegmentedSTTService):
         self._prompt = prompt
         self._temperature = temperature
 
+        self._settings = {
+            "base_url": base_url,
+            "language": self._language,
+            "prompt": self._prompt,
+            "temperature": self._temperature,
+        }
+
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
@@ -147,6 +155,34 @@ class BaseWhisperSTTService(SegmentedSTTService):
         logger.info(f"Switching STT language to: [{language}]")
         self._language = language
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="whisper_transcription")
+    async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
+        """Handle a transcription result with tracing."""
+        if is_tracing_available():
+            from opentelemetry import trace
+
+            from pipecat.utils.tracing.helpers import add_stt_span_attributes
+
+            current_span = trace.get_current_span()
+
+            service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+            ttfb_ms = None
+            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                ttfb_ms = self._metrics.ttfb_ms
+
+            add_stt_span_attributes(
+                span=current_span,
+                service_name=service_name,
+                model=self.model_name,
+                transcript=transcript,
+                is_final=True,  # Whisper services always produce final transcripts
+                language=language or self._language,
+                vad_enabled=False,
+                settings=self._settings,
+                ttfb_ms=ttfb_ms,
+            )
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
             await self.start_processing_metrics()
@@ -160,6 +196,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             text = response.text.strip()
 
             if text:
+                await self._handle_transcription(text, self._language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(text, "", time_now_iso8601())
             else:
