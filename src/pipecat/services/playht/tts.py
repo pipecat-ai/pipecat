@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     from pyht.async_client import AsyncClient
@@ -268,6 +269,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="playht_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -309,6 +311,31 @@ class PlayHTTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"{self} error generating TTS: {e}")
             yield ErrorFrame(f"{self} error: {str(e)}")
+        finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self._settings["voice_engine"],
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                    request_id=self._request_id,
+                )
 
 
 class PlayHTHttpTTSService(TTSService):
@@ -391,6 +418,7 @@ class PlayHTHttpTTSService(TTSService):
     def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
+    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="playht_http_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -433,5 +461,30 @@ class PlayHTHttpTTSService(TTSService):
         except Exception as e:
             logger.error(f"{self} error generating TTS: {e}")
         finally:
+            if is_tracing_available():
+                from opentelemetry import trace
+
+                from pipecat.utils.tracing.helpers import add_tts_span_attributes
+
+                current_span = trace.get_current_span()
+                service_name = self.__class__.__name__.replace("TTSService", "").lower()
+
+                ttfb_ms = None
+                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
+                    ttfb_ms = self._metrics.ttfb_ms
+
+                add_tts_span_attributes(
+                    span=current_span,
+                    service_name=service_name,
+                    model=self._settings["voice_engine"],
+                    voice_id=self._voice_id,
+                    text=text,
+                    settings=self._settings,
+                    character_count=len(text),
+                    operation_name="tts",
+                    ttfb_ms=ttfb_ms,
+                    protocol=self._settings["protocol"],
+                )
+
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
