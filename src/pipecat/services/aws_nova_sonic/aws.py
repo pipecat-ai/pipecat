@@ -132,7 +132,6 @@ class AWSNovaSonicLLMService(LLMService):
     def __init__(
         self,
         *,
-        # TODO: if we have instruction here as an alternative to using context, we should do the same for tools...right?
         secret_access_key: str,
         access_key_id: str,
         region: str,
@@ -182,13 +181,6 @@ class AWSNovaSonicLLMService(LLMService):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         self._wants_connection = True
-        # TODO: maybe connect but don't send history until we get all of our settings?
-        # how do we know how long to wait?
-        # ah, i think we'll *always* get at least one OpenAILLMContextFrame which kicks things off
-        # so we need to send the initial history when:
-        # - we're connected
-        # - we've gotten the first context
-        # i *think* this is what's controlled by _api_session_ready/_run_llm_when_api_session_ready
         await self._start_connecting()
 
     async def stop(self, frame: EndFrame):
@@ -247,7 +239,6 @@ class AWSNovaSonicLLMService(LLMService):
         if self._triggering_assistant_response:
             return
 
-        # TODO: check if _audio_input_paused? what causes that?
         await self._send_user_audio_event(frame.audio)
 
     async def _handle_bot_stopped_speaking(self):
@@ -417,9 +408,7 @@ class AWSNovaSonicLLMService(LLMService):
             region=self._region,
             aws_credentials_identity_resolver=StaticCredentialsResolver(
                 credentials=AWSCredentialsIdentity(
-                    access_key_id=self._access_key_id,
-                    secret_access_key=self._secret_access_key,
-                    # TODO: add additional stuff like aws_session_token
+                    access_key_id=self._access_key_id, secret_access_key=self._secret_access_key
                 )
             ),
             http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
@@ -431,7 +420,6 @@ class AWSNovaSonicLLMService(LLMService):
     # LLM communication: input events (pipecat -> LLM)
     #
 
-    # TODO: make params configurable?
     async def _send_session_start_event(self):
         session_start = f"""
         {{
