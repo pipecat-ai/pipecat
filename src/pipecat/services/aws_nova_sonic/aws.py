@@ -153,6 +153,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._assistant_response_trigger_audio: bytes = None  # Not cleared on _disconnect()
         self._disconnecting = False
         self._connected_time: float = None
+        self._wants_connection = False
 
     #
     # standard AIService frame handling
@@ -160,6 +161,7 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._wants_connection = True
         # TODO: maybe connect but don't send history until we get all of our settings?
         # how do we know how long to wait?
         # ah, i think we'll *always* get at least one OpenAILLMContextFrame which kicks things off
@@ -171,10 +173,12 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
+        self._wants_connection = False
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
+        self._wants_connection = False
         await self._disconnect()
 
     #
@@ -183,6 +187,7 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def reset_conversation(self):
         logger.debug("Resetting conversation")
+        await self._handle_bot_stopped_speaking()
         await self._disconnect()
         await self._start_connecting()
         # Use existing context
@@ -694,6 +699,8 @@ class AWSNovaSonicLLMService(LLMService):
 
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
+            if self._wants_connection:
+                await self.reset_conversation()
 
     async def _handle_completion_start_event(self, event_json):
         # print("[pk] completion start")

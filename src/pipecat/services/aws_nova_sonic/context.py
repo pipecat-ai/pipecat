@@ -143,6 +143,8 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
         # print(f"[pk] assistant text buffered: {self._assistant_text}")
 
     def flush_aggregated_assistant_text(self):
+        if not self._assistant_text:
+            return
         message = {
             "role": "assistant",
             "content": [{"type": "text", "text": self._assistant_text}],
