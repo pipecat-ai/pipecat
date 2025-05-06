@@ -41,7 +41,7 @@ Website = "https://pipecat.ai"
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.49.0" ]
 assemblyai = [ "assemblyai~=0.37.0" ]
-aws = [ "boto3~=1.37.16" ]
+aws = [ "boto3~=1.37.16", "websockets~=13.1" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=1.4.0", "websockets~=13.1" ]
 cerebras = []

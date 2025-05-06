@@ -11,16 +11,12 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Optional
 
-import boto3
-from botocore.config import Config
-import httpx
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.frames.frames import (
     Frame,
     FunctionCallCancelFrame,
@@ -36,7 +32,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
+    LLMUserAggregatorParams,
     LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -44,7 +42,18 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.ai_services import LLMService
+from pipecat.services.llm_service import LLMService
+
+try:
+    import boto3
+    import httpx
+    from botocore.config import Config
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use AWS services, you need to `pip install pipecat-ai[aws]`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
+    )
+    raise Exception(f"Missing module: {e}")
 
 
 @dataclass
@@ -564,10 +573,10 @@ class BedrockLLMService(LLMService):
 
     def create_context_aggregator(
         self,
-        context: BedrockLLMContext,
+        context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> BedrockContextAggregatorPair:
         """Create an instance of BedrockContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -575,12 +584,10 @@ class BedrockLLMService(LLMService):
 
         Args:
             context (OpenAILLMContext): The LLM context.
-            user_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the user context aggregator constructor. Defaults
-                to an empty mapping.
-            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the assistant context aggregator
-                constructor. Defaults to an empty mapping.
+            user_params (LLMUserAggregatorParams, optional): User aggregator
+                parameters.
+            assistant_params (LLMAssistantAggregatorParams, optional): User
+                aggregator parameters.
 
         Returns:
             BedrockContextAggregatorPair: A pair of context aggregators, one
@@ -589,11 +596,11 @@ class BedrockLLMService(LLMService):
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
-        if isinstance(context, OpenAILLMContext) and not isinstance(context, BedrockLLMContext):
+        if isinstance(context, OpenAILLMContext):
             context = BedrockLLMContext.from_openai_context(context)
 
-        user = BedrockUserContextAggregator(context, **user_kwargs)
-        assistant = BedrockAssistantContextAggregator(context, **assistant_kwargs)
+        user = BedrockUserContextAggregator(context, params=user_params)
+        assistant = BedrockAssistantContextAggregator(context, params=assistant_params)
         return BedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
     async def _process_context(self, context: BedrockLLMContext):

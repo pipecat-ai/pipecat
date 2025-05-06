@@ -5,8 +5,8 @@
 #
 
 import asyncio
-from typing import AsyncGenerator, Optional
 import os
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.services.ai_services import TTSService
+from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 try:
@@ -27,9 +27,7 @@ try:
     from botocore.exceptions import BotoCoreError, ClientError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use AWS services, you need to `pip install pipecat-ai[aws]`. Also, remember to set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
-    )
+    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -206,7 +204,7 @@ class PollyTTSService(TTSService):
 
         ssml += "</speak>"
 
-        logger.debug(f"SSML: {ssml}")
+        logger.trace(f"{self} SSML: {ssml}")
 
         return ssml
 
