@@ -150,7 +150,7 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
         }
         self._assistant_text = ""
         self.add_message(message)
-        # print(f"[pk] context updated (assistant): {self.get_messages_for_logging()}")
+        # logger.debug(f"Context updated (assistant): {self.get_messages_for_logging()}")
 
 
 @dataclass
@@ -167,11 +167,6 @@ class AWSNovaSonicUserContextAggregator(OpenAIUserContextAggregator):
         # Parent does not push LLMMessagesUpdateFrame
         if isinstance(frame, LLMMessagesUpdateFrame):
             await self.push_frame(AWSNovaSonicMessagesUpdateFrame(context=self._context))
-
-        # Parent also doesn't push the LLMSetToolsFrame
-        # TODO: this
-        # if isinstance(frame, LLMSetToolsFrame):
-        #     await self.push_frame(frame, direction)
 
 
 class AWSNovaSonicAssistantContextAggregator(OpenAIAssistantContextAggregator):
