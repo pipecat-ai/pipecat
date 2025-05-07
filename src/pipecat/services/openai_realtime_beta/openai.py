@@ -577,15 +577,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             arguments = json.loads(item.arguments)
             if self.has_function(function_name):
                 run_llm = index == total_items - 1
-                if function_name in self._functions.keys():
-                    await self.call_function(
-                        context=self._context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
-                        arguments=arguments,
-                        run_llm=run_llm,
-                    )
-                elif None in self._functions.keys():
+                if function_name in self._functions.keys() or None in self._functions.keys():
                     await self.call_function(
                         context=self._context,
                         tool_call_id=tool_id,
