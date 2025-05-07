@@ -108,7 +108,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     # Set up context and context management.
     # AWSNovaSonicService will adapt OpenAI LLM context objects with standard message format to
     # what's expected by Nova Sonic.
-    # TODO: since we can't trigger a response upon joining, this isn't particularly useful
     context = OpenAILLMContext(
         messages=[
             {"role": "system", "content": f"{system_instruction}"},
