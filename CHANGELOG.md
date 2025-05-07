@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `UserImageRequestFrame.video_source` field has been added to request an image
+  from the desired video source.
+
 - Added support for the AWS Nova Sonic speech-to-speech model with the new
   `AWSNovaSonicLLMService`.
   See https://docs.aws.amazon.com/nova/latest/userguide/speech.html.
