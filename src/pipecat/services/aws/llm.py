@@ -17,6 +17,7 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.frames.frames import (
     Frame,
     FunctionCallCancelFrame,
@@ -92,7 +93,6 @@ class AWSBedrockLLMContext(OpenAILLMContext):
 
     @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
-        logger.debug("from_openai_context called")
         self = cls(
             messages=openai_context.messages,
             tools=openai_context.tools,
@@ -105,7 +105,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
     @classmethod
     def from_messages(cls, messages: List[dict]) -> "AWSBedrockLLMContext":
         self = cls(messages=messages)
-        # self._restructure_from_openai_messages()
+        self._restructure_from_openai_messages()
         return self
 
     @classmethod
@@ -118,7 +118,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
 
     def set_messages(self, messages: List):
         self._messages[:] = messages
-        # self._restructure_from_openai_messages()
+        self._restructure_from_openai_messages()
 
     # convert a message in AWS Bedrock format into one or more messages in OpenAI format
     def to_standard_messages(self, obj):
@@ -334,7 +334,6 @@ class AWSBedrockLLMContext(OpenAILLMContext):
 
         """
         # Handle system message if present at the beginning
-        logger.debug(f"_restructure_from_bedrock_messages: {self.messages}")
         if self.messages and self.messages[0]["role"] == "system":
             if len(self.messages) == 1:
                 self.messages[0]["role"] = "user"
@@ -375,7 +374,6 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         self.messages.extend(merged_messages)
 
     def _restructure_from_openai_messages(self):
-        logger.debug(f"_restructure_from_openai_messages: {self.messages}")
         # first, map across self._messages calling self.from_standard_message(m) to modify messages in place
         try:
             self._messages[:] = [self.from_standard_message(m) for m in self._messages]
@@ -516,6 +514,9 @@ class AWSBedrockLLMService(LLMService):
     boto3 configuration.
 
     """
+
+    # Overriding the default adapter to use the Anthropic one.
+    adapter_class = AWSBedrockLLMAdapter
 
     class InputParams(BaseModel):
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
