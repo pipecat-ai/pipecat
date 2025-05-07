@@ -782,14 +782,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Call tool function
         if self.has_function(function_name):
-            if function_name in self._functions.keys():
-                await self.call_function(
-                    context=self._context,
-                    tool_call_id=tool_call_id,
-                    function_name=function_name,
-                    arguments=arguments,
-                )
-            elif None in self._functions.keys():
+            if function_name in self._functions.keys() or None in self._functions.keys():
                 await self.call_function(
                     context=self._context,
                     tool_call_id=tool_call_id,
