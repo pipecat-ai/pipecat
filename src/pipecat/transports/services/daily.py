@@ -1076,7 +1076,8 @@ class DailyInputTransport(BaseInputTransport):
 
     async def request_participant_image(self, frame: UserImageRequestFrame):
         if frame.user_id in self._video_renderers:
-            self._video_renderers[frame.user_id]["render_next_frame"].append(frame)
+            video_source = frame.video_source if frame.video_source else "camera"
+            self._video_renderers[frame.user_id][video_source]["render_next_frame"].append(frame)
 
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
