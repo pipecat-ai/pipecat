@@ -669,7 +669,7 @@ class AWSNovaSonicLLMService(LLMService):
     # The overall completion is wrapped by "completionStart" and "completionEnd" events.
     async def _receive_task_handler(self):
         try:
-            while self._client and not self._disconnecting:
+            while self._stream and not self._disconnecting:
                 output = await self._stream.await_output()
                 result = await output[1].receive()
 
