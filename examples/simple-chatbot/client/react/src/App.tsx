@@ -8,6 +8,7 @@ import { ConnectButton } from './components/ConnectButton';
 import { StatusDisplay } from './components/StatusDisplay';
 import { DebugDisplay } from './components/DebugDisplay';
 import './App.css';
+import { AudioRecorder } from './components/AudioRecorder';
 
 function BotVideo() {
   const transportState = useRTVIClientTransportState();
@@ -36,6 +37,8 @@ function AppContent() {
 
       <DebugDisplay />
       <RTVIClientAudio />
+
+       <AudioRecorder />
     </div>
   );
 }
