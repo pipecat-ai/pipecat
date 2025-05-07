@@ -11,7 +11,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 
 
-class BedrockLLMAdapter(BaseLLMAdapter):
+class AWSBedrockLLMAdapter(BaseLLMAdapter):
     @staticmethod
     def _to_bedrock_function_format(function: FunctionSchema) -> Dict[str, Any]:
         return {
