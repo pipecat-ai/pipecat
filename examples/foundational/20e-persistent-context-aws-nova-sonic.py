@@ -72,15 +72,24 @@ async def get_saved_conversation_filenames(params: FunctionCallParams):
 async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
-    logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages_for_persistent_storage(), indent=4)}"
-    )
     try:
         with open(filename, "w") as file:
             messages = params.context.get_messages_for_persistent_storage()
-            # remove the last message, which is the instruction we just gave to save the conversation
-            messages.pop()
-            json.dump(messages, file, indent=2)
+            # remove the last few messages. in reverse order, they are:
+            # - the in progress save tool call
+            # - the invocation of the save tool call
+            # - the user ask to save (which may encompass one or more messages)
+            # the simplest thing to do is to pop messages until the last one is an assistant
+            # response
+            while messages and not (
+                messages[-1].get("role") == "assistant" and "content" in messages[-1]
+            ):
+                messages.pop()
+            if messages:  # we never expect this to be empty
+                logger.debug(
+                    f"writing conversation to {filename}\n{json.dumps(messages, indent=4)}"
+                )
+                json.dump(messages, file, indent=2)
         await params.result_callback({"success": True})
     except Exception as e:
         await params.result_callback({"success": False, "error": str(e)})
