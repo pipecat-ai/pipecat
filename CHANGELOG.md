@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `DailyTransport` issue that was causing issues when multiple audio or
+  video sources where being captured.
+
 - Fixed a `UltravoxSTTService` issue that would cause the service to generate
   all tokens as one word.
 

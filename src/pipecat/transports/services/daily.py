@@ -700,7 +700,7 @@ class DailyTransportClient(EventHandler):
 
         await self.update_subscriptions(participant_settings={participant_id: media})
 
-        self._audio_renderers[participant_id] = {audio_source: callback}
+        self._audio_renderers.setdefault(participant_id, {})[audio_source] = callback
 
         self._client.set_audio_renderer(
             participant_id,
@@ -724,7 +724,7 @@ class DailyTransportClient(EventHandler):
 
         await self.update_subscriptions(participant_settings={participant_id: media})
 
-        self._video_renderers[participant_id] = {video_source: callback}
+        self._video_renderers.setdefault(participant_id, {})[video_source] = callback
 
         self._client.set_video_renderer(
             participant_id,
@@ -1061,12 +1061,13 @@ class DailyInputTransport(BaseInputTransport):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        self._video_renderers[participant_id] = {
-            video_source: {
-                "framerate": framerate,
-                "timestamp": 0,
-                "render_next_frame": [],
-            }
+        if participant_id not in self._video_renderers:
+            self._video_renderers[participant_id] = {}
+
+        self._video_renderers[participant_id][video_source] = {
+            "framerate": framerate,
+            "timestamp": 0,
+            "render_next_frame": [],
         }
 
         await self._client.capture_participant_video(
