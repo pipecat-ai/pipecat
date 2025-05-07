@@ -15,23 +15,8 @@ from enum import Enum
 from importlib.resources import files
 from typing import Any, List, Optional
 
-from aws_sdk_bedrock_runtime.client import (
-    BedrockRuntimeClient,
-    InvokeModelWithBidirectionalStreamOperationInput,
-)
-from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
-from aws_sdk_bedrock_runtime.models import (
-    BidirectionalInputPayloadPart,
-    InvokeModelWithBidirectionalStreamInput,
-    InvokeModelWithBidirectionalStreamInputChunk,
-    InvokeModelWithBidirectionalStreamOperationOutput,
-    InvokeModelWithBidirectionalStreamOutput,
-)
 from loguru import logger
 from pydantic import BaseModel, Field
-from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolver
-from smithy_aws_core.identity import AWSCredentialsIdentity
-from smithy_core.aio.eventstream import DuplexEventStream
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
@@ -45,15 +30,11 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
     StartFrame,
-    StartInterruptionFrame,
-    StopInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
-    UserStartedSpeakingFrame,
-    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
@@ -74,6 +55,27 @@ from pipecat.services.aws_nova_sonic.context import (
 from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.time import time_now_iso8601
+
+try:
+    from aws_sdk_bedrock_runtime.client import (
+        BedrockRuntimeClient,
+        InvokeModelWithBidirectionalStreamOperationInput,
+    )
+    from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
+    from aws_sdk_bedrock_runtime.models import (
+        BidirectionalInputPayloadPart,
+        InvokeModelWithBidirectionalStreamInput,
+        InvokeModelWithBidirectionalStreamInputChunk,
+        InvokeModelWithBidirectionalStreamOperationOutput,
+        InvokeModelWithBidirectionalStreamOutput,
+    )
+    from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolver
+    from smithy_aws_core.identity import AWSCredentialsIdentity
+    from smithy_core.aio.eventstream import DuplexEventStream
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 class AWSNovaSonicUnhandledFunctionException(Exception):
