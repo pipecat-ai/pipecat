@@ -169,7 +169,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._input_audio_content_name: Optional[str] = None
         self._content_being_received: Optional[CurrentContent] = None
         self._assistant_is_responding = False
-        self._context_available = False
         self._ready_to_send_context = False
         self._triggering_assistant_response = False
         self._assistant_response_trigger_audio: Optional[bytes] = (
@@ -205,11 +204,13 @@ class AWSNovaSonicLLMService(LLMService):
     async def reset_conversation(self):
         logger.debug("Resetting conversation")
         await self._handle_bot_stopped_speaking()
+
+        # Carry over previous context through disconnect
+        context = self._context
         await self._disconnect()
+        self._context = context
+
         await self._start_connecting()
-        # Use existing context
-        self._context_available = True
-        await self._finish_connecting_if_context_available()
 
     #
     # frame processing
@@ -235,7 +236,6 @@ class AWSNovaSonicLLMService(LLMService):
             self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(
                 context, self._system_instruction
             )
-            self._context_available = True
             await self._finish_connecting_if_context_available()
 
     async def _handle_input_audio_frame(self, frame: InputAudioRawFrame):
@@ -247,7 +247,6 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_user_audio_event(frame.audio)
 
     async def _handle_bot_stopped_speaking(self):
-
         if self._assistant_is_responding:
             # Consider the assistant finished with their response (after a short delay, to allow for
             # any FINAL text block to come in).
@@ -308,7 +307,7 @@ class AWSNovaSonicLLMService(LLMService):
     async def _finish_connecting_if_context_available(self):
         # We can only finish connecting once we've gotten our initial context and we're ready to
         # send it
-        if not (self._context_available and self._ready_to_send_context):
+        if not (self._context and self._ready_to_send_context):
             return
 
         logger.info("Finishing connecting (setting up session)...")
@@ -389,7 +388,6 @@ class AWSNovaSonicLLMService(LLMService):
             self._input_audio_content_name = None
             self._content_being_received = None
             self._assistant_is_responding = False
-            self._context_available = False
             self._ready_to_send_context = False
             self._triggering_assistant_response = False
             self._disconnecting = False
