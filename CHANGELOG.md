@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove custom audio tracks from `DailyTransport` before leaving.
 
+### Removed
+
+- Removed `CanonicalMetricsService` as it's no longer maintained.
+
 ## [0.0.66] - 2025-05-02
 
 ### Added
