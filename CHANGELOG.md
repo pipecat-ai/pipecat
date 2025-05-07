@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `ElevenLabsTTSService` to use the beta websocket API
+  (multi-stream-input). This new API supports context_ids and cancelling those
+  contexts, which greatly improves interruption handling.
+
 - Observers `on_push_frame()` now take a single argument `FramePushed` instead
   of multiple arguments.
 
