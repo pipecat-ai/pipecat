@@ -254,7 +254,7 @@ class RTVIBotReady(BaseModel):
 class RTVILLMFunctionCallMessageData(BaseModel):
     function_name: str
     tool_call_id: str
-    arguments: Mapping[str, Any]
+    args: Mapping[str, Any]
 
 
 class RTVILLMFunctionCallMessage(BaseModel):
@@ -700,7 +700,7 @@ class RTVIProcessor(FrameProcessor):
         fn = RTVILLMFunctionCallMessageData(
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
-            arguments=params.arguments,
+            args=params.arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
