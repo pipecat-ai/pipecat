@@ -148,30 +148,34 @@ class AWSNovaSonicLLMService(LLMService):
         self._access_key_id = access_key_id
         self._region = region
         self._model = model
-        self._client: BedrockRuntimeClient = None
+        self._client: Optional[BedrockRuntimeClient] = None
         self._voice_id = voice_id
         self._params = params
         self._system_instruction = system_instruction
         self._tools = tools
         self._send_transcription_frames = send_transcription_frames
-        self._context: AWSNovaSonicLLMContext = None
-        self._stream: DuplexEventStream[
-            InvokeModelWithBidirectionalStreamInput,
-            InvokeModelWithBidirectionalStreamOutput,
-            InvokeModelWithBidirectionalStreamOperationOutput,
+        self._context: Optional[AWSNovaSonicLLMContext] = None
+        self._stream: Optional[
+            DuplexEventStream[
+                InvokeModelWithBidirectionalStreamInput,
+                InvokeModelWithBidirectionalStreamOutput,
+                InvokeModelWithBidirectionalStreamOperationOutput,
+            ]
         ] = None
-        self._receive_task = None
-        self._prompt_name = None
-        self._input_audio_content_name = None
-        self._content_being_received = None
+        self._receive_task: Optional[asyncio.Task] = None
+        self._prompt_name: Optional[str] = None
+        self._input_audio_content_name: Optional[str] = None
+        self._content_being_received: Optional[CurrentContent] = None
         self._assistant_is_responding = False
         self._context_available = False
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
-        self._assistant_response_trigger_audio: bytes = None  # Not cleared on _disconnect()
+        self._assistant_response_trigger_audio: Optional[bytes] = (
+            None  # Not cleared on _disconnect()
+        )
         self._disconnecting = False
-        self._connected_time: float = None
+        self._connected_time: Optional[float] = None
         self._wants_connection = False
 
     #
@@ -437,6 +441,9 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(session_start)
 
     async def _send_prompt_start_event(self, tools: List[Any]):
+        if not self._prompt_name:
+            return
+
         tools_config = (
             f""",
         "toolUseOutputConfiguration": {{
@@ -474,6 +481,9 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(prompt_start)
 
     async def _send_audio_input_start_event(self):
+        if not self._prompt_name:
+            return
+
         audio_content_start = f'''
         {{
             "event": {{
@@ -498,7 +508,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(audio_content_start)
 
     async def _send_text_event(self, text: str, role: Role):
-        if not self._stream or not text:
+        if not self._stream or not self._prompt_name or not text:
             return
 
         content_name = str(uuid.uuid4())
@@ -566,7 +576,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(audio_event)
 
     async def _send_session_end_events(self):
-        if not self._stream:
+        if not self._stream or not self._prompt_name:
             return
 
         prompt_end = f'''
@@ -590,7 +600,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(session_end)
 
     async def _send_tool_result(self, tool_call_id, result):
-        if not self._stream:
+        if not self._stream or not self._prompt_name:
             return
 
         content_name = str(uuid.uuid4())
@@ -643,6 +653,9 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_client_event(result_content_end)
 
     async def _send_client_event(self, event_json: str):
+        if not self._stream:  # should never happen
+            return
+
         event = InvokeModelWithBidirectionalStreamInputChunk(
             value=BidirectionalInputPayloadPart(bytes_=event_json.encode("utf-8"))
         )
@@ -732,8 +745,7 @@ class AWSNovaSonicLLMService(LLMService):
                     await self._report_assistant_response_started()
 
     async def _handle_text_output_event(self, event_json):
-        # This should never happen
-        if not self._content_being_received:
+        if not self._content_being_received:  # should never happen
             return
         content = self._content_being_received
 
@@ -744,8 +756,7 @@ class AWSNovaSonicLLMService(LLMService):
         content.text_content = text_content
 
     async def _handle_audio_output_event(self, event_json):
-        # This should never happen
-        if not self._content_being_received:
+        if not self._content_being_received:  # should never happen
             return
 
         # Get audio
@@ -761,8 +772,7 @@ class AWSNovaSonicLLMService(LLMService):
         await self.push_frame(frame)
 
     async def _handle_tool_use_event(self, event_json):
-        # This should never happen
-        if not self._content_being_received:
+        if not self._content_being_received or not self._context:  # should never happen
             return
 
         # Get tool use details
@@ -793,8 +803,7 @@ class AWSNovaSonicLLMService(LLMService):
             )
 
     async def _handle_content_end_event(self, event_json):
-        # This should never happen
-        if not self._content_being_received:
+        if not self._content_being_received:  # should never happen
             return
         content = self._content_being_received
 
@@ -817,8 +826,6 @@ class AWSNovaSonicLLMService(LLMService):
                     # User transcription text added
                     await self._report_user_transcription_text_added(content.text_content)
 
-        self._content_being_received = False
-
     async def _handle_completion_end_event(self, event_json):
         pass
 
@@ -832,6 +839,9 @@ class AWSNovaSonicLLMService(LLMService):
         await self.push_frame(TTSStartedFrame())
 
     async def _report_assistant_response_text_added(self, text):
+        if not self._context:  # should never happen
+            return
+
         logger.debug(f"Assistant response text added: {text}")
 
         # Report some text added to the ongoing assistant response
@@ -853,6 +863,9 @@ class AWSNovaSonicLLMService(LLMService):
         self._context.buffer_assistant_text(text)
 
     async def _report_assistant_response_ended(self):
+        if not self._context:  # should never happen
+            return
+
         logger.debug("Assistant response ended")
 
         # Report that the assistant has finished their response.
@@ -865,6 +878,9 @@ class AWSNovaSonicLLMService(LLMService):
         self._context.flush_aggregated_assistant_text()
 
     async def _report_user_transcription_text_added(self, text):
+        if not self._context:  # should never happen
+            return
+
         logger.debug(f"User transcription text added: {text}")
 
         # Manually add new user transcription text to context.
@@ -918,12 +934,16 @@ class AWSNovaSonicLLMService(LLMService):
                 self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
 
         # Send the trigger audio, if we're fully connected and set up
-        # NOTE: maybe there's a better way to determine whether we're done setting up?
-        if self._receive_task:
+        if self._connected_time is not None:
             await self._send_assistant_response_trigger()
             self._triggering_assistant_response = False
 
     async def _send_assistant_response_trigger(self):
+        if (
+            not self._assistant_response_trigger_audio or self._connected_time is None
+        ):  # should never happen
+            return
+
         logger.debug("Sending assistant response trigger...")
 
         chunk_duration = 0.02  # what we might get from InputAudioRawFrame
