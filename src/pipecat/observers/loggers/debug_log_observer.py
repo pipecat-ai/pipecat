@@ -6,7 +6,7 @@
 
 from dataclasses import fields, is_dataclass
 from enum import Enum, auto
-from typing import Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Dict, Optional, Set, Tuple, Type, Union
 
 from loguru import logger
 
@@ -29,20 +29,20 @@ class DebugLogObserver(BaseObserver):
     for debugging pipeline behavior without needing frame-specific observers.
 
     Args:
-        frame_types: Optional list of frame types to log, or a dict with frame type
+        frame_types: Optional tuple of frame types to log, or a dict with frame type
             filters. If None, logs all frame types.
         exclude_fields: Optional set of field names to exclude from logging.
 
     Examples:
         Log all frames from all services:
         ```python
-        observer = DebugLogObserver()
+        observers = DebugLogObserver()
         ```
 
         Log specific frame types from any source/destination:
         ```python
         from pipecat.frames.frames import TranscriptionFrame, InterimTranscriptionFrame
-        observer = DebugLogObserver(frame_types=[TranscriptionFrame, InterimTranscriptionFrame])
+        observers = DebugLogObserver(frame_types=(TranscriptionFrame, InterimTranscriptionFrame))
         ```
 
         Log frames with specific source/destination filters:
@@ -51,7 +51,7 @@ class DebugLogObserver(BaseObserver):
         from pipecat.transports.base_output_transport import BaseOutputTransport
         from pipecat.services.stt_service import STTService
 
-        observer = DebugLogObserver(frame_types={
+        observers = DebugLogObserver(frame_types={
             # Only log StartInterruptionFrame when source is BaseOutputTransport
             StartInterruptionFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
 
@@ -67,19 +67,19 @@ class DebugLogObserver(BaseObserver):
     def __init__(
         self,
         frame_types: Optional[
-            Union[List[Type[Frame]], Dict[Type[Frame], Optional[Tuple[Type, FrameEndpoint]]]]
+            Union[Tuple[Type[Frame], ...], Dict[Type[Frame], Optional[Tuple[Type, FrameEndpoint]]]]
         ] = None,
         exclude_fields: Optional[Set[str]] = None,
     ):
         """Initialize the debug log observer.
 
         Args:
-            frame_types: List of frame types to log, or a dict mapping frame types to
+            frame_types: Tuple of frame types to log, or a dict mapping frame types to
                 filter configurations. Filter configs can be:
                 - None to log all instances of the frame type
                 - A tuple of (service_type, endpoint) to filter on a specific service
                   and endpoint (SOURCE or DESTINATION)
-                If None is provided instead of a dict/list, log all frames.
+                If None is provided instead of a tuple/dict, log all frames.
             exclude_fields: Set of field names to exclude from logging. If None, only binary
                 data fields are excluded.
         """
@@ -87,8 +87,8 @@ class DebugLogObserver(BaseObserver):
         self.frame_filters = {}
 
         if frame_types is not None:
-            if isinstance(frame_types, list):
-                # List of frame types - log all instances
+            if isinstance(frame_types, tuple):
+                # Tuple of frame types - log all instances
                 self.frame_filters = {frame_type: None for frame_type in frame_types}
             else:
                 # Dict of frame types with filters
