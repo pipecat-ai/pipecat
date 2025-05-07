@@ -269,7 +269,6 @@ class AWSNovaSonicLLMService(LLMService):
             await asyncio.sleep(0.25)
             self._assistant_is_responding = False
             await self._report_assistant_response_ended()
-            self._handling_bot_stopped_speaking = False
 
         self._handling_bot_stopped_speaking = False
 
