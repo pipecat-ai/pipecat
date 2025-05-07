@@ -171,7 +171,6 @@ class AWSNovaSonicLLMService(LLMService):
         self._assistant_is_responding = False
         self._context_available = False
         self._ready_to_send_context = False
-        self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
         self._assistant_response_trigger_audio: Optional[bytes] = (
             None  # Not cleared on _disconnect()
@@ -248,10 +247,6 @@ class AWSNovaSonicLLMService(LLMService):
         await self._send_user_audio_event(frame.audio)
 
     async def _handle_bot_stopped_speaking(self):
-        # Protect against back-to-back BotStoppedSpeaking calls, which I've observed
-        if self._handling_bot_stopped_speaking:
-            return
-        self._handling_bot_stopped_speaking = True
 
         if self._assistant_is_responding:
             # Consider the assistant finished with their response (after a short delay, to allow for
@@ -271,8 +266,6 @@ class AWSNovaSonicLLMService(LLMService):
             await asyncio.sleep(0.25)
             self._assistant_is_responding = False
             await self._report_assistant_response_ended()
-
-        self._handling_bot_stopped_speaking = False
 
     async def _handle_function_call_result(self, frame: AWSNovaSonicFunctionCallResultFrame):
         result = frame.result_frame
@@ -398,7 +391,6 @@ class AWSNovaSonicLLMService(LLMService):
             self._assistant_is_responding = False
             self._context_available = False
             self._ready_to_send_context = False
-            self._handling_bot_stopped_speaking = False
             self._triggering_assistant_response = False
             self._disconnecting = False
             self._connected_time = None
