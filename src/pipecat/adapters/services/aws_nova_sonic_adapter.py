@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 import json
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.function_schema import FunctionSchema
@@ -31,9 +31,9 @@ class AWSNovaSonicLLMAdapter(BaseLLMAdapter):
         }
 
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
-        """Converts function schemas to Openai Realtime function-calling format.
+        """Converts function schemas to AWS Nova Sonic function-calling format.
 
-        :return: Openai Realtime formatted function call definition.
+        :return: AWS Nova Sonic formatted function call definition.
         """
 
         functions_schema = tools_schema.standard_tools
