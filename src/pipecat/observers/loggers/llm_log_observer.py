@@ -7,7 +7,6 @@
 from loguru import logger
 
 from pipecat.frames.frames import (
-    Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     LLMFullResponseEndFrame,
@@ -17,7 +16,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 
 
