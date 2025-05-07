@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `UserImageRequestFrame.video_source` field has been added to request an image
+  from the desired video source.
+
 - Added support for the AWS Nova Sonic speech-to-speech model with the new
   `AWSNovaSonicLLMService`.
   See https://docs.aws.amazon.com/nova/latest/userguide/speech.html.
@@ -38,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deprecated, use `on_push_frame(data: FramePushed)` instead.
 
 ### Fixed
+
+- Fixed a `DailyTransport` issue that was causing issues when multiple audio or
+  video sources where being captured.
 
 - Fixed a `UltravoxSTTService` issue that would cause the service to generate
   all tokens as one word.
