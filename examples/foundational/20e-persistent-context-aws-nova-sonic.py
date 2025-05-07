@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
 import glob
 import json
@@ -22,6 +23,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.aws_nova_sonic.aws import AWSNovaSonicLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -31,21 +33,19 @@ load_dotenv(override=True)
 BASE_FILENAME = "/tmp/pipecat_conversation_"
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    temperature = 75 if args["format"] == "fahrenheit" else 24
-    await result_callback(
+async def fetch_weather_from_api(params: FunctionCallParams):
+    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+    await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": args["format"],
+            "format": params.arguments["format"],
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
-async def get_saved_conversation_filenames(
-    function_name, tool_call_id, args, llm, context, result_callback
-):
+async def get_saved_conversation_filenames(params: FunctionCallParams):
     # Construct the full pattern including the BASE_FILENAME
     full_pattern = f"{BASE_FILENAME}*.json"
 
@@ -53,7 +53,7 @@ async def get_saved_conversation_filenames(
     matching_files = glob.glob(full_pattern)
     logger.debug(f"matching files: {matching_files}")
 
-    await result_callback({"filenames": matching_files})
+    await params.result_callback({"filenames": matching_files})
 
 
 # async def get_saved_conversation_filenames(
@@ -69,26 +69,26 @@ async def get_saved_conversation_filenames(
 #     await result_callback({"filenames": matching_files})
 
 
-async def save_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(context.get_messages_for_persistent_storage(), indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages_for_persistent_storage(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
-            messages = context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages_for_persistent_storage()
             # remove the last message, which is the instruction we just gave to save the conversation
             messages.pop()
             json.dump(messages, file, indent=2)
-        await result_callback({"success": True})
+        await params.result_callback({"success": True})
     except Exception as e:
-        await result_callback({"success": False, "error": str(e)})
+        await params.result_callback({"success": False, "error": str(e)})
 
 
-async def load_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+async def load_conversation(params: FunctionCallParams):
     async def _reset():
-        filename = args["filename"]
+        filename = params.arguments["filename"]
         logger.debug(f"loading conversation from {filename}")
         try:
             with open(filename, "r") as file:
@@ -99,11 +99,11 @@ async def load_conversation(function_name, tool_call_id, args, llm, context, res
                         "content": f"{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}",
                     }
                 )
-                context.set_messages(messages)
-                await llm.reset_conversation()
-                await llm.trigger_assistant_response()
+                params.context.set_messages(messages)
+                await params.llm.reset_conversation()
+                await params.llm.trigger_assistant_response()
         except Exception as e:
-            await result_callback({"success": False, "error": str(e)})
+            await params.result_callback({"success": False, "error": str(e)})
 
     asyncio.create_task(_reset())
 
@@ -161,7 +161,7 @@ tools = ToolsSchema(
 )
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -169,9 +169,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
-            vad_audio_passthrough=True,
         ),
     )
 
