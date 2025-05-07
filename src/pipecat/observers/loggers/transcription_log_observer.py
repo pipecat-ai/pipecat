@@ -7,12 +7,10 @@
 from loguru import logger
 
 from pipecat.frames.frames import (
-    Frame,
     InterimTranscriptionFrame,
     TranscriptionFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import STTService
 
 
