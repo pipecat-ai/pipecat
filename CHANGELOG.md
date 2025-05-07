@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for the AWS Nova Sonic speech-to-speech model with the new
+  `AWSNovaSonicLLMService`.
+  (see https://docs.aws.amazon.com/nova/latest/userguide/speech.html)
+
 - Added new AWS services `AWSBedrockLLMService` and `AWSTranscribeSTTService`.
 
 - Added `on_active_speaker_changed` event handler to the `DailyTransport` class.
