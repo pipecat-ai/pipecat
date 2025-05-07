@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `DebugLogObserver` for detailed frame logging with configurable
+  filtering by frame type and endpoint. This observer automatically extracts
+  and formats all frame data fields for debug logging.
+
 - `UserImageRequestFrame.video_source` field has been added to request an image
   from the desired video source.
 
