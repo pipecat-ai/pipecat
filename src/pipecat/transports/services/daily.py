@@ -175,6 +175,7 @@ class DailyCallbacks(BaseModel):
     """Callback handlers for Daily events.
 
     Attributes:
+        on_active_speaker_changed: Called when the active speaker of the call has changed.
         on_joined: Called when bot successfully joined a room.
         on_left: Called when bot left a room.
         on_error: Called when an error occurs.
@@ -201,6 +202,7 @@ class DailyCallbacks(BaseModel):
         on_recording_error: Called when recording encounters an error.
     """
 
+    on_active_speaker_changed: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_left: Callable[[], Awaitable[None]]
     on_error: Callable[[str], Awaitable[None]]
@@ -789,6 +791,9 @@ class DailyTransportClient(EventHandler):
     # Daily (EventHandler)
     #
 
+    def on_active_speaker_changed(self, participant):
+        self._call_async_callback(self._callbacks.on_active_speaker_changed, participant)
+
     def on_app_message(self, message: Any, sender: str):
         self._call_async_callback(self._callbacks.on_app_message, message, sender)
 
@@ -1208,6 +1213,7 @@ class DailyTransport(BaseTransport):
         super().__init__(input_name=input_name, output_name=output_name)
 
         callbacks = DailyCallbacks(
+            on_active_speaker_changed=self._on_active_speaker_changed,
             on_joined=self._on_joined,
             on_left=self._on_left,
             on_error=self._on_error,
@@ -1243,6 +1249,7 @@ class DailyTransport(BaseTransport):
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
+        self._register_event_handler("on_active_speaker_changed")
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
         self._register_event_handler("on_error")
@@ -1376,6 +1383,9 @@ class DailyTransport(BaseTransport):
 
     async def update_remote_participants(self, remote_participants: Mapping[str, Any]):
         await self._client.update_remote_participants(remote_participants=remote_participants)
+
+    async def _on_active_speaker_changed(self, participant: Any):
+        await self._call_event_handler("on_active_speaker_changed", participant)
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)
