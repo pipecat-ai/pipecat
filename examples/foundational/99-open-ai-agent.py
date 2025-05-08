@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    VisionImageRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -95,6 +96,21 @@ class CustomLLMService(BaseOpenAILLMService):
             # tools=[get_weather],
         )
 
+    def create_client(
+        self,
+        api_key=None,
+        base_url=None,
+        organization=None,
+        project=None,
+        default_headers=None,
+        **kwargs,
+    ):
+        return Agent(
+            name="Assistant agent",
+            instructions="Respond with haikus.",
+            # tools=[get_weather],
+        )
+
     def create_context_aggregator(
         self,
         context: OpenAILLMContext,
@@ -124,31 +140,21 @@ class CustomLLMService(BaseOpenAILLMService):
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
-    def create_client(
-        self,
-        api_key=None,
-        base_url=None,
-        organization=None,
-        project=None,
-        default_headers=None,
-        **kwargs,
-    ):
-        return Agent(
-            name="Assistant agent",
-            instructions="Respond with haikus.",
-            # tools=[get_weather],
-        )
+    async def _process_context(self, context: OpenAILLMContext):
+        functions_list = []
+        arguments_list = []
+        tool_id_list = []
+        func_idx = 0
+        function_name = ""
+        arguments = ""
+        tool_call_id = ""
 
-    async def get_chat_completions(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        # self._client.tools = context.tools
-        logger.info(f"get_chat_completions: {self._client}")
+        await self.start_ttfb_metrics()
 
         result = Runner.run_streamed(
             # context=context,
             starting_agent=self._client,
-            input="Tell a joke about pirates.",  # messages
+            input=context.messages,  # messages
             # ---
             # no func tool
             # input="give me a 2 sentences about life",
@@ -161,23 +167,31 @@ class CustomLLMService(BaseOpenAILLMService):
             return
 
         async for event in result.stream_events():
-            # if not event.type == "raw_response_event":
-            #     break
             if event.type == "raw_response_event":
                 if event.data.type == "response.output_text.delta":
-                    delta = ChoiceDelta(content=event.data.delta)
-                    choice = Choice(delta=delta, index=event.data.output_index)
+                    await self.push_frame(LLMTextFrame(event.data.delta))
 
-                    converted_message = ChatCompletionChunk(
-                        id=event.data.item_id,
-                        choices=[choice],
-                    )
-                    return converted_message
-            else:
-                break
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
 
-        # chunks = await self._client.chat.completions.create(**params)
-        # return chunks
+        context = None
+        if isinstance(frame, OpenAILLMContextFrame):
+            context: OpenAILLMContext = frame.context
+        elif isinstance(frame, LLMMessagesFrame):
+            context = OpenAILLMContext.from_messages(frame.messages)
+        else:
+            await self.push_frame(frame, direction)
+
+        if context:
+            try:
+                await self.push_frame(LLMFullResponseStartFrame())
+                await self.start_processing_metrics()
+                await self._process_context(context)
+            except httpx.TimeoutException:
+                await self._call_event_handler("on_completion_timeout")
+            finally:
+                await self.stop_processing_metrics()
+                await self.push_frame(LLMFullResponseEndFrame())
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
