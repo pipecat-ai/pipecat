@@ -190,6 +190,7 @@ class LLMService(AIService):
         function_name: Optional[str] = None,
         tool_call_id: Optional[str] = None,
         text_content: Optional[str] = None,
+        video_source: Optional[str] = None,
     ):
         await self.push_frame(
             UserImageRequestFrame(
@@ -197,6 +198,7 @@ class LLMService(AIService):
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 context=text_content,
+                video_source=video_source,
             ),
             FrameDirection.UPSTREAM,
         )

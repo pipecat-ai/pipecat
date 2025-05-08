@@ -250,14 +250,24 @@ class AnthropicLLMService(LLMService):
                         if hasattr(event.message.usage, "output_tokens")
                         else 0
                     )
-                    if hasattr(event.message.usage, "cache_creation_input_tokens"):
-                        cache_creation_input_tokens += (
-                            event.message.usage.cache_creation_input_tokens
+                    cache_creation_input_tokens += (
+                        event.message.usage.cache_creation_input_tokens
+                        if (
+                            hasattr(event.message.usage, "cache_creation_input_tokens")
+                            and event.message.usage.cache_creation_input_tokens is not None
                         )
-                        logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
-                    if hasattr(event.message.usage, "cache_read_input_tokens"):
-                        cache_read_input_tokens += event.message.usage.cache_read_input_tokens
-                        logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
+                        else 0
+                    )
+                    logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
+                    cache_read_input_tokens += (
+                        event.message.usage.cache_read_input_tokens
+                        if (
+                            hasattr(event.message.usage, "cache_read_input_tokens")
+                            and event.message.usage.cache_read_input_tokens is not None
+                        )
+                        else 0
+                    )
+                    logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
                     total_input_tokens = (
                         prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
                     )

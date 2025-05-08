@@ -5,15 +5,70 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.67] - 2025-05-07
 
 ### Added
 
+- Added `DebugLogObserver` for detailed frame logging with configurable
+  filtering by frame type and endpoint. This observer automatically extracts
+  and formats all frame data fields for debug logging.
+
+- `UserImageRequestFrame.video_source` field has been added to request an image
+  from the desired video source.
+
+- Added support for the AWS Nova Sonic speech-to-speech model with the new
+  `AWSNovaSonicLLMService`.
+  See https://docs.aws.amazon.com/nova/latest/userguide/speech.html.
+  Note that it requires Python >= 3.12 and `pip install pipecat-ai[aws-nova-sonic]`.
+
+- Added new AWS services `AWSBedrockLLMService` and `AWSTranscribeSTTService`.
+
+- Added `on_active_speaker_changed` event handler to the `DailyTransport` class.
+
+- Added `enable_ssml_parsing` and `enable_logging` to `InputParams` in
+  `ElevenLabsTTSService`.
+
 - Added support to `RimeHttpTTSService` for the `arcana` model.
+
+### Changed
+
+- Updated `ElevenLabsTTSService` to use the beta websocket API
+  (multi-stream-input). This new API supports context_ids and cancelling those
+  contexts, which greatly improves interruption handling.
+
+- Observers `on_push_frame()` now take a single argument `FramePushed` instead
+  of multiple arguments.
+
+- Updated the default voice for `DeepgramTTSService` to `aura-2-helena-en`.
+
+### Deprecated
+
+- `PollyTTSService` is now deprecated, use `AWSPollyTTSService` instead.
+
+- Observer `on_push_frame(src, dst, frame, direction, timestamp)` is now
+  deprecated, use `on_push_frame(data: FramePushed)` instead.
 
 ### Fixed
 
+- Fixed a `DailyTransport` issue that was causing issues when multiple audio or
+  video sources where being captured.
+
+- Fixed a `UltravoxSTTService` issue that would cause the service to generate
+  all tokens as one word.
+
+- Fixed a `PipelineTask` issue that would cause tasks to not be cancelled if
+  task was cancelled from outside of Pipecat.
+
+- Fixed a `TaskManager` that was causing dangling tasks to be reported.
+
+- Fixed an issue that could cause data to be sent to the transports when they
+  were still not ready.
+
 - Remove custom audio tracks from `DailyTransport` before leaving.
+
+### Removed
+
+- Removed `CanonicalMetricsService` as it's no longer maintained.
 
 ## [0.0.66] - 2025-05-02
 
