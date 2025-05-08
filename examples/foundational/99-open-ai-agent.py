@@ -4,15 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import os
 from abc import ABC, abstractmethod
 from dataclasses import field
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 import httpx
+from agents import Agent, Runner
 from dotenv import load_dotenv
 from loguru import logger
-from openai import BaseModel
+from openai import AsyncStream, BaseModel
+from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -70,10 +73,27 @@ class BackendBase(ABC):
         raise NotImplementedError("The method get_resp is not implemented.")
 
 
-class CompassLLMService(AIService):
-    def __init__(self, backend: BackendBase):
-        super().__init__()
-        self.backend = backend
+class ChoiceDelta(BaseModel):
+    content: Optional[str] = None
+    """The contents of the chunk message."""
+
+
+class Choice(BaseModel):
+    delta: ChoiceDelta
+    """The contents of the chunk message."""
+
+    index: int
+    """The index of the choice in the list of choices."""
+
+
+class CustomLLMService(BaseOpenAILLMService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._client = Agent(
+            name="Assistant agent",
+            instructions="Respond with haikus.",
+            # tools=[get_weather],
+        )
 
     def create_context_aggregator(
         self,
@@ -82,7 +102,9 @@ class CompassLLMService(AIService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> OpenAIContextAggregatorPair:
-        """Create an instance of OpenAIContextAggregatorPair from an
+        """Create an instance of OpenAIContextAggregatorPair.
+
+        from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
         assistant aggregators can be provided.
 
@@ -102,52 +124,63 @@ class CompassLLMService(AIService):
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
+    def create_client(
+        self,
+        api_key=None,
+        base_url=None,
+        organization=None,
+        project=None,
+        default_headers=None,
+        **kwargs,
+    ):
+        return Agent(
+            name="Assistant agent",
+            instructions="Respond with haikus.",
+            # tools=[get_weather],
+        )
 
-        context = None
-        if isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAILLMContext = frame.context
-        elif isinstance(frame, LLMMessagesFrame):
-            context = OpenAILLMContext.from_messages(frame.messages)
-        elif isinstance(frame, LLMUpdateSettingsFrame):
-            await self._update_settings(frame.settings)
-        else:
-            await self.push_frame(frame, direction)
+    async def get_chat_completions(
+        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+    ) -> AsyncStream[ChatCompletionChunk]:
+        # self._client.tools = context.tools
+        logger.info(f"get_chat_completions: {self._client}")
 
-        if context:
-            try:
-                await self.push_frame(LLMFullResponseStartFrame())
-                await self.start_processing_metrics()
-                # await self._process_context(context)
+        result = Runner.run_streamed(
+            # context=context,
+            starting_agent=self._client,
+            input="Tell a joke about pirates.",  # messages
+            # ---
+            # no func tool
+            # input="give me a 2 sentences about life",
+        )
 
-                msgs = []
-                for contmsg in context.messages:
-                    msgs.append(
-                        LlmMessage(
-                            role=contmsg["role"],
-                            content=contmsg["content"],
-                        )
+        logger.info(f"get_chat_completions: {result}")
+
+        if result is None:
+            logger.error("Runner.run_streamed returned None")
+            return
+
+        async for event in result.stream_events():
+            # if not event.type == "raw_response_event":
+            #     break
+            if event.type == "raw_response_event":
+                if event.data.type == "response.output_text.delta":
+                    delta = ChoiceDelta(content=event.data.delta)
+                    choice = Choice(delta=delta, index=event.data.output_index)
+
+                    converted_message = ChatCompletionChunk(
+                        id=event.data.item_id,
+                        choices=[choice],
                     )
-                resp = await self.backend.get_resp(
-                    msgs,
-                    {
-                        "conversation_id": "fake_conversation_id",
-                        "user_id": "fake_user_id",
-                    },
-                )
+                    return converted_message
+            else:
+                break
 
-                context.add_messages(resp.msgs)
-                await self.push_frame(LLMTextFrame(resp.content))
-
-            except httpx.TimeoutException:
-                await self._call_event_handler("on_completion_timeout")
-            finally:
-                await self.stop_processing_metrics()
-                await self.push_frame(LLMFullResponseEndFrame())
+        # chunks = await self._client.chat.completions.create(**params)
+        # return chunks
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
 
     transport = SmallWebRTCTransport(
@@ -155,9 +188,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
         ),
     )
 
@@ -168,7 +199,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = CustomLLMService(model="gpt-4.1", api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [
         {
@@ -206,8 +237,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        # messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        # await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
