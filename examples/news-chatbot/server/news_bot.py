@@ -102,9 +102,9 @@ async def main():
 
         llm = GoogleLLMService(
             api_key=os.getenv("GOOGLE_API_KEY"),
-            model="gemini-1.5-flash-002",
             system_instruction=system_instruction,
             tools=tools,
+            model="gemini-1.5-flash",
         )
 
         context = OpenAILLMContext(
