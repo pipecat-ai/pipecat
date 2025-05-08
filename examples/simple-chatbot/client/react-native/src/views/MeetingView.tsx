@@ -15,7 +15,6 @@ import { MaterialIcons } from '@expo/vector-icons';
 
 import WaveformView from '../components/WaveformView';
 import MicrophoneView from '../components/MicrophoneView';
-import CameraButtonView from '../components/CameraButtonView';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Colors from '../theme/Colors';
 import CustomButton from '../theme/CustomButton';
@@ -48,11 +47,6 @@ const MeetingView: React.FC = () => {
             <TouchableOpacity onPress={toggleMicInput}>
               <MicrophoneView
                 style={styles.microphone}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={toggleCamInput}>
-              <CameraButtonView
-                style={styles.camera}
               />
             </TouchableOpacity>
           </View>
@@ -127,20 +121,6 @@ const styles = StyleSheet.create({
   },
   bottomPanel: {
     paddingVertical: 10,
-  },
-  settingsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#ccc', // Replace with Color.buttonsBorder equivalent
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 10,
-  },
-  settingsText: {
-    marginLeft: 5,
-    color: 'black',
   },
   endButton: {
     flexDirection: 'row',

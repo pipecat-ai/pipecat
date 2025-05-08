@@ -775,10 +775,10 @@
   dependencies:
     expo-build-properties "~0.8.3"
 
-"@daily-co/daily-js@^0.76.0":
-  version "0.76.0"
-  resolved "https://registry.yarnpkg.com/@daily-co/daily-js/-/daily-js-0.76.0.tgz#5b45fae585de3175985fc008af0fdd022989844b"
-  integrity sha512-v3yPJ6oxz/CViHM1R78YMc7b9cLsTD+G4OxwvVIRX5vfqjn0tFhisqBwdzGK4MGAI/IdnE4oNahuPWAPpKwysA==
+"@daily-co/daily-js@^0.79.0":
+  version "0.79.0"
+  resolved "https://registry.yarnpkg.com/@daily-co/daily-js/-/daily-js-0.79.0.tgz#6628c145951f9951ea213c65e916d6e8a3934b45"
+  integrity sha512-Ii/Zi6cfTl2EZBpX8msRPNkkCHcajA+ErXpbN2Xe2KySd1Nb4IzC/QWJlSl9VA9pIlYPQicRTDoZnoym/0uEAw==
   dependencies:
     "@babel/runtime" "^7.12.5"
     "@sentry/browser" "^8.33.1"
@@ -786,12 +786,12 @@
     dequal "^2.0.3"
     events "^3.1.0"
 
-"@daily-co/react-native-daily-js@^0.73.0":
-  version "0.73.0"
-  resolved "https://registry.yarnpkg.com/@daily-co/react-native-daily-js/-/react-native-daily-js-0.73.0.tgz#12b7eb7ad2868f6741c3ad720e1c88fd5864b160"
-  integrity sha512-T8FA7fDq+eXRG7XHYwHJIZUxHE44SCRWCvOaY53W5qBy3GABjGENNE5WxUqdzQVOuXC6jEaVZcCtJielkQwR8g==
+"@daily-co/react-native-daily-js@^0.76.0":
+  version "0.76.0"
+  resolved "https://registry.yarnpkg.com/@daily-co/react-native-daily-js/-/react-native-daily-js-0.76.0.tgz#63a7f55bce975e8af30ca3f7ac4a8018e935bb5e"
+  integrity sha512-/W8FJVIKAF8wgZMJdPyNaRw06r4UHh4MYNlMQS8eQMmIdskFN7kLL3Vpd/9qm3VaH65Aev6RH/n4X/p/yoc4Ug==
   dependencies:
-    "@daily-co/daily-js" "^0.76.0"
+    "@daily-co/daily-js" "^0.79.0"
     "@types/react-native-background-timer" "^2.0.0"
     base-64 "^1.0.0"
     react-native-url-polyfill "^1.1.2"
@@ -1248,7 +1248,7 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
-"@pipecat-ai/client-js@^0.3.2":
+"@pipecat-ai/client-js@^0.3.5":
   version "0.3.5"
   resolved "https://registry.yarnpkg.com/@pipecat-ai/client-js/-/client-js-0.3.5.tgz#70610e093097784dbfd777f071a5f21a601cd15f"
   integrity sha512-qmhnDjwY2XUtLjww35ShsYf5TF9BCuAk0tIj0oHjpTe6v6QOlgKQt8JVCAdc32p5ycouzSZOeDFtBd2aNWuq1g==
@@ -1259,12 +1259,12 @@
     typed-emitter "^2.1.0"
     uuid "^10.0.0"
 
-"@pipecat-ai/react-native-daily-transport@^0.3.2":
-  version "0.3.2"
-  resolved "https://registry.yarnpkg.com/@pipecat-ai/react-native-daily-transport/-/react-native-daily-transport-0.3.2.tgz#a8cbee24e41937f48a279b5f0b5b9784bb5b543a"
-  integrity sha512-KSTcE8ziDo8HS4/mkQeEOhg1YnCyH/z6RRzcFryYKQo0XkeEZ3UwPM+9L9cJFyuG/wu/UYI+R0gqcwPiqQvuEA==
+"@pipecat-ai/react-native-daily-transport@^0.3.5":
+  version "0.3.5"
+  resolved "https://registry.yarnpkg.com/@pipecat-ai/react-native-daily-transport/-/react-native-daily-transport-0.3.5.tgz#b88fff52ff498049cc5889816ab528791073c8f3"
+  integrity sha512-L/Ynj6PACy2//Q9Yv3UqTfvf7070LhcavKI67yy0tSQ0wj8C7l2OIziPIAm8woP2BNGbaP7J88M5QRfPOp9F4Q==
   dependencies:
-    "@pipecat-ai/client-js" "^0.3.2"
+    "@pipecat-ai/client-js" "^0.3.5"
 
 "@pkgjs/parseargs@^0.11.0":
   version "0.11.0"
