@@ -33,7 +33,7 @@ function AppContent() {
 
   const [mixedUrl, setMixedUrl] = useState<string | null>(null);
   const [startTime, setStartTime] = useState<number | null>(null);
-  const [latencies,  setLatencies]    = useState<Interval[]>([]);
+  const [latencies, setLatencies] = useState<Interval[]>([]);
   
   return (
     <div className="app">
@@ -54,7 +54,10 @@ function AppContent() {
         setStartTime(startTime)
       }} />
 
-      <LatencyTracker onLatency={(latency) => setLatencies(prev => [...prev, latency])}/>
+      <LatencyTracker onLatency={({start, end} ) => {
+        setLatencies((prev) => [...prev, { start, end }])
+      }} 
+      />
 
   
 

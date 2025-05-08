@@ -1,7 +1,10 @@
 .transcript-panel {
   background-color: #fff;
   border-radius: 8px;
-  padding: 20px;
+  padding-left: 20px;
+  width: 100%;
+  overflow-y: auto;
+  /* margin-bottom: 20px; */
 }
 
 .transcript-panel h3 {
@@ -11,8 +14,8 @@
 }
 
 .transcript-log {
-  height: 200px;
-  overflow-y: auto;
+  height: 100%;
+  overflow-y: scroll;
   background-color: #f8f8f8;
   padding: 10px;
   border-radius: 4px;

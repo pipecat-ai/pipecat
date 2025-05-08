@@ -53,7 +53,7 @@ export function AudioRecorder({ onStopRecording }: AudioRecorderProps) {
 
         recorderRef.current = recorder;
         recorder.start(); // start capturing immediately
-
+        startTime.current = performance.now();
         // Cleanup on unmount
         return () => {
             recorder.stop();
@@ -67,7 +67,6 @@ export function AudioRecorder({ onStopRecording }: AudioRecorderProps) {
     
         if (transport === 'connected' && recorder.state === 'inactive') {
           recorder.start();
-          startTime.current = performance.now();
         }
     
         if (transport === 'disconnected' && recorder.state === 'recording') {

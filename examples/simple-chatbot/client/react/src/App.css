@@ -49,6 +49,7 @@ button:disabled {
   padding: 20px;
   margin-bottom: 20px;
   display: flex;
+  height:360px
 }
 
 .bot-container {
@@ -61,7 +62,7 @@ button:disabled {
   width: 640px;
   height: 360px;
   background-color: #ddd;
-  margin-bottom: 20px;
+  /* margin-bottom: 20px; */
   border-radius: 8px;
   overflow: hidden;
 }

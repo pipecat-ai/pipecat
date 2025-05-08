@@ -20,6 +20,7 @@ the conversation flow.
 import asyncio
 import os
 import sys
+import time
 
 import aiohttp
 from dotenv import load_dotenv
@@ -32,15 +33,22 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
+    MetricsFrame,
     OutputImageRawFrame,
     SpriteFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIConfig,
+    RTVIObserver,
+    RTVIProcessor,
+    RTVIServerMessageFrame,
+)
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import (
@@ -103,6 +111,37 @@ class TalkingAnimation(FrameProcessor):
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self.push_frame(quiet_frame)
             self._is_talking = False
+
+        await self.push_frame(frame, direction)
+
+
+class LatencyProcessor(FrameProcessor):
+    """Measure user-stop → bot-start and send it as metadata to the client."""
+
+    def __init__(self, transport, rtvi):
+        super().__init__()
+        self.transport = transport
+        self.rtvi = rtvi
+        self._user_stop_ts: float | None = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # 1) record when user stops speaking
+        await super().process_frame(frame, direction)
+        if isinstance(frame, UserStoppedSpeakingFrame):
+            self._user_stop_ts = time.monotonic()
+            # logger.debug(f"[Latency] user stopped @ {self._user_stop_ts:.6f}")
+            # await self.push_frame(RTVIServerMessageFrame(data={"latency_start": time.now()}))
+
+        # 2) on bot start, compute & ship metadata
+        elif isinstance(frame, BotStartedSpeakingFrame) and self._user_stop_ts is not None:
+            now = time.monotonic()
+            latency_ms = (now - self._user_stop_ts) * 1000
+            payload = {"latency_ms": latency_ms}
+            logger.debug(f"[Latency] injecting RTVIServerMessageFrame {payload}")
+            await self.push_frame(RTVIServerMessageFrame(data=payload))
+            self._user_stop_ts = None
+
+        # 3) always pass frames through
 
         await self.push_frame(frame, direction)
 
@@ -187,21 +226,20 @@ async def main():
         context_aggregator = llm.create_context_aggregator(context)
 
         ta = TalkingAnimation()
-
         #
         # RTVI events for Pipecat client UI
         #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
-
+        latency = LatencyProcessor(transport, rtvi)
         pipeline = Pipeline(
             [
                 transport.input(),
                 rtvi,
                 context_aggregator.user(),
                 llm,
-                # context_aggregator.assistant(),
                 tts,
                 ta,
+                latency,
                 transport.output(),
                 context_aggregator.assistant(),
             ]

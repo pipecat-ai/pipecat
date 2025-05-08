@@ -1,16 +1,15 @@
 // src/components/AudioAnalysis.tsx
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import WaveSurfer from 'wavesurfer.js'
-import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js'
 import { Interval } from './LatencyTracker'
 
 type AudioAnalysisProps = {
   playbackUrl: string
-  startTime:   number    // absolute ms timestamp when the recording began
-  latencies:   Interval[] 
-  waveColor?:      string
-  progressColor?:  string
-  height?:         number
+  startTime:   number       // absolute ms timestamp when recording began
+  latencies:   Interval[]   // latency intervals between user end and bot start
+  waveColor?:     string
+  progressColor?: string
+  height?:        number
 }
 
 export const AudioAnalysis: React.FC<AudioAnalysisProps> = ({
@@ -23,62 +22,125 @@ export const AudioAnalysis: React.FC<AudioAnalysisProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const waveSurferRef = useRef<WaveSurfer|null>(null)
+  const [loading, setLoading] = useState(true)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [duration, setDuration] = useState<number>(0)
+  const [activeMarker, setActiveMarker] = useState<number | null>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
 
-    const regions = RegionsPlugin.create()
     const ws = WaveSurfer.create({
       container: containerRef.current,
       waveColor,
       progressColor,
       cursorColor: '#333',
       height,
-      plugins: [ regions ],
     })
     waveSurferRef.current = ws
+
     ws.load(playbackUrl)
 
     ws.on('ready', () => {
-      latencies.forEach(({ start, end }, idx) => {
-        // compute relative seconds from absolute ms
-        const relStart = (8000 - startTime) / 1000
-        const relEnd   = (16000   - startTime) / 1000
+      setLoading(false)
+      setDuration(ws.getDuration())
+    })
 
-        regions.addRegion({
-          id:    `latency-${idx}`,
-          start: relStart,
-          end:   relEnd,
-          content: `Latency: ${(end - start).toFixed(0)} ms`,
-          color: 'rgba(220,38,38,0.3)',  // semi-transparent red
-          drag:   false,
-          resize: false,
-        })
-      })
+    ws.on('play', () => setIsPlaying(true))
+    ws.on('pause', () => setIsPlaying(false))
+    ws.on('finish', () => {
+      setIsPlaying(false)
+      ws.seekTo(0)
     })
 
     return () => {
       ws.destroy()
       waveSurferRef.current = null
     }
-  }, [playbackUrl, startTime, latencies, waveColor, progressColor, height])
-  console.log("Latencies: ", latencies)
+  }, [playbackUrl, waveColor, height])
+
+  const togglePlayback = () => {
+    const ws = waveSurferRef.current
+    if (!ws) return
+    ws.playPause()
+  }
+
   return (
-    <div>
+    <div style={{ position: 'relative', width: '100%' }}>
+      {loading && (
+        <div
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'rgba(255,255,255,0.8)', zIndex: 10,
+            fontSize: '1.2rem', fontWeight: 'bold',
+          }}
+        >Generating waveform...</div>
+      )}
+
+      {/* Play/Pause Button */}
+      <button
+        onClick={togglePlayback}
+        disabled={loading}
+        style={{
+          marginBottom: 8, padding: '8px 16px', borderRadius: 4,
+          border: '1px solid #ccc', backgroundColor: '#fff',
+          cursor: loading ? 'not-allowed' : 'pointer',
+        }}
+      >{isPlaying ? 'Pause' : 'Play'}</button>
+
+      {/* Waveform Container */}
       <div
         ref={containerRef}
         className="waveform-container"
-        style={{ width: '100%', marginBottom: 16 }}
+        style={{ width: '100%', height, visibility: loading ? 'hidden' : 'visible' }}
       />
-      <ul style={{ listStyle: 'none', padding: 0, fontSize: 14 }}>
-        {latencies.map(({ start, end }, i) => (
-          <li key={i}>
-            <strong>Turn {i + 1}:</strong>{' '}
-            {((start - startTime).toFixed(0))} ms → {(end - startTime).toFixed(0)} ms (
-            <em>{(end - start).toFixed(0)} ms</em>)
-          </li>
-        ))}
-      </ul>
+
+      {/* Overlay latency markers as tappable dots */}
+      {!loading && duration > 0 && (
+        <div
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height, pointerEvents: 'none' }}
+        >
+          {latencies.map(({ start, end }, idx) => {
+            const relStartSec = (start - startTime) / 1000
+            const leftPercent = (relStartSec / duration) * 100
+            const latencyMs = end - start
+            const isActive = activeMarker === idx
+
+            return (
+              <React.Fragment key={idx}>
+                <div
+                  onClick={() => setActiveMarker(isActive ? null : idx)}
+                  onTouchStart={() => setActiveMarker(isActive ? null : idx)}
+                  style={{
+                    position: 'absolute', left: `${leftPercent}%`, top: '102%', zIndex: 20,
+                    transform: 'translate(-50%, -50%)', width: 10, height: 10,
+                    borderRadius: '50%', backgroundColor: 'rgba(220,38,38,1)',
+                    pointerEvents: 'auto',
+                    cursor: 'pointer',
+                    touchAction: 'manipulation',
+                  }}
+                />
+
+                {isActive && (
+                  <div
+                    style={{
+                      position: 'absolute', left: `${leftPercent}%`, top: '150%', zIndex: 30,
+                      transform: 'translate(-50%,-100%)',
+                      padding: '4px 8px', backgroundColor: '#fff',
+                      border: '1px solid #ccc', borderRadius: 4,
+                      whiteSpace: 'nowrap', pointerEvents: 'none',
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    {`${latencyMs.toFixed(1)} ms`}
+                  </div>
+                )}
+              </React.Fragment>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

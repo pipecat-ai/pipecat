@@ -16,7 +16,7 @@ export function TranscriptDisplay() {
     if (!debugLogRef.current) return;
 
     const entry = document.createElement('div');
-    entry.textContent = `${new Date().toISOString()} - ${message}`;
+    entry.textContent = message
 
     if (message.startsWith('User: ')) {
       entry.style.color = '#2196F3'; // blue for user
@@ -50,9 +50,10 @@ export function TranscriptDisplay() {
     }, [log])
   );
 
+  
+
   return (
     <div className="transcript-panel">
-      <h3>Live Transcript</h3>
       <div ref={debugLogRef} className="transcript-log" />
     </div>
   );
