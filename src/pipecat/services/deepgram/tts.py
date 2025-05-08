@@ -30,7 +30,7 @@ class DeepgramTTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice: str = "aura-helios-en",
+        voice: str = "aura-2-helena-en",
         base_url: str = "",
         sample_rate: Optional[int] = None,
         encoding: str = "linear16",

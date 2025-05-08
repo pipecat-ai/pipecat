@@ -5,7 +5,7 @@
 #
 
 from abc import abstractmethod
-from typing import Optional
+from typing import List, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict
 
@@ -33,7 +33,8 @@ class TransportParams(BaseModel):
     audio_out_channels: int = 1
     audio_out_bitrate: int = 96000
     audio_out_10ms_chunks: int = 4
-    audio_out_mixer: Optional[BaseAudioMixer] = None
+    audio_out_mixer: Optional[BaseAudioMixer | Mapping[Optional[str], BaseAudioMixer]] = None
+    audio_out_destinations: List[str] = []
     audio_in_enabled: bool = False
     audio_in_sample_rate: Optional[int] = None
     audio_in_channels: int = 1
@@ -48,6 +49,7 @@ class TransportParams(BaseModel):
     video_out_bitrate: int = 800000
     video_out_framerate: int = 30
     video_out_color_format: str = "RGB"
+    video_out_destinations: List[str] = []
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: Optional[VADAnalyzer] = None

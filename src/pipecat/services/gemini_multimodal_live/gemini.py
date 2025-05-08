@@ -223,6 +223,14 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
+    # The LLMAssistantContextAggregator uses TextFrames to aggregate the LLM output,
+    # but the GeminiMultimodalLiveAssistantContextAggregator pushes LLMTextFrames and TTSTextFrames. We
+    # need to override this proces_frame for LLMTextFrame, so that only the TTSTextFrames
+    # are process. This ensures that the context gets only one set of messages.
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if not isinstance(frame, LLMTextFrame):
+            await super().process_frame(frame, direction)
+
     async def handle_user_image_frame(self, frame: UserImageRawFrame):
         # We don't want to store any images in the context. Revisit this later
         # when the API evolves.
@@ -265,6 +273,15 @@ class GeminiVADParams(BaseModel):
     silence_duration_ms: Optional[int] = Field(default=None)
 
 
+class ContextWindowCompressionParams(BaseModel):
+    """Parameters for context window compression."""
+
+    enabled: bool = Field(default=False)
+    trigger_tokens: Optional[int] = Field(
+        default=None
+    )  # None = use default (80% of context window)
+
+
 class InputParams(BaseModel):
     frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4096, ge=1)
@@ -280,6 +297,7 @@ class InputParams(BaseModel):
         default=GeminiMediaResolution.UNSPECIFIED
     )
     vad: Optional[GeminiVADParams] = Field(default=None)
+    context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -355,6 +373,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "language": self._language_code,
             "media_resolution": params.media_resolution,
             "vad": params.vad,
+            "context_window_compression": params.context_window_compression.model_dump()
+            if params.context_window_compression
+            else {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -414,7 +435,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def _handle_interruption(self):
-        pass
+        self._bot_is_speaking = False
+        await self.push_frame(TTSStoppedFrame())
+        await self.push_frame(LLMFullResponseEndFrame())
 
     async def _handle_user_started_speaking(self, frame):
         self._user_is_speaking = True
@@ -437,10 +460,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
         text = await self._transcribe_audio(audio, context)
         if not text:
             return
-        logger.debug(f"[Transcription:user] {text}")
-        context.add_message({"role": "user", "content": [{"type": "text", "text": text}]})
+        # Sometimes the transcription contains newlines; we want to remove them.
+        cleaned_text = text.rstrip("\n")
+        logger.debug(f"[Transcription:user] {cleaned_text}")
         await self.push_frame(
-            TranscriptionFrame(text=text, user_id="user", timestamp=time_now_iso8601())
+            TranscriptionFrame(text=cleaned_text, user_id="user", timestamp=time_now_iso8601()),
+            FrameDirection.UPSTREAM,
         )
 
     async def _transcribe_audio(self, audio, context):
@@ -560,6 +585,21 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     "output_audio_transcription": {},
                 }
             }
+
+            # Add context window compression if enabled
+            if self._settings.get("context_window_compression", {}).get("enabled", False):
+                compression_config = {}
+                # Add sliding window (always true if compression is enabled)
+                compression_config["sliding_window"] = {}
+
+                # Add trigger_tokens if specified
+                trigger_tokens = self._settings.get("context_window_compression", {}).get(
+                    "trigger_tokens"
+                )
+                if trigger_tokens is not None:
+                    compression_config["trigger_tokens"] = trigger_tokens
+
+                config_data["setup"]["context_window_compression"] = compression_config
 
             # Add VAD configuration if provided
             if self._settings.get("vad"):
@@ -811,6 +851,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not part:
             return
 
+        # part.text is added when `modalities` is set to TEXT; otherwise, it's None
         text = part.text
         if text:
             if not self._bot_text_buffer:
@@ -833,6 +874,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not self._bot_is_speaking:
             self._bot_is_speaking = True
             await self.push_frame(TTSStartedFrame())
+            await self.push_frame(LLMFullResponseStartFrame())
 
         self._bot_audio_buffer.extend(audio)
         frame = TTSAudioRawFrame(
@@ -861,21 +903,28 @@ class GeminiMultimodalLiveLLMService(LLMService):
         text = self._bot_text_buffer
         self._bot_text_buffer = ""
 
-        if text:
-            await self.push_frame(LLMFullResponseEndFrame())
+        # Only push the TTSStoppedFrame the bot is outputting audio
+        # when text is found, modalities is set to TEXT and no audio
+        # is produced.
+        if not text:
+            await self.push_frame(TTSStoppedFrame())
 
-        await self.push_frame(TTSStoppedFrame())
+        await self.push_frame(LLMFullResponseEndFrame())
 
     async def _handle_evt_output_transcription(self, evt):
         if not evt.serverContent.outputTranscription:
             return
 
+        # This is the output transcription text when modalities is set to AUDIO.
+        # In this case, we push LLMTextFrame and TTSTextFrame to be handled by the
+        # downstream assistant context aggregator.
         text = evt.serverContent.outputTranscription.text
-        if text:
-            await self.push_frame(LLMFullResponseStartFrame())
-            await self.push_frame(LLMTextFrame(text=text))
-            await self.push_frame(TTSTextFrame(text=text))
-            await self.push_frame(LLMFullResponseEndFrame())
+
+        if not text:
+            return
+
+        await self.push_frame(LLMTextFrame(text=text))
+        await self.push_frame(TTSTextFrame(text=text))
 
     def create_context_aggregator(
         self,
@@ -906,6 +955,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         GeminiMultimodalLiveContext.upgrade(context)
         user = GeminiMultimodalLiveUserContextAggregator(context, params=user_params)
 
-        assistant_params.expect_stripped_words = True
+        assistant_params.expect_stripped_words = False
         assistant = GeminiMultimodalLiveAssistantContextAggregator(context, params=assistant_params)
         return GeminiMultimodalLiveContextAggregatorPair(_user=user, _assistant=assistant)

@@ -9,8 +9,9 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel
 
 from pipecat.frames.frames import Frame
+from pipecat.observers.base_observer import FramePushed
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIObserver
+from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame
 
 
@@ -27,18 +28,13 @@ class RTVIBotLLMSearchResponseMessage(BaseModel):
 
 
 class GoogleRTVIObserver(RTVIObserver):
-    def __init__(self, rtvi: FrameProcessor):
+    def __init__(self, rtvi: RTVIProcessor):
         super().__init__(rtvi)
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
-        await super().on_push_frame(src, dst, frame, direction, timestamp)
+    async def on_push_frame(self, data: FramePushed):
+        await super().on_push_frame(data)
+
+        frame = data.frame
 
         if isinstance(frame, LLMSearchResponseFrame):
             await self._handle_llm_search_response_frame(frame)

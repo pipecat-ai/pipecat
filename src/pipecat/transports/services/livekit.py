@@ -370,6 +370,7 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.connect()
         if not self._audio_in_task and self._params.audio_in_enabled:
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
+        await self.set_transport_ready(frame)
         logger.info("LiveKitInputTransport started")
 
     async def stop(self, frame: EndFrame):
@@ -441,6 +442,7 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().start(frame)
         await self._client.setup(frame)
         await self._client.connect()
+        await self.set_transport_ready(frame)
         logger.info("LiveKitOutputTransport started")
 
     async def stop(self, frame: EndFrame):
@@ -462,7 +464,7 @@ class LiveKitOutputTransport(BaseOutputTransport):
         else:
             await self._client.send_data(frame.message.encode())
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         livekit_audio = self._convert_pipecat_audio_to_livekit(frames)
         await self._client.publish_audio(livekit_audio)
 

@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
 )
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -42,14 +42,10 @@ class HeartbeatsObserver(BaseObserver):
         self._target = target
         self._callback = heartbeat_callback
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
+        src = data.source
+        frame = data.frame
+
         if src == self._target and isinstance(frame, HeartbeatFrame):
             await self._callback(self._target, frame)
 

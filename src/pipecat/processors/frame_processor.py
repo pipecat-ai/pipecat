@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
+from pipecat.observers.base_observer import FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
@@ -294,17 +295,28 @@ class FrameProcessor(BaseObject):
             timestamp = self._clock.get_time() if self._clock else 0
             if direction == FrameDirection.DOWNSTREAM and self._next:
                 logger.trace(f"Pushing {frame} from {self} to {self._next}")
+
                 if self._observer:
-                    await self._observer.on_push_frame(
-                        self, self._next, frame, direction, timestamp
+                    data = FramePushed(
+                        source=self,
+                        destination=self._next,
+                        frame=frame,
+                        direction=direction,
+                        timestamp=timestamp,
                     )
+                    await self._observer.on_push_frame(data)
                 await self._next.queue_frame(frame, direction)
             elif direction == FrameDirection.UPSTREAM and self._prev:
                 logger.trace(f"Pushing {frame} upstream from {self} to {self._prev}")
                 if self._observer:
-                    await self._observer.on_push_frame(
-                        self, self._prev, frame, direction, timestamp
+                    data = FramePushed(
+                        source=self,
+                        destination=self._prev,
+                        frame=frame,
+                        direction=direction,
+                        timestamp=timestamp,
                     )
+                    await self._observer.on_push_frame(data)
                 await self._prev.queue_frame(frame, direction)
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
