@@ -122,6 +122,7 @@ class BaseInputTransport(FrameProcessor):
         # Configure VAD analyzer.
         if self._params.vad_analyzer:
             self._params.vad_analyzer.set_sample_rate(self._sample_rate)
+
         # Configure End of turn analyzer.
         if self._params.turn_analyzer:
             self._params.turn_analyzer.set_sample_rate(self._sample_rate)
@@ -129,10 +130,6 @@ class BaseInputTransport(FrameProcessor):
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
-        # Create audio input queue and task if needed.
-        if not self._audio_task and self._params.audio_in_enabled:
-            self._audio_in_queue = asyncio.Queue()
-            self._audio_task = self.create_task(self._audio_task_handler())
 
     async def stop(self, frame: EndFrame):
         # Cancel and wait for the audio input task to finish.
@@ -148,6 +145,13 @@ class BaseInputTransport(FrameProcessor):
         if self._audio_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_task)
             self._audio_task = None
+
+    async def set_transport_ready(self, frame: StartFrame):
+        """To be called when the transport is ready to stream."""
+        # Create audio input queue and task if needed.
+        if not self._audio_task and self._params.audio_in_enabled:
+            self._audio_in_queue = asyncio.Queue()
+            self._audio_task = self.create_task(self._audio_task_handler())
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
         if self._params.audio_in_enabled:

@@ -78,6 +78,16 @@ class BaseOutputTransport(FrameProcessor):
         audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
         self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
 
+    async def stop(self, frame: EndFrame):
+        for _, sender in self._media_senders.items():
+            await sender.stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        for _, sender in self._media_senders.items():
+            await sender.cancel(frame)
+
+    async def set_transport_ready(self, frame: StartFrame):
+        """To be called when the transport is ready to stream."""
         # Register destinations.
         for destination in self._params.audio_out_destinations:
             await self.register_audio_destination(destination)
@@ -111,14 +121,6 @@ class BaseOutputTransport(FrameProcessor):
                 params=self._params,
             )
             await self._media_senders[destination].start(frame)
-
-    async def stop(self, frame: EndFrame):
-        for _, sender in self._media_senders.items():
-            await sender.stop(frame)
-
-    async def cancel(self, frame: CancelFrame):
-        for _, sender in self._media_senders.items():
-            await sender.cancel(frame)
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         pass

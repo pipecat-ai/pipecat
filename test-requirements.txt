@@ -1,1 +1,1 @@
--e ".[anthropic,google,langchain]"
+-e ".[anthropic,aws,google,langchain]"

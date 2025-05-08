@@ -715,9 +715,10 @@ class UserImageRequestFrame(SystemFrame):
     context: Optional[Any] = None
     function_name: Optional[str] = None
     tool_call_id: Optional[str] = None
+    video_source: Optional[str] = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, function: {self.function_name}, request: {self.tool_call_id})"
+        return f"{self.name}(user: {self.user_id}, video_source: {self.video_source}, function: {self.function_name}, request: {self.tool_call_id})"
 
 
 @dataclass
