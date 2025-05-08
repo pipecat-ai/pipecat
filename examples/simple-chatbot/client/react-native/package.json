@@ -11,7 +11,7 @@
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^10.0.0",
     "@daily-co/config-plugin-rn-daily-js": "0.0.7",
-    "@daily-co/react-native-daily-js": "^0.73.0",
+    "@daily-co/react-native-daily-js": "^0.76.0",
     "@daily-co/react-native-webrtc": "^118.0.3-daily.2",
     "@react-native-async-storage/async-storage": "1.24.0",
     "@react-navigation/native": "^7.0.14",
@@ -26,7 +26,7 @@
     "react-native-background-timer": "^2.4.1",
     "react-native-gesture-handler": "^2.25.0",
     "react-native-get-random-values": "^1.11.0",
-    "@pipecat-ai/react-native-daily-transport": "^0.3.2",
+    "@pipecat-ai/react-native-daily-transport": "^0.3.5",
     "react-native-safe-area-context": "^5.4.0",
     "react-native-screens": "^4.10.0",
     "react-native-toast-message": "^2.3.0"
