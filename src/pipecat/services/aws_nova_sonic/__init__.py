@@ -1,1 +1,1 @@
-from .aws import AWSNovaSonicLLMService
+from .aws import AWSNovaSonicLLMService, Params
