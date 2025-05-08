@@ -43,7 +43,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.daily import (
+    DailyParams,
+    DailyTranscriptionSettings,
+    DailyTransport,
+)
 
 load_dotenv(override=True)
 logger.remove(0)
@@ -129,6 +133,11 @@ async def main():
                 video_out_height=576,
                 vad_analyzer=SileroVADAnalyzer(),
                 transcription_enabled=True,
+                transcription_settings=DailyTranscriptionSettings(
+                    language="en",
+                    interim_results=False,
+                    endpointing=False,
+                ),
                 #
                 # Spanish
                 #
@@ -147,6 +156,7 @@ async def main():
             # English
             #
             voice_id="pNInz6obpgDQGcFmaJgB",
+            params=ElevenLabsTTSService.InputParams(auto_mode=True),
             #
             # Spanish
             #
@@ -189,6 +199,7 @@ async def main():
                 rtvi,
                 context_aggregator.user(),
                 llm,
+                # context_aggregator.assistant(),
                 tts,
                 ta,
                 transport.output(),
@@ -200,7 +211,7 @@ async def main():
             pipeline,
             params=PipelineParams(
                 allow_interruptions=True,
-                enable_metrics=True,
+                enable_metrics=False,
                 enable_usage_metrics=True,
             ),
             observers=[RTVIObserver(rtvi)],

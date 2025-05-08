@@ -1,25 +1,28 @@
 // src/components/AudioRecorder.tsx
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRTVIClientMediaTrack, useRTVIClientTransportState } from '@pipecat-ai/client-react';
 
+
+
+interface AudioRecorderProps {
+    onStopRecording: (url: string, startTime: number) => void;
+  }
 /**
  * AudioRecorder mixes local and bot audio tracks,
  * records them, and provides a "Stop Call" button
  * to end recording and render a playback control.
  */
-export function AudioRecorder() {
+export function AudioRecorder({ onStopRecording }: AudioRecorderProps) {
     const transport = useRTVIClientTransportState();
     const localTrack = useRTVIClientMediaTrack('audio', 'local');
     const botTrack   = useRTVIClientMediaTrack('audio', 'bot');
-
+    const startTime   = useRef<number>(0);
     
     const recorderRef = useRef<MediaRecorder>();
     const chunksRef   = useRef<Blob[]>([]);
     const audioCtxRef = useRef<AudioContext>();
     const destRef     = useRef<MediaStreamAudioDestinationNode>();
 
-    // URL for the mixed recording blob
-    const [mixedUrl, setMixedUrl] = useState<string | null>(null);
 
     useEffect(() => {
         if (!localTrack || !botTrack) return;
@@ -43,9 +46,9 @@ export function AudioRecorder() {
         };
 
         recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        const url  = URL.createObjectURL(blob);
-        setMixedUrl(url);
+            const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+            const url  = URL.createObjectURL(blob);
+            onStopRecording(url, startTime.current);
         };
 
         recorderRef.current = recorder;
@@ -53,8 +56,8 @@ export function AudioRecorder() {
 
         // Cleanup on unmount
         return () => {
-        recorder.stop();
-        audioCtx.close();
+            recorder.stop();
+            audioCtx.close();
         };
     }, [localTrack, botTrack]);
 
@@ -64,6 +67,7 @@ export function AudioRecorder() {
     
         if (transport === 'connected' && recorder.state === 'inactive') {
           recorder.start();
+          startTime.current = performance.now();
         }
     
         if (transport === 'disconnected' && recorder.state === 'recording') {
@@ -74,14 +78,5 @@ export function AudioRecorder() {
 
 
 
-    return (
-        <div style={{ marginTop: '1rem' }}>
-        
-        {mixedUrl && (
-            <div style={{ marginTop: '0.5rem' }}>
-            <audio controls src={mixedUrl} />
-            </div>
-        )}
-        </div>
-    );
+    return null;
 }

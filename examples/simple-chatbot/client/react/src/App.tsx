@@ -1,3 +1,5 @@
+// src/App.tsx
+import { useState } from 'react';
 import {
   RTVIClientAudio,
   RTVIClientVideo,
@@ -6,9 +8,13 @@ import {
 import { RTVIProvider } from './providers/RTVIProvider';
 import { ConnectButton } from './components/ConnectButton';
 import { StatusDisplay } from './components/StatusDisplay';
-import { DebugDisplay } from './components/DebugDisplay';
-import './App.css';
+import { TranscriptDisplay } from './components/TranscriptDisplay';
 import { AudioRecorder } from './components/AudioRecorder';
+import { AudioAnalysis } from './components/AudioAnalysis';
+import { LatencyTracker } from './components/LatencyTracker';
+
+import { Interval } from './components/LatencyTracker'
+import './App.css';
 
 function BotVideo() {
   const transportState = useRTVIClientTransportState();
@@ -24,6 +30,11 @@ function BotVideo() {
 }
 
 function AppContent() {
+
+  const [mixedUrl, setMixedUrl] = useState<string | null>(null);
+  const [startTime, setStartTime] = useState<number | null>(null);
+  const [latencies,  setLatencies]    = useState<Interval[]>([]);
+  
   return (
     <div className="app">
       <div className="status-bar">
@@ -33,12 +44,38 @@ function AppContent() {
 
       <div className="main-content">
         <BotVideo />
+        <TranscriptDisplay />
       </div>
 
-      <DebugDisplay />
       <RTVIClientAudio />
 
-       <AudioRecorder />
+      <AudioRecorder onStopRecording={(url, startTime) => {
+        setMixedUrl(url)
+        setStartTime(startTime)
+      }} />
+
+      <LatencyTracker onLatency={(latency) => setLatencies(prev => [...prev, latency])}/>
+
+  
+
+      {mixedUrl && (
+        <div style={{ marginTop: '1rem', width: '100%' }}>
+          <AudioAnalysis
+            playbackUrl={mixedUrl}
+            startTime={startTime!}
+            latencies={latencies}
+          />
+
+          {/* Download button */}
+          <div style={{ marginTop: '0.5rem' }}>
+            <a href={mixedUrl} download="call-recording.webm">
+              <button type="button">Download Recording</button>
+            </a>
+          </div>
+        </div>
+      )}
+
+
     </div>
   );
 }

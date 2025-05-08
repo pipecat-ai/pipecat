@@ -48,6 +48,7 @@ button:disabled {
   border-radius: 8px;
   padding: 20px;
   margin-bottom: 20px;
+  display: flex;
 }
 
 .bot-container {

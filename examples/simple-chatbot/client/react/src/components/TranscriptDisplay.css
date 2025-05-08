@@ -1,16 +1,16 @@
-.debug-panel {
+.transcript-panel {
   background-color: #fff;
   border-radius: 8px;
   padding: 20px;
 }
 
-.debug-panel h3 {
+.transcript-panel h3 {
   margin: 0 0 10px 0;
   font-size: 16px;
   font-weight: bold;
 }
 
-.debug-log {
+.transcript-log {
   height: 200px;
   overflow-y: auto;
   background-color: #f8f8f8;
@@ -21,6 +21,6 @@
   line-height: 1.4;
 }
 
-.debug-log div {
+.transcript-log div {
   margin-bottom: 4px;
 }
