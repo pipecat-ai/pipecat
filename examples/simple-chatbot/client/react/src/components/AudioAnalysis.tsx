@@ -1,17 +1,24 @@
 // src/components/AudioAnalysis.tsx
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState} from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import { Interval } from './LatencyTracker'
 
+/**
+ * Props for the AudioAnalysis component
+ */
 type AudioAnalysisProps = {
-  playbackUrl: string
-  startTime:   number       // absolute ms timestamp when recording began
-  latencies:   Interval[]   // latency intervals between user end and bot start
-  waveColor?:     string
-  progressColor?: string
-  height?:        number
+  playbackUrl: string           // URL of the audio file to play back
+  startTime:   number           // absolute timestamp (ms) when the recording began
+  latencies:   Interval[]       // array of latency intervals between user end and bot start
+  waveColor?:     string        // optional color for the waveform
+  progressColor?: string        // optional color for the played portion of the waveform
+  height?:        number        // optional height of the waveform container
 }
 
+/**
+ * AudioAnalysis renders a waveform of the audio, playback controls,
+ * and tappable latency markers showing intervals annotated in time.
+ */
 export const AudioAnalysis: React.FC<AudioAnalysisProps> = ({
   playbackUrl,
   startTime,
@@ -20,44 +27,60 @@ export const AudioAnalysis: React.FC<AudioAnalysisProps> = ({
   progressColor = '#4F46E5',
   height = 80,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null)
-  const waveSurferRef = useRef<WaveSurfer|null>(null)
-  const [loading, setLoading] = useState(true)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [duration, setDuration] = useState<number>(0)
-  const [activeMarker, setActiveMarker] = useState<number | null>(null)
+    // Ref to the DOM element that will contain the waveform
+    const containerRef = useRef<HTMLDivElement>(null)
+    // Ref to the WaveSurfer instance for controlling playback
+    const waveSurferRef = useRef<WaveSurfer|null>(null)
 
-  useEffect(() => {
-    if (!containerRef.current) return
+    // Loading state while waveform is being generated
+    const [loading, setLoading] = useState(true)
+    // Playback state: playing vs paused
+    const [isPlaying, setIsPlaying] = useState(false)
+    // Duration of the audio in seconds, set when WaveSurfer is ready
+    const [duration, setDuration] = useState<number>(0)
+    // Index of the currently active latency marker (for tooltip), or null
+    const [activeMarker, setActiveMarker] = useState<number | null>(null)
 
-    const ws = WaveSurfer.create({
-      container: containerRef.current,
-      waveColor,
-      progressColor,
-      cursorColor: '#333',
-      height,
-    })
-    waveSurferRef.current = ws
+    /**
+     * Initialize WaveSurfer when component mounts or when playbackUrl/config changes.
+     * Sets up event handlers and cleans up on unmount.
+     */
+    useEffect(() => {
+        if (!containerRef.current) return
 
-    ws.load(playbackUrl)
+        // Create a new WaveSurfer instance with provided colors and height
+        const ws = WaveSurfer.create({
+          container: containerRef.current,
+          waveColor,
+          progressColor,
+          cursorColor: '#333',     // caret color when hovering waveform
+          height,
+        })
+        waveSurferRef.current = ws
 
-    ws.on('ready', () => {
-      setLoading(false)
-      setDuration(ws.getDuration())
-    })
+        // Load the audio from the URL
+        ws.load(playbackUrl)
 
-    ws.on('play', () => setIsPlaying(true))
-    ws.on('pause', () => setIsPlaying(false))
-    ws.on('finish', () => {
-      setIsPlaying(false)
-      ws.seekTo(0)
-    })
+        // When waveform is generated and audio metadata loaded
+        ws.on('ready', () => {
+          setLoading(false)            // hide loading overlay
+          setDuration(ws.getDuration()) // store total duration
+        })
 
-    return () => {
-      ws.destroy()
-      waveSurferRef.current = null
-    }
-  }, [playbackUrl, waveColor, height])
+        // Update playback state on play/pause/finish
+        ws.on('play', () => setIsPlaying(true))
+        ws.on('pause', () => setIsPlaying(false))
+        ws.on('finish', () => {
+          setIsPlaying(false)
+          ws.seekTo(0)                // rewind to start after finishing
+        })
+
+        // Cleanup WaveSurfer instance on unmount or props change
+        return () => {
+          ws.destroy()
+          waveSurferRef.current = null
+        }
+    }, [playbackUrl, waveColor, progressColor, height])
 
   const togglePlayback = () => {
     const ws = waveSurferRef.current

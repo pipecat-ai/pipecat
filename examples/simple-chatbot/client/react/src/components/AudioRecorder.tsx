@@ -28,17 +28,19 @@ export function AudioRecorder({ onStopRecording }: AudioRecorderProps) {
   // only set up the recorder once, when both tracks exist
   useEffect(() => {
     if (!localTrack || !botTrack) return;
-
+    
+    // create a new audio context
     const audioCtx = new AudioContext();
+    // create a destination node to mix the tracks
     const dest     = audioCtx.createMediaStreamDestination();
     audioCtxRef.current = audioCtx;
     destRef.current     = dest;
-
+    
     const localSrc = audioCtx.createMediaStreamSource(new MediaStream([localTrack]));
     const botSrc   = audioCtx.createMediaStreamSource(new MediaStream([botTrack]));
     localSrc.connect(dest);
     botSrc.connect(dest);
-
+    // create the recorder
     const recorder = new MediaRecorder(dest.stream, { mimeType:'audio/webm; codecs=opus' });
 
     recorder.ondataavailable = e => {
@@ -70,7 +72,7 @@ export function AudioRecorder({ onStopRecording }: AudioRecorderProps) {
   }, [localTrack, botTrack]);
 
 
-  // 2) drive start/stop (and reset) purely off transport changes
+  // drive start/stop (and reset) purely off transport changes
   useEffect(() => {
     const rec = recorderRef.current;
     if (!rec) return;

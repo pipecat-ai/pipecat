@@ -16,12 +16,12 @@ export function LatencyTracker({ onLatency }: LatencyTrackerProps) {
   // hold the timestamp when the user stopped speaking
   const userEndRef = useRef<number|null>(null)
 
-  // 1) capture when the user stops speaking
+  // capture when the user stops speaking
   useRTVIClientEvent(RTVIEvent.UserStoppedSpeaking, () => {
     userEndRef.current = performance.now()
   })
 
-  // 2) listen for our server message carrying latency_ms
+  // listen for our server message carrying latency_ms
   useRTVIClientEvent(
     RTVIEvent.ServerMessage,
     (data: any) => {

@@ -1,4 +1,3 @@
-// src/components/DebugDisplay.tsx
 import { useRef, useCallback, useEffect } from 'react';
 import {
   RTVIEvent,
