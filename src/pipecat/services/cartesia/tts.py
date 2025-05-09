@@ -28,6 +28,7 @@ from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+from pipecat.utils.tracing.service_decorators import traced_tts
 from pipecat.utils.tracing.tracing import (
     AttachmentStrategy,
     is_tracing_available,
@@ -279,7 +280,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="cartesia_tts")
+    @traced_tts(name="cartesia_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -307,34 +308,6 @@ class CartesiaTTSService(AudioContextWordTTSService):
             yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-        finally:
-            if is_tracing_available():
-                from opentelemetry import trace
-
-                from pipecat.utils.tracing.helpers import add_tts_span_attributes
-
-                current_span = trace.get_current_span()
-                service_name = self.__class__.__name__.replace("TTSService", "").lower()
-
-                # Get TTFB if available
-                ttfb_ms = None
-                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                    ttfb_ms = self._metrics.ttfb_ms
-
-                # Use the helper function to add all attributes including metrics
-                add_tts_span_attributes(
-                    span=current_span,
-                    service_name=service_name,
-                    model=self.model_name,
-                    voice_id=self._voice_id,
-                    text=text,
-                    cartesia_version=self._cartesia_version,
-                    context_id=self._context_id,
-                    settings=self._settings,
-                    character_count=len(text),
-                    operation_name="tts",
-                    ttfb_ms=ttfb_ms,
-                )
 
 
 class CartesiaHttpTTSService(TTSService):
