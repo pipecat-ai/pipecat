@@ -22,7 +22,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+from pipecat.utils.tracing.service_decorators import traced_stt_transcription
 
 try:
     from deepgram import (
@@ -181,38 +181,12 @@ class DeepgramSTTService(STTService):
         # we just forget about the previous connection and create a new one.
         await self._connect()
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="deepgram_transcription")
+    @traced_stt_transcription(name="deepgram_transcription")
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
         """Handle a transcription result with tracing."""
-        if is_tracing_available():
-            from opentelemetry import trace
-
-            from pipecat.utils.tracing.helpers import add_stt_span_attributes
-
-            current_span = trace.get_current_span()
-
-            # Get service name from class name
-            service_name = self.__class__.__name__.replace("STTService", "").lower()
-
-            # Get the TTFB metric if available
-            ttfb_ms = None
-            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                ttfb_ms = self._metrics.ttfb_ms
-
-            # Use the helper function to add all attributes
-            add_stt_span_attributes(
-                span=current_span,
-                service_name=service_name,
-                model=self._settings.get("model", "unknown"),
-                transcript=transcript,
-                is_final=is_final,
-                language=str(language) if language else None,
-                vad_enabled=self.vad_enabled,
-                settings=self._settings,
-                ttfb_ms=ttfb_ms,
-            )
+        pass
 
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
