@@ -1,4 +1,0 @@
-python-dotenv==1.0.1
-modal==0.71.3
-pipecat-ai[daily,silero,cartesia,openai]
-fastapi==0.115.6
