@@ -125,14 +125,12 @@ class LatencyProcessor(FrameProcessor):
         self._user_stop_ts: float | None = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        # 1) record when user stops speaking
+        # record when user stops speaking
         await super().process_frame(frame, direction)
         if isinstance(frame, UserStoppedSpeakingFrame):
             self._user_stop_ts = time.monotonic()
-            # logger.debug(f"[Latency] user stopped @ {self._user_stop_ts:.6f}")
-            # await self.push_frame(RTVIServerMessageFrame(data={"latency_start": time.now()}))
 
-        # 2) on bot start, compute & ship metadata
+        # on bot start, compute & ship metadata
         elif isinstance(frame, BotStartedSpeakingFrame) and self._user_stop_ts is not None:
             now = time.monotonic()
             latency_ms = (now - self._user_stop_ts) * 1000
@@ -141,7 +139,7 @@ class LatencyProcessor(FrameProcessor):
             await self.push_frame(RTVIServerMessageFrame(data=payload))
             self._user_stop_ts = None
 
-        # 3) always pass frames through
+        # always pass frames through
 
         await self.push_frame(frame, direction)
 
