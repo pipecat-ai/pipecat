@@ -166,7 +166,7 @@ class AnthropicLLMService(LLMService):
             await self.start_processing_metrics()
 
             logger.debug(
-                f"{self}: Generating chat [{context.system}] | [{context.get_messages_for_logging()}]"
+                f"{self}: Generating chat [{context.system}] | {context.get_messages_for_logging()}"
             )
 
             messages = context.messages

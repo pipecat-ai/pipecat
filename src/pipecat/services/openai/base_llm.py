@@ -154,7 +154,7 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
+        logger.debug(f"{self}: Generating chat {context.get_messages_for_logging()}")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
@@ -239,6 +239,13 @@ class BaseOpenAILLMService(LLMService):
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+
+            # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
+            # we need to get LLMTextFrame for the transcript
+            elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
+                "transcript"
+            ):
+                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
