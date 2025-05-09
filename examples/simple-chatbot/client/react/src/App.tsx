@@ -1,5 +1,5 @@
 // src/App.tsx
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   RTVIClientAudio,
   RTVIClientVideo,
@@ -35,6 +35,16 @@ function AppContent() {
   const [startTime, setStartTime] = useState<number | null>(null);
   const [latencies, setLatencies] = useState<Interval[]>([]);
   
+  const transportState = useRTVIClientTransportState();
+
+  useEffect(() => {
+    if (transportState === 'connected') {
+      setMixedUrl(null);
+      setStartTime(null);
+      setLatencies([]);
+    }
+  }, [transportState]);
+
   return (
     <div className="app">
       <div className="status-bar">
@@ -56,29 +66,17 @@ function AppContent() {
 
       <LatencyTracker onLatency={({start, end} ) => {
         setLatencies((prev) => [...prev, { start, end }])
-      }} 
-      />
+      }} />
 
-  
-
-      {mixedUrl && (
+      {(mixedUrl && transportState == 'disconnected') && (
         <div style={{ marginTop: '1rem', width: '100%' }}>
           <AudioAnalysis
             playbackUrl={mixedUrl}
             startTime={startTime!}
             latencies={latencies}
           />
-
-          {/* Download button */}
-          <div style={{ marginTop: '0.5rem' }}>
-            <a href={mixedUrl} download="call-recording.webm">
-              <button type="button">Download Recording</button>
-            </a>
-          </div>
         </div>
       )}
-
-
     </div>
   );
 }

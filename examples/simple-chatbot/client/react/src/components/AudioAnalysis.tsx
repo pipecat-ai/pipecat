@@ -77,7 +77,13 @@ export const AudioAnalysis: React.FC<AudioAnalysisProps> = ({
           }}
         >Generating waveform...</div>
       )}
-
+      <a href={playbackUrl} download="call-recording.webm">
+              <button type="button" style={{
+          marginBottom: 8, marginRight:6, padding: '8px 16px', borderRadius: 4,
+          border: '1px solid #ccc', backgroundColor: '#fff',
+          cursor: loading ? 'not-allowed' : 'pointer',
+        }}>Download</button>
+      </a>
       {/* Play/Pause Button */}
       <button
         onClick={togglePlayback}
@@ -115,7 +121,7 @@ export const AudioAnalysis: React.FC<AudioAnalysisProps> = ({
                   style={{
                     position: 'absolute', left: `${leftPercent}%`, top: '102%', zIndex: 20,
                     transform: 'translate(-50%, -50%)', width: 10, height: 10,
-                    borderRadius: '50%', backgroundColor: 'rgba(220,38,38,1)',
+                    borderRadius: '50%', backgroundColor: 'rgba(220,38,38, 1)',
                     pointerEvents: 'auto',
                     cursor: 'pointer',
                     touchAction: 'manipulation',

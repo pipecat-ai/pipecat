@@ -1,17 +1,29 @@
 // src/components/DebugDisplay.tsx
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import {
   RTVIEvent,
   TranscriptData,
   BotLLMTextData,
 } from '@pipecat-ai/client-js';
-import { useRTVIClientEvent } from '@pipecat-ai/client-react';
+import { useRTVIClientEvent, useRTVIClientTransportState } from '@pipecat-ai/client-react';
 import './TranscriptDisplay.css';
 
 export function TranscriptDisplay() {
   const debugLogRef = useRef<HTMLDivElement>(null);
   const lastUserTextRef = useRef<string | null>(null);
 
+  const transportState = useRTVIClientTransportState();
+
+  useEffect(() => {
+    if (transportState === 'connected') {
+      // Clear the log when connected
+      if (debugLogRef.current) {
+        debugLogRef.current.innerHTML = '';
+      }
+    }
+  }
+  , [transportState]);
+  
   const log = useCallback((message: string) => {
     if (!debugLogRef.current) return;
 
