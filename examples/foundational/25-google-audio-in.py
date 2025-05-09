@@ -34,6 +34,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -286,16 +287,18 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    conversation_llm = GoogleLLMService(
-        name="Conversation",
-        model="gemini-2.0-flash-001",
-        # model="gemini-exp-1121",
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        # we can give the GoogleLLMService a system instruction to use directly
-        # in the GenerativeModel constructor. Let's do that rather than put
-        # our system message in the messages list.
-        system_instruction=conversation_system_message,
-    )
+    # conversation_llm = GoogleLLMService(
+    #     name="Conversation",
+    #     model="gemini-2.0-flash-001",
+    #     # model="gemini-exp-1121",
+    #     api_key=os.getenv("GOOGLE_API_KEY"),
+    #     # we can give the GoogleLLMService a system instruction to use directly
+    #     # in the GenerativeModel constructor. Let's do that rather than put
+    #     # our system message in the messages list.
+    #     system_instruction=conversation_system_message,
+    # )
+
+    conversation_llm = OpenAILLMService(name="Conversation", api_key=os.getenv("OPENAI_API_KEY"))
 
     input_transcription_llm = GoogleLLMService(
         name="Transcription",
