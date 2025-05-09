@@ -19,11 +19,13 @@ the conversation flow using Gemini's streaming capabilities.
 import asyncio
 import os
 import sys
+import time
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
+from processors.latency import LatencyProcessor
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -34,13 +36,19 @@ from pipecat.frames.frames import (
     Frame,
     OutputImageRawFrame,
     SpriteFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIConfig,
+    RTVIObserver,
+    RTVIProcessor,
+    RTVIServerMessageFrame,
+)
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -155,7 +163,7 @@ async def main():
         # RTVI events for Pipecat client UI
         #
         rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
-
+        latency = LatencyProcessor(transport, rtvi)
         pipeline = Pipeline(
             [
                 transport.input(),
@@ -163,6 +171,7 @@ async def main():
                 context_aggregator.user(),
                 llm,
                 ta,
+                latency,
                 transport.output(),
                 context_aggregator.assistant(),
             ]

@@ -2,3 +2,5 @@ python-dotenv
 fastapi[all]
 uvicorn
 pipecat-ai[daily,elevenlabs,openai,silero,google]
+pytest
+pytest-asyncio

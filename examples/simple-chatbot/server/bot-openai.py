@@ -26,6 +26,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from PIL import Image
+from processors.latency import LatencyProcessor
 from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -115,33 +116,33 @@ class TalkingAnimation(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class LatencyProcessor(FrameProcessor):
-    """Measure user-stop → bot-start and send it as metadata to the client."""
+# class LatencyProcessor(FrameProcessor):
+#     """Measure user-stop → bot-start and send it as metadata to the client."""
 
-    def __init__(self, transport, rtvi):
-        super().__init__()
-        self.transport = transport
-        self.rtvi = rtvi
-        self._user_stop_ts: float | None = None
+#     def __init__(self, transport, rtvi):
+#         super().__init__()
+#         self.transport = transport
+#         self.rtvi = rtvi
+#         self._user_stop_ts: float | None = None
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        # record when user stops speaking
-        await super().process_frame(frame, direction)
-        if isinstance(frame, UserStoppedSpeakingFrame):
-            self._user_stop_ts = time.monotonic()
+#     async def process_frame(self, frame: Frame, direction: FrameDirection):
+#         # record when user stops speaking
+#         await super().process_frame(frame, direction)
+#         if isinstance(frame, UserStoppedSpeakingFrame):
+#             self._user_stop_ts = time.monotonic()
 
-        # on bot start, compute & ship metadata
-        elif isinstance(frame, BotStartedSpeakingFrame) and self._user_stop_ts is not None:
-            now = time.monotonic()
-            latency_ms = (now - self._user_stop_ts) * 1000
-            payload = {"latency_ms": latency_ms}
-            logger.debug(f"[Latency] injecting RTVIServerMessageFrame {payload}")
-            await self.push_frame(RTVIServerMessageFrame(data=payload))
-            self._user_stop_ts = None
+#         # on bot start, compute & ship metadata
+#         elif isinstance(frame, BotStartedSpeakingFrame) and self._user_stop_ts is not None:
+#             now = time.monotonic()
+#             latency_ms = (now - self._user_stop_ts) * 1000
+#             payload = {"latency_ms": latency_ms}
+#             logger.debug(f"[Latency] injecting RTVIServerMessageFrame {payload}")
+#             await self.push_frame(RTVIServerMessageFrame(data=payload))
+#             self._user_stop_ts = None
 
-        # always pass frames through
+#         # always pass frames through
 
-        await self.push_frame(frame, direction)
+#         await self.push_frame(frame, direction)
 
 
 async def main():
