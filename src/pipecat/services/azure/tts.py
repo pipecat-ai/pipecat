@@ -269,31 +269,25 @@ class AzureHttpTTSService(AzureBaseTTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        try:
-            await self.start_ttfb_metrics()
+        await self.start_ttfb_metrics()
 
-            ssml = self._construct_ssml(text)
+        ssml = self._construct_ssml(text)
 
-            result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, ssml)
+        result = await asyncio.to_thread(self._speech_synthesizer.speak_ssml, ssml)
 
-            if result.reason == ResultReason.SynthesizingAudioCompleted:
-                await self.start_tts_usage_metrics(text)
-                await self.stop_ttfb_metrics()
-                yield TTSStartedFrame()
-                # Azure always sends a 44-byte header. Strip it off.
-                yield TTSAudioRawFrame(
-                    audio=result.audio_data[44:],
-                    sample_rate=self.sample_rate,
-                    num_channels=1,
-                )
-                yield TTSStoppedFrame()
-            elif result.reason == ResultReason.Canceled:
-                cancellation_details = result.cancellation_details
-                logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")
-                if cancellation_details.reason == CancellationReason.Error:
-                    logger.error(f"{self} error: {cancellation_details.error_details}")
-                    yield ErrorFrame(f"Azure TTS error: {cancellation_details.error_details}")
-
-        except Exception as e:
-            logger.error(f"{self} error during TTS generation: {e}")
-            yield ErrorFrame(f"Error during Azure TTS generation: {str(e)}")
+        if result.reason == ResultReason.SynthesizingAudioCompleted:
+            await self.start_tts_usage_metrics(text)
+            await self.stop_ttfb_metrics()
+            yield TTSStartedFrame()
+            # Azure always sends a 44-byte header. Strip it off.
+            yield TTSAudioRawFrame(
+                audio=result.audio_data[44:],
+                sample_rate=self.sample_rate,
+                num_channels=1,
+            )
+            yield TTSStoppedFrame()
+        elif result.reason == ResultReason.Canceled:
+            cancellation_details = result.cancellation_details
+            logger.warning(f"Speech synthesis canceled: {cancellation_details.reason}")
+            if cancellation_details.reason == CancellationReason.Error:
+                logger.error(f"{self} error: {cancellation_details.error_details}")

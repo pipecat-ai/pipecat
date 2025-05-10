@@ -150,7 +150,10 @@ class AnthropicLLMService(LLMService):
 
     @traced(attachment_strategy=AttachmentStrategy.CHILD, name="anthropic_process_context")
     async def _process_context(self, context: OpenAILLMContext):
-        # Usage tracking variables
+        # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
+        # completion_tokens. We also estimate the completion tokens from output text
+        # and use that estimate if we are interrupted, because we almost certainly won't
+        # get a complete usage report if the task we're running in is cancelled.
         prompt_tokens = 0
         completion_tokens = 0
         completion_tokens_estimate = 0

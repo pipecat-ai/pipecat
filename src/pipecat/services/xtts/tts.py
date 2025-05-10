@@ -122,74 +122,68 @@ class XTTSService(TTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
-        try:
-            if not self._studio_speakers:
-                logger.error(f"{self} no studio speakers available")
-                yield ErrorFrame("No studio speakers available")
+        if not self._studio_speakers:
+            logger.error(f"{self} no studio speakers available")
+            return
+
+        embeddings = self._studio_speakers[self._voice_id]
+
+        url = self._settings["base_url"] + "/tts_stream"
+
+        payload = {
+            "text": text.replace(".", "").replace("*", ""),
+            "language": self._settings["language"],
+            "speaker_embedding": embeddings["speaker_embedding"],
+            "gpt_cond_latent": embeddings["gpt_cond_latent"],
+            "add_wav_header": False,
+            "stream_chunk_size": 20,
+        }
+
+        await self.start_ttfb_metrics()
+
+        async with self._aiohttp_session.post(url, json=payload) as r:
+            if r.status != 200:
+                text = await r.text()
+                logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
+                yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
                 return
 
-            embeddings = self._studio_speakers[self._voice_id]
+            await self.start_tts_usage_metrics(text)
 
-            url = self._settings["base_url"] + "/tts_stream"
+            yield TTSStartedFrame()
 
-            payload = {
-                "text": text.replace(".", "").replace("*", ""),
-                "language": self._settings["language"],
-                "speaker_embedding": embeddings["speaker_embedding"],
-                "gpt_cond_latent": embeddings["gpt_cond_latent"],
-                "add_wav_header": False,
-                "stream_chunk_size": 20,
-            }
+            CHUNK_SIZE = 1024
 
-            await self.start_ttfb_metrics()
+            buffer = bytearray()
+            async for chunk in r.content.iter_chunked(CHUNK_SIZE):
+                if len(chunk) > 0:
+                    await self.stop_ttfb_metrics()
+                    # Append new chunk to the buffer.
+                    buffer.extend(chunk)
 
-            async with self._aiohttp_session.post(url, json=payload) as r:
-                if r.status != 200:
-                    text = await r.text()
-                    logger.error(f"{self} error getting audio (status: {r.status}, error: {text})")
-                    yield ErrorFrame(f"Error getting audio (status: {r.status}, error: {text})")
-                    return
+                    # Check if buffer has enough data for processing.
+                    while (
+                        len(buffer) >= 48000
+                    ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
+                        # Process the buffer up to a safe size for resampling.
+                        process_data = buffer[:48000]
+                        # Remove processed data from buffer.
+                        buffer = buffer[48000:]
 
-                await self.start_tts_usage_metrics(text)
+                        # XTTS uses 24000 so we need to resample to our desired rate.
+                        resampled_audio = await self._resampler.resample(
+                            bytes(process_data), 24000, self.sample_rate
+                        )
+                        # Create the frame with the resampled audio
+                        frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                        yield frame
 
-                yield TTSStartedFrame()
+            # Process any remaining data in the buffer.
+            if len(buffer) > 0:
+                resampled_audio = await self._resampler.resample(
+                    bytes(buffer), 24000, self.sample_rate
+                )
+                frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
+                yield frame
 
-                CHUNK_SIZE = 1024
-
-                buffer = bytearray()
-                async for chunk in r.content.iter_chunked(CHUNK_SIZE):
-                    if len(chunk) > 0:
-                        await self.stop_ttfb_metrics()
-                        # Append new chunk to the buffer.
-                        buffer.extend(chunk)
-
-                        # Check if buffer has enough data for processing.
-                        while (
-                            len(buffer) >= 48000
-                        ):  # Assuming at least 0.5 seconds of audio data at 24000 Hz
-                            # Process the buffer up to a safe size for resampling.
-                            process_data = buffer[:48000]
-                            # Remove processed data from buffer.
-                            buffer = buffer[48000:]
-
-                            # XTTS uses 24000 so we need to resample to our desired rate.
-                            resampled_audio = await self._resampler.resample(
-                                bytes(process_data), 24000, self.sample_rate
-                            )
-                            # Create the frame with the resampled audio
-                            frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
-                            yield frame
-
-                # Process any remaining data in the buffer.
-                if len(buffer) > 0:
-                    resampled_audio = await self._resampler.resample(
-                        bytes(buffer), 24000, self.sample_rate
-                    )
-                    frame = TTSAudioRawFrame(resampled_audio, self.sample_rate, 1)
-                    yield frame
-
-                yield TTSStoppedFrame()
-
-        except Exception as e:
-            logger.error(f"{self} error during TTS generation: {e}")
-            yield ErrorFrame(f"Error during TTS generation: {str(e)}")
+            yield TTSStoppedFrame()

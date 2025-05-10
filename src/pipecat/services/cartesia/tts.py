@@ -398,4 +398,6 @@ class CartesiaHttpTTSService(TTSService):
             yield frame
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+        finally:
+            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
