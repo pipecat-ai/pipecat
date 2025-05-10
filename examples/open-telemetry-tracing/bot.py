@@ -20,10 +20,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
@@ -77,16 +75,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     llm = OpenAILLMService(
         api_key=os.getenv("OPENAI_API_KEY"), params=OpenAILLMService.InputParams(temperature=0.5)
     )
-    # llm = AnthropicLLMService(
-    #     api_key=os.getenv("ANTHROPIC_API_KEY"),
-    #     model="claude-3-7-sonnet-latest",
-    #     params=AnthropicLLMService.InputParams(temperature=0.5),
-    # )
-    # llm = GoogleLLMService(
-    #     api_key=os.getenv("GOOGLE_API_KEY"),
-    #     model="gemini-2.0-flash-001",
-    #     params=GoogleLLMService.InputParams(temperature=0.5),
-    # )
 
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
