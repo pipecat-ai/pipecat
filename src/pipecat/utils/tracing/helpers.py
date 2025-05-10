@@ -13,7 +13,10 @@ from typing import Any, Dict, Optional
 def add_nested_settings_as_attributes(span, prefix, settings):
     """Add nested settings as flattened span attributes."""
     for key, value in settings.items():
-        if isinstance(value, dict):
+        if value is None:
+            # Skip None values to avoid OpenTelemetry warnings
+            continue
+        elif isinstance(value, dict):
             # Recursively add nested dictionaries
             add_nested_settings_as_attributes(span, f"{prefix}.{key}", value)
         elif isinstance(value, (str, int, float, bool, type(None))):
@@ -55,11 +58,11 @@ def add_tts_span_attributes(
     span.set_attribute("tts.text", text)
 
     # Add language if provided
-    if "language" in kwargs:
+    if "language" in kwargs and kwargs["language"] is not None:
         span.set_attribute("tts.language", str(kwargs["language"]))
 
     # Add cartesia-specific attributes
-    if "cartesia_version" in kwargs:
+    if "cartesia_version" in kwargs and kwargs["cartesia_version"] is not None:
         span.set_attribute("tts.cartesia_version", kwargs["cartesia_version"])
     if "context_id" in kwargs and kwargs["context_id"]:
         span.set_attribute("tts.context_id", kwargs["context_id"])
@@ -67,8 +70,20 @@ def add_tts_span_attributes(
     # Handle settings if provided (special case for comprehensive configuration)
     if "settings" in kwargs:
         settings = kwargs["settings"]
-        # Add flattened nested settings for easier querying
-        add_nested_settings_as_attributes(span, "tts.setting", settings)
+        # Add flattened nested settings for easier querying, skipping None values
+        for key, value in settings.items():
+            if isinstance(value, dict):
+                # Recursively add nested dictionaries
+                add_nested_settings_as_attributes(span, f"tts.setting", value)
+            elif value is not None and isinstance(value, (str, int, float, bool, type(None))):
+                # Add simple types directly
+                span.set_attribute(f"tts.setting.{key}", value)
+            elif value is not None:
+                # For other types, convert to string
+                try:
+                    span.set_attribute(f"tts.setting.{key}", json.dumps(value))
+                except (TypeError, ValueError):
+                    span.set_attribute(f"tts.setting.{key}", str(value))
 
     # Add metrics attributes
     if "ttfb_ms" in kwargs and kwargs["ttfb_ms"] is not None:
@@ -84,22 +99,27 @@ def add_tts_span_attributes(
 
     # Add any custom metrics
     for key, value in kwargs.items():
-        if key.startswith("metric."):
+        if key.startswith("metric.") and value is not None:
             # Allow passing custom metrics with metric.* prefix
             metric_name = key[7:]  # Remove "metric." prefix
             span.set_attribute(f"metrics.{metric_name}", value)
 
     # Add any additional attributes with tts. prefix
     for key, value in kwargs.items():
-        if key not in [
-            "language",
-            "settings",
-            "cartesia_version",
-            "context_id",
-            "ttfb_ms",
-            "character_count",
-            "operation_name",
-        ] and not key.startswith("metric."):
+        if (
+            key
+            not in [
+                "language",
+                "settings",
+                "cartesia_version",
+                "context_id",
+                "ttfb_ms",
+                "character_count",
+                "operation_name",
+            ]
+            and not key.startswith("metric.")
+            and value is not None
+        ):
             span.set_attribute(f"tts.{key}", value)
 
 
