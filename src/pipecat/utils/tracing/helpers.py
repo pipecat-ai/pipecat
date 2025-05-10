@@ -193,6 +193,7 @@ def add_llm_span_attributes(
             - tools: Tools configuration
             - tool_count: Number of tools
             - tool_choice: Tool choice configuration
+            - system: System message (for Anthropic)
             - ttfb_ms: Time to first byte in milliseconds
             - parameters: Model parameters
             - extra_parameters: Additional parameters
@@ -212,6 +213,13 @@ def add_llm_span_attributes(
             span.set_attribute("llm.messages", kwargs["messages"])
         except Exception as e:
             span.set_attribute("llm.messages_error", f"Error serializing messages: {str(e)}")
+
+    # Add system message if provided (for Anthropic)
+    if "system" in kwargs:
+        try:
+            span.set_attribute("llm.system", str(kwargs["system"]))
+        except Exception as e:
+            span.set_attribute("llm.system_error", f"Error adding system message: {str(e)}")
 
     # Add tools if provided
     if "tools" in kwargs:
@@ -242,7 +250,7 @@ def add_llm_span_attributes(
     # Add parameters if provided
     if "parameters" in kwargs:
         for param_name, param_value in kwargs["parameters"].items():
-            if param_value is not "NOT_GIVEN" and isinstance(param_value, (int, float, bool)):
+            if param_value is not "NOT_GIVEN" and isinstance(param_value, (int, float, bool, str)):
                 span.set_attribute(f"llm.param.{param_name}", param_value)
             elif param_value == "NOT_GIVEN":
                 span.set_attribute(f"llm.param.{param_name}", "NOT_GIVEN")
@@ -260,6 +268,7 @@ def add_llm_span_attributes(
         if key not in [
             "stream",
             "messages",
+            "system",
             "tools",
             "tool_count",
             "tool_choice",

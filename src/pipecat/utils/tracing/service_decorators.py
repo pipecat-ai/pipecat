@@ -284,8 +284,11 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, context, *args, **kwargs)
 
-            # Get the turn context first, then fall back to service context
+            # Store the current turn context before function call
+            # This will be used to restore function call traces
             turn_context = get_current_turn_context()
+
+            # Get the service parent context
             parent_context = turn_context or get_parent_service_context(self)
 
             # Create a new span as child of the turn span or service span
@@ -317,33 +320,135 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     try:
                         import json
 
-                        # Try to serialize messages from context
-                        messages = []
-                        if hasattr(context, "get_messages"):
-                            messages = context.get_messages()
+                        # Detect if we're using Google's service
+                        is_google_service = "google" in service_name.lower()
 
-                        # Get tools if available
+                        # Try to get messages based on service type
+                        messages = None
+                        serialized_messages = None
+
+                        if is_google_service:
+                            # Handle Google service specifically
+                            if hasattr(context, "get_messages_for_logging"):
+                                messages = context.get_messages_for_logging()
+                                # Google messages are already pre-formatted for logging, so we can just use them
+                                try:
+                                    serialized_messages = json.dumps(messages)
+                                except Exception as e:
+                                    serialized_messages = (
+                                        f"Error serializing Google messages: {str(e)}"
+                                    )
+                        else:
+                            # Handle other services like OpenAI
+                            if hasattr(context, "get_messages"):
+                                messages = context.get_messages()
+                            elif hasattr(context, "messages"):
+                                messages = context.messages
+
+                            # For OpenAI-style messages, use standard JSON serialization
+                            if messages:
+                                try:
+                                    # Standard message format should serialize fine
+                                    serialized_messages = json.dumps(messages)
+                                except Exception as e:
+                                    serialized_messages = f"Error serializing messages: {str(e)}"
+
+                        # Get tools, system message, etc. based on the service type
                         tools = getattr(context, "tools", None)
-                        tool_choice = getattr(context, "tool_choice", None)
+                        serialized_tools = None
+                        tool_count = 0
 
-                        # Set initial attributes
-                        add_llm_span_attributes(
-                            span=current_span,
-                            service_name=service_name,
-                            model=getattr(self, "model_name", "unknown"),
-                        )
+                        if tools:
+                            try:
+                                if is_google_service:
+                                    # Special handling for Google tools
+                                    serialized_tools = json.dumps(tools)
+                                else:
+                                    # Standard serialization for other services
+                                    serialized_tools = json.dumps(tools)
+                                tool_count = len(tools) if isinstance(tools, list) else 1
+                            except Exception as e:
+                                serialized_tools = f"Error serializing tools: {str(e)}"
+
+                        # Handle system message for different services
+                        system_message = None
+                        if hasattr(context, "system"):
+                            system_message = context.system
+                        elif hasattr(context, "system_message"):
+                            system_message = context.system_message
+                        elif hasattr(self, "_system_instruction"):
+                            system_message = self._system_instruction
+
+                        # Get settings from the service
+                        params = {}
+                        if hasattr(self, "_settings"):
+                            for key, value in self._settings.items():
+                                if key == "extra":
+                                    continue
+                                # Add value directly if it's a basic type
+                                if isinstance(value, (int, float, bool, str)):
+                                    params[key] = value
+                                elif value is None or (
+                                    hasattr(value, "__name__") and value.__name__ == "NOT_GIVEN"
+                                ):
+                                    params[key] = "NOT_GIVEN"
+
+                        # Add all available attributes to the span
+                        attribute_kwargs = {
+                            "service_name": service_name,
+                            "model": getattr(self, "model_name", "unknown"),
+                            "stream": True,  # Most LLM services use streaming
+                            "parameters": params,
+                        }
+
+                        # Add optional attributes only if they exist
+                        if serialized_messages:
+                            attribute_kwargs["messages"] = serialized_messages
+                        if serialized_tools:
+                            attribute_kwargs["tools"] = serialized_tools
+                            attribute_kwargs["tool_count"] = tool_count
+                        if system_message:
+                            attribute_kwargs["system"] = system_message
+
+                        # Add all gathered attributes to the span
+                        add_llm_span_attributes(span=current_span, **attribute_kwargs)
                     except Exception as e:
                         logging.warning(f"Error adding initial LLM attributes: {e}")
+
+                    # Patch the LLM service's call_function method to ensure function calls use the same turn context
+                    original_call_function = None
+                    if hasattr(self, "call_function"):
+                        original_call_function = self.call_function
+
+                        @functools.wraps(original_call_function)
+                        async def wrapped_call_function(*call_args, **call_kwargs):
+                            # Use the turn_context when making function calls
+                            if turn_context and is_tracing_available():
+                                # This is key: temporarily set the global current span to be in the turn context
+                                # before executing the function call
+                                ctx_token = context_api.attach(turn_context)
+                                try:
+                                    return await original_call_function(*call_args, **call_kwargs)
+                                finally:
+                                    context_api.detach(ctx_token)
+                            else:
+                                return await original_call_function(*call_args, **call_kwargs)
+
+                        # Replace temporarily
+                        self.call_function = wrapped_call_function
 
                     # Call the original function
                     return await f(self, context, *args, **kwargs)
                 finally:
-                    # Restore the original method if we overrode it
+                    # Restore the original methods if we overrode them
                     if (
                         "original_start_llm_usage_metrics" in locals()
                         and original_start_llm_usage_metrics
                     ):
                         self.start_llm_usage_metrics = original_start_llm_usage_metrics
+
+                    if "original_call_function" in locals() and original_call_function:
+                        self.call_function = original_call_function
 
                     # Update TTFB metric
                     ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)

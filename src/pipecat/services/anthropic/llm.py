@@ -46,7 +46,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
@@ -148,7 +148,7 @@ class AnthropicLLMService(LLMService):
         assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="anthropic_process_context")
+    @traced_llm(name="anthropic_process_context")
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text
@@ -160,13 +160,6 @@ class AnthropicLLMService(LLMService):
         use_completion_tokens_estimate = False
         cache_creation_input_tokens = 0
         cache_read_input_tokens = 0
-
-        # Parameters for tracing
-        request_params = {}
-        has_tools = False
-        tool_count = 0
-        serialized_messages = None
-        serialized_tools = None
 
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -199,41 +192,6 @@ class AnthropicLLMService(LLMService):
             }
 
             params.update(self._settings["extra"])
-
-            # Store relevant parameters for tracing
-            request_params = {
-                k: v
-                for k, v in params.items()
-                if k not in ["messages", "tools", "system"]
-                and v is not NOT_GIVEN
-                and isinstance(v, (int, float, bool, str))
-            }
-            has_tools = bool(context.tools)
-            tool_count = len(context.tools) if context.tools else 0
-
-            # Prepare messages for tracing
-            if is_tracing_available():
-
-                def prepare_for_json(obj):
-                    if isinstance(obj, dict):
-                        return {k: prepare_for_json(v) for k, v in obj.items()}
-                    elif isinstance(obj, list):
-                        return [prepare_for_json(item) for item in obj]
-                    elif obj is NOT_GIVEN:
-                        return "NOT_GIVEN"
-                    else:
-                        return obj
-
-                try:
-                    serialized_messages = json.dumps(prepare_for_json(messages))
-                except Exception as e:
-                    serialized_messages = f"Error serializing messages: {str(e)}"
-
-                if has_tools:
-                    try:
-                        serialized_tools = json.dumps(prepare_for_json(context.tools))
-                    except Exception as e:
-                        serialized_tools = f"Error serializing tools: {str(e)}"
 
             response = await api_call(**params)
 
@@ -342,48 +300,6 @@ class AnthropicLLMService(LLMService):
                 cache_creation_input_tokens=cache_creation_input_tokens,
                 cache_read_input_tokens=cache_read_input_tokens,
             )
-
-            if is_tracing_available():
-                from opentelemetry import trace
-
-                from pipecat.utils.tracing.helpers import add_llm_span_attributes
-
-                current_span = trace.get_current_span()
-                service_name = self.__class__.__name__.replace("LLMService", "").lower()
-
-                token_usage = {
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": comp_tokens,
-                }
-
-                if cache_creation_input_tokens:
-                    token_usage["cache_creation_input_tokens"] = cache_creation_input_tokens
-
-                if cache_read_input_tokens:
-                    token_usage["cache_read_input_tokens"] = cache_read_input_tokens
-
-                extra_parameters = {}
-                if self._settings["extra"]:
-                    for key, value in self._settings["extra"].items():
-                        if value is NOT_GIVEN:
-                            extra_parameters[key] = "NOT_GIVEN"
-                        elif isinstance(value, (int, float, bool, str)):
-                            extra_parameters[key] = value
-
-                add_llm_span_attributes(
-                    span=current_span,
-                    service_name=service_name,
-                    model=self.model_name,
-                    stream=True,
-                    messages=serialized_messages,
-                    tools=serialized_tools if has_tools else None,
-                    tool_count=tool_count,
-                    token_usage=token_usage,
-                    parameters=request_params,
-                    extra_parameters=extra_parameters,
-                    ttfb_ms=self._metrics.ttfb_ms if hasattr(self._metrics, "ttfb_ms") else None,
-                    cache_enabled=self._settings.get("enable_prompt_caching_beta", False),
-                )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
