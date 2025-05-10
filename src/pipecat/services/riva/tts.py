@@ -131,9 +131,8 @@ class RivaTTSService(TTSService):
         except asyncio.TimeoutError:
             logger.error(f"{self} timeout waiting for audio response")
 
-        finally:
-            await self.start_tts_usage_metrics(text)
-            yield TTSStoppedFrame()
+        await self.start_tts_usage_metrics(text)
+        yield TTSStoppedFrame()
 
 
 class FastPitchTTSService(RivaTTSService):

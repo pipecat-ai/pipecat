@@ -181,6 +181,13 @@ class DeepgramSTTService(STTService):
         # we just forget about the previous connection and create a new one.
         await self._connect()
 
+    async def _on_speech_started(self, *args, **kwargs):
+        await self.start_metrics()
+        await self._call_event_handler("on_speech_started", *args, **kwargs)
+
+    async def _on_utterance_end(self, *args, **kwargs):
+        await self._call_event_handler("on_utterance_end", *args, **kwargs)
+
     @traced_stt_transcription(name="deepgram_transcription")
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None

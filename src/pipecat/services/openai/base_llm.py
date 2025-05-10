@@ -208,11 +208,6 @@ class BaseOpenAILLMService(LLMService):
 
             await self.stop_ttfb_metrics()
 
-            if chunk.choices is None or len(chunk.choices) == 0:
-                continue
-
-            await self.stop_ttfb_metrics()
-
             if not chunk.choices[0].delta:
                 continue
 
