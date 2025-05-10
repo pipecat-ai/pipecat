@@ -18,7 +18,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+from pipecat.utils.tracing.service_decorators import traced_stt_transcription
 
 if TYPE_CHECKING:
     try:
@@ -347,33 +347,10 @@ class WhisperSTTService(SegmentedSTTService):
             logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
             self._model = None
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="whisper_transcription")
+    @traced_stt_transcription(name="whisper_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
-        if is_tracing_available():
-            from opentelemetry import trace
-
-            from pipecat.utils.tracing.helpers import add_stt_span_attributes
-
-            current_span = trace.get_current_span()
-
-            service_name = self.__class__.__name__.replace("STTService", "").lower()
-
-            ttfb_ms = None
-            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                ttfb_ms = self._metrics.ttfb_ms
-
-            add_stt_span_attributes(
-                span=current_span,
-                service_name=service_name,
-                model=self.model_name,
-                transcript=transcript,
-                is_final=True,  # Local Whisper only provides final transcripts
-                language=self.language_to_service_language(language) if language else None,
-                vad_enabled=False,
-                settings=self._settings,
-                ttfb_ms=ttfb_ms,
-            )
+        pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes given audio using Whisper.
@@ -467,33 +444,10 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         """MLX Whisper loads models on demand, so this is a no-op."""
         pass
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="whisper_transcription")
+    @traced_stt_transcription(name="whisper_mlx_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
-        if is_tracing_available():
-            from opentelemetry import trace
-
-            from pipecat.utils.tracing.helpers import add_stt_span_attributes
-
-            current_span = trace.get_current_span()
-
-            service_name = self.__class__.__name__.replace("STTService", "").lower()
-
-            ttfb_ms = None
-            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                ttfb_ms = self._metrics.ttfb_ms
-
-            add_stt_span_attributes(
-                span=current_span,
-                service_name=service_name,
-                model=self.model_name,
-                transcript=transcript,
-                is_final=True,  # Local Whisper only provides final transcripts
-                language=self.language_to_service_language(language) if language else None,
-                vad_enabled=False,
-                settings=self._settings,
-                ttfb_ms=ttfb_ms,
-            )
+        pass
 
     @override
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:

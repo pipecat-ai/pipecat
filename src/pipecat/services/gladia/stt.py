@@ -26,7 +26,7 @@ from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+from pipecat.utils.tracing.service_decorators import traced_stt_transcription
 
 try:
     import websockets
@@ -359,37 +359,10 @@ class GladiaSTTService(STTService):
                         f"Failed to initialize Gladia session: {response.status} - {error_text}"
                     )
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="gladia_transcription")
+    @traced_stt_transcription(name="gladia_transcription")
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
     ):
-        if is_tracing_available():
-            from opentelemetry import trace
-
-            from pipecat.utils.tracing.helpers import add_stt_span_attributes
-
-            current_span = trace.get_current_span()
-
-            service_name = self.__class__.__name__.replace("STTService", "").lower()
-
-            ttfb_ms = None
-            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                ttfb_ms = self._metrics.ttfb_ms
-
-            add_stt_span_attributes(
-                span=current_span,
-                service_name=service_name,
-                model=self._model_name,
-                transcript=transcript,
-                is_final=is_final,
-                language=language,
-                vad_enabled=False,
-                settings=self._settings,
-                confidence_threshold=self._confidence,
-                confidence=confidence,
-                ttfb_ms=ttfb_ms,
-            )
-
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
