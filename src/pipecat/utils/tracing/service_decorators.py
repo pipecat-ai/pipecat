@@ -284,12 +284,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, context, *args, **kwargs)
 
-            # Store the current turn context before function call
-            # This will be used to restore function call traces
-            turn_context = get_current_turn_context()
-
-            # Get the service parent context
-            parent_context = turn_context or get_parent_service_context(self)
+            # Get the parent context - turn context if available, otherwise service context
+            parent_context = get_current_turn_context() or get_parent_service_context(self)
 
             # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
@@ -415,28 +411,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     except Exception as e:
                         logging.warning(f"Error adding initial LLM attributes: {e}")
 
-                    # Patch the LLM service's call_function method to ensure function calls use the same turn context
-                    original_call_function = None
-                    if hasattr(self, "call_function"):
-                        original_call_function = self.call_function
-
-                        @functools.wraps(original_call_function)
-                        async def wrapped_call_function(*call_args, **call_kwargs):
-                            # Use the turn_context when making function calls
-                            if turn_context and is_tracing_available():
-                                # This is key: temporarily set the global current span to be in the turn context
-                                # before executing the function call
-                                ctx_token = context_api.attach(turn_context)
-                                try:
-                                    return await original_call_function(*call_args, **call_kwargs)
-                                finally:
-                                    context_api.detach(ctx_token)
-                            else:
-                                return await original_call_function(*call_args, **call_kwargs)
-
-                        # Replace temporarily
-                        self.call_function = wrapped_call_function
-
                     # Call the original function
                     return await f(self, context, *args, **kwargs)
                 finally:
@@ -446,9 +420,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         and original_start_llm_usage_metrics
                     ):
                         self.start_llm_usage_metrics = original_start_llm_usage_metrics
-
-                    if "original_call_function" in locals() and original_call_function:
-                        self.call_function = original_call_function
 
                     # Update TTFB metric
                     ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
