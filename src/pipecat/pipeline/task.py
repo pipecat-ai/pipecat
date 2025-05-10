@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
@@ -120,45 +121,7 @@ class PipelineTaskSink(FrameProcessor):
 
 
 class PipelineTask(BaseTask):
-    """Manages the execution of a pipeline, handling frame processing and task lifecycle.
-
-    It has a couple of event handlers `on_frame_reached_upstream` and
-    `on_frame_reached_downstream` that are called when upstream frames or
-    downstream frames reach both ends of pipeline. By default, the events
-    handlers will not be called unless some filters are set using
-    `set_reached_upstream_filter` and `set_reached_downstream_filter`.
-
-       @task.event_handler("on_frame_reached_upstream")
-       async def on_frame_reached_upstream(task, frame):
-           ...
-
-       @task.event_handler("on_frame_reached_downstream")
-       async def on_frame_reached_downstream(task, frame):
-           ...
-
-    It also has an event handler that detects when the pipeline is idle. By
-    default, a pipeline is idle if no `BotSpeakingFrame` or
-    `LLMFullResponseEndFrame` are received within `idle_timeout_secs`.
-
-       @task.event_handler("on_idle_timeout")
-       async def on_idle_timeout(task):
-           ...
-
-    Args:
-        pipeline: The pipeline to execute.
-        params: Configuration parameters for the pipeline.
-        observers: List of observers for monitoring pipeline execution.
-        clock: Clock implementation for timing operations.
-        check_dangling_tasks: Whether to check for processors' tasks finishing properly.
-        idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
-            None. If a pipeline is idle the pipeline task will be cancelled
-            automatically.
-        idle_timeout_frames: A tuple with the frames that should trigger an idle
-            timeout if not received withing `idle_timeout_seconds`.
-        cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
-            the idle timeout is reached.
-
-    """
+    """Manages the execution of a pipeline, handling frame processing and task lifecycle."""
 
     def __init__(
         self,
@@ -175,6 +138,7 @@ class PipelineTask(BaseTask):
             LLMFullResponseEndFrame,
         ),
         cancel_on_idle_timeout: bool = True,
+        enable_turn_tracking: bool = True,
     ):
         super().__init__()
         self._pipeline = pipeline
@@ -184,6 +148,7 @@ class PipelineTask(BaseTask):
         self._idle_timeout_secs = idle_timeout_secs
         self._idle_timeout_frames = idle_timeout_frames
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
+        self._enable_turn_tracking = enable_turn_tracking
         if self._params.observers:
             import warnings
 
@@ -194,6 +159,9 @@ class PipelineTask(BaseTask):
                     DeprecationWarning,
                 )
             observers = self._params.observers
+        if self._enable_turn_tracking:
+            self._turn_tracking_observer = TurnTrackingObserver()
+            observers = [self._turn_tracking_observer] + list(observers)
         self._finished = False
 
         # This queue receives frames coming from the pipeline upstream.
@@ -250,6 +218,11 @@ class PipelineTask(BaseTask):
     def params(self) -> PipelineParams:
         """Returns the pipeline parameters of this task."""
         return self._params
+
+    @property
+    def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
+        """Return the turn tracking observer if enabled."""
+        return getattr(self, "_turn_tracking_observer", None)
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self._task_manager.set_event_loop(loop)
