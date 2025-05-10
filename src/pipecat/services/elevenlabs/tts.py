@@ -334,7 +334,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 )
 
             # Set max websocket message size to 16MB for large audio responses
-            self._websocket = await websockets.connect(url, max_size=16 * 1024 * 1024, extra_headers={"xi-api-key": self._api_key})
+            self._websocket = await websockets.connect(
+                url, max_size=16 * 1024 * 1024, extra_headers={"xi-api-key": self._api_key}
+            )
 
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
