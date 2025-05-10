@@ -26,6 +26,7 @@ from pipecat.services.aws.utils import build_event_message, decode_event, get_pr
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt_transcription
 
 try:
     import websockets
@@ -268,6 +269,12 @@ class AWSTranscribeSTTService(STTService):
         }
         return language_map.get(language)
 
+    @traced_stt_transcription(name="aws_transcription")
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
+    ):
+        pass
+
     async def _receive_loop(self):
         """Background task to receive and process messages from AWS Transcribe."""
         while True:
@@ -299,6 +306,11 @@ class AWSTranscribeSTTService(STTService):
                                             time_now_iso8601(),
                                             self._settings["language"],
                                         )
+                                    )
+                                    await self._handle_transcription(
+                                        transcript,
+                                        is_final,
+                                        self._settings["language"],
                                     )
                                     await self.stop_processing_metrics()
                                 else:

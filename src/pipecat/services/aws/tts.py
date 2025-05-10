@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import boto3
@@ -208,7 +208,7 @@ class AWSPollyTTSService(TTSService):
 
         return ssml
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="polly_tts")
+    @traced_tts(name="aws_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_data(**args):
             response = self._polly_client.synthesize_speech(**args)
@@ -267,30 +267,6 @@ class AWSPollyTTSService(TTSService):
             yield ErrorFrame(error=error_message)
 
         finally:
-            if is_tracing_available():
-                from opentelemetry import trace
-
-                from pipecat.utils.tracing.helpers import add_tts_span_attributes
-
-                current_span = trace.get_current_span()
-                service_name = self.__class__.__name__.replace("TTSService", "").lower()
-
-                ttfb_ms = None
-                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                    ttfb_ms = self._metrics.ttfb_ms
-
-                add_tts_span_attributes(
-                    span=current_span,
-                    service_name=service_name,
-                    model=self._settings.get("engine", "standard"),
-                    voice_id=self._voice_id,
-                    text=text,
-                    settings=self._settings,
-                    character_count=len(text),
-                    operation_name="tts",
-                    ttfb_ms=ttfb_ms,
-                )
-
             yield TTSStoppedFrame()
 
 

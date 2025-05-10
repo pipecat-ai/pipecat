@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+from pipecat.utils.tracing.service_decorators import traced_stt_transcription
 
 try:
     import riva.client
@@ -235,35 +235,12 @@ class RivaSTTService(STTService):
             self._thread_running = False
             raise
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="riva_transcription")
+    @traced_stt_transcription(name="riva_transcription")
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
         """Handle a transcription result with tracing."""
-        if is_tracing_available():
-            from opentelemetry import trace
-
-            from pipecat.utils.tracing.helpers import add_stt_span_attributes
-
-            current_span = trace.get_current_span()
-
-            service_name = self.__class__.__name__.replace("STTService", "").lower()
-
-            ttfb_ms = None
-            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                ttfb_ms = self._metrics.ttfb_ms
-
-            add_stt_span_attributes(
-                span=current_span,
-                service_name=service_name,
-                model=self.model_name,
-                transcript=transcript,
-                is_final=is_final,
-                language=self._language_code,
-                vad_enabled=False,
-                settings=self._settings,
-                ttfb_ms=ttfb_ms,
-            )
+        pass
 
     async def _handle_response(self, response):
         for result in response.results:
@@ -467,42 +444,10 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         if self._config:
             self._config.language_code = self._language
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="riva_segmented_transcription")
+    @traced_stt_transcription(name="riva_segmented_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
-        if is_tracing_available():
-            from opentelemetry import trace
-
-            from pipecat.utils.tracing.helpers import add_stt_span_attributes
-
-            current_span = trace.get_current_span()
-
-            service_name = self.__class__.__name__.replace("STTService", "").lower()
-
-            ttfb_ms = None
-            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                ttfb_ms = self._metrics.ttfb_ms
-
-            settings = {
-                "server": self._server,
-                "function_id": self._function_id,
-                "language": str(language) if language else str(self._language_enum),
-                "profanity_filter": self._profanity_filter,
-                "automatic_punctuation": self._automatic_punctuation,
-                "verbatim_transcripts": self._verbatim_transcripts,
-            }
-
-            add_stt_span_attributes(
-                span=current_span,
-                service_name=service_name,
-                model=self.model_name,
-                transcript=transcript,
-                is_final=True,  # Always final for batch transcription
-                language=str(language) if language else str(self._language_enum),
-                vad_enabled=False,
-                settings=settings,
-                ttfb_ms=ttfb_ms,
-            )
+        pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribe an audio segment.

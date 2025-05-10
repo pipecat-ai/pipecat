@@ -14,7 +14,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
+from pipecat.utils.tracing.service_decorators import traced_stt_transcription
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -155,33 +155,10 @@ class BaseWhisperSTTService(SegmentedSTTService):
         logger.info(f"Switching STT language to: [{language}]")
         self._language = language
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="whisper_transcription")
+    @traced_stt_transcription(name="base_whisper_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
         """Handle a transcription result with tracing."""
-        if is_tracing_available():
-            from opentelemetry import trace
-
-            from pipecat.utils.tracing.helpers import add_stt_span_attributes
-
-            current_span = trace.get_current_span()
-
-            service_name = self.__class__.__name__.replace("STTService", "").lower()
-
-            ttfb_ms = None
-            if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                ttfb_ms = self._metrics.ttfb_ms
-
-            add_stt_span_attributes(
-                span=current_span,
-                service_name=service_name,
-                model=self.model_name,
-                transcript=transcript,
-                is_final=True,  # Whisper services always produce final transcripts
-                language=language or self._language,
-                vad_enabled=False,
-                settings=self._settings,
-                ttfb_ms=ttfb_ms,
-            )
+        pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:

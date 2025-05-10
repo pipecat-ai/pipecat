@@ -29,11 +29,6 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.tracing.tracing import (
-    AttachmentStrategy,
-    is_tracing_available,
-    traced,
-)
 
 # See .env.example for Cartesia configuration needed
 try:
@@ -367,7 +362,7 @@ class CartesiaHttpTTSService(TTSService):
         await super().cancel(frame)
         await self._client.close()
 
-    @traced(attachment_strategy=AttachmentStrategy.CHILD, name="cartesia_http_tts")
+    @traced_tts(name="cartesia_http_tts")
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -403,30 +398,4 @@ class CartesiaHttpTTSService(TTSService):
             yield frame
         except Exception as e:
             logger.error(f"{self} exception: {e}")
-        finally:
-            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
-
-            if is_tracing_available():
-                from opentelemetry import trace
-
-                from pipecat.utils.tracing.helpers import add_tts_span_attributes
-
-                current_span = trace.get_current_span()
-                service_name = self.__class__.__name__.replace("TTSService", "").lower()
-
-                ttfb_ms = None
-                if hasattr(self._metrics, "ttfb_ms") and self._metrics.ttfb_ms is not None:
-                    ttfb_ms = self._metrics.ttfb_ms
-
-                add_tts_span_attributes(
-                    span=current_span,
-                    service_name=service_name,
-                    model=self._model_name,
-                    voice_id=self._voice_id,
-                    text=text,
-                    settings=self._settings,
-                    character_count=len(text),
-                    operation_name="tts",
-                    ttfb_ms=ttfb_ms,
-                )
