@@ -425,7 +425,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         if self._websocket:
             if not self._context_id:
                 # First message for a new context - need a space to initialize
-                msg = {"text": " ", "context_id": str(uuid.uuid4()), "xi_api_key": self._api_key}
+                msg = {"text": " ", "context_id": str(uuid.uuid4()), "xi-api-key": self._api_key}
 
                 # Add voice settings only in first message for a context
                 if self._voice_settings:
