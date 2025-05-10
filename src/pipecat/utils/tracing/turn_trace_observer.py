@@ -8,14 +8,11 @@ from typing import Dict, Optional
 
 from loguru import logger
 
-from pipecat.frames.frames import Frame
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.tracing.context_provider import TurnContextProvider
 from pipecat.utils.tracing.tracing import is_tracing_available
 
-# Only import OpenTelemetry if it's available
 if is_tracing_available():
     from opentelemetry import trace
     from opentelemetry.trace import Span, SpanContext
@@ -37,7 +34,6 @@ class TurnTraceObserver(BaseObserver):
         self._trace_context_map: Dict[int, SpanContext] = {}
         self._tracer = trace.get_tracer("pipecat.turn") if is_tracing_available() else None
 
-        # Register handlers for turn events
         if turn_tracker:
 
             @turn_tracker.event_handler("on_turn_started")
@@ -48,14 +44,7 @@ class TurnTraceObserver(BaseObserver):
             async def on_turn_ended(tracker, turn_number, duration, was_interrupted):
                 await self._handle_turn_ended(turn_number, duration, was_interrupted)
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
         """Process a frame without modifying it.
 
         This observer doesn't need to process individual frames as it

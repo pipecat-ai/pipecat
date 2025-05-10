@@ -11,11 +11,9 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    Frame,
     UserStartedSpeakingFrame,
 )
-from pipecat.observers.base_observer import BaseObserver
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 
 
 class TurnTrackingObserver(BaseObserver):
@@ -47,19 +45,15 @@ class TurnTrackingObserver(BaseObserver):
 
     async def on_push_frame(
         self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
+        data: FramePushed,
     ):
         """Process frame events for turn tracking."""
         # Skip already processed frames
-        if frame.id in self._processed_frames:
+        if data.frame.id in self._processed_frames:
             return
 
-        self._processed_frames.add(frame.id)
-        self._frame_history.append(frame.id)
+        self._processed_frames.add(data.frame.id)
+        self._frame_history.append(data.frame.id)
 
         # If we've exceeded our history size, remove the oldest frame ID
         # from the set of processed frames.
@@ -68,14 +62,14 @@ class TurnTrackingObserver(BaseObserver):
             self._processed_frames = set(self._frame_history)
 
         # Process different frame types
-        if isinstance(frame, UserStartedSpeakingFrame):
-            await self._handle_user_started_speaking(timestamp)
-        elif isinstance(frame, BotStartedSpeakingFrame):
+        if isinstance(data.frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(data.timestamp)
+        elif isinstance(data.frame, BotStartedSpeakingFrame):
             self._is_bot_speaking = True
-            await self._maybe_start_first_turn(timestamp)
-        elif isinstance(frame, BotStoppedSpeakingFrame) and self._is_bot_speaking:
+            await self._maybe_start_first_turn(data.timestamp)
+        elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._is_bot_speaking:
             self._is_bot_speaking = False
-            await self._maybe_end_turn(timestamp)
+            await self._maybe_end_turn(data.timestamp)
 
     async def _handle_user_started_speaking(self, timestamp: int):
         """Handle user speaking events, including interruptions."""
