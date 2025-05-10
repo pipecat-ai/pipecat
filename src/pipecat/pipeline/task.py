@@ -30,11 +30,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.asyncio import BaseTaskManager, TaskManager
+from pipecat.utils.tracing.tracing import is_tracing_available
+from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 HEARTBEAT_SECONDS = 1.0
 HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
@@ -157,6 +160,8 @@ class PipelineTask(BaseTask):
             timeout if not received withing `idle_timeout_seconds`.
         cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
             the idle timeout is reached.
+        enable_turn_tracking: Whether to enable turn tracking.
+        enable_turn_tracing: Whether to enable turn tracing.
 
     """
 
@@ -175,6 +180,8 @@ class PipelineTask(BaseTask):
             LLMFullResponseEndFrame,
         ),
         cancel_on_idle_timeout: bool = True,
+        enable_turn_tracking: bool = True,
+        enable_turn_tracing: bool = True,
     ):
         super().__init__()
         self._pipeline = pipeline
@@ -184,6 +191,8 @@ class PipelineTask(BaseTask):
         self._idle_timeout_secs = idle_timeout_secs
         self._idle_timeout_frames = idle_timeout_frames
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
+        self._enable_turn_tracking = enable_turn_tracking
+        self._enable_turn_tracing = enable_turn_tracing and is_tracing_available()
         if self._params.observers:
             import warnings
 
@@ -194,6 +203,12 @@ class PipelineTask(BaseTask):
                     DeprecationWarning,
                 )
             observers = self._params.observers
+        if self._enable_turn_tracking:
+            self._turn_tracking_observer = TurnTrackingObserver()
+            observers = [self._turn_tracking_observer] + list(observers)
+        if self._enable_turn_tracking and self._enable_turn_tracing:
+            self._turn_trace_observer = TurnTraceObserver(self._turn_tracking_observer)
+            observers = [self._turn_trace_observer] + list(observers)
         self._finished = False
 
         # This queue receives frames coming from the pipeline upstream.
@@ -250,6 +265,16 @@ class PipelineTask(BaseTask):
     def params(self) -> PipelineParams:
         """Returns the pipeline parameters of this task."""
         return self._params
+
+    @property
+    def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
+        """Return the turn tracking observer if enabled."""
+        return getattr(self, "_turn_tracking_observer", None)
+
+    @property
+    def turn_trace_observer(self) -> Optional[TurnTraceObserver]:
+        """Return the turn trace observer if enabled."""
+        return getattr(self, "_turn_trace_observer", None)
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self._task_manager.set_event_loop(loop)

@@ -35,6 +35,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm, traced_llm_chat_completion
 
 
 class OpenAIUnhandledFunctionException(Exception):
@@ -126,6 +127,7 @@ class BaseOpenAILLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    @traced_llm_chat_completion(name="openai_chat_completions")
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> AsyncStream[ChatCompletionChunk]:
@@ -176,6 +178,7 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
+    @traced_llm(name="openai_process_context")
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []

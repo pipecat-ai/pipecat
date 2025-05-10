@@ -23,8 +23,10 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.tracing import traceable
 
 
+@traceable
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
@@ -103,6 +105,39 @@ class STTService(AIService):
             logger.debug(f"STT service {'muted' if frame.mute else 'unmuted'}")
         else:
             await self.push_frame(frame, direction)
+
+    def get_trace_attributes(self, **kwargs) -> dict:
+        """Get trace attributes for this STT service.
+
+        Returns a dictionary of attributes that can be used for tracing.
+
+        Args:
+            **kwargs: Additional attributes to include
+
+        Returns:
+            dict: Attributes for this service
+        """
+        # Extract service name from class name
+        service_name = self.__class__.__name__.replace("STTService", "").lower()
+
+        # Build basic attributes
+        attributes = {
+            "service_name": service_name,
+            "model": getattr(self, "model_name", "unknown"),
+        }
+
+        # Add language if available
+        if hasattr(self, "_settings") and "language" in self._settings:
+            attributes["language"] = self._settings["language"]
+
+        # Add settings if available
+        if hasattr(self, "_settings") and self._settings:
+            attributes["settings"] = self._settings
+
+        # Add any additional attributes
+        attributes.update(kwargs)
+
+        return attributes
 
 
 class SegmentedSTTService(STTService):
