@@ -123,7 +123,47 @@ class PipelineTaskSink(FrameProcessor):
 
 
 class PipelineTask(BaseTask):
-    """Manages the execution of a pipeline, handling frame processing and task lifecycle."""
+    """Manages the execution of a pipeline, handling frame processing and task lifecycle.
+
+    It has a couple of event handlers `on_frame_reached_upstream` and
+    `on_frame_reached_downstream` that are called when upstream frames or
+    downstream frames reach both ends of pipeline. By default, the events
+    handlers will not be called unless some filters are set using
+    `set_reached_upstream_filter` and `set_reached_downstream_filter`.
+
+       @task.event_handler("on_frame_reached_upstream")
+       async def on_frame_reached_upstream(task, frame):
+           ...
+
+       @task.event_handler("on_frame_reached_downstream")
+       async def on_frame_reached_downstream(task, frame):
+           ...
+
+    It also has an event handler that detects when the pipeline is idle. By
+    default, a pipeline is idle if no `BotSpeakingFrame` or
+    `LLMFullResponseEndFrame` are received within `idle_timeout_secs`.
+
+       @task.event_handler("on_idle_timeout")
+       async def on_idle_timeout(task):
+           ...
+
+    Args:
+        pipeline: The pipeline to execute.
+        params: Configuration parameters for the pipeline.
+        observers: List of observers for monitoring pipeline execution.
+        clock: Clock implementation for timing operations.
+        check_dangling_tasks: Whether to check for processors' tasks finishing properly.
+        idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
+            None. If a pipeline is idle the pipeline task will be cancelled
+            automatically.
+        idle_timeout_frames: A tuple with the frames that should trigger an idle
+            timeout if not received withing `idle_timeout_seconds`.
+        cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
+            the idle timeout is reached.
+        enable_turn_tracking: Whether to enable turn tracking.
+        enable_turn_tracing: Whether to enable turn tracing.
+
+    """
 
     def __init__(
         self,
