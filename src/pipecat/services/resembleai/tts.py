@@ -10,7 +10,6 @@ from typing import AsyncGenerator, Optional
 
 import websockets
 from loguru import logger
-from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     Frame,
@@ -33,24 +32,12 @@ class ResembleTTSService(TTSService):
     """A Text-to-Speech service using Resemble AI's streaming API.
 
     This service connects to Resemble AI's WebSocket API to stream TTS audio in real-time.
-    It supports configurable audio parameters like sample rate, speed, and pitch.
 
     Args:
         api_key: The Resemble AI API key for authentication.
         voice_uuid: The UUID of the voice to use for synthesis.
         sample_rate: The audio sample rate (default: 48000 Hz).
-        params: Optional parameters for speech synthesis (speed, pitch).
     """
-
-    class InputParams(BaseModel):
-        """Optional parameters for speech synthesis.
-
-        Attributes:
-            speed: Optional speed adjustment (1.0 is normal speed).
-            pitch: Optional pitch adjustment (1.0 is normal pitch).
-        """
-        speed: Optional[float] = None
-        pitch: Optional[float] = None
 
     def __init__(
         self,
@@ -58,26 +45,14 @@ class ResembleTTSService(TTSService):
         api_key: str,
         voice_uuid: str,
         sample_rate: int = DEFAULT_SAMPLE_RATE,
-        params: InputParams = InputParams(),
         **kwargs,
     ):
         """Initialize the TTS service with configuration."""
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key
         self._voice_uuid = voice_uuid
-        self._params = params
-        self._websocket = None
         self._sample_rate = sample_rate
-
-        # Initialize PyAudio
-        self._pyaudio = pyaudio.PyAudio()
-        self._stream = self._pyaudio.open(
-            format=AUDIO_FORMAT,
-            channels=1,
-            rate=self._sample_rate,
-            output=True,
-            frames_per_buffer=CHUNK_SIZE,
-        )
+        self._websocket = None
 
     def can_generate_metrics(self) -> bool:
         """Whether this service can generate TTS metrics."""
@@ -113,12 +88,6 @@ class ResembleTTSService(TTSService):
                 "precision": "PCM_16",
             }
 
-            # Add optional parameters
-            if self._params.speed is not None:
-                request["speed"] = self._params.speed
-            if self._params.pitch is not None:
-                request["pitch"] = self._params.pitch
-
             await self._websocket.send(json.dumps(request))
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame()
@@ -130,7 +99,6 @@ class ResembleTTSService(TTSService):
                 if data["type"] == "audio":
                     await self.stop_ttfb_metrics()
                     audio = base64.b64decode(data["audio_content"])
-                    self._stream.write(audio)  # Play audio immediately
                     yield TTSAudioRawFrame(audio, self._sample_rate, 1)
 
                 elif data["type"] == "audio_end":
@@ -147,6 +115,10 @@ class ResembleTTSService(TTSService):
         except Exception as e:
             logger.error(f"Error during TTS: {e}")
             yield ErrorFrame(error=str(e))
+        finally:
+            if self._websocket:
+                await self._websocket.close()
+                self._websocket = None
 
     async def stop(self, frame: Optional[Frame] = None):
         """Clean up resources with proper Pipecat frame handling.
@@ -156,10 +128,5 @@ class ResembleTTSService(TTSService):
         """
         if self._websocket:
             await self._websocket.close()
-        if hasattr(self, "_stream"):
-            self._stream.stop_stream()
-            self._stream.close()
-        if hasattr(self, "_pyaudio"):
-            self._pyaudio.terminate()
-        # Call parent with EndFrame if none provided
+            self._websocket = None
         await super().stop(frame if frame else EndFrame())
