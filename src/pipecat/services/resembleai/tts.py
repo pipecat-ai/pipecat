@@ -5,7 +5,6 @@
 
 import base64
 import json
-import pyaudio
 from typing import AsyncGenerator, Optional
 
 import websockets
@@ -25,7 +24,6 @@ from pipecat.services.tts_service import TTSService
 # Audio configuration constants
 DEFAULT_SAMPLE_RATE = 48000
 CHUNK_SIZE = 1024
-AUDIO_FORMAT = pyaudio.paInt16
 
 
 class ResembleTTSService(TTSService):
