@@ -84,6 +84,7 @@ class ResembleTTSService(TTSService):
                 "data": text,
                 "sample_rate": self._sample_rate,
                 "precision": "PCM_16",
+                "no_audio_header": True
             }
 
             await self._websocket.send(json.dumps(request))
