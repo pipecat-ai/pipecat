@@ -17,6 +17,7 @@ from typing import Callable, Optional, TypeVar
 from opentelemetry import context as context_api
 from opentelemetry import trace
 
+from pipecat.utils.tracing.context_provider import get_current_turn_context
 from pipecat.utils.tracing.helpers import (
     add_llm_span_attributes,
     add_stt_span_attributes,
@@ -70,10 +71,11 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         yield item
                     return
 
-                # Get the parent service context
-                parent_context = get_parent_service_context(self)
+                # Get the turn context first, then fall back to service context
+                turn_context = get_current_turn_context()
+                parent_context = turn_context or get_parent_service_context(self)
 
-                # Create a new span as child of the service span
+                # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
                 with tracer.start_as_current_span(
                     name or f.__name__, context=parent_context
@@ -174,10 +176,11 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, audio, *args, **kwargs)
 
-            # Get the parent service context
-            parent_context = get_parent_service_context(self)
+            # Get the turn context first, then fall back to service context
+            turn_context = get_current_turn_context()
+            parent_context = turn_context or get_parent_service_context(self)
 
-            # Create a new span as child of the service span
+            # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(
                 name or f.__name__, context=parent_context
@@ -224,10 +227,11 @@ def traced_stt_transcription(
             if not is_tracing_available():
                 return await f(self, transcript, is_final, language)
 
-            # Get the parent service context
-            parent_context = get_parent_service_context(self)
+            # Get the turn context first, then fall back to service context
+            turn_context = get_current_turn_context()
+            parent_context = turn_context or get_parent_service_context(self)
 
-            # Create a new span as child of the service span
+            # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(
                 name or f.__name__, context=parent_context
@@ -280,10 +284,11 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, context, *args, **kwargs)
 
-            # Get the parent service context
-            parent_context = get_parent_service_context(self)
+            # Get the turn context first, then fall back to service context
+            turn_context = get_current_turn_context()
+            parent_context = turn_context or get_parent_service_context(self)
 
-            # Create a new span as child of the service span
+            # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(
                 name or f.__name__, context=parent_context
@@ -365,14 +370,14 @@ def traced_llm_chat_completion(
             if not is_tracing_available():
                 return await f(self, context, messages, *args, **kwargs)
 
-            # Get the parent service context - specifically from the parent process_context span
-            # We need to get the current span since process_context is the one calling this method
-            parent_context = context_api.get_current()
+            # Get the turn context first, then fall back to service context
+            turn_context = get_current_turn_context()
+            parent_context = turn_context or get_parent_service_context(self)
 
-            # Create a new span as child of the current process_context span
+            # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(
-                name or "openai_chat_completions", context=parent_context
+                name or f.__name__, context=parent_context
             ) as current_span:
                 try:
                     try:
