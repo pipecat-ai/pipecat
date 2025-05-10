@@ -12,11 +12,10 @@ This module provides specialized tracing decorators for different service types.
 import functools
 import inspect
 import logging
-from typing import Any, AsyncGenerator, Awaitable, Callable, Optional, TypeVar, Union, cast
+from typing import Callable, Optional, TypeVar
 
 from opentelemetry import context as context_api
 from opentelemetry import trace
-from opentelemetry.trace import SpanContext
 
 from pipecat.utils.tracing.helpers import (
     add_llm_span_attributes,

@@ -16,7 +16,7 @@ import enum
 import functools
 import inspect
 import os
-from typing import Any, Callable, Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 
 # Type variables for better typing support
 T = TypeVar("T")
