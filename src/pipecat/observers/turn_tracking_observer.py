@@ -11,6 +11,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    StartFrame,
     UserStartedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
@@ -20,8 +21,8 @@ class TurnTrackingObserver(BaseObserver):
     """Observer that tracks conversation turns in a pipeline.
 
     Turn tracking logic:
-    - A turn starts when either the user speaks or the bot speaks (first turn),
-      or when the user interrupts the bot (subsequent turns)
+    - The first turn starts immediately when the pipeline starts (StartFrame)
+    - Subsequent turns start when the user starts speaking
     - A turn ends when the bot stops speaking, unless it was already interrupted
 
     Events:
@@ -61,12 +62,14 @@ class TurnTrackingObserver(BaseObserver):
             # Rebuild the set from the current deque contents
             self._processed_frames = set(self._frame_history)
 
-        # Process different frame types
-        if isinstance(data.frame, UserStartedSpeakingFrame):
+        if isinstance(data.frame, StartFrame):
+            # Start the first turn immediately when the pipeline starts
+            if self._turn_count == 0:
+                await self._start_turn(data.timestamp)
+        elif isinstance(data.frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(data.timestamp)
         elif isinstance(data.frame, BotStartedSpeakingFrame):
             self._is_bot_speaking = True
-            await self._maybe_start_first_turn(data.timestamp)
         elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._is_bot_speaking:
             self._is_bot_speaking = False
             await self._maybe_end_turn(data.timestamp)
@@ -79,12 +82,7 @@ class TurnTrackingObserver(BaseObserver):
             self._is_bot_speaking = False  # Bot is considered interrupted
             await self._start_turn(timestamp)
         elif not self._is_turn_active:
-            # Start first turn or a new turn after previous one ended
-            await self._start_turn(timestamp)
-
-    async def _maybe_start_first_turn(self, timestamp: int):
-        """Start the first turn if no turn is active yet."""
-        if self._turn_count == 0 and not self._is_turn_active:
+            # Start a new turn after previous one ended
             await self._start_turn(timestamp)
 
     async def _maybe_end_turn(self, timestamp: int):
