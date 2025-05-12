@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A new function `FrameProcessor.setup()` has been added to allow setting up
+  frame processors before receiving a `StartFrame`. This is what's happening
+  internally: `FrameProcessor.setup()` is called, `StartFrame` is pushed from
+  the beginning of the pipeline, your regular pipeline operations, `EndFrame` or
+  `CancelFrame` are pushed from the beginning of the pipeline and finally
+  `FrameProcessor.cleanup()` is called.
+
 - Allow passing observers to `run_test()` while running unit tests.
 
 ### Changed
