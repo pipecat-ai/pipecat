@@ -72,6 +72,12 @@ async def main(
     global num_idle_events
     num_idle_events = 0
 
+    global start_time
+    start_time = None
+
+
+
+
     # ------------ TRANSPORT SETUP ------------
 
     # Set up transport parameters
@@ -121,10 +127,17 @@ async def main(
         params: FunctionCallParams
                               ):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
-        content = f"""The user wants to end the call. The user has been silent after {num_idle_events} prompts"""
-        # message = call_config_manager.create_system_message(content)
-        # messages.append(message)
-        # await task.queue_frames([LLMMessagesFrame(messages)])
+
+        end_time = time.time()
+        global start_time
+        call_duration_in_seconds = round(end_time - start_time,2)
+
+        content = f"""
+        The user wants to end the call. 
+        The user has been silent after {num_idle_events} prompts.
+        The call was {call_duration_in_seconds} seconds long. 
+        """
+
         await task.queue_frame(
             TTSSpeakFrame(content)
         )
@@ -201,11 +214,16 @@ async def main(
             return True
         elif retry_count == 3:
             # Third attempt: End the conversation
-            content = f"""User has been silent after 3 prompts, ending conversation."""
+            end_time = time.time()
+            global start_time
+            call_duration_in_seconds = round(end_time - start_time, 2)
+
+            content = f"""User has been silent after 3 prompts, ending conversation. The call was {call_duration_in_seconds} seconds long."""
             await user_idle.push_frame(
                 TTSSpeakFrame(content)
             )
             num_idle_events = retry_count
+
             await task.queue_frame(EndFrame())
             return False
 
@@ -232,8 +250,11 @@ async def main(
 
     # ------------ EVENT HANDLERS ------------
 
+
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
+        global start_time
+        start_time = time.time()
         logger.debug(f"First participant joined: {participant['id']}")
         await transport.capture_participant_transcription(participant["id"])
         await task.queue_frames([context_aggregator.user().get_context_frame()])
