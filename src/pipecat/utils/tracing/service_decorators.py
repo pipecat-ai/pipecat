@@ -38,7 +38,7 @@ def _noop_decorator(func):
     return func
 
 
-def get_parent_service_context(self):
+def _get_parent_service_context(self):
     """Get the parent service span context.
 
     This looks for the service span that was created when the service was initialized.
@@ -54,8 +54,34 @@ def get_parent_service_context(self):
     return context_api.get_current()
 
 
+def _add_token_usage_to_span(span, token_usage):
+    """Helper function to add token usage metrics to a span."""
+    if not is_tracing_available() or not token_usage:
+        return
+
+    if isinstance(token_usage, dict):
+        if "prompt_tokens" in token_usage:
+            span.set_attribute("llm.prompt_tokens", token_usage["prompt_tokens"])
+        if "completion_tokens" in token_usage:
+            span.set_attribute("llm.completion_tokens", token_usage["completion_tokens"])
+    else:
+        # Handle LLMTokenUsage object
+        span.set_attribute("llm.prompt_tokens", getattr(token_usage, "prompt_tokens", 0))
+        span.set_attribute("llm.completion_tokens", getattr(token_usage, "completion_tokens", 0))
+
+
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Decorator specifically for TTS service methods that automatically adds TTS attributes."""
+    """Decorator for tracing TTS service methods with TTS-specific attributes.
+
+    Works with both async functions and generators.
+
+    Args:
+        func: The TTS method to trace.
+        name: Custom span name. Defaults to function name.
+
+    Returns:
+        Wrapped method with TTS-specific tracing.
+    """
     if not OPENTELEMETRY_AVAILABLE:
         return _noop_decorator if func is None else _noop_decorator(func)
 
@@ -74,7 +100,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                 # Get the turn context first, then fall back to service context
                 turn_context = get_current_turn_context()
-                parent_context = turn_context or get_parent_service_context(self)
+                parent_context = turn_context or _get_parent_service_context(self)
 
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
@@ -123,7 +149,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                 # Get the parent service context
                 turn_context = get_current_turn_context()
-                parent_context = turn_context or get_parent_service_context(self)
+                parent_context = turn_context or _get_parent_service_context(self)
 
                 # Create a new span as child of the service span
                 tracer = trace.get_tracer("pipecat")
@@ -168,7 +194,15 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Decorator for STT transcription handling that automatically adds STT attributes."""
+    """Decorator for tracing STT service methods with transcription attributes.
+
+    Args:
+        func: The STT method to trace.
+        name: Custom span name. Defaults to function name.
+
+    Returns:
+        Wrapped method with STT-specific tracing.
+    """
     if not OPENTELEMETRY_AVAILABLE:
         return _noop_decorator if func is None else _noop_decorator(func)
 
@@ -180,7 +214,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
             # Get the turn context first, then fall back to service context
             turn_context = get_current_turn_context()
-            parent_context = turn_context or get_parent_service_context(self)
+            parent_context = turn_context or _get_parent_service_context(self)
 
             # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
@@ -225,7 +259,17 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Decorator specifically for LLM service methods that automatically adds LLM attributes."""
+    """Decorator for tracing LLM service methods with LLM-specific attributes.
+
+    Captures context, messages, tools, and token usage.
+
+    Args:
+        func: The LLM method to trace.
+        name: Custom span name. Defaults to function name.
+
+    Returns:
+        Wrapped method with LLM-specific tracing.
+    """
     if not OPENTELEMETRY_AVAILABLE:
         return _noop_decorator if func is None else _noop_decorator(func)
 
@@ -237,7 +281,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
             # Get the parent context - turn context if available, otherwise service context
             turn_context = get_current_turn_context()
-            parent_context = turn_context or get_parent_service_context(self)
+            parent_context = turn_context or _get_parent_service_context(self)
 
             # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
@@ -257,7 +301,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             await original_start_llm_usage_metrics(tokens)
 
                             # Add token usage to the current span
-                            add_token_usage_to_span(current_span, tokens)
+                            _add_token_usage_to_span(current_span, tokens)
 
                         # Replace the method temporarily
                         self.start_llm_usage_metrics = wrapped_start_llm_usage_metrics
@@ -381,19 +425,3 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     if func is not None:
         return decorator(func)
     return decorator
-
-
-def add_token_usage_to_span(span, token_usage):
-    """Helper function to add token usage metrics to a span."""
-    if not is_tracing_available() or not token_usage:
-        return
-
-    if isinstance(token_usage, dict):
-        if "prompt_tokens" in token_usage:
-            span.set_attribute("llm.prompt_tokens", token_usage["prompt_tokens"])
-        if "completion_tokens" in token_usage:
-            span.set_attribute("llm.completion_tokens", token_usage["completion_tokens"])
-    else:
-        # Handle LLMTokenUsage object
-        span.set_attribute("llm.prompt_tokens", getattr(token_usage, "prompt_tokens", 0))
-        span.set_attribute("llm.completion_tokens", getattr(token_usage, "completion_tokens", 0))
