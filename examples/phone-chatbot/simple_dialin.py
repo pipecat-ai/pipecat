@@ -7,6 +7,8 @@ import argparse
 import asyncio
 import os
 import sys
+import time
+from datetime import datetime, timedelta
 
 from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
@@ -15,12 +17,26 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame
+from pipecat.frames.frames import (
+    EndTaskFrame,
+    Frame,
+    LLMMessagesFrame,
+    TTSSpeakFrame,
+    MetricsFrame,
+    TranscriptionFrame,
+)
+from pipecat.metrics.metrics import (
+    TTFBMetricsData,
+    ProcessingMetricsData,
+    LLMUsageMetricsData,
+    TTSUsageMetricsData,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
@@ -35,12 +51,86 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
+class CallStatistics:
+    def __init__(self):
+        self.start_time = time.time()
+        self.end_time = None
+        self.silence_events = 0
+        self.user_messages = 0
+        self.bot_messages = 0
+        self.llm_tokens_used = 0
+        self.tts_characters_used = 0
+
+    def record_silence_event(self):
+        self.silence_events += 1
+
+    def record_user_message(self):
+        self.user_messages += 1
+
+    def record_bot_message(self):
+        self.bot_messages += 1
+
+    def record_llm_usage(self, tokens):
+        self.llm_tokens_used += tokens
+
+    def record_tts_usage(self, characters):
+        self.tts_characters_used += characters
+
+    def end_call(self):
+        self.end_time = time.time()
+
+    def get_duration_seconds(self):
+        end = self.end_time if self.end_time else time.time()
+        return end - self.start_time
+
+    def log_summary(self):
+        duration = self.get_duration_seconds()
+        duration_str = str(timedelta(seconds=int(duration)))
+
+        logger.info("===== CALL SUMMARY =====")
+        logger.info(f"Call Duration: {duration_str}")
+        logger.info(f"Silence Events: {self.silence_events}")
+        logger.info(f"User Messages: {self.user_messages}")
+        logger.info(f"Bot Messages: {self.bot_messages}")
+        logger.info(f"LLM Tokens Used: {self.llm_tokens_used}")
+        logger.info(f"TTS Characters Used: {self.tts_characters_used}")
+        logger.info("=======================")
+
+
+class MetricsProcessor(FrameProcessor):
+    def __init__(self, call_stats):
+        super().__init__()
+        self.call_stats = call_stats
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, MetricsFrame):
+            for d in frame.data:
+                if isinstance(d, LLMUsageMetricsData):
+                    tokens = d.value
+                    self.call_stats.record_llm_usage(tokens.total_tokens)
+                elif isinstance(d, TTSUsageMetricsData):
+                    self.call_stats.record_tts_usage(d.value)
+
+        # Track user and bot messages
+        if isinstance(frame, TranscriptionFrame) and frame.final:
+            self.call_stats.record_user_message()
+        elif isinstance(frame, TTSSpeakFrame):
+            self.call_stats.record_bot_message()
+
+        await self.push_frame(frame, direction)
+
+
 async def main(
     room_url: str,
     token: str,
     body: dict,
 ):
     # ------------ CONFIGURATION AND SETUP ------------
+
+    # Initialize call statistics
+    call_stats = CallStatistics()
 
     # Create a config manager using the provided body
     call_config_manager = CallConfigManager.from_json_string(body) if body else CallConfigManager()
@@ -139,6 +229,54 @@ async def main(
 
     # ------------ PIPELINE SETUP ------------
 
+    # Create a user idle processor to detect silence
+    async def handle_user_idle(processor, retry_count):
+        # Record silence event
+        call_stats.record_silence_event()
+
+        if retry_count <= 2:  # First and second attempts (retry_count starts at 1)
+            messages = [
+                "I notice you've been quiet for a while. Is there anything I can help you with?",
+                "I haven't heard from you. Are you still there?",
+                "Since I haven't heard from you in a while, I'll be ending the call soon.",
+            ]
+            await pipeline.push_frame(
+                TTSSpeakFrame(
+                    text=messages[retry_count - 1],
+                    interrupt=False,
+                )
+            )
+            return True  # Continue monitoring for idle events
+        else:  # Third attempt (retry_count = 3)
+            # Final message before terminating
+            await pipeline.push_frame(
+                TTSSpeakFrame(
+                    text="I'll be ending our call now. Feel free to call back if you need assistance later.",
+                    interrupt=False,
+                )
+            )
+            # Wait for the message to be spoken before terminating
+            await asyncio.sleep(5)
+
+            # Mark that the call was terminated by the bot
+            if session_manager:
+                session_manager.call_flow_state.set_call_terminated()
+
+            # End the call
+            await task.queue_frame(EndTaskFrame())
+            # End call statistics and log summary
+            call_stats.end_call()
+            call_stats.log_summary()
+            return False  # Stop monitoring for idle events
+
+    user_idle_processor = UserIdleProcessor(
+        callback=handle_user_idle,
+        timeout=10.0,  # Trigger after 10 seconds of silence
+    )
+
+    # Create metrics processor
+    metrics_processor = MetricsProcessor(call_stats)
+
     # Build pipeline
     pipeline = Pipeline(
         [
@@ -148,11 +286,20 @@ async def main(
             tts,  # TTS
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses
+            user_idle_processor,  # Add the user idle processor to detect silence
+            metrics_processor,  # Add metrics processor
         ]
     )
 
     # Create pipeline task
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
     # ------------ EVENT HANDLERS ------------
 
@@ -165,6 +312,9 @@ async def main(
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
         logger.debug(f"Participant left: {participant}, reason: {reason}")
+        # End call statistics and log summary
+        call_stats.end_call()
+        call_stats.log_summary()
         await task.cancel()
 
     # ------------ RUN PIPELINE ------------
