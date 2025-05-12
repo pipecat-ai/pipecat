@@ -34,6 +34,7 @@ class TurnTrackingObserver(BaseObserver):
         self._turn_count = 0
         self._is_turn_active = False
         self._is_bot_speaking = False
+        self._has_bot_spoken = False
         self._turn_start_time = 0
         self._turn_end_timeout_secs = turn_end_timeout_secs
         self._end_turn_timer = None
@@ -71,8 +72,11 @@ class TurnTrackingObserver(BaseObserver):
             await self._handle_user_started_speaking(data.timestamp)
         elif isinstance(data.frame, BotStartedSpeakingFrame):
             self._is_bot_speaking = True
+            self._has_bot_spoken = True
             # Cancel any pending turn end timer when bot starts speaking again
             self._cancel_turn_end_timer()
+        # A BotStoppedSpeakingFrame can arrive after a UserStartedSpeakingFrame following an interruption
+        # We only want to end the turn if the bot was previously speaking
         elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._is_bot_speaking:
             self._is_bot_speaking = False
             # Schedule turn end with timeout
@@ -113,19 +117,22 @@ class TurnTrackingObserver(BaseObserver):
             await self._end_turn(timestamp, was_interrupted=True)
             self._is_bot_speaking = False  # Bot is considered interrupted
             await self._start_turn(timestamp)
-        elif self._is_turn_active:
-            # User started speaking during an active turn but bot wasn't speaking
-            # (this could happen during silence after bot speech)
+        elif self._is_turn_active and self._has_bot_spoken:
+            # User started speaking during the turn_end_timeout_secs period after bot speech
             self._cancel_turn_end_timer()  # Cancel any pending end turn timer
             await self._end_turn(timestamp, was_interrupted=False)
             await self._start_turn(timestamp)
-        else:
+        elif not self._is_turn_active:
             # Start a new turn after previous one ended
             await self._start_turn(timestamp)
+        else:
+            # User is speaking within the same turn (before bot has responded)
+            logger.trace(f"User is already speaking in Turn {self._turn_count}")
 
     async def _start_turn(self, timestamp: int):
         """Start a new turn."""
         self._is_turn_active = True
+        self._has_bot_spoken = False
         self._turn_count += 1
         self._turn_start_time = timestamp
         logger.debug(f"Turn {self._turn_count} started")
