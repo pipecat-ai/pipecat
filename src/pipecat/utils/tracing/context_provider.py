@@ -6,7 +6,7 @@
 
 from typing import Optional
 
-from pipecat.utils.tracing.tracing import is_tracing_available
+from pipecat.utils.tracing.setup import is_tracing_available
 
 if is_tracing_available():
     from opentelemetry.context import Context

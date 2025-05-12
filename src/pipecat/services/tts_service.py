@@ -39,10 +39,8 @@ from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import seconds_to_nanoseconds
-from pipecat.utils.tracing.tracing import traceable
 
 
-@traceable
 class TTSService(AIService):
     def __init__(
         self,

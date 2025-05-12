@@ -22,7 +22,6 @@ from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.tracing.tracing import AttachmentStrategy, is_tracing_available, traced
 
 try:
     import assemblyai as aai

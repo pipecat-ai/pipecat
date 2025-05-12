@@ -29,7 +29,6 @@ from pipecat.processors.aggregators.llm_response import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.utils.tracing.tracing import traceable
 
 # Type alias for a callable that handles LLM function calls.
 FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
@@ -80,7 +79,6 @@ class FunctionCallParams:
     result_callback: FunctionCallResultCallback
 
 
-@traceable
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 

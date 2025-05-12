@@ -4,9 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenTelemetry service-specific tracing decorators for Pipecat.
+"""Service-specific OpenTelemetry tracing decorators for Pipecat.
 
-This module provides specialized tracing decorators for different service types.
+This module provides specialized decorators that automatically capture
+rich information about service execution including configuration,
+parameters, and performance metrics.
 """
 
 import functools
@@ -18,30 +20,34 @@ from typing import Callable, Optional, TypeVar
 from opentelemetry import context as context_api
 from opentelemetry import trace
 
-from pipecat.utils.tracing.attributes import (
+from pipecat.utils.tracing.context_provider import get_current_turn_context
+from pipecat.utils.tracing.service_attributes import (
     add_llm_span_attributes,
     add_stt_span_attributes,
     add_tts_span_attributes,
 )
-from pipecat.utils.tracing.context_provider import get_current_turn_context
-from pipecat.utils.tracing.tracing import (
-    OPENTELEMETRY_AVAILABLE,
-    is_tracing_available,
-)
+from pipecat.utils.tracing.setup import OPENTELEMETRY_AVAILABLE, is_tracing_available
 
 T = TypeVar("T")
 R = TypeVar("R")
 
 
-# Fallback for when OpenTelemetry is not available
+# Internal helper functions
 def _noop_decorator(func):
+    """No-op fallback decorator when tracing is unavailable."""
     return func
 
 
 def _get_parent_service_context(self):
-    """Get the parent service span context.
+    """Get the parent service span context (internal use only).
 
     This looks for the service span that was created when the service was initialized.
+
+    Args:
+        self: The service instance
+
+    Returns:
+        Context or None: The parent service context, or None if unavailable
     """
     if not is_tracing_available():
         return None
@@ -55,7 +61,12 @@ def _get_parent_service_context(self):
 
 
 def _add_token_usage_to_span(span, token_usage):
-    """Helper function to add token usage metrics to a span."""
+    """Add token usage metrics to a span (internal use only).
+
+    Args:
+        span: The span to add token metrics to
+        token_usage: Dictionary or object containing token usage information
+    """
     if not is_tracing_available() or not token_usage:
         return
 
@@ -71,7 +82,13 @@ def _add_token_usage_to_span(span, token_usage):
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Decorator for tracing TTS service methods with TTS-specific attributes.
+    """Traces TTS service methods with TTS-specific attributes.
+
+    Automatically captures and records:
+    - Service name and model information
+    - Voice ID and settings
+    - Character count and text content
+    - Performance metrics like TTFB
 
     Works with both async functions and generators.
 
@@ -194,7 +211,13 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Decorator for tracing STT service methods with transcription attributes.
+    """Traces STT service methods with transcription attributes.
+
+    Automatically captures and records:
+    - Service name and model information
+    - Transcription text and final status
+    - Language information
+    - Performance metrics like TTFB
 
     Args:
         func: The STT method to trace.
@@ -259,9 +282,14 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Decorator for tracing LLM service methods with LLM-specific attributes.
+    """Traces LLM service methods with LLM-specific attributes.
 
-    Captures context, messages, tools, and token usage.
+    Automatically captures and records:
+    - Service name and model information
+    - Context content and messages
+    - Tool configurations
+    - Token usage metrics
+    - Performance metrics like TTFB
 
     Args:
         func: The LLM method to trace.

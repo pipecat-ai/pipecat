@@ -11,7 +11,7 @@ from loguru import logger
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.utils.tracing.context_provider import TurnContextProvider
-from pipecat.utils.tracing.tracing import is_tracing_available
+from pipecat.utils.tracing.setup import is_tracing_available
 
 if is_tracing_available():
     from opentelemetry import trace

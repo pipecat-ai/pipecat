@@ -27,7 +27,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-from pipecat.utils.tracing.tracing import setup_tracing
+from pipecat.utils.tracing.setup import setup_tracing
 
 load_dotenv(override=True)
 

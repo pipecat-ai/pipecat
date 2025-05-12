@@ -36,7 +36,7 @@ from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.utils.asyncio import BaseTaskManager, TaskManager
-from pipecat.utils.tracing.tracing import is_tracing_available
+from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 HEARTBEAT_SECONDS = 1.0

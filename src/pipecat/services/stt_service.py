@@ -23,10 +23,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.tracing.tracing import traceable
 
 
-@traceable
 class STTService(AIService):
     """STTService is a base class for speech-to-text services."""
 
