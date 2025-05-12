@@ -10,15 +10,19 @@ Setup a Modal account and install it on your machine if you have not already, fo
 
 ## Deploy a self-serve LLM
 
-Follow the Modal Guide and example for [Deploying an OpenAI-compatible LLM service with vLLM](https://modal.com/docs/examples/vllm_inference).
+1. Follow the Modal Guide and example for [Deploying an OpenAI-compatible LLM service with vLLM](https://modal.com/docs/examples/vllm_inference).
 
-The TLDR, though, is to simply do the following from within this directory:
+    The TLDR, though, is to simply do the following from within this directory:
 
-```bash
-git clone https://github.com/modal-labs/modal-examples
-cd modal-examples
-modal deploy 06_gpu_and_ml/llm-serving/vllm_inference.py
-```
+   ```bash
+   git clone https://github.com/modal-labs/modal-examples
+   cd modal-examples
+   modal deploy 06_gpu_and_ml/llm-serving/vllm_inference.py
+   ```
+
+2. Jot down the endpoint from the previous step to use in the bot_vllm file mentioned below. It will look something like: `https://<Modal workspace>--example-vllm-openai-compatible-serve.modal.run`
+
+**Note:** This Modal example is their [initial getting started example](https://modal.com/docs/examples/vllm_inference) with a Llama-3.1 model. By default, it will tear down the container after 15 minutes of inactivity and can take 5-10 minutes to re-start, during which time it is unusable. So for the purposes of just getting started and this example, we recommend visiting the `/docs` endpoint (`https://<Modal workspace>--example-vllm-openai-compatible-serve.modal.run/docs`) for your deployed llm in a browser to trigger the cold start. Then wait for the page to load, indicating its ready before trying to connect your client.
 
 ## Deploy FastAPI App and Pipecat pipeline to Modal 
 
@@ -32,9 +36,9 @@ cp env.example .env
 
 Alternatively, you can configure your Modal app to use [secrets](https://modal.com/docs/guide/secrets)
 
-2. Update the `modal_url` in `server/src/bot_vllm.py` to point to the url produced from the self-serve llm deploy. It should have looked something like: `https://<Modal workspace>--example-vllm-openai-compatible-serve.modal.run`
+1. Update the `modal_url` in `server/src/bot_vllm.py` to point to the url produced from the self-serve llm deploy, mentioned above.
 
-3. From within the `server` directory, test the app locally:
+2. From within the `server` directory, test the app locally:
 
 ```bash
 modal serve app.py
@@ -45,6 +49,8 @@ modal serve app.py
 ```bash
 modal deploy app.py
 ```
+
+5. Jot down the endpoint from the previous step to use in the client's app.js file mentioned its README. It will look something like: `https://<Modal workspace>--pipecat-modal-fastapi-app.modal.run`
 
 ## Launch and Talk to your Bots running on Modal
 
@@ -71,11 +77,7 @@ In your [Modal dashboard](https://modal.com/apps), you should have two Apps list
 
 # Modal + Pipecat Tips
 
-<!--
-<FIX ME: fill in the following>
-
-<Recommended image settings for webapp container>
-<Recommended image settings for pipeline container>
-<Recommendations for min_containers and fast bot joins>
-<Link to Advanced example with Services self-hosted on Modal>
--->
+- In most other Pipecat examples, we use Popen to launch the pipeline process from the /connect endpoint. In this example, we instead use a Modal function with its own Modal image defined. This change ensures that each run of the Pipeline happens in a isolated, customizable container.
+- For the FastAPI and most common Pipecat Pipeline containers, a default debian_slim CPU-only should be all that's required to run. GPU containers are needed for self-hosted services.
+- To minimize cold starts of the pipeline and reduce latency for users, set `min_containers=1` on the Modal Function that launches the pipeline to ensure at least one warm instance of your function is always available.
+- For next steps on running a self-hosted llm and reducing latency, check out all of [Modal's LLM examples](https://modal.com/docs/examples/vllm_inference).

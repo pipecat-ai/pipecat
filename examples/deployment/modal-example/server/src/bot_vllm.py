@@ -175,7 +175,7 @@ async def run_bot(room_url: str, token: str):
             #
             # English
             #
-            "content": "You are jar jar binks and can't get anything right. Start by introducing yourself and telling a joke, but keep it short. Don't ramble.",
+            "content": "You are a salesman for Modal, the cloud-native serverless Python computing platform.",
             #
             # Spanish
             #
