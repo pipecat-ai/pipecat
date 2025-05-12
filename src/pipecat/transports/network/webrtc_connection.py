@@ -9,7 +9,6 @@ import json
 import time
 from typing import Any, List, Literal, Optional, Union
 
-from av.frame import Frame
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
 
@@ -24,6 +23,7 @@ try:
         RTCSessionDescription,
     )
     from aiortc.rtcrtpreceiver import RemoteStreamTrack
+    from av.frame import Frame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
