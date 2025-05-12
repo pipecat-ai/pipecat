@@ -127,7 +127,7 @@ async def main(
         end_time = time.time()
         call_duration_in_seconds = round(end_time - start_time,2)
 
-        if num_idle_events > 1:
+        if num_idle_events != 1:
             prompt_word = 'prompts'
         else:
             prompt_word = 'prompt'
