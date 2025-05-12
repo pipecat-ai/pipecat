@@ -7,6 +7,7 @@ import argparse
 import asyncio
 import os
 import sys
+import time
 
 from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
@@ -101,7 +102,7 @@ async def main(
     # Initialize the session manager
     session_manager = SessionManager()
 
-    idle_durations = []
+    num_idle_events = 0
 
     user_idled_too_much = False
 
@@ -155,7 +156,7 @@ async def main(
         params: FunctionCallParams
                               ):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
-        content = f"""The customer has been silent for {idle_durations[0]} seconds."""
+        content = f"""The user wants to end the call. The user has been silent for {UserIdleProcessor.retry_count} events"""
         message = call_config_manager.create_system_message(content)
         messages.append(message)
         await task.queue_frames([LLMMessagesFrame(messages)])
@@ -210,12 +211,7 @@ async def main(
                     "content": "The user has been quiet. Politely and briefly ask if they're still there.",
                 }
             )
-            import time
-
-            start = time.time()
             await user_idle.push_frame(LLMMessagesFrame(messages))
-            idle_durations.append(time.time() - start)
-
             return True
         elif retry_count == 2:
             # Second attempt: More direct prompt
@@ -227,33 +223,33 @@ async def main(
             )
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
-        else:
+        elif retry_count == 3:
             # Third attempt: End the conversation
             await user_idle.push_frame(
                 TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
             )
-
-            content = f"""The customer has been silent for {idle_durations[0]} seconds."""
-            message = call_config_manager.create_system_message(content)
-            messages.append(message)
-            await task.queue_frames([LLMMessagesFrame(messages)])
-            session_manager.call_flow_state.set_user_idled_too_much()
+            await user_idle.push_frame(LLMMessagesFrame(messages))
+            return True
+        elif retry_count == 4:
+            content = f"""User has been silent after {UserIdleProcessor.retry_count} prompts, ending conversation."""
+            await user_idle.push_frame(
+                TTSSpeakFrame(content)
+            )
+            return True
 
 
     user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=3.0)
-
-    summary_finished = SummaryFinished(session_manager.call_flow_state)
 
     transcription_modifier = TranscriptionModifierProcessor(
         session_manager.get_session_id_ref("operator")
     )
 
     # Define function to determine if bot should speak
-    async def should_speak(self) -> bool:
-        result = (
-                not user_idled_too_much #and not session_manager.call_flow_state.summary_finished
-        )
-        return result
+    # async def should_speak(self) -> bool:
+    #     result = (
+    #             not user_idled_too_much #and not session_manager.call_flow_state.summary_finished
+    #     )
+    #     return result
 
     # ------------ PIPELINE SETUP ------------
 
@@ -263,10 +259,9 @@ async def main(
             transport.input(),  # Transport user input
             user_idle,  # Idle user check-in
             context_aggregator.user(),  # User responses
-            FunctionFilter(should_speak),
+            # FunctionFilter(should_speak),
             llm,  # LLM
             tts,  # TTS
-            summary_finished,
             transport.output()  # Transport bot output
             # context_aggregator.assistant(),  # Assistant spoken responses
         ]
