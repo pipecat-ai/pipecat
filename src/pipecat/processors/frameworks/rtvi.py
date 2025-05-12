@@ -639,8 +639,6 @@ class RTVIProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._config = config
 
-        self._pipeline: Optional[FrameProcessor] = None
-
         self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
@@ -753,11 +751,6 @@ class RTVIProcessor(FrameProcessor):
         # Other frames
         else:
             await self.push_frame(frame, direction)
-
-    async def cleanup(self):
-        await super().cleanup()
-        if self._pipeline:
-            await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
         if not self._action_task:
