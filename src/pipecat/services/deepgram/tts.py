@@ -62,29 +62,18 @@ class DeepgramTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            response = await self._deepgram_client.speak.asyncrest.v("1").stream_memory(
+            response = await self._deepgram_client.speak.asyncrest.v("1").stream_raw(
                 {"text": text}, options
             )
 
             await self.start_tts_usage_metrics(text)
             yield TTSStartedFrame()
 
-            # The response.stream_memory is already a BytesIO object
-            audio_buffer = response.stream_memory
-
-            if audio_buffer is None:
-                raise ValueError("No audio data received from Deepgram")
-
-            # Read and yield the audio data in chunks
-            audio_buffer.seek(0)  # Ensure we're at the start of the buffer
-            chunk_size = 1024  # Use a fixed buffer size
-            while True:
+            async for data in response.aiter_bytes():
                 await self.stop_ttfb_metrics()
-                chunk = audio_buffer.read(chunk_size)
-                if not chunk:
-                    break
-                frame = TTSAudioRawFrame(audio=chunk, sample_rate=self.sample_rate, num_channels=1)
-                yield frame
+                if data:
+                    yield TTSAudioRawFrame(audio=data, sample_rate=self.sample_rate, num_channels=1)
+
             yield TTSStoppedFrame()
 
         except Exception as e:
