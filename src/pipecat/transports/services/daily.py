@@ -702,7 +702,9 @@ class DailyTransportClient(EventHandler):
 
         self._audio_renderers.setdefault(participant_id, {})[audio_source] = callback
 
-        logger.info(f"Starting to capture audio from participant {participant_id} to {audio_source}")
+        logger.info(
+            f"Starting to capture audio from participant {participant_id} to {audio_source}"
+        )
 
         self._client.set_audio_renderer(
             participant_id,
