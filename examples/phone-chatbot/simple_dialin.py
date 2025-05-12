@@ -69,9 +69,7 @@ async def main(
     # Initialize the session manager
     session_manager = SessionManager()
 
-    global num_idle_events
     num_idle_events = 0
-
     start_time = None
 
     # ------------ TRANSPORT SETUP ------------
@@ -126,6 +124,7 @@ async def main(
 
         end_time = time.time()
         global start_time
+        global num_idle_events
         call_duration_in_seconds = round(end_time - start_time,2)
 
         content = f"""
