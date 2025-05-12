@@ -9,6 +9,7 @@
 This repository contains examples for building intelligent phone chatbots using AI for various use cases including:
 
 - **Simple dial-in**: Basic incoming call handling
+- **Enhanced dial-in**: Advanced incoming call handling with silence detection and call statistics
 - **Simple dial-out**: Basic outgoing call handling
 - **Voicemail detection**: Bot calls a number, detects if it reaches voicemail or a human, and responds appropriately
 - **Call transfer**: Bot handles initial customer interaction and transfers to a human operator when needed
@@ -19,7 +20,7 @@ These examples use the following components:
 
 - 🔁 **Transport**: Daily WebRTC
 - 💬 **Speech-to-Text**: Deepgram via Daily transport
-- 🤖 **LLMs**: Each example uses a specific LLM (OpenAI GPT-4o or Google Gemini)
+- 🤖 **LLMs**: Each example uses a specific LLM (OpenAI GPT-4 or Google Gemini)
 - 🔉 **Text-to-Speech**: Cartesia
 
 ## Getting Started
@@ -75,7 +76,43 @@ Start ngrok to create a public URL for your local server:
 ngrok http --domain yourdomain.ngrok.app 7860
 ```
 
-## Example 1: Simple Dial-in
+## Example 1: Enhanced Dial-in
+
+This example demonstrates advanced handling of incoming calls with the following features:
+
+- Silence detection that prompts the user after 10+ seconds of silence
+- Graceful call termination after 3 unanswered prompts
+- Call statistics logging (duration, silence events, etc.)
+
+### Testing in Daily Prebuilt (No Actual Phone Calls)
+
+```shell
+curl -X POST "http://localhost:7860/start" \
+	 -H "Content-Type: application/json" \
+	 -d '{
+		 "config": {
+			"enhanced_dialin": {
+			   "testInPrebuilt": true
+			}
+		 }
+	  }'
+```
+
+This returns a Daily room URL where you can test the bot's conversation capabilities and silence detection features.
+
+### Making Actual Phone Calls
+
+The enhanced dial-in bot will automatically:
+1. Monitor for silence periods
+2. Prompt the user after 10 seconds of silence
+3. Terminate the call after 3 unanswered prompts
+4. Log call statistics including:
+   - Total call duration
+   - Number of silence events
+   - Number of unanswered prompts
+   - Start and end times
+
+## Example 2: Simple Dial-in
 
 This example demonstrates basic handling of incoming calls without additional features like call transfer.
 
@@ -95,7 +132,7 @@ curl -X POST "http://localhost:7860/start" \
 
 This returns a Daily room URL where you can test the bot's basic conversation capabilities.
 
-## Example 2: Simple Dial-out
+## Example 3: Simple Dial-out
 
 This example demonstrates basic handling of outgoing calls without additional features like voicemail detection.
 
@@ -132,7 +169,7 @@ curl -X POST "http://localhost:7860/start" \
 	  }'
 ```
 
-## Example 3: Voicemail Detection
+## Example 4: Voicemail Detection
 
 This example demonstrates a bot that can dial out to a phone number, detect whether it reached a human or voicemail system, and respond appropriately.
 
@@ -187,7 +224,7 @@ curl -X POST "http://localhost:7860/start" \
 > 3. Ensure rooms have dial-out enabled (the bot runner handles this)
 > 4. Use an owner token for the bot (also handled by the bot runner)
 
-## Example 4: Call Transfer
+## Example 5: Call Transfer
 
 This example demonstrates a bot that handles initial customer interaction and can transfer the call to a human operator when requested.
 
