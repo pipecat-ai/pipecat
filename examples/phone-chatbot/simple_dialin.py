@@ -201,7 +201,7 @@ async def main(
             return True
         elif retry_count == 3:
             # Third attempt: End the conversation
-            content = f"""User has been silent after {retry_count - 1} prompts, ending conversation."""
+            content = f"""User has been silent after 3 prompts, ending conversation."""
             await user_idle.push_frame(
                 TTSSpeakFrame(content)
             )
