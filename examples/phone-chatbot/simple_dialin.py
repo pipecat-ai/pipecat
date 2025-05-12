@@ -161,12 +161,13 @@ async def main(
         messages.append(message)
         await task.queue_frames([LLMMessagesFrame(messages)])
 
-        # if session_manager:
-        #     # Mark that the call was terminated by the bot
-        #     session_manager.call_flow_state.set_call_terminated()
+
+        if session_manager:
+            # Mark that the call was terminated by the bot
+            session_manager.call_flow_state.set_call_terminated()
 
         # # Then end the call
-        # await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     # Define function schemas for tools
     terminate_call_function = FunctionSchema(
@@ -186,7 +187,15 @@ async def main(
     Your output will be converted to audio so don't include special characters in your answers. 
     Respond to what the user said in a creative and helpful way, but keep your responses brief. 
 
-    Say How can I help you on Mars? 
+    When the person indicates they're done with the conversation by saying something like:
+        - "Goodbye"
+        - "That's all"
+        - "I'm done"
+        - "Thank you, that's all I needed"
+        
+     THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function.
+     
+    Start by saying how can I help you?
     """
 
     # Initialize LLM
@@ -231,7 +240,8 @@ async def main(
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         elif retry_count == 4:
-            content = f"""User has been silent after {UserIdleProcessor.retry_count} prompts, ending conversation."""
+            content = f"""User has been silent after {retry_count-1} prompts, ending conversation."""
+            logger.info(content)
             await user_idle.push_frame(
                 TTSSpeakFrame(content)
             )
