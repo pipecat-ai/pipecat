@@ -68,6 +68,7 @@ async def main(
     # Initialize the session manager
     session_manager = SessionManager()
 
+    global num_idle_events
     num_idle_events = 0
     start_time = None
 
