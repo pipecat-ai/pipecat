@@ -102,6 +102,7 @@ async def main(
     # Initialize the session manager
     session_manager = SessionManager()
 
+    global num_idle_events
     num_idle_events = 0
 
     user_idled_too_much = False
@@ -156,7 +157,8 @@ async def main(
         params: FunctionCallParams
                               ):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
-        content = f"""The user wants to end the call. The user has been silent for {UserIdleProcessor.retry_count} events"""
+        global num_idle_events
+        content = f"""The user wants to end the call. The user has been silent after {num_idle_events} prompts"""
         # message = call_config_manager.create_system_message(content)
         # messages.append(message)
         # await task.queue_frames([LLMMessagesFrame(messages)])
@@ -189,15 +191,12 @@ async def main(
     Your output will be converted to audio so don't include special characters in your answers. 
     Respond to what the user said in a creative and helpful way, but keep your responses brief. 
 
-    When the person indicates they're done with the conversation by saying something like:
+    If the person indicates they're done with the conversation by saying something like:
         - "Goodbye"
         - "That's all"
         - "I'm done"
         - "Thank you, that's all I needed"
-        
-     THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function.
-     
-    Start by saying how can I help you?
+    call the `terminate_call` function.
     """
 
     # Initialize LLM
@@ -214,6 +213,7 @@ async def main(
     context_aggregator = llm.create_context_aggregator(context)
 
     async def detect_user_idle(user_idle: UserIdleProcessor, retry_count: int) -> bool:
+        global num_idle_events
         if retry_count == 1:
             # First attempt: Add a gentle prompt to the conversation
             messages.append(
@@ -222,6 +222,7 @@ async def main(
                     "content": "The user has been quiet. Politely and briefly ask if they're still there.",
                 }
             )
+            num_idle_events = retry_count
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         elif retry_count == 2:
@@ -232,6 +233,7 @@ async def main(
                     "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
                 }
             )
+            num_idle_events = retry_count
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         elif retry_count == 3:
@@ -239,6 +241,7 @@ async def main(
             await user_idle.push_frame(
                 TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
             )
+            num_idle_events = retry_count
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         elif retry_count == 4:
