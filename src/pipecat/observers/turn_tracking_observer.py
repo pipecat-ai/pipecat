@@ -46,10 +46,7 @@ class TurnTrackingObserver(BaseObserver):
         self._register_event_handler("on_turn_started")
         self._register_event_handler("on_turn_ended")
 
-    async def on_push_frame(
-        self,
-        data: FramePushed,
-    ):
+    async def on_push_frame(self, data: FramePushed):
         """Process frame events for turn tracking."""
         # Skip already processed frames
         if data.frame.id in self._processed_frames:
@@ -67,24 +64,17 @@ class TurnTrackingObserver(BaseObserver):
         if isinstance(data.frame, StartFrame):
             # Start the first turn immediately when the pipeline starts
             if self._turn_count == 0:
-                await self._start_turn(data.timestamp)
+                await self._start_turn(data)
         elif isinstance(data.frame, UserStartedSpeakingFrame):
-            await self._handle_user_started_speaking(data.timestamp)
+            await self._handle_user_started_speaking(data)
         elif isinstance(data.frame, BotStartedSpeakingFrame):
-            self._is_bot_speaking = True
-            self._has_bot_spoken = True
-            # Cancel any pending turn end timer when bot starts speaking again
-            self._cancel_turn_end_timer()
+            await self._handle_bot_started_speaking(data)
         # A BotStoppedSpeakingFrame can arrive after a UserStartedSpeakingFrame following an interruption
         # We only want to end the turn if the bot was previously speaking
         elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._is_bot_speaking:
-            self._is_bot_speaking = False
-            # Schedule turn end with timeout
-            # This is needed to handle cases where the bot's speech ends and then resumes
-            # This can happen with HTTP TTS services or function calls
-            self._schedule_turn_end(data.timestamp)
+            await self._handle_bot_stopped_speaking(data)
 
-    def _schedule_turn_end(self, timestamp: int):
+    def _schedule_turn_end(self, data: FramePushed):
         """Schedule turn end with a timeout."""
         # Cancel any existing timer
         self._cancel_turn_end_timer()
@@ -93,7 +83,7 @@ class TurnTrackingObserver(BaseObserver):
         loop = asyncio.get_event_loop()
         self._end_turn_timer = loop.call_later(
             self._turn_end_timeout_secs,
-            lambda: asyncio.create_task(self._end_turn_after_timeout(timestamp)),
+            lambda: asyncio.create_task(self._end_turn_after_timeout(data)),
         )
 
     def _cancel_turn_end_timer(self):
@@ -102,48 +92,63 @@ class TurnTrackingObserver(BaseObserver):
             self._end_turn_timer.cancel()
             self._end_turn_timer = None
 
-    async def _end_turn_after_timeout(self, timestamp: int):
+    async def _end_turn_after_timeout(self, data: FramePushed):
         """End turn after timeout has expired."""
         if self._is_turn_active and not self._is_bot_speaking:
             logger.debug(f"Turn {self._turn_count} ending due to timeout")
-            await self._end_turn(timestamp, was_interrupted=False)
+            await self._end_turn(data, was_interrupted=False)
             self._end_turn_timer = None
 
-    async def _handle_user_started_speaking(self, timestamp: int):
+    async def _handle_user_started_speaking(self, data: FramePushed):
         """Handle user speaking events, including interruptions."""
         if self._is_bot_speaking:
             # Handle interruption - end current turn and start a new one
             self._cancel_turn_end_timer()  # Cancel any pending end turn timer
-            await self._end_turn(timestamp, was_interrupted=True)
+            await self._end_turn(data, was_interrupted=True)
             self._is_bot_speaking = False  # Bot is considered interrupted
-            await self._start_turn(timestamp)
+            await self._start_turn(data)
         elif self._is_turn_active and self._has_bot_spoken:
             # User started speaking during the turn_end_timeout_secs period after bot speech
             self._cancel_turn_end_timer()  # Cancel any pending end turn timer
-            await self._end_turn(timestamp, was_interrupted=False)
-            await self._start_turn(timestamp)
+            await self._end_turn(data, was_interrupted=False)
+            await self._start_turn(data)
         elif not self._is_turn_active:
             # Start a new turn after previous one ended
-            await self._start_turn(timestamp)
+            await self._start_turn(data)
         else:
             # User is speaking within the same turn (before bot has responded)
             logger.trace(f"User is already speaking in Turn {self._turn_count}")
 
-    async def _start_turn(self, timestamp: int):
+    async def _handle_bot_started_speaking(self, data: FramePushed):
+        """Handle bot speaking events."""
+        self._is_bot_speaking = True
+        self._has_bot_spoken = True
+        # Cancel any pending turn end timer when bot starts speaking again
+        self._cancel_turn_end_timer()
+
+    async def _handle_bot_stopped_speaking(self, data: FramePushed):
+        """Handle bot stopped speaking events."""
+        self._is_bot_speaking = False
+        # Schedule turn end with timeout
+        # This is needed to handle cases where the bot's speech ends and then resumes
+        # This can happen with HTTP TTS services or function calls
+        self._schedule_turn_end(data)
+
+    async def _start_turn(self, data: FramePushed):
         """Start a new turn."""
         self._is_turn_active = True
         self._has_bot_spoken = False
         self._turn_count += 1
-        self._turn_start_time = timestamp
+        self._turn_start_time = data.timestamp
         logger.debug(f"Turn {self._turn_count} started")
         await self._call_event_handler("on_turn_started", self._turn_count)
 
-    async def _end_turn(self, timestamp: int, was_interrupted: bool):
+    async def _end_turn(self, data: FramePushed, was_interrupted: bool):
         """End the current turn."""
         if not self._is_turn_active:
             return
 
-        duration = (timestamp - self._turn_start_time) / 1_000_000_000  # Convert to seconds
+        duration = (data.timestamp - self._turn_start_time) / 1_000_000_000  # Convert to seconds
         self._is_turn_active = False
 
         status = "interrupted" if was_interrupted else "completed"
