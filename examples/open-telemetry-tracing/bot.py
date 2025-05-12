@@ -10,7 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from pytest import param
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -127,6 +126,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        # Optionally, add a conversation ID to track the conversation
+        # conversation_id="8df26cc1-6db0-4a7a-9930-1e037c8f1fa2",
     )
 
     @transport.event_handler("on_client_connected")

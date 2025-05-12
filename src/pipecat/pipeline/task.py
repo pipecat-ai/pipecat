@@ -181,7 +181,8 @@ class PipelineTask(BaseTask):
         ),
         cancel_on_idle_timeout: bool = True,
         enable_turn_tracking: bool = True,
-        enable_turn_tracing: bool = True,
+        enable_tracing: bool = True,
+        conversation_id: Optional[str] = None,
     ):
         super().__init__()
         self._pipeline = pipeline
@@ -192,7 +193,8 @@ class PipelineTask(BaseTask):
         self._idle_timeout_frames = idle_timeout_frames
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
         self._enable_turn_tracking = enable_turn_tracking
-        self._enable_turn_tracing = enable_turn_tracing and is_tracing_available()
+        self._enable_tracing = enable_tracing and is_tracing_available()
+        self._conversation_id = conversation_id
         if self._params.observers:
             import warnings
 
@@ -206,8 +208,10 @@ class PipelineTask(BaseTask):
         if self._enable_turn_tracking:
             self._turn_tracking_observer = TurnTrackingObserver()
             observers = [self._turn_tracking_observer] + list(observers)
-        if self._enable_turn_tracking and self._enable_turn_tracing:
-            self._turn_trace_observer = TurnTraceObserver(self._turn_tracking_observer)
+        if self._enable_turn_tracking and self._enable_tracing:
+            self._turn_trace_observer = TurnTraceObserver(
+                self._turn_tracking_observer, conversation_id=self._conversation_id
+            )
             observers = [self._turn_trace_observer] + list(observers)
         self._finished = False
 
@@ -450,6 +454,10 @@ class PipelineTask(BaseTask):
     async def _cleanup(self, cleanup_pipeline: bool):
         # Cleanup base object.
         await self.cleanup()
+
+        # End conversation tracing if it's active - this will also close any active turn span
+        if self._enable_tracing and hasattr(self, "_turn_trace_observer"):
+            self._turn_trace_observer.end_conversation_tracing()
 
         # Cleanup pipeline processors.
         await self._source.cleanup()

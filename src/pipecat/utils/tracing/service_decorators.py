@@ -20,13 +20,13 @@ from typing import Callable, Optional, TypeVar
 from opentelemetry import context as context_api
 from opentelemetry import trace
 
-from pipecat.utils.tracing.context_provider import get_current_turn_context
 from pipecat.utils.tracing.service_attributes import (
     add_llm_span_attributes,
     add_stt_span_attributes,
     add_tts_span_attributes,
 )
 from pipecat.utils.tracing.setup import OPENTELEMETRY_AVAILABLE, is_tracing_available
+from pipecat.utils.tracing.turn_context_provider import get_current_turn_context
 
 T = TypeVar("T")
 R = TypeVar("R")
