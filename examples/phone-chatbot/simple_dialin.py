@@ -104,7 +104,7 @@ async def main(
     transport = DailyTransport(
         room_url,
         token,
-        "Detect Silence Dial-in Bot",
+        "Silence Detection Dial-in Bot",
         transport_params,
     )
 
@@ -133,7 +133,7 @@ async def main(
 
         content = f"""
         The user wants to end the call. 
-        The user has been silent after {num_idle_events} {prompt_word}.
+        The user did not respond to {num_idle_events} {prompt_word}.
         The call was {call_duration_in_seconds} seconds long.
         """
 
@@ -220,7 +220,7 @@ async def main(
             call_duration_in_seconds = round(end_time - start_time, 2)
 
             content = f"""
-            User has been silent after 3 prompts, ending conversation. 
+            The user did not respond to 3 prompts, ending conversation. 
             The call was {call_duration_in_seconds} seconds long.
             """
 
