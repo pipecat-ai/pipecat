@@ -18,5 +18,5 @@ from .vision_service import *
 sys.modules[__name__] = DeprecatedModuleProxy(
     globals(),
     "ai_services",
-    "ai_service.[image_service,llm_service,stt_service,tts_service,vision_service]",
+    "[ai_service,image_service,llm_service,stt_service,tts_service,vision_service]",
 )
