@@ -26,7 +26,17 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 from pipecat.processors.user_idle_processor import UserIdleProcessor
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSSpeakFrame
+# from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSSpeakFrame
+from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
+    EndTaskFrame,
+    Frame,
+    LLMMessagesFrame,
+    TranscriptionFrame,
+    TTSSpeakFrame
+)
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.filters.function_filter import FunctionFilter
 
 load_dotenv(override=True)
 
@@ -36,6 +46,38 @@ logger.add(sys.stderr, level="DEBUG")
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
+
+class TranscriptionModifierProcessor(FrameProcessor):
+    """Processor that modifies transcription frames before they reach the context aggregator."""
+
+    def __init__(self, operator_session_id_ref):
+        """Initialize with a reference to the operator_session_id variable.
+
+        Args:
+            operator_session_id_ref: A reference or container holding the operator's session ID
+        """
+        super().__init__()
+        self.operator_session_id_ref = operator_session_id_ref
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # Only process frames that are moving downstream
+        if direction == FrameDirection.DOWNSTREAM:
+            # Check if the frame is a transcription frame
+            if isinstance(frame, TranscriptionFrame):
+                # Check if this frame is from the operator
+                if (
+                    self.operator_session_id_ref[0] is not None
+                    and hasattr(frame, "user_id")
+                    and frame.user_id == self.operator_session_id_ref[0]
+                ):
+                    # Modify the text to include operator prefix
+                    frame.text = f"[OPERATOR]: {frame.text}"
+                    logger.debug(f"++++ Modified Operator Transcription: {frame.text}")
+
+        # Push the (potentially modified) frame downstream
+        await self.push_frame(frame, direction)
 
 async def main(
     room_url: str,
@@ -174,7 +216,21 @@ async def main(
             await task.queue_frame(EndFrame())
             return False
 
-    user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=5.0)
+    user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=3.0)
+
+    summary_finished = SummaryFinished(session_manager.call_flow_state)
+
+    transcription_modifier = TranscriptionModifierProcessor(
+        session_manager.get_session_id_ref("operator")
+    )
+
+    # Define function to determine if bot should speak
+    async def should_speak(self) -> bool:
+        result = (
+                not session_manager.call_flow_state.operator_connected
+                or not session_manager.call_flow_state.summary_finished
+        )
+        return result
 
     # ------------ PIPELINE SETUP ------------
 
@@ -184,10 +240,12 @@ async def main(
             transport.input(),  # Transport user input
             user_idle,  # Idle user check-in
             context_aggregator.user(),  # User responses
+            FunctionFilter(should_speak),
             llm,  # LLM
             tts,  # TTS
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            summary_finished,
+            transport.output()  # Transport bot output
+            # context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -215,6 +273,25 @@ async def main(
     runner = PipelineRunner()
     await runner.run(task)
 
+class SummaryFinished(FrameProcessor):
+    """Frame processor that monitors when summary has been finished."""
+
+    def __init__(self, dial_operator_state):
+        super().__init__()
+        # Store reference to the shared state object
+        self.dial_operator_state = dial_operator_state
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # Check if operator is connected and this is the end of bot speaking
+        if self.dial_operator_state.operator_connected and isinstance(
+            frame, BotStoppedSpeakingFrame
+        ):
+            logger.debug("Summary finished, bot will stop speaking")
+            self.dial_operator_state.set_summary_finished()
+
+        await self.push_frame(frame, direction)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Dial-in Bot")
