@@ -26,14 +26,15 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 from pipecat.processors.user_idle_processor import UserIdleProcessor
-# from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSSpeakFrame
+# from pipecat.frames.frames import LLMMessagesFrame, TTSSpeakFrame
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndTaskFrame,
     Frame,
     LLMMessagesFrame,
     TranscriptionFrame,
-    TTSSpeakFrame
+    TTSSpeakFrame,
+    EndFrame
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.filters.function_filter import FunctionFilter
@@ -45,6 +46,7 @@ logger.add(sys.stderr, level="DEBUG")
 
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
+
 
 
 class TranscriptionModifierProcessor(FrameProcessor):
@@ -84,6 +86,7 @@ async def main(
     token: str,
     body: dict,
 ):
+
     # ------------ CONFIGURATION AND SETUP ------------
 
     # Create a config manager using the provided body
@@ -97,6 +100,11 @@ async def main(
 
     # Initialize the session manager
     session_manager = SessionManager()
+
+    idle_durations = []
+
+    user_idled_too_much = False
+
 
     # ------------ TRANSPORT SETUP ------------
 
@@ -143,14 +151,21 @@ async def main(
 
     # ------------ FUNCTION DEFINITIONS ------------
 
-    async def terminate_call(params: FunctionCallParams):
+    async def terminate_call(  # Pipeline task reference
+        params: FunctionCallParams
+                              ):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
-        if session_manager:
-            # Mark that the call was terminated by the bot
-            session_manager.call_flow_state.set_call_terminated()
+        content = f"""The customer has been silent for {idle_durations[0]} seconds."""
+        message = call_config_manager.create_system_message(content)
+        messages.append(message)
+        await task.queue_frames([LLMMessagesFrame(messages)])
 
-        # Then end the call
-        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        # if session_manager:
+        #     # Mark that the call was terminated by the bot
+        #     session_manager.call_flow_state.set_call_terminated()
+
+        # # Then end the call
+        # await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     # Define function schemas for tools
     terminate_call_function = FunctionSchema(
@@ -170,8 +185,7 @@ async def main(
     Your output will be converted to audio so don't include special characters in your answers. 
     Respond to what the user said in a creative and helpful way, but keep your responses brief. 
 
-    Say How can I help you on Mars?    
-    If the user does not answer within 3 seconds of your question, say no response heard and **IMMEDIATELY** call the `terminate_call` function. 
+    Say How can I help you on Mars? 
     """
 
     # Initialize LLM
@@ -196,7 +210,12 @@ async def main(
                     "content": "The user has been quiet. Politely and briefly ask if they're still there.",
                 }
             )
+            import time
+
+            start = time.time()
             await user_idle.push_frame(LLMMessagesFrame(messages))
+            idle_durations.append(time.time() - start)
+
             return True
         elif retry_count == 2:
             # Second attempt: More direct prompt
@@ -213,8 +232,13 @@ async def main(
             await user_idle.push_frame(
                 TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
             )
-            await task.queue_frame(EndFrame())
-            return False
+
+            content = f"""The customer has been silent for {idle_durations[0]} seconds."""
+            message = call_config_manager.create_system_message(content)
+            messages.append(message)
+            await task.queue_frames([LLMMessagesFrame(messages)])
+            session_manager.call_flow_state.set_user_idled_too_much()
+
 
     user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=3.0)
 
@@ -227,8 +251,7 @@ async def main(
     # Define function to determine if bot should speak
     async def should_speak(self) -> bool:
         result = (
-                not session_manager.call_flow_state.operator_connected
-                or not session_manager.call_flow_state.summary_finished
+                not user_idled_too_much #and not session_manager.call_flow_state.summary_finished
         )
         return result
 
@@ -263,6 +286,7 @@ async def main(
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
         logger.debug(f"Participant left: {participant}, reason: {reason}")
+
         await task.cancel()
 
     # ------------ RUN PIPELINE ------------
@@ -273,25 +297,25 @@ async def main(
     runner = PipelineRunner()
     await runner.run(task)
 
-class SummaryFinished(FrameProcessor):
-    """Frame processor that monitors when summary has been finished."""
-
-    def __init__(self, dial_operator_state):
-        super().__init__()
-        # Store reference to the shared state object
-        self.dial_operator_state = dial_operator_state
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-
-        # Check if operator is connected and this is the end of bot speaking
-        if self.dial_operator_state.operator_connected and isinstance(
-            frame, BotStoppedSpeakingFrame
-        ):
-            logger.debug("Summary finished, bot will stop speaking")
-            self.dial_operator_state.set_summary_finished()
-
-        await self.push_frame(frame, direction)
+# class SummaryFinished(FrameProcessor):
+#     """Frame processor that monitors when summary has been finished."""
+#
+#     def __init__(self, dial_operator_state):
+#         super().__init__()
+#         # Store reference to the shared state object
+#         self.dial_operator_state = dial_operator_state
+#
+#     async def process_frame(self, frame: Frame, direction: FrameDirection):
+#         await super().process_frame(frame, direction)
+#
+#         # Check if operator is connected and this is the end of bot speaking
+#         if self.dial_operator_state.operator_connected and isinstance(
+#             frame, BotStoppedSpeakingFrame
+#         ):
+#             logger.debug("Summary finished, bot will stop speaking")
+#             self.dial_operator_state.set_summary_finished()
+#
+#         await self.push_frame(frame, direction)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Simple Dial-in Bot")
