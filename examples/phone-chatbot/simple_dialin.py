@@ -157,10 +157,12 @@ async def main(
                               ):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
         content = f"""The user wants to end the call. The user has been silent for {UserIdleProcessor.retry_count} events"""
-        message = call_config_manager.create_system_message(content)
-        messages.append(message)
-        await task.queue_frames([LLMMessagesFrame(messages)])
-
+        # message = call_config_manager.create_system_message(content)
+        # messages.append(message)
+        # await task.queue_frames([LLMMessagesFrame(messages)])
+        await task.queue_frame(
+            TTSSpeakFrame(content)
+        )
 
         if session_manager:
             # Mark that the call was terminated by the bot
@@ -248,7 +250,7 @@ async def main(
             return True
 
 
-    user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=3.0)
+    user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=10.0)
 
     transcription_modifier = TranscriptionModifierProcessor(
         session_manager.get_session_id_ref("operator")
