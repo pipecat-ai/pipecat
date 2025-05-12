@@ -206,9 +206,7 @@ async def main(
                 TTSSpeakFrame(content)
             )
             num_idle_events = retry_count
-            await user_idle.push_frame(LLMMessagesFrame(messages))
-            return True
-        else:
+            await task.queue_frame(EndFrame())
             return False
 
     user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=10.0)
