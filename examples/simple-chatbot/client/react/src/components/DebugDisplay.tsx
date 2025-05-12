@@ -8,6 +8,7 @@ import {
 } from '@pipecat-ai/client-js';
 import { useRTVIClient, useRTVIClientEvent } from '@pipecat-ai/client-react';
 import './DebugDisplay.css';
+import { DailyTransport } from '@pipecat-ai/daily-transport';
 
 export function DebugDisplay() {
   const debugLogRef = useRef<HTMLDivElement>(null);
@@ -50,6 +51,17 @@ export function DebugDisplay() {
       },
       [log]
     )
+  );
+
+  // Log connection events
+  useRTVIClientEvent(
+    RTVIEvent.Connected,
+    useCallback(() => {
+      if (!client) return;
+      const dailyCallClient = (client.transport as DailyTransport)
+        .dailyCallClient;
+      console.log(`Session ID: ${dailyCallClient.meetingSessionSummary().id}`);
+    }, [client])
   );
 
   useRTVIClientEvent(
