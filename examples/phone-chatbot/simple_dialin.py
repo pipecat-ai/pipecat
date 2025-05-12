@@ -72,11 +72,7 @@ async def main(
     global num_idle_events
     num_idle_events = 0
 
-    global start_time
     start_time = None
-
-
-
 
     # ------------ TRANSPORT SETUP ------------
 
@@ -111,7 +107,7 @@ async def main(
     transport = DailyTransport(
         room_url,
         token,
-        "Simple Dial-in Bot",
+        "Detect Silence Dial-in Bot",
         transport_params,
     )
 
@@ -192,37 +188,43 @@ async def main(
         global num_idle_events
         if retry_count == 1:
             # First attempt: Add a gentle prompt to the conversation
+            num_idle_events = retry_count
             messages.append(
                 {
                     "role": "system",
                     "content": "The user has been quiet. Politely and briefly ask if they're still there.",
                 }
             )
-            num_idle_events = retry_count
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         elif retry_count == 2:
             # Second attempt: More direct prompt
+            num_idle_events = retry_count
             messages.append(
                 {
                     "role": "system",
                     "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
                 }
             )
-            num_idle_events = retry_count
+
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         elif retry_count == 3:
             # Third attempt: End the conversation
+            num_idle_events = retry_count
             end_time = time.time()
             global start_time
             call_duration_in_seconds = round(end_time - start_time, 2)
 
-            content = f"""User has been silent after 3 prompts, ending conversation. The call was {call_duration_in_seconds} seconds long."""
+            content = f"""
+            User has been silent after 3 prompts, ending conversation. 
+            The call was {call_duration_in_seconds} seconds long.
+            """
+
             await user_idle.push_frame(
                 TTSSpeakFrame(content)
             )
-            num_idle_events = retry_count
+
 
             await task.queue_frame(EndFrame())
             return False
