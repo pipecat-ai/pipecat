@@ -25,6 +25,8 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
+from pipecat.processors.user_idle_processor import UserIdleProcessor
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSSpeakFrame
 
 load_dotenv(override=True)
 
@@ -122,7 +124,13 @@ async def main(
     # ------------ LLM AND CONTEXT SETUP ------------
 
     # Set up the system instruction for the LLM
-    system_instruction = """You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself. If the user ends the conversation, **IMMEDIATELY** call the `terminate_call` function. """
+    system_instruction = """You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. 
+    Your output will be converted to audio so don't include special characters in your answers. 
+    Respond to what the user said in a creative and helpful way, but keep your responses brief. 
+
+    Say How can I help you on Mars?    
+    If the user does not answer within 3 seconds of your question, say no response heard and **IMMEDIATELY** call the `terminate_call` function. 
+    """
 
     # Initialize LLM
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -137,12 +145,44 @@ async def main(
     context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
+    async def detect_user_idle(user_idle: UserIdleProcessor, retry_count: int) -> bool:
+        if retry_count == 1:
+            # First attempt: Add a gentle prompt to the conversation
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "The user has been quiet. Politely and briefly ask if they're still there.",
+                }
+            )
+            await user_idle.push_frame(LLMMessagesFrame(messages))
+            return True
+        elif retry_count == 2:
+            # Second attempt: More direct prompt
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
+                }
+            )
+            await user_idle.push_frame(LLMMessagesFrame(messages))
+            return True
+        else:
+            # Third attempt: End the conversation
+            await user_idle.push_frame(
+                TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
+            )
+            await task.queue_frame(EndFrame())
+            return False
+
+    user_idle = UserIdleProcessor(callback=detect_user_idle, timeout=5.0)
+
     # ------------ PIPELINE SETUP ------------
 
     # Build pipeline
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
+            user_idle,  # Idle user check-in
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
