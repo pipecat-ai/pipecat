@@ -157,7 +157,6 @@ async def main(
         params: FunctionCallParams
                               ):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
-        global num_idle_events
         content = f"""The user wants to end the call. The user has been silent after {num_idle_events} prompts"""
         # message = call_config_manager.create_system_message(content)
         # messages.append(message)
