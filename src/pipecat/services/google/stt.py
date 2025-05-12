@@ -9,7 +9,7 @@ import json
 import os
 import time
 
-from pipecat.utils.tracing.service_decorators import traced_stt_transcription
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -783,7 +783,7 @@ class GoogleSTTService(STTService):
             await self._request_queue.put(audio)
         yield None
 
-    @traced_stt_transcription(name="google_transcription")
+    @traced_stt(name="google_transcription")
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
     ):

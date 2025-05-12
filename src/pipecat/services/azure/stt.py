@@ -20,7 +20,7 @@ from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_stt_transcription
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from azure.cognitiveservices.speech import (
@@ -110,7 +110,7 @@ class AzureSTTService(STTService):
         if self._audio_stream:
             self._audio_stream.close()
 
-    @traced_stt_transcription(name="azure_transcription")
+    @traced_stt(name="azure_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
         """Handle a transcription result with tracing."""
         await self.stop_ttfb_metrics()

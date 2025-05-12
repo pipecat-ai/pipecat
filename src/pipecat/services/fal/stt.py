@@ -14,7 +14,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_stt_transcription
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import fal_client
@@ -212,7 +212,7 @@ class FalSTTService(SegmentedSTTService):
         await super().set_model(model)
         logger.info(f"Switching STT model to: [{model}]")
 
-    @traced_stt_transcription(name="_transcription")
+    @traced_stt(name="_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
         """Handle a transcription result with tracing."""
         await self.stop_ttfb_metrics()

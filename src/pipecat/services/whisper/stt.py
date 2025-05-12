@@ -18,7 +18,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_stt_transcription
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 if TYPE_CHECKING:
     try:
@@ -347,7 +347,7 @@ class WhisperSTTService(SegmentedSTTService):
             logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
             self._model = None
 
-    @traced_stt_transcription(name="whisper_transcription")
+    @traced_stt(name="whisper_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
         pass
@@ -444,7 +444,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         """MLX Whisper loads models on demand, so this is a no-op."""
         pass
 
-    @traced_stt_transcription(name="whisper_mlx_transcription")
+    @traced_stt(name="whisper_mlx_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
         pass

@@ -29,7 +29,7 @@ class TurnTrackingObserver(BaseObserver):
       - A timeout period elapses with no more bot speech
     """
 
-    def __init__(self, max_frames=100, turn_end_timeout_secs=2.0, **kwargs):
+    def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):
         super().__init__()
         self._turn_count = 0
         self._is_turn_active = False

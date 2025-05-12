@@ -22,7 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_stt_transcription
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import riva.client
@@ -235,7 +235,7 @@ class RivaSTTService(STTService):
             self._thread_running = False
             raise
 
-    @traced_stt_transcription(name="riva_transcription")
+    @traced_stt(name="riva_transcription")
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
@@ -444,7 +444,7 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         if self._config:
             self._config.language_code = self._language
 
-    @traced_stt_transcription(name="riva_segmented_transcription")
+    @traced_stt(name="riva_segmented_transcription")
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
         pass

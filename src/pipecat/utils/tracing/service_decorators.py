@@ -11,18 +11,19 @@ This module provides specialized tracing decorators for different service types.
 
 import functools
 import inspect
+import json
 import logging
 from typing import Callable, Optional, TypeVar
 
 from opentelemetry import context as context_api
 from opentelemetry import trace
 
-from pipecat.utils.tracing.context_provider import get_current_turn_context
-from pipecat.utils.tracing.helpers import (
+from pipecat.utils.tracing.attributes import (
     add_llm_span_attributes,
     add_stt_span_attributes,
     add_tts_span_attributes,
 )
+from pipecat.utils.tracing.context_provider import get_current_turn_context
 from pipecat.utils.tracing.tracing import (
     OPENTELEMETRY_AVAILABLE,
     is_tracing_available,
@@ -56,7 +57,7 @@ def get_parent_service_context(self):
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
     """Decorator specifically for TTS service methods that automatically adds TTS attributes."""
     if not OPENTELEMETRY_AVAILABLE:
-        return _noop_decorator if func is None else func
+        return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
         # Check if we're dealing with a coroutine or an async generator
@@ -121,7 +122,8 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     return await f(self, text, *args, **kwargs)
 
                 # Get the parent service context
-                parent_context = get_parent_service_context(self)
+                turn_context = get_current_turn_context()
+                parent_context = turn_context or get_parent_service_context(self)
 
                 # Create a new span as child of the service span
                 tracer = trace.get_tracer("pipecat")
@@ -166,60 +168,9 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Decorator specifically for STT service methods that automatically adds STT attributes."""
-    if not OPENTELEMETRY_AVAILABLE:
-        return _noop_decorator if func is None else func
-
-    def decorator(f):
-        @functools.wraps(f)
-        async def wrapper(self, audio, *args, **kwargs):
-            if not is_tracing_available():
-                return await f(self, audio, *args, **kwargs)
-
-            # Get the turn context first, then fall back to service context
-            turn_context = get_current_turn_context()
-            parent_context = turn_context or get_parent_service_context(self)
-
-            # Create a new span as child of the turn span or service span
-            tracer = trace.get_tracer("pipecat")
-            with tracer.start_as_current_span(
-                name or f.__name__, context=parent_context
-            ) as current_span:
-                try:
-                    # Immediately add attributes to the span
-                    service_name = self.__class__.__name__.replace("STTService", "").lower()
-                    settings = getattr(self, "_settings", {})
-
-                    # Add STT attributes
-                    add_stt_span_attributes(
-                        span=current_span,
-                        service_name=service_name,
-                        model=getattr(self, "model_name", settings.get("model", "unknown")),
-                        settings=settings,
-                        vad_enabled=getattr(self, "vad_enabled", False),
-                    )
-
-                    # Call the function
-                    return await f(self, audio, *args, **kwargs)
-                finally:
-                    # Update TTFB metric at the end
-                    ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
-                    if ttfb_ms is not None:
-                        current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
-
-        return wrapper
-
-    if func is not None:
-        return decorator(func)
-    return decorator
-
-
-def traced_stt_transcription(
-    func: Optional[Callable] = None, *, name: Optional[str] = None
-) -> Callable:
     """Decorator for STT transcription handling that automatically adds STT attributes."""
     if not OPENTELEMETRY_AVAILABLE:
-        return _noop_decorator if func is None else func
+        return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
         @functools.wraps(f)
@@ -276,7 +227,7 @@ def traced_stt_transcription(
 def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
     """Decorator specifically for LLM service methods that automatically adds LLM attributes."""
     if not OPENTELEMETRY_AVAILABLE:
-        return _noop_decorator if func is None else func
+        return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
         @functools.wraps(f)
@@ -285,7 +236,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 return await f(self, context, *args, **kwargs)
 
             # Get the parent context - turn context if available, otherwise service context
-            parent_context = get_current_turn_context() or get_parent_service_context(self)
+            turn_context = get_current_turn_context()
+            parent_context = turn_context or get_parent_service_context(self)
 
             # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
@@ -314,8 +266,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     service_name = self.__class__.__name__.replace("LLMService", "").lower()
 
                     try:
-                        import json
-
                         # Detect if we're using Google's service
                         is_google_service = "google" in service_name.lower()
 
@@ -421,144 +371,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     ):
                         self.start_llm_usage_metrics = original_start_llm_usage_metrics
 
-                    # Update TTFB metric
-                    ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
-                    if ttfb_ms is not None:
-                        current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
-
-        return wrapper
-
-    if func is not None:
-        return decorator(func)
-    return decorator
-
-
-def traced_llm_chat_completion(
-    func: Optional[Callable] = None, *, name: Optional[str] = None
-) -> Callable:
-    """Decorator for LLM chat completion that adds detailed attributes about the request."""
-    if not OPENTELEMETRY_AVAILABLE:
-        return _noop_decorator if func is None else func
-
-    def decorator(f):
-        @functools.wraps(f)
-        async def wrapper(self, context, messages, *args, **kwargs):
-            if not is_tracing_available():
-                return await f(self, context, messages, *args, **kwargs)
-
-            # Get the turn context first, then fall back to service context
-            turn_context = get_current_turn_context()
-            parent_context = turn_context or get_parent_service_context(self)
-
-            # Create a new span as child of the turn span or service span
-            tracer = trace.get_tracer("pipecat")
-            with tracer.start_as_current_span(
-                name or f.__name__, context=parent_context
-            ) as current_span:
-                try:
-                    try:
-                        import json
-
-                        # Helper function for serialization
-                        def prepare_for_json(obj):
-                            if isinstance(obj, dict):
-                                return {k: prepare_for_json(v) for k, v in obj.items()}
-                            elif isinstance(obj, list):
-                                return [prepare_for_json(item) for item in obj]
-                            elif obj is None:
-                                return None
-                            elif hasattr(obj, "__name__") and obj.__name__ == "NOT_GIVEN":
-                                return "NOT_GIVEN"
-                            else:
-                                return obj
-
-                        # Get service name
-                        service_name = self.__class__.__name__.replace("LLMService", "").lower()
-
-                        # Try to serialize messages
-                        serialized_messages = None
-                        try:
-                            serialized_messages = json.dumps(prepare_for_json(messages))
-                        except Exception as e:
-                            serialized_messages = f"Error serializing messages: {str(e)}"
-
-                        # Get tools and tool_choice from context
-                        serialized_tools = None
-                        serialized_tool_choice = None
-                        tool_count = 0
-
-                        if hasattr(context, "tools") and context.tools:
-                            try:
-                                serialized_tools = json.dumps(prepare_for_json(context.tools))
-                                tool_count = len(context.tools)
-                            except Exception as e:
-                                serialized_tools = f"Error serializing tools: {str(e)}"
-
-                        # Handle tool_choice
-                        if hasattr(context, "tool_choice"):
-                            tool_choice = context.tool_choice
-                            if tool_choice is None or (
-                                hasattr(tool_choice, "__name__")
-                                and tool_choice.__name__ == "NOT_GIVEN"
-                            ):
-                                serialized_tool_choice = "NOT_GIVEN"
-                            else:
-                                try:
-                                    serialized_tool_choice = json.dumps(
-                                        prepare_for_json(tool_choice)
-                                    )
-                                except Exception as e:
-                                    serialized_tool_choice = (
-                                        f"Error serializing tool_choice: {str(e)}"
-                                    )
-
-                        # Get parameters from settings
-                        parameters = {}
-                        extra_parameters = {}
-
-                        if hasattr(self, "_settings"):
-                            for key, value in self._settings.items():
-                                if key == "extra":
-                                    continue
-                                if value is None or (
-                                    hasattr(value, "__name__") and value.__name__ == "NOT_GIVEN"
-                                ):
-                                    parameters[key] = "NOT_GIVEN"
-                                elif isinstance(value, (int, float, bool)):
-                                    parameters[key] = value
-
-                            # Add extra parameters
-                            if "extra" in self._settings and isinstance(
-                                self._settings["extra"], dict
-                            ):
-                                for key, value in self._settings["extra"].items():
-                                    if value is None or (
-                                        hasattr(value, "__name__") and value.__name__ == "NOT_GIVEN"
-                                    ):
-                                        extra_parameters[key] = "NOT_GIVEN"
-                                    elif isinstance(value, (int, float, bool, str)):
-                                        extra_parameters[key] = value
-
-                        # Add all attributes to the span immediately
-                        add_llm_span_attributes(
-                            span=current_span,
-                            service_name=service_name,
-                            model=getattr(self, "model_name", "unknown"),
-                            stream=True,  # Assuming streaming is always enabled
-                            messages=serialized_messages,
-                            tools=serialized_tools,
-                            tool_count=tool_count,
-                            tool_choice=serialized_tool_choice,
-                            parameters=parameters,
-                            extra_parameters=extra_parameters,
-                        )
-                    except Exception as e:
-                        # If anything goes wrong with tracing, log it but don't fail the main function
-                        logging.warning(f"Error adding LLM chat completion span attributes: {e}")
-
-                    # Call the original function
-                    return await f(self, context, messages, *args, **kwargs)
-                finally:
                     # Update TTFB metric
                     ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
                     if ttfb_ms is not None:
