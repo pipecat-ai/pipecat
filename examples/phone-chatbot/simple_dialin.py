@@ -27,7 +27,6 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 from pipecat.processors.user_idle_processor import UserIdleProcessor
-# from pipecat.frames.frames import LLMMessagesFrame, TTSSpeakFrame
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     EndTaskFrame,
@@ -122,15 +121,20 @@ async def main(
                               ):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
 
-        end_time = time.time()
-        global start_time
         global num_idle_events
+        global start_time
+        end_time = time.time()
         call_duration_in_seconds = round(end_time - start_time,2)
+
+        if num_idle_events > 1:
+            prompt_word = 'prompts'
+        else:
+            prompt_word = 'prompt'
 
         content = f"""
         The user wants to end the call. 
-        The user has been silent after {num_idle_events} prompts.
-        The call was {call_duration_in_seconds} seconds long. 
+        The user has been silent after {num_idle_events} {prompt_word}.
+        The call was {call_duration_in_seconds} seconds long.
         """
 
         await task.queue_frame(
