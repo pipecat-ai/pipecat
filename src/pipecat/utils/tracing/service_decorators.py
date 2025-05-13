@@ -82,28 +82,21 @@ def _add_token_usage_to_span(span, token_usage):
 
 
 def _generate_default_span_name(self, service_type):
-    """Generate a default span name using service name and type.
+    """Generate a default span name using service type and class name.
 
     Args:
         self: The service instance.
         service_type: The service type (e.g., 'llm', 'stt', 'tts').
 
     Returns:
-        A default span name string like "servicename_type".
+        A default span name string like "type_classname".
     """
-    # Extract service name from class name
+    # Get the full class name in lowercase
     class_name = self.__class__.__name__.lower()
-    suffixes = {"llm": "llmservice", "stt": "sttservice", "tts": "ttsservice"}
 
-    # Remove common service type suffixes
-    if service_type in suffixes and class_name.endswith(suffixes[service_type]):
-        service_name = class_name[: -len(suffixes[service_type])]
-    else:
-        service_name = class_name
-
-    # Return a name in the format "servicename_type"
-    # Examples: "openai_llm", "deepgram_stt", "cartesia_tts"
-    return f"{service_name}_{service_type}"
+    # Return a name in the format "type_classname"
+    # Examples: "llm_openaillmservice", "stt_deepgramsttservice", "tts_cartesiattservice"
+    return f"{service_type}_{class_name}"
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
