@@ -63,7 +63,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(update_frame.messages), 1)
         message = update_frame.messages[0]
         self.assertEqual(message.role, "user")
-        self.assertEqual(message.content, "Hello, world!")
+        self.assertEqual(message.content, "test_user: Hello, world!")
         self.assertEqual(message.timestamp, timestamp)
 
     async def test_event_handler(self):
@@ -105,12 +105,12 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
 
         # Check first message
         self.assertEqual(received_updates[0].role, "user")
-        self.assertEqual(received_updates[0].content, "First message")
+        self.assertEqual(received_updates[0].content, "test_user: First message")
         self.assertEqual(received_updates[0].timestamp, timestamp)
 
         # Check second message
         self.assertEqual(received_updates[1].role, "user")
-        self.assertEqual(received_updates[1].content, "Second message")
+        self.assertEqual(received_updates[1].content, "test_user: Second message")
         self.assertEqual(received_updates[1].timestamp, timestamp)
 
     async def test_text_aggregation(self):
@@ -421,7 +421,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         # Verify both processors triggered the same handler
         self.assertEqual(len(received_updates), 2)
         self.assertEqual(received_updates[0].role, "user")
-        self.assertEqual(received_updates[0].content, "User message")
+        self.assertEqual(received_updates[0].content, "user1: User message")
         self.assertEqual(received_updates[1].role, "assistant")
         self.assertEqual(received_updates[1].content, "Assistant message")
 
