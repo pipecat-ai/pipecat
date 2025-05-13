@@ -7,7 +7,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
-    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -20,15 +19,10 @@ from typing import (
 )
 
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
-
-if TYPE_CHECKING:
-    from pipecat.observers.base_observer import BaseObserver
 
 
 class KeypadEntry(str, Enum):
@@ -447,14 +441,11 @@ class OutputDTMFFrame(DTMFFrame):
 class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
-    clock: BaseClock
-    task_manager: BaseTaskManager
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
-    observer: Optional["BaseObserver"] = None
     report_only_initial_ttfb: bool = False
 
 

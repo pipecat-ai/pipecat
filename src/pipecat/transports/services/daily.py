@@ -34,7 +34,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -410,7 +410,25 @@ class DailyTransportClient(EventHandler):
         if not destination and self._camera:
             self._camera.write_frame(frame.image)
 
-    async def setup(self, frame: StartFrame):
+    async def setup(self, setup: FrameProcessorSetup):
+        if self._task_manager:
+            return
+
+        self._task_manager = setup.task_manager
+        self._callback_task = self._task_manager.create_task(
+            self._callback_task_handler(),
+            f"{self}::callback_task",
+        )
+
+    async def cleanup(self):
+        if self._callback_task and self._task_manager:
+            await self._task_manager.cancel_task(self._callback_task)
+            self._callback_task = None
+        # Make sure we don't block the event loop in case `client.release()`
+        # takes extra time.
+        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
+
+    async def start(self, frame: StartFrame):
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
@@ -438,13 +456,6 @@ class DailyTransportClient(EventHandler):
                 non_blocking=True,
             )
             Daily.select_speaker_device(self._speaker_name())
-
-        if not self._task_manager:
-            self._task_manager = frame.task_manager
-            self._callback_task = self._task_manager.create_task(
-                self._callback_task_handler(),
-                f"{self}::callback_task",
-            )
 
     async def join(self):
         # Transport already joined or joining, ignore.
@@ -611,14 +622,6 @@ class DailyTransportClient(EventHandler):
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
         return await asyncio.wait_for(future, timeout=10)
-
-    async def cleanup(self):
-        if self._callback_task and self._task_manager:
-            await self._task_manager.cancel_task(self._callback_task)
-            self._callback_task = None
-        # Make sure we don't block the event loop in case `client.release()`
-        # takes extra time.
-        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
@@ -952,6 +955,15 @@ class DailyInputTransport(BaseInputTransport):
             logger.debug(f"Start receiving audio")
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._client.setup(setup)
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self._client.cleanup()
+        await self._transport.cleanup()
+
     async def start(self, frame: StartFrame):
         if self._initialized:
             return
@@ -962,7 +974,7 @@ class DailyInputTransport(BaseInputTransport):
         await super().start(frame)
 
         # Setup client.
-        await self._client.setup(frame)
+        await self._client.start(frame)
 
         # Join the room.
         await self._client.join()
@@ -992,11 +1004,6 @@ class DailyInputTransport(BaseInputTransport):
         if self._audio_in_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
-
-    async def cleanup(self):
-        await super().cleanup()
-        await self._client.cleanup()
-        await self._transport.cleanup()
 
     #
     # FrameProcessor
@@ -1139,6 +1146,15 @@ class DailyOutputTransport(BaseOutputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._client.setup(setup)
+
+    async def cleanup(self):
+        await super().cleanup()
+        await self._client.cleanup()
+        await self._transport.cleanup()
+
     async def start(self, frame: StartFrame):
         if self._initialized:
             return
@@ -1149,7 +1165,7 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().start(frame)
 
         # Setup client.
-        await self._client.setup(frame)
+        await self._client.start(frame)
 
         # Join the room.
         await self._client.join()
@@ -1168,11 +1184,6 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
-
-    async def cleanup(self):
-        await super().cleanup()
-        await self._client.cleanup()
-        await self._transport.cleanup()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)

@@ -5,6 +5,7 @@
 #
 
 import asyncio
+from dataclasses import dataclass
 from enum import Enum
 from typing import Awaitable, Callable, Coroutine, Optional
 
@@ -21,7 +22,7 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
-from pipecat.observers.base_observer import FramePushed
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
@@ -30,6 +31,13 @@ from pipecat.utils.base_object import BaseObject
 class FrameDirection(Enum):
     DOWNSTREAM = 1
     UPSTREAM = 2
+
+
+@dataclass
+class FrameProcessorSetup:
+    clock: BaseClock
+    task_manager: BaseTaskManager
+    observer: Optional[BaseObserver] = None
 
 
 class FrameProcessor(BaseObject):
@@ -51,12 +59,17 @@ class FrameProcessor(BaseObject):
         # Task Manager
         self._task_manager: Optional[BaseTaskManager] = None
 
+        # Observer
+        self._observer: Optional[BaseObserver] = None
+
         # Other properties
         self._allow_interruptions = False
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
-        self._observer = None
+
+        # Indicates whether we have received the StartFrame.
+        self.__started = False
 
         # Cancellation is done through CancelFrame (a system frame). This could
         # cause other events being triggered (e.g. closing a transport) which
@@ -167,6 +180,11 @@ class FrameProcessor(BaseObject):
             raise Exception(f"{self} TaskManager is still not initialized.")
         await self._task_manager.wait_for_task(task, timeout)
 
+    async def setup(self, setup: FrameProcessorSetup):
+        self._clock = setup.clock
+        self._task_manager = setup.task_manager
+        self._observer = setup.observer
+
     async def cleanup(self):
         await super().cleanup()
         await self.__cancel_input_task()
@@ -227,13 +245,6 @@ class FrameProcessor(BaseObject):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):
-            self._clock = frame.clock
-            self._task_manager = frame.task_manager
-            self._allow_interruptions = frame.allow_interruptions
-            self._enable_metrics = frame.enable_metrics
-            self._enable_usage_metrics = frame.enable_usage_metrics
-            self._report_only_initial_ttfb = frame.report_only_initial_ttfb
-            self._observer = frame.observer
             await self.__start(frame)
         elif isinstance(frame, StartInterruptionFrame):
             await self._start_interruption()
@@ -247,7 +258,7 @@ class FrameProcessor(BaseObject):
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        if not self._check_ready(frame):
+        if not self._check_started(frame):
             return
 
         if isinstance(frame, SystemFrame):
@@ -256,6 +267,11 @@ class FrameProcessor(BaseObject):
             await self.__push_queue.put((frame, direction))
 
     async def __start(self, frame: StartFrame):
+        self.__started = True
+        self._allow_interruptions = frame.allow_interruptions
+        self._enable_metrics = frame.enable_metrics
+        self._enable_usage_metrics = frame.enable_usage_metrics
+        self._report_only_initial_ttfb = frame.report_only_initial_ttfb
         self.__create_input_task()
         self.__create_push_task()
 
@@ -323,15 +339,10 @@ class FrameProcessor(BaseObject):
             await self.push_error(ErrorFrame(str(e)))
             raise
 
-    def _check_ready(self, frame: Frame):
-        # If we are trying to push a frame but we still have no clock, it means
-        # we didn't process a StartFrame.
-        if not self._clock:
-            logger.error(
-                f"{self} not properly initialized, missing super().process_frame(frame, direction)?"
-            )
-            return False
-        return True
+    def _check_started(self, frame: Frame):
+        if not self.__started:
+            logger.error(f"{self} Trying to process {frame} but StartFrame not received yet")
+        return self.__started
 
     def __create_input_task(self):
         if not self.__input_frame_task:
