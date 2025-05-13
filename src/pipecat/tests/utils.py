@@ -6,7 +6,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -79,6 +79,7 @@ async def run_test(
     expected_down_frames: Optional[Sequence[type]] = None,
     expected_up_frames: Optional[Sequence[type]] = None,
     ignore_start: bool = True,
+    observers: List[BaseObserver] = [],
     start_metadata: Dict[str, Any] = {},
     send_end_frame: bool = True,
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
@@ -100,6 +101,7 @@ async def run_test(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(start_metadata=start_metadata),
+        observers=observers,
         cancel_on_idle_timeout=False,
     )
 
