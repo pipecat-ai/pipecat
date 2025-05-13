@@ -44,6 +44,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     import boto3
@@ -603,6 +604,7 @@ class AWSBedrockLLMService(LLMService):
         assistant = AWSBedrockAssistantContextAggregator(context, params=assistant_params)
         return AWSBedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
+    @traced_llm
     async def _process_context(self, context: AWSBedrockLLMContext):
         # Usage tracking
         prompt_tokens = 0

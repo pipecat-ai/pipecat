@@ -8,6 +8,8 @@ import asyncio
 import os
 from typing import AsyncGenerator, Mapping, Optional
 
+from pipecat.utils.tracing.service_decorators import traced_tts
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -83,6 +85,7 @@ class RivaTTSService(TTSService):
             f"{self.__class__.__name__}(api_key=<api_key>, model_function_map={example})"
         )
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_responses(queue: asyncio.Queue):
             def add_response(r):

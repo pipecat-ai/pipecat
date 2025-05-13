@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for LMNT configuration needed
 try:
@@ -198,6 +199,7 @@ class LmntTTSService(InterruptibleTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text."""
         logger.debug(f"{self}: Generating TTS [{text}]")

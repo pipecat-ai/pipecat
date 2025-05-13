@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 # This assumes a running TTS service running: https://github.com/rhasspy/piper/blob/master/src/python_run/README_http.md
@@ -54,6 +55,7 @@ class PiperTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Piper API.
 

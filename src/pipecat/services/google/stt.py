@@ -9,6 +9,8 @@ import json
 import os
 import time
 
+from pipecat.utils.tracing.service_decorators import traced_stt
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -496,6 +498,9 @@ class GoogleSTTService(STTService):
             "enable_voice_activity_events": params.enable_voice_activity_events,
         }
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     def language_to_service_language(self, language: Language | List[Language]) -> str | List[str]:
         """Convert Language enum(s) to Google STT language code(s).
 
@@ -773,8 +778,16 @@ class GoogleSTTService(STTService):
         """Process an audio chunk for STT transcription."""
         if self._streaming_task:
             # Queue the audio data
+            await self.start_ttfb_metrics()
+            await self.start_processing_metrics()
             await self._request_queue.put(audio)
         yield None
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[str] = None
+    ):
+        pass
 
     async def _process_responses(self, streaming_recognize):
         """Process streaming recognition responses."""
@@ -803,8 +816,15 @@ class GoogleSTTService(STTService):
                         await self.push_frame(
                             TranscriptionFrame(transcript, "", time_now_iso8601(), primary_language)
                         )
+                        await self.stop_processing_metrics()
+                        await self._handle_transcription(
+                            transcript,
+                            is_final=True,
+                            language=primary_language,
+                        )
                     else:
                         self._last_transcript_was_final = False
+                        await self.stop_ttfb_metrics()
                         await self.push_frame(
                             InterimTranscriptionFrame(
                                 transcript, "", time_now_iso8601(), primary_language
