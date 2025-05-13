@@ -100,7 +100,24 @@ phone numbers with valid values for your use case.
 
 ### Dialin Request
 
-The server will receive a request when a call is received from Daily.
+The server will receive a request when a call is received from Daily. 
+The payload that the webhook received is as follows:
+```json
+{
+  // for dial-in from webhook
+  "To": "+14152251493",
+  "From": "+14158483432",
+  "callId": "string-contains-uuid",
+  "callDomain": "string-contains-uuid",
+  "sipHeaders": {
+    // these are fields that can be sent to the sip-interconnect
+    // for example from twilio to daily
+    "X-My-Custom-Header": "value",
+    "x-caller": "+1234567890",
+    "x-called": "+1987654321", 
+   },
+}
+```
 
 ### Dialout Request
 
@@ -158,6 +175,7 @@ curl -X POST http://localhost:3000/api/dial \
     "From": "+1987654321",
     "callId": "call-uuid-123",
     "callDomain": "domain-uuid-456",
+    "sipHeader": {},
     "dialout_settings": [
       {
         "phoneNumber": "+1234567890",
