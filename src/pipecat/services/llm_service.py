@@ -327,31 +327,3 @@ class LLMService(AIService):
             # do this because otherwise the task manager would report a dangling
             # task if we don't remove it.
             asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
-
-    def get_trace_attributes(self, **kwargs) -> dict:
-        """Get trace attributes for this LLM service."""
-        # Extract service name from class name
-        service_name = self.__class__.__name__
-
-        # Build basic attributes
-        attributes = {
-            "service_name": service_name,
-            "model": getattr(self, "model_name", "unknown"),
-        }
-
-        # Add token usage if available in kwargs
-        if "token_usage" in kwargs:
-            token_usage = kwargs["token_usage"]
-            if isinstance(token_usage, dict):
-                attributes.update(token_usage)
-            else:
-                # Handle LLMTokenUsage object
-                attributes["token_usage"] = {
-                    "prompt_tokens": getattr(token_usage, "prompt_tokens", 0),
-                    "completion_tokens": getattr(token_usage, "completion_tokens", 0),
-                }
-
-        # Add any additional attributes
-        attributes.update({k: v for k, v in kwargs.items() if k != "token_usage"})
-
-        return attributes

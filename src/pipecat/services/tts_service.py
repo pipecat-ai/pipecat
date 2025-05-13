@@ -303,40 +303,6 @@ class TTSService(AIService):
                     await self.push_frame(TTSStoppedFrame())
                     has_started = False
 
-    def get_trace_attributes(self, **kwargs) -> dict:
-        """Get trace attributes for this TTS service.
-
-        Returns a dictionary of attributes that can be used for tracing.
-
-        Args:
-            **kwargs: Additional attributes to include
-
-        Returns:
-            dict: Attributes for this service
-        """
-        # Extract service name from class name
-        service_name = self.__class__.__name__
-
-        # Build basic attributes
-        attributes = {
-            "service_name": service_name,
-            "model": getattr(self, "model_name", "unknown"),
-            "voice_id": getattr(self, "_voice_id", "unknown"),
-        }
-
-        # Add text if provided
-        if "text" in kwargs:
-            attributes["text"] = kwargs["text"]
-
-        # Add settings if available
-        if hasattr(self, "_settings") and self._settings:
-            attributes["settings"] = self._settings
-
-        # Add any additional attributes
-        attributes.update(kwargs)
-
-        return attributes
-
 
 class WordTTSService(TTSService):
     """This is a base class for TTS services that support word timestamps. Word
