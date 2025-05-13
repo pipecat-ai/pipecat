@@ -60,6 +60,7 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
 
     def __setup_local(self, system_instruction: str = ""):
         self._assistant_text = ""
+        self._user_text = ""
         self._system_instruction = system_instruction
 
     @staticmethod
@@ -129,13 +130,22 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
         # NOTE: we're ignoring messages with role "tool" since they can't be loaded into AWS Nova
         # Sonic conversation history
 
-    def add_user_transcription_text(self, text):
+    def buffer_user_text(self, text):
+        self._user_text += f" {text}" if self._user_text else text
+        # logger.debug(f"User text buffered: {self._user_text}")
+
+    def flush_aggregated_user_text(self) -> str:
+        if not self._user_text:
+            return ""
+        user_text = self._user_text
         message = {
             "role": "user",
-            "content": [{"type": "text", "text": text}],
+            "content": [{"type": "text", "text": user_text}],
         }
+        self._user_text = ""
         self.add_message(message)
         # logger.debug(f"Context updated (user): {self.get_messages_for_logging()}")
+        return user_text
 
     def buffer_assistant_text(self, text):
         self._assistant_text += text
