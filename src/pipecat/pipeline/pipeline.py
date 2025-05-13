@@ -8,7 +8,7 @@ from typing import Callable, Coroutine, List
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 
 class PipelineSource(FrameProcessor):
@@ -70,6 +70,10 @@ class Pipeline(BasePipeline):
     # Frame processor
     #
 
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._setup_processors(setup)
+
     async def cleanup(self):
         await super().cleanup()
         await self._cleanup_processors()
@@ -81,6 +85,10 @@ class Pipeline(BasePipeline):
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
         elif direction == FrameDirection.UPSTREAM:
             await self._sink.queue_frame(frame, FrameDirection.UPSTREAM)
+
+    async def _setup_processors(self, setup: FrameProcessorSetup):
+        for p in self._processors:
+            await p.setup(setup)
 
     async def _cleanup_processors(self):
         for p in self._processors:

@@ -33,7 +33,7 @@ from pipecat.observers.base_observer import BaseObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.utils.asyncio import BaseTaskManager, TaskManager
 
 HEARTBEAT_SECONDS = 1.0
@@ -294,8 +294,15 @@ class PipelineTask(BaseTask):
             return
         cleanup_pipeline = True
         try:
+            # Setup processors.
+            await self._setup()
+
+            # Create all main tasks and wait of the main push task. This is the
+            # task that pushes frames to the very beginning of our pipeline (our
+            # controlled PipelineTaskSource processor).
             push_task = await self._create_tasks()
             await self._task_manager.wait_for_task(push_task)
+
             # We have already cleaned up the pipeline inside the task.
             cleanup_pipeline = False
         except asyncio.CancelledError:
@@ -405,6 +412,16 @@ class PipelineTask(BaseTask):
         await self._pipeline_end_event.wait()
         self._pipeline_end_event.clear()
 
+    async def _setup(self):
+        setup = FrameProcessorSetup(
+            clock=self._clock,
+            task_manager=self._task_manager,
+            observer=self._observer,
+        )
+        await self._source.setup(setup)
+        await self._pipeline.setup(setup)
+        await self._sink.setup(setup)
+
     async def _cleanup(self, cleanup_pipeline: bool):
         # Cleanup base object.
         await self.cleanup()
@@ -427,14 +444,11 @@ class PipelineTask(BaseTask):
         self._maybe_start_idle_task()
 
         start_frame = StartFrame(
-            clock=self._clock,
-            task_manager=self._task_manager,
             allow_interruptions=self._params.allow_interruptions,
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
-            observer=self._observer,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
         )
         start_frame.metadata = self._params.start_metadata
