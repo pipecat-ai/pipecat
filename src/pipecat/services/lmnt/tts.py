@@ -199,7 +199,7 @@ class LmntTTSService(InterruptibleTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
-    @traced_tts(name="lmnt_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text."""
         logger.debug(f"{self}: Generating TTS [{text}]")

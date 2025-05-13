@@ -155,7 +155,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
         logger.info(f"Switching STT language to: [{language}]")
         self._language = language
 
-    @traced_stt(name="base_whisper_transcription")
+    @traced_stt
     async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
         """Handle a transcription result with tracing."""
         pass

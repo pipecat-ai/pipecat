@@ -197,7 +197,7 @@ class AzureTTSService(AzureBaseTTSService):
     async def flush_audio(self):
         logger.trace(f"{self}: flushing audio")
 
-    @traced_tts(name="azure_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -265,7 +265,7 @@ class AzureHttpTTSService(AzureBaseTTSService):
             speech_config=self._speech_config, audio_config=None
         )
 
-    @traced_tts(name="azure_http_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

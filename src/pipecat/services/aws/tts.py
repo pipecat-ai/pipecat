@@ -208,7 +208,7 @@ class AWSPollyTTSService(TTSService):
 
         return ssml
 
-    @traced_tts(name="aws_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_data(**args):
             response = self._polly_client.synthesize_speech(**args)

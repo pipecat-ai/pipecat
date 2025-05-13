@@ -177,7 +177,7 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
-    @traced_llm(name="openai_process_context")
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []

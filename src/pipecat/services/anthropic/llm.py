@@ -148,7 +148,7 @@ class AnthropicLLMService(LLMService):
         assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
-    @traced_llm(name="anthropic_process_context")
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text

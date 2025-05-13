@@ -212,7 +212,7 @@ class FalSTTService(SegmentedSTTService):
         await super().set_model(model)
         logger.info(f"Switching STT model to: [{model}]")
 
-    @traced_stt(name="_transcription")
+    @traced_stt
     async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
         """Handle a transcription result with tracing."""
         await self.stop_ttfb_metrics()

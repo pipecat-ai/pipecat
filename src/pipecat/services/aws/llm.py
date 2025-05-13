@@ -604,7 +604,7 @@ class AWSBedrockLLMService(LLMService):
         assistant = AWSBedrockAssistantContextAggregator(context, params=assistant_params)
         return AWSBedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
-    @traced_llm(name="aws_bedrock_process_context")
+    @traced_llm
     async def _process_context(self, context: AWSBedrockLLMContext):
         # Usage tracking
         prompt_tokens = 0

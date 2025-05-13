@@ -311,7 +311,7 @@ class RimeTTSService(AudioContextWordTTSService):
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
 
-    @traced_tts(name="rime_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text.
 
@@ -387,7 +387,7 @@ class RimeHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    @traced_tts(name="rime_http_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

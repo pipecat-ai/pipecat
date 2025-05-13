@@ -320,7 +320,7 @@ class GoogleTTSService(TTSService):
 
         return ssml
 
-    @traced_tts(name="google_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

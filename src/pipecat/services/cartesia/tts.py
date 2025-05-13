@@ -275,7 +275,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
-    @traced_tts(name="cartesia_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -362,7 +362,7 @@ class CartesiaHttpTTSService(TTSService):
         await super().cancel(frame)
         await self._client.close()
 
-    @traced_tts(name="cartesia_http_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

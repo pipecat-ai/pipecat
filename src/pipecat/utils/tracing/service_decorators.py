@@ -81,6 +81,31 @@ def _add_token_usage_to_span(span, token_usage):
         span.set_attribute("llm.completion_tokens", getattr(token_usage, "completion_tokens", 0))
 
 
+def _generate_default_span_name(self, service_type):
+    """Generate a default span name using service name and type.
+
+    Args:
+        self: The service instance.
+        service_type: The service type (e.g., 'llm', 'stt', 'tts').
+
+    Returns:
+        A default span name string like "servicename_type".
+    """
+    # Extract service name from class name
+    class_name = self.__class__.__name__.lower()
+    suffixes = {"llm": "llmservice", "stt": "sttservice", "tts": "ttsservice"}
+
+    # Remove common service type suffixes
+    if service_type in suffixes and class_name.endswith(suffixes[service_type]):
+        service_name = class_name[: -len(suffixes[service_type])]
+    else:
+        service_name = class_name
+
+    # Return a name in the format "servicename_type"
+    # Examples: "openai_llm", "deepgram_stt", "cartesia_tts"
+    return f"{service_name}_{service_type}"
+
+
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
     """Traces TTS service methods with TTS-specific attributes.
 
@@ -115,6 +140,11 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         yield item
                     return
 
+                # Generate a default name if none provided
+                span_name = name
+                if span_name is None:
+                    span_name = _generate_default_span_name(self, "tts")
+
                 # Get the turn context first, then fall back to service context
                 turn_context = get_current_turn_context()
                 parent_context = turn_context or _get_parent_service_context(self)
@@ -122,7 +152,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 # Create a new span as child of the turn span or service span
                 tracer = trace.get_tracer("pipecat")
                 with tracer.start_as_current_span(
-                    name or f.__name__, context=parent_context
+                    span_name, context=parent_context
                 ) as current_span:
                     try:
                         # Immediately add attributes to the span
@@ -164,14 +194,19 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 if not is_tracing_available():
                     return await f(self, text, *args, **kwargs)
 
-                # Get the parent service context
+                # Generate a default name if none provided
+                span_name = name
+                if span_name is None:
+                    span_name = _generate_default_span_name(self, "tts")
+
+                # Get the parent context - turn context if available, otherwise service context
                 turn_context = get_current_turn_context()
                 parent_context = turn_context or _get_parent_service_context(self)
 
                 # Create a new span as child of the service span
                 tracer = trace.get_tracer("pipecat")
                 with tracer.start_as_current_span(
-                    name or f.__name__, context=parent_context
+                    span_name, context=parent_context
                 ) as current_span:
                     try:
                         # Immediately add attributes to the span
@@ -235,15 +270,18 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, transcript, is_final, language)
 
+            # Generate a default name if none provided
+            span_name = name
+            if span_name is None:
+                span_name = _generate_default_span_name(self, "stt")
+
             # Get the turn context first, then fall back to service context
             turn_context = get_current_turn_context()
             parent_context = turn_context or _get_parent_service_context(self)
 
             # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
-            with tracer.start_as_current_span(
-                name or f.__name__, context=parent_context
-            ) as current_span:
+            with tracer.start_as_current_span(span_name, context=parent_context) as current_span:
                 try:
                     # Get service name from class name
                     service_name = self.__class__.__name__.replace("STTService", "").lower()
@@ -293,7 +331,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
     Args:
         func: The LLM method to trace.
-        name: Custom span name. Defaults to function name.
+        name: Custom span name. Defaults to function name with class prefix if None.
 
     Returns:
         Wrapped method with LLM-specific tracing.
@@ -307,15 +345,18 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, context, *args, **kwargs)
 
+            # Generate a default name if none provided
+            span_name = name
+            if span_name is None:
+                span_name = _generate_default_span_name(self, "llm")
+
             # Get the parent context - turn context if available, otherwise service context
             turn_context = get_current_turn_context()
             parent_context = turn_context or _get_parent_service_context(self)
 
             # Create a new span as child of the turn span or service span
             tracer = trace.get_tracer("pipecat")
-            with tracer.start_as_current_span(
-                name or f.__name__, context=parent_context
-            ) as current_span:
+            with tracer.start_as_current_span(span_name, context=parent_context) as current_span:
                 try:
                     # For token usage monitoring
                     original_start_llm_usage_metrics = None

@@ -494,7 +494,7 @@ class GoogleLLMService(LLMService):
     def _create_client(self, api_key: str):
         self._client = genai.Client(api_key=api_key)
 
-    @traced_llm(name="google_process_context")
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
 

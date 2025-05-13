@@ -359,7 +359,7 @@ class GladiaSTTService(STTService):
                         f"Failed to initialize Gladia session: {response.status} - {error_text}"
                     )
 
-    @traced_stt(name="gladia_transcription")
+    @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
     ):

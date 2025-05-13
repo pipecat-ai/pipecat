@@ -86,7 +86,7 @@ class AssemblyAISTTService(STTService):
             self._transcriber.stream(audio)
         yield None
 
-    @traced_stt(name="assemblyai_transcription")
+    @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):

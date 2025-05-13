@@ -446,7 +446,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 msg = {"text": text, "context_id": self._context_id}
                 await self._websocket.send(json.dumps(msg))
 
-    @traced_tts(name="elevenlabs_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -647,7 +647,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         return word_times
 
-    @traced_tts(name="elevenlabs_http_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs streaming API with timestamps.
 

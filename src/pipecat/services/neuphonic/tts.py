@@ -240,7 +240,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             logger.debug(f"Sending text to websocket: {msg}")
             await self._websocket.send(json.dumps(msg))
 
-    @traced_tts(name="neuphonic_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -317,7 +317,7 @@ class NeuphonicHttpTTSService(TTSService):
     async def flush_audio(self):
         pass
 
-    @traced_tts(name="neuphonic_http_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic streaming API.
 

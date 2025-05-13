@@ -95,7 +95,7 @@ class OpenAITTSService(TTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
-    @traced_tts(name="openai_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:

@@ -187,7 +187,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
 
-    @traced_tts(name="fish_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating Fish TTS: [{text}]")
         try:

@@ -188,7 +188,7 @@ class DeepgramSTTService(STTService):
     async def _on_utterance_end(self, *args, **kwargs):
         await self._call_event_handler("on_utterance_end", *args, **kwargs)
 
-    @traced_stt(name="deepgram_transcription")
+    @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):

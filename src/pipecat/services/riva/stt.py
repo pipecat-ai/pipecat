@@ -235,7 +235,7 @@ class RivaSTTService(STTService):
             self._thread_running = False
             raise
 
-    @traced_stt(name="riva_transcription")
+    @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[Language] = None
     ):
@@ -444,7 +444,7 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         if self._config:
             self._config.language_code = self._language
 
-    @traced_stt(name="riva_segmented_transcription")
+    @traced_stt
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
         pass

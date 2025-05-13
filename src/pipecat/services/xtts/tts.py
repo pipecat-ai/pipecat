@@ -118,7 +118,7 @@ class XTTSService(TTSService):
                 return
             self._studio_speakers = await r.json()
 
-    @traced_tts(name="xtts_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

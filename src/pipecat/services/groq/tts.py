@@ -68,7 +68,7 @@ class GroqTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    @traced_tts(name="groq_tts")
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
         measuring_ttfb = True

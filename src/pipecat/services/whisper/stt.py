@@ -347,7 +347,7 @@ class WhisperSTTService(SegmentedSTTService):
             logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
             self._model = None
 
-    @traced_stt(name="whisper_transcription")
+    @traced_stt
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
         pass
@@ -444,7 +444,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         """MLX Whisper loads models on demand, so this is a no-op."""
         pass
 
-    @traced_stt(name="whisper_mlx_transcription")
+    @traced_stt
     async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
         """Handle a transcription result with tracing."""
         pass

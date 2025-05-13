@@ -783,7 +783,7 @@ class GoogleSTTService(STTService):
             await self._request_queue.put(audio)
         yield None
 
-    @traced_stt(name="google_transcription")
+    @traced_stt
     async def _handle_transcription(
         self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
     ):
