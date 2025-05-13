@@ -260,7 +260,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
     Args:
         func: The LLM method to trace.
-        name: Custom span name. Defaults to function name with class prefix if None.
+        name: Custom span name. Defaults to service type and class name.
 
     Returns:
         Wrapped method with LLM-specific tracing.
@@ -314,13 +314,6 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Handle Google service specifically
                             if hasattr(context, "get_messages_for_logging"):
                                 messages = context.get_messages_for_logging()
-                                # Google messages are already pre-formatted for logging, so we can just use them
-                                try:
-                                    serialized_messages = json.dumps(messages)
-                                except Exception as e:
-                                    serialized_messages = (
-                                        f"Error serializing Google messages: {str(e)}"
-                                    )
                         else:
                             # Handle other services like OpenAI
                             if hasattr(context, "get_messages"):
@@ -328,13 +321,12 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             elif hasattr(context, "messages"):
                                 messages = context.messages
 
-                            # For OpenAI-style messages, use standard JSON serialization
-                            if messages:
-                                try:
-                                    # Standard message format should serialize fine
-                                    serialized_messages = json.dumps(messages)
-                                except Exception as e:
-                                    serialized_messages = f"Error serializing messages: {str(e)}"
+                        # Serialize messages if available
+                        if messages:
+                            try:
+                                serialized_messages = json.dumps(messages)
+                            except Exception as e:
+                                serialized_messages = f"Error serializing messages: {str(e)}"
 
                         # Get tools, system message, etc. based on the service type
                         tools = getattr(context, "tools", None)
@@ -343,12 +335,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                         if tools:
                             try:
-                                if is_google_service:
-                                    # Special handling for Google tools
-                                    serialized_tools = json.dumps(tools)
-                                else:
-                                    # Standard serialization for other services
-                                    serialized_tools = json.dumps(tools)
+                                serialized_tools = json.dumps(tools)
                                 tool_count = len(tools) if isinstance(tools, list) else 1
                             except Exception as e:
                                 serialized_tools = f"Error serializing tools: {str(e)}"
