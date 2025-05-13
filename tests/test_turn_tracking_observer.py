@@ -45,14 +45,14 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             UserStoppedSpeakingFrame(),
             BotStartedSpeakingFrame(),
             BotStoppedSpeakingFrame(),
-            SleepFrame(sleep=0.1),  # < 0.2 seconds turn_end_timeout
+            SleepFrame(sleep=0.05),  # < 0.2 seconds turn_end_timeout
             # Turn 2
             UserStartedSpeakingFrame(),  # New turn starts
             UserStoppedSpeakingFrame(),
             BotStartedSpeakingFrame(),
             BotStoppedSpeakingFrame(),
             # Add a sleep frame to allow turn timeout to occur
-            SleepFrame(sleep=0.3),  # > 0.2 seconds turn_end_timeout
+            SleepFrame(sleep=0.4),  # > 0.2 seconds turn_end_timeout
         ]
 
         expected_down_frames = [
@@ -116,7 +116,7 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame(),
             BotStoppedSpeakingFrame(),
             # Add a sleep frame to allow turn timeout to occur
-            SleepFrame(sleep=0.3),  # > 0.2 seconds turn_end_timeout
+            SleepFrame(sleep=0.4),  # > 0.2 seconds turn_end_timeout
         ]
 
         expected_down_frames = [
@@ -175,7 +175,7 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame(),
             # Interruption here - user starts speaking while bot is still speaking
             UserStartedSpeakingFrame(),  # This should end Turn 1 and start Turn 2
-            SleepFrame(sleep=0.3),  # > 0.2 seconds turn_end_timeout
+            SleepFrame(sleep=0.4),  # > 0.2 seconds turn_end_timeout
         ]
 
         expected_down_frames = [
@@ -229,7 +229,7 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame(),  # Bot speaks again, should not end turn
             BotStoppedSpeakingFrame(),
             # Add a sleep frame to allow turn timeout to occur
-            SleepFrame(sleep=0.3),  # > 0.2 seconds turn_end_timeout
+            SleepFrame(sleep=0.4),  # > 0.2 seconds turn_end_timeout
         ]
 
         expected_down_frames = [
