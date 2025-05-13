@@ -47,6 +47,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -493,6 +494,7 @@ class GoogleLLMService(LLMService):
     def _create_client(self, api_key: str):
         self._client = genai.Client(api_key=api_key)
 
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
 

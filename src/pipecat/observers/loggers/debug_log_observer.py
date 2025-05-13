@@ -42,7 +42,9 @@ class DebugLogObserver(BaseObserver):
         Log specific frame types from any source/destination:
         ```python
         from pipecat.frames.frames import TranscriptionFrame, InterimTranscriptionFrame
-        observers = DebugLogObserver(frame_types=(TranscriptionFrame, InterimTranscriptionFrame))
+        observers=[
+            DebugLogObserver(frame_types=(LLMTextFrame,TranscriptionFrame,)),
+        ],
         ```
 
         Log frames with specific source/destination filters:
@@ -51,16 +53,18 @@ class DebugLogObserver(BaseObserver):
         from pipecat.transports.base_output_transport import BaseOutputTransport
         from pipecat.services.stt_service import STTService
 
-        observers = DebugLogObserver(frame_types={
-            # Only log StartInterruptionFrame when source is BaseOutputTransport
-            StartInterruptionFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
-
-            # Only log UserStartedSpeakingFrame when destination is STTService
-            UserStartedSpeakingFrame: (STTService, FrameEndpoint.DESTINATION),
-
-            # Log LLMTextFrame regardless of source or destination type
-            LLMTextFrame: None
-        })
+        observers=[
+            DebugLogObserver(
+                frame_types={
+                    # Only log StartInterruptionFrame when source is BaseOutputTransport
+                    StartInterruptionFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
+                    # Only log UserStartedSpeakingFrame when destination is STTService
+                    UserStartedSpeakingFrame: (STTService, FrameEndpoint.DESTINATION),
+                    # Log LLMTextFrame regardless of source or destination type
+                    LLMTextFrame: None,
+                }
+            ),
+        ],
         ```
     """
 

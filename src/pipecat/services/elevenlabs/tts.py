@@ -32,6 +32,7 @@ from pipecat.services.tts_service import (
     WordTTSService,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for ElevenLabs configuration needed
 try:
@@ -445,6 +446,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 msg = {"text": text, "context_id": self._context_id}
                 await self._websocket.send(json.dumps(msg))
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -645,6 +647,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
 
         return word_times
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using ElevenLabs streaming API with timestamps.
 
