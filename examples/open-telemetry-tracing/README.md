@@ -4,10 +4,31 @@ This demo showcases OpenTelemetry tracing integration for Pipecat services, allo
 
 ## Features
 
-- **Service Tracing**: Track requests through TTS, STT, and LLM services
+- **Hierarchical Tracing**: Track entire conversations, turns, and service calls
+- **Service Tracing**: Detailed spans for TTS, STT, and LLM services with rich context
 - **TTFB Metrics**: Capture Time To First Byte metrics for latency analysis
 - **Usage Statistics**: Track character counts for TTS and token usage for LLMs
 - **Flexible Exporters**: Use Jaeger, Zipkin, or any OpenTelemetry-compatible backend
+
+## Trace Structure
+
+Traces are organized hierarchically:
+
+```
+Conversation (conversation-uuid)
+├── Turn 1
+│   ├── deepgram_transcription
+│   ├── process_context
+│   ├── get_chat_completion
+│   └── cartesia_tts
+└── Turn 2
+    ├── deepgram_transcription
+    ├── process_context
+    ├── get_chat_completion
+    └── cartesia_tts
+```
+
+This organization helps you track conversation-to-conversation and turn-to-turn.
 
 ## Setup Instructions
 
@@ -31,7 +52,7 @@ Create a `.env` file with your API keys and enable tracing:
 ```
 ENABLE_TRACING=true
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # Point to your preferred backend
-OTEL_CONSOLE_EXPORT=false  # Set to true for debug output to console
+# OTEL_CONSOLE_EXPORT=true  # Set to any value for debug output to console
 
 # Service API keys
 DEEPGRAM_API_KEY=your_key_here
@@ -39,7 +60,38 @@ CARTESIA_API_KEY=your_key_here
 OPENAI_API_KEY=your_key_here
 ```
 
-### 3. Exporter Options
+### 3. Configure Your Pipeline Task
+
+Enable tracing in your Pipecat application:
+
+```python
+# Initialize OpenTelemetry with your chosen exporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+exporter = OTLPSpanExporter(
+    endpoint="http://localhost:4317",  # Jaeger OTLP endpoint
+    insecure=True,
+)
+
+setup_tracing(
+    service_name="pipecat-demo",
+    exporter=exporter,
+    console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
+)
+
+# Enable tracing in your PipelineTask
+task = PipelineTask(
+    pipeline,
+    params=PipelineParams(
+        allow_interruptions=True,
+        enable_metrics=True,  # Required for some service metrics
+    ),
+    enable_tracing=True,  # Enables both turn and conversation tracing
+    conversation_id="customer-123",  # Optional - will auto-generate if not provided
+)
+```
+
+### 4. Exporter Options
 
 While this demo uses Jaeger, you can configure any OpenTelemetry-compatible exporter:
 
@@ -63,36 +115,44 @@ Many cloud providers offer OpenTelemetry-compatible observability services:
 - Azure Monitor
 - Datadog APM
 
-See the OpenTelemetry documentation for specific exporter configurations.
+See the OpenTelemetry documentation for specific exporter configurations:
+https://opentelemetry.io/ecosystem/vendors/
 
-### 4. Install Dependencies
+### 5. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 5. Run the Demo
+### 6. Run the Demo
 
 ```bash
 python bot.py
 ```
 
-### 6. View Traces in Jaeger
+### 7. View Traces in Jaeger
 
 Open your browser to [http://localhost:16686](http://localhost:16686) and select the "pipecat-demo" service to view traces.
 
 ## Understanding the Traces
 
-- **Service Spans**: Each service operation creates a span in the trace
-- **TTS Metrics**: Look for `metrics.ttfb_ms` and `metrics.tts.character_count` attributes
-- **Service Settings**: Each service's configuration is captured in the trace
+- **Conversation Spans**: The top-level span representing an entire conversation
+- **Turn Spans**: Child spans of conversations that represent each turn in the dialog
+- **Service Spans**: Detailed service operations nested under turns
+- **Service Attributes**: Each service includes rich context about its operation:
+  - **TTS**: Voice ID, character count, service type
+  - **STT**: Transcription text, language, model
+  - **LLM**: Messages, tokens used, model, service configuration
+- **Metrics**: Performance data like `metrics.ttfb_ms` and processing durations
 
 ## How It Works
 
 The tracing system consists of:
 
-1. **Traceable Base Class**: Provides basic tracing capabilities
-2. **Decorators**: `@traceable` for classes, `@traced` for methods
+1. **TurnTrackingObserver**: Detects conversation turns
+2. **TurnTraceObserver**: Creates spans for turns and conversations
+3. **Service Decorators**: `@traced_tts`, `@traced_stt`, `@traced_llm` for service-specific tracing
+4. **Context Providers**: Share context between different parts of the pipeline
 
 ## Troubleshooting
 

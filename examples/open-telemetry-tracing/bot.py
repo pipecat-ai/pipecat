@@ -31,10 +31,10 @@ from pipecat.utils.tracing.setup import setup_tracing
 load_dotenv(override=True)
 
 # Initialize tracing if enabled
-if os.getenv("ENABLE_TRACING", "false").lower() == "true":
+if os.getenv("ENABLE_TRACING"):
     # Create the exporter
     otlp_exporter = OTLPSpanExporter(
-        endpoint="http://localhost:4317",  # Jaeger OTLP endpoint
+        endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
         insecure=True,
     )
 
@@ -42,7 +42,7 @@ if os.getenv("ENABLE_TRACING", "false").lower() == "true":
     setup_tracing(
         service_name="pipecat-demo",
         exporter=otlp_exporter,
-        console_export=os.getenv("OTEL_CONSOLE_EXPORT", "false").lower() == "true",
+        console_export=bool(os.getenv("OTEL_CONSOLE_EXPORT")),
     )
     logger.info("OpenTelemetry tracing initialized")
 
