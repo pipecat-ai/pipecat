@@ -1,19 +1,20 @@
 import { useEffect } from 'react';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { useVoiceClient } from '../context/VoiceClientContext';
 
+export type RootStackParamList = {
+  Meeting: undefined;
+  Prejoin: undefined;
+};
+
 export const useVoiceClientNavigation = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { inCall } = useVoiceClient();
 
   useEffect(() => {
     if (inCall) {
-      // TODO, refactor this
-      // @ts-ignore
       navigation.navigate('Meeting');
     } else {
-      // TODO, refactor this
-      // @ts-ignore
       navigation.navigate('Prejoin');
     }
   }, [inCall, navigation]);
