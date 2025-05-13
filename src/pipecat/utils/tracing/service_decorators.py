@@ -310,6 +310,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         messages = None
                         serialized_messages = None
 
+                        # TODO: Revisit once we unify the messages across services
                         if is_google_service:
                             # Handle Google service specifically
                             if hasattr(context, "get_messages_for_logging"):
