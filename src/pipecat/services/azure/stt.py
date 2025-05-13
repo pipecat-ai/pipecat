@@ -111,7 +111,9 @@ class AzureSTTService(STTService):
             self._audio_stream.close()
 
     @traced_stt
-    async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
         """Handle a transcription result with tracing."""
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
@@ -121,6 +123,6 @@ class AzureSTTService(STTService):
             language = getattr(event.result, "language", None) or self._settings.get("language")
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601(), language)
             asyncio.run_coroutine_threadsafe(
-                self._handle_transcription(event.result.text, language), self.get_event_loop()
+                self._handle_transcription(event.result.text, True, language), self.get_event_loop()
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())

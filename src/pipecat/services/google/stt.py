@@ -785,7 +785,7 @@ class GoogleSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
+        self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
         pass
 
@@ -821,7 +821,6 @@ class GoogleSTTService(STTService):
                             transcript,
                             is_final=True,
                             language=primary_language,
-                            confidence=result.alternatives[0].confidence,
                         )
                     else:
                         self._last_transcript_was_final = False

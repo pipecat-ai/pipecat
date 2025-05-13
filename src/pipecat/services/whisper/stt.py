@@ -348,7 +348,9 @@ class WhisperSTTService(SegmentedSTTService):
             self._model = None
 
     @traced_stt
-    async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
         """Handle a transcription result with tracing."""
         pass
 
@@ -390,7 +392,7 @@ class WhisperSTTService(SegmentedSTTService):
         await self.stop_processing_metrics()
 
         if text:
-            await self._handle_transcription(text, self._settings["language"])
+            await self._handle_transcription(text, True, self._settings["language"])
             logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
 
@@ -445,7 +447,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         pass
 
     @traced_stt
-    async def _handle_transcription(self, transcript: str, language: Optional[Language] = None):
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
         """Handle a transcription result with tracing."""
         pass
 
@@ -497,7 +501,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             await self.stop_processing_metrics()
 
             if text:
-                await self._handle_transcription(text, self._settings["language"])
+                await self._handle_transcription(text, True, self._settings["language"])
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
 

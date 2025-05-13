@@ -506,7 +506,7 @@ class RivaSegmentedSTTService(SegmentedSTTService):
                             )
                             transcription_found = True
 
-                            await self._handle_transcription(text, self._language_enum)
+                            await self._handle_transcription(text, True, self._language_enum)
 
                 if not transcription_found:
                     logger.debug("No transcription results found in Riva response")

@@ -361,7 +361,7 @@ class GladiaSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[str] = None, confidence: float = 0
+        self, transcript: str, is_final: bool, language: Optional[str] = None
     ):
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
@@ -408,18 +408,17 @@ class GladiaSTTService(STTService):
                             await self.push_frame(
                                 TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                             )
+                            await self._handle_transcription(
+                                transcript=transcript,
+                                is_final=is_final,
+                                language=language,
+                            )
                         else:
                             await self.push_frame(
                                 InterimTranscriptionFrame(
                                     transcript, "", time_now_iso8601(), language
                                 )
                             )
-                        await self._handle_transcription(
-                            transcript=transcript,
-                            is_final=is_final,
-                            language=language,
-                            confidence=confidence,
-                        )
                 elif content["type"] == "translation":
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]

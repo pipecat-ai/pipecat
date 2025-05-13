@@ -213,7 +213,9 @@ class FalSTTService(SegmentedSTTService):
         logger.info(f"Switching STT model to: [{model}]")
 
     @traced_stt
-    async def _handle_transcription(self, transcript: str, language: Optional[str] = None):
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[str] = None
+    ):
         """Handle a transcription result with tracing."""
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
@@ -245,7 +247,7 @@ class FalSTTService(SegmentedSTTService):
             if response and "text" in response:
                 text = response["text"].strip()
                 if text:  # Only yield non-empty text
-                    await self._handle_transcription(text, self._settings["language"])
+                    await self._handle_transcription(text, True, self._settings["language"])
                     logger.debug(f"Transcription: [{text}]")
                     yield TranscriptionFrame(
                         text, "", time_now_iso8601(), Language(self._settings["language"])
