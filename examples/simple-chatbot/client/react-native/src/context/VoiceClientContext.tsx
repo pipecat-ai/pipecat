@@ -103,7 +103,7 @@ export const VoiceClientProvider: React.FC<VoiceClientProviderProps> = ({ childr
         // nothing to do here
       })
       .on("userStoppedSpeaking", () => {
-        setLocalAudioLevel(0)
+        // nothing to do here
       })
       .on("botStartedSpeaking", () => {
         botSpeakingRef.current = true
