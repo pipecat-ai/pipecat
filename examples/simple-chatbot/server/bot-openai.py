@@ -20,6 +20,7 @@ the conversation flow.
 import asyncio
 import os
 import sys
+from typing import Dict
 
 import aiohttp
 from dotenv import load_dotenv
@@ -27,13 +28,17 @@ from loguru import logger
 from PIL import Image
 from runner import configure
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
+    FunctionCallResultFrame,
     OutputImageRawFrame,
     SpriteFrame,
+    TTSSpeakFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -42,6 +47,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -68,6 +74,49 @@ sprites.extend(flipped)
 # Define static and animated states
 quiet_frame = sprites[0]  # Static frame for when bot is listening
 talking_frame = SpriteFrame(images=sprites)  # Animation sequence for when bot is talking
+
+#
+# RTVI events for Pipecat client UI
+#
+rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
+
+class WeatherProcessor(FrameProcessor):
+    """Processes weather-related function calls.
+
+    This processor handles the function call to fetch weather data and
+    manages the response.
+    """
+
+    # currently does nothing but tracks waiting calls but could be used
+    waiting_calls: Dict[str, FunctionCallParams] = {}
+
+    def __init__(self):
+        super().__init__()
+
+    async def fetch_weather(self, params: FunctionCallParams):
+        print("Fetching weather data...", params)
+        await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
+        await rtvi.handle_function_call(params)
+        self.waiting_calls[params.tool_call_id] = params
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle function calls.
+
+        Args:
+            frame: The incoming frame to process
+            direction: The direction of frame flow in the pipeline
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, FunctionCallResultFrame):
+            print("Function call result:", frame.tool_call_id, frame.result)
+            if "weather" in frame.result and "condition" in frame.result["weather"]:
+                frame.result["weather"]["condition"] = "hazy"
+            if frame.tool_call_id in self.waiting_calls:
+                del self.waiting_calls[frame.tool_call_id]
+
+        await self.push_frame(frame, direction)
 
 
 class TalkingAnimation(FrameProcessor):
@@ -157,6 +206,29 @@ async def main():
         # Initialize LLM service
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
+        # Set up function calling
+        wp = WeatherProcessor()
+        llm.register_function("get_current_weather", wp.fetch_weather)
+        # llm.register_function("get_current_weather", fetch_weather_from_api)
+
+        weather_function = FunctionSchema(
+            name="get_current_weather",
+            description="Get the current weather",
+            properties={
+                "location": {
+                    "type": "string",
+                    "description": "The city and state, e.g. San Francisco, CA",
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["celsius", "fahrenheit"],
+                    "description": "The temperature unit to use. Infer this from the user's location.",
+                },
+            },
+            required=["format"],
+        )
+        tools = ToolsSchema(standard_tools=[weather_function])
+
         messages = [
             {
                 "role": "system",
@@ -173,15 +245,10 @@ async def main():
 
         # Set up conversation context and management
         # The context_aggregator will automatically collect conversation context
-        context = OpenAILLMContext(messages)
+        context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
         ta = TalkingAnimation()
-
-        #
-        # RTVI events for Pipecat client UI
-        #
-        rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
         pipeline = Pipeline(
             [
@@ -191,6 +258,7 @@ async def main():
                 llm,
                 tts,
                 ta,
+                wp,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
