@@ -16,8 +16,24 @@
  * - Browser with WebRTC support
  */
 
-import { RTVIClient, RTVIEvent } from '@pipecat-ai/client-js';
+import { LLMHelper, RTVIClient, RTVIEvent } from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
+
+function _generateRandomWeather() {
+  const temperature = Math.random() * 200 - 80;
+  const humidity = Math.random() * 100;
+  const conditions = ['sunny', 'cloudy', 'rainy', 'snowy'];
+  const condition = conditions[Math.floor(Math.random() * conditions.length)];
+  const windSpeed = Math.random() * 50;
+  const windGusts = windSpeed + Math.random() * 20;
+  return {
+    temperature,
+    humidity,
+    condition,
+    windSpeed,
+    windGusts,
+  };
+}
 
 /**
  * ChatbotClient handles the connection and media management for a real-time
@@ -28,7 +44,6 @@ class ChatbotClient {
     // Initialize client state
     this.rtviClient = null;
     this.setupDOMElements();
-    this.setupEventListeners();
     this.initializeClientAndTransport();
   }
 
@@ -42,6 +57,7 @@ class ChatbotClient {
     this.statusSpan = document.getElementById('connection-status');
     this.debugLog = document.getElementById('debug-log');
     this.botVideoContainer = document.getElementById('bot-video-container');
+    this.deviceSelector = document.getElementById('device-selector');
 
     // Create an audio element for bot's voice output
     this.botAudio = document.createElement('audio');
@@ -56,12 +72,45 @@ class ChatbotClient {
   setupEventListeners() {
     this.connectBtn.addEventListener('click', () => this.connect());
     this.disconnectBtn.addEventListener('click', () => this.disconnect());
+
+    // Populate device selector
+    this.rtviClient.getAllMics().then((mics) => {
+      console.log('Available mics:', mics);
+      mics.forEach((device) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `Microphone ${device.deviceId}`;
+        this.deviceSelector.appendChild(option);
+      });
+    });
+    this.deviceSelector.addEventListener('change', (event) => {
+      const selectedDeviceId = event.target.value;
+      console.log('Selected device ID:', selectedDeviceId);
+      this.rtviClient.updateMic(selectedDeviceId);
+    });
+
+    // Handle mic mute/unmute toggle
+    const micToggleBtn = document.getElementById('mic-toggle-btn');
+
+    micToggleBtn.addEventListener('click', () => {
+      let micEnabled = this.rtviClient.isMicEnabled;
+      micToggleBtn.textContent = micEnabled ? 'Unmute Mic' : 'Mute Mic';
+      this.rtviClient.enableMic(!micEnabled);
+      // Add logic to mute/unmute the mic
+      if (micEnabled) {
+        console.log('Mic muted');
+        // Add code to mute the mic
+      } else {
+        console.log('Mic unmuted');
+        // Add code to unmute the mic
+      }
+    });
   }
 
   /**
    * Set up the RTVI client and Daily transport
    */
-  initializeClientAndTransport() {
+  async initializeClientAndTransport() {
     // Initialize the RTVI client with a DailyTransport and our configuration
     this.rtviClient = new RTVIClient({
       transport: new DailyTransport(),
@@ -121,6 +170,10 @@ class ChatbotClient {
         onMessageError: (error) => {
           console.log('Message error:', error);
         },
+        onMicUpdated: (data) => {
+          console.log('Mic updated:', data);
+          this.deviceSelector.value = data.deviceId;
+        },
         onError: (error) => {
           console.log('Error:', JSON.stringify(error));
         },
@@ -129,6 +182,52 @@ class ChatbotClient {
 
     // Set up listeners for media track events
     this.setupTrackListeners();
+
+    await this.rtviClient.initDevices();
+    this.setupEventListeners();
+
+    let llmHelper = new LLMHelper({});
+    llmHelper.handleFunctionCall(async (data) => {
+      return await this.handleFunctionCall(data.functionName, data.arguments);
+    });
+    this.rtviClient.registerHelper('openai', llmHelper);
+  }
+
+  async handleFunctionCall(functionName, args) {
+    console.log('[EVENT] LLMFunctionCall', functionName, args);
+    const toolFunctions = {
+      changeBackgroundColor: ({ color }) => {
+        console.log('changing background color to', color);
+        document.body.style.backgroundColor = color;
+        return { success: true, color };
+      },
+      get_current_weather: async (data) => {
+        console.log('getting weather for', data, data.location);
+        const key = import.meta.env.VITE_DANGEROUS_OPENWEATHER_API_KEY;
+        if (!key) {
+          const ret = { success: true, weather: _generateRandomWeather() };
+          console.log('returning weather', ret);
+          return ret;
+        }
+        const locationReq = await fetch(
+          `http://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${key}`
+        );
+        const locJson = await locationReq.json();
+        const loc = { lat: locJson[0].lat, lon: locJson[0].lon };
+        const exclude = ['minutely', 'hourly', 'daily'].join(',');
+        const weatherRec = await fetch(
+          `https://api.openweathermap.org/data/3.0/onecall?lat=${loc.lat}&lon=${loc.lon}&exclude=${exclude}&appid=${key}`
+        );
+        const weather = await weatherRec.json();
+        return { success: true, weather: weather.current };
+      },
+    };
+    const toolFunction = toolFunctions[functionName];
+    if (toolFunction) {
+      let result = await toolFunction(args);
+      console.debug('returning result', result);
+      return result;
+    }
   }
 
   /**
