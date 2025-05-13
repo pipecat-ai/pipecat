@@ -110,14 +110,18 @@ The payload that the webhook received is as follows:
   "callId": "string-contains-uuid",
   "callDomain": "string-contains-uuid",
   "sipHeaders": {
-    // these are fields that can be sent to the sip-interconnect
-    // for example from twilio to daily
     "X-My-Custom-Header": "value",
     "x-caller": "+1234567890",
     "x-called": "+1987654321", 
    },
 }
 ```
+The `To`, `From`, `callId`, `callDomain` fields are converted to 
+`snake_case` and mapped to `dialin_settings`. In addition, `sipHeader` 
+contains any custom SIP headers received by Daily on the SIP 
+interconnect address (`sip_uri`). These are headers sent from 
+Twilio or other external SIP platforms, for example, to send the 
+caller's phone number.
 
 ### Dialout Request
 
