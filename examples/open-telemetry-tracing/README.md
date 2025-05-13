@@ -16,16 +16,16 @@ Traces are organized hierarchically:
 
 ```
 Conversation (conversation-uuid)
-├── Turn 1
-│   ├── deepgram_transcription
-│   ├── process_context
-│   ├── get_chat_completion
-│   └── cartesia_tts
-└── Turn 2
-    ├── deepgram_transcription
-    ├── process_context
-    ├── get_chat_completion
-    └── cartesia_tts
+├── turn-1
+│   ├── stt_deepgramsttservice
+│   ├── llm_openaillmservice
+│   └── tts_cartesiattsservice
+└── turn-2
+    ├── stt_deepgramsttservice
+    ├── llm_openaillmservice
+    └── tts_cartesiattsservice
+    turn-N
+    └── ...
 ```
 
 This organization helps you track conversation-to-conversation and turn-to-turn.

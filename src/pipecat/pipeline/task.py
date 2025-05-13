@@ -181,7 +181,7 @@ class PipelineTask(BaseTask):
         ),
         cancel_on_idle_timeout: bool = True,
         enable_turn_tracking: bool = True,
-        enable_tracing: bool = True,
+        enable_tracing: bool = False,
         conversation_id: Optional[str] = None,
     ):
         super().__init__()

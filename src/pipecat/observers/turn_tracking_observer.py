@@ -95,7 +95,7 @@ class TurnTrackingObserver(BaseObserver):
     async def _end_turn_after_timeout(self, data: FramePushed):
         """End turn after timeout has expired."""
         if self._is_turn_active and not self._is_bot_speaking:
-            logger.debug(f"Turn {self._turn_count} ending due to timeout")
+            logger.trace(f"Turn {self._turn_count} ending due to timeout")
             await self._end_turn(data, was_interrupted=False)
             self._end_turn_timer = None
 
@@ -140,7 +140,7 @@ class TurnTrackingObserver(BaseObserver):
         self._has_bot_spoken = False
         self._turn_count += 1
         self._turn_start_time = data.timestamp
-        logger.debug(f"Turn {self._turn_count} started")
+        logger.trace(f"Turn {self._turn_count} started")
         await self._call_event_handler("on_turn_started", self._turn_count)
 
     async def _end_turn(self, data: FramePushed, was_interrupted: bool):
@@ -152,7 +152,7 @@ class TurnTrackingObserver(BaseObserver):
         self._is_turn_active = False
 
         status = "interrupted" if was_interrupted else "completed"
-        logger.debug(f"Turn {self._turn_count} {status} after {duration:.2f}s")
+        logger.trace(f"Turn {self._turn_count} {status} after {duration:.2f}s")
         await self._call_event_handler("on_turn_ended", self._turn_count, duration, was_interrupted)
 
     def _register_event_handler(self, event_name):

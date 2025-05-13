@@ -30,8 +30,10 @@ from pipecat.utils.tracing.setup import setup_tracing
 
 load_dotenv(override=True)
 
+IS_TRACING_ENABLED = bool(os.getenv("ENABLE_TRACING"))
+
 # Initialize tracing if enabled
-if os.getenv("ENABLE_TRACING"):
+if IS_TRACING_ENABLED:
     # Create the exporter
     otlp_exporter = OTLPSpanExporter(
         endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
@@ -126,6 +128,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        enable_tracing=IS_TRACING_ENABLED,
         # Optionally, add a conversation ID to track the conversation
         # conversation_id="8df26cc1-6db0-4a7a-9930-1e037c8f1fa2",
     )
