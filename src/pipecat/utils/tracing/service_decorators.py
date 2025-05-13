@@ -61,6 +61,20 @@ def _get_parent_service_context(self):
     return context_api.get_current()
 
 
+def _get_service_name(self, service_prefix: str) -> str:
+    """Generate a default span name using service type and class name.
+
+    Args:
+        self: The service instance.
+        service_prefix: The service type (e.g., 'llm', 'stt', 'tts').
+
+    Returns:
+        A default span name string like "type_classname" (e.g. llm_openaillmservice).
+    """
+    service_class_name = self.__class__.__name__.lower()
+    return f"{service_prefix}_{service_class_name}"
+
+
 def _add_token_usage_to_span(span, token_usage):
     """Add token usage metrics to a span (internal use only).
 
@@ -114,7 +128,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 return
 
             service_class_name = self.__class__.__name__
-            span_name = f"tts_{service_class_name.lower()}"
+            span_name = name or _get_service_name(self, "tts")
 
             # Get parent context
             turn_context = get_current_turn_context()
@@ -206,7 +220,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 return await f(self, transcript, is_final, language)
 
             service_class_name = self.__class__.__name__
-            span_name = f"stt_{service_class_name.lower()}"
+            span_name = name or _get_service_name(self, "stt")
 
             # Get the turn context first, then fall back to service context
             turn_context = get_current_turn_context()
@@ -275,7 +289,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 return await f(self, context, *args, **kwargs)
 
             service_class_name = self.__class__.__name__
-            span_name = f"llm_{service_class_name.lower()}"
+            span_name = name or _get_service_name(self, "llm")
 
             # Get the parent context - turn context if available, otherwise service context
             turn_context = get_current_turn_context()
