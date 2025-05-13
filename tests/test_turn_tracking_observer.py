@@ -5,7 +5,6 @@
 #
 
 import unittest
-from typing import Optional
 
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
@@ -13,35 +12,9 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.observers.base_observer import FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
-from pipecat.processors.frame_processor import FrameProcessor
+from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.tests.utils import SleepFrame, run_test
-
-
-class TurnObserverProcessor(FrameProcessor):
-    """Helper processor that forwards frames and contains a TurnTrackingObserver."""
-
-    def __init__(self, turn_observer: Optional[TurnTrackingObserver] = None):
-        super().__init__()
-        self.turn_observer = turn_observer or TurnTrackingObserver(turn_end_timeout_secs=0.2)
-
-    async def process_frame(self, frame, direction):
-        await super().process_frame(frame, direction)
-
-        data = FramePushed(
-            source=self,
-            destination=self,
-            frame=frame,
-            direction=direction,
-            timestamp=0,  # Timestamp doesn't matter for this test
-        )
-
-        # Forward to turn observer
-        await self.turn_observer.on_push_frame(data)
-
-        # Forward the frame
-        await self.push_frame(frame, direction)
 
 
 class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
@@ -49,9 +22,11 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
 
     async def test_normal_conversation_flow(self):
         """Test a normal conversation with two complete turns."""
-        # Create processor and observer with a short timeout
-        processor = TurnObserverProcessor()
-        turn_observer = processor.turn_observer
+        # Create observer with a short timeout
+        turn_observer = TurnTrackingObserver(turn_end_timeout_secs=0.2)
+
+        # Create identity filter (passes all frames through)
+        processor = IdentityFilter()
 
         # Record start/end events with turn numbers
         turn_events = []
@@ -80,7 +55,6 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             SleepFrame(sleep=0.3),  # > 0.2 seconds turn_end_timeout
         ]
 
-        # Specify the expected frame types in order
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
@@ -92,11 +66,11 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             BotStoppedSpeakingFrame,
         ]
 
-        # Run the test, verifying both event sequence and frame order
         await run_test(
             processor,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            observers=[turn_observer],
         )
 
         # Verify turn events
@@ -111,9 +85,11 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_speaks_twice_before_bot(self):
         """Test when user speaks twice before bot responds, should be same turn."""
-        # Create processor and observer
-        processor = TurnObserverProcessor()
-        turn_observer = processor.turn_observer
+        # Create observer with a short timeout
+        turn_observer = TurnTrackingObserver(turn_end_timeout_secs=0.2)
+
+        # Create identity filter (passes all frames through)
+        processor = IdentityFilter()
 
         # Record start/end events with turn numbers
         turn_events = []
@@ -143,7 +119,6 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             SleepFrame(sleep=0.3),  # > 0.2 seconds turn_end_timeout
         ]
 
-        # Specify the expected frame types in order (excluding SleepFrame)
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
@@ -157,11 +132,11 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             BotStoppedSpeakingFrame,
         ]
 
-        # Run the test
         await run_test(
             processor,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            observers=[turn_observer],
         )
 
         # Verify turn events - should only see two turns despite user speaking twice
@@ -176,9 +151,11 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
 
     async def test_user_interrupts_bot(self):
         """Test when user interrupts bot speaking, should end current turn and start new one."""
-        # Create processor and observer
-        processor = TurnObserverProcessor()
-        turn_observer = processor.turn_observer
+        # Create observer with a short timeout
+        turn_observer = TurnTrackingObserver(turn_end_timeout_secs=0.2)
+
+        # Create identity filter (passes all frames through)
+        processor = IdentityFilter()
 
         # Record start/end events with turn numbers
         turn_events = []
@@ -201,7 +178,6 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             SleepFrame(sleep=0.3),  # > 0.2 seconds turn_end_timeout
         ]
 
-        # Specify the expected frame types in order
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
@@ -209,11 +185,11 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             UserStartedSpeakingFrame,
         ]
 
-        # Run the test
         await run_test(
             processor,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            observers=[turn_observer],
         )
 
         # Verify turn events - should see Turn 1 interrupted
@@ -227,8 +203,11 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
 
     async def test_bot_starts_stops_multiple_times(self):
         """Test that multiple bot start/stop frames in the same turn work correctly."""
-        processor = TurnObserverProcessor()
-        turn_observer = processor.turn_observer
+        # Create observer with a short timeout
+        turn_observer = TurnTrackingObserver(turn_end_timeout_secs=0.2)
+
+        # Create identity filter (passes all frames through)
+        processor = IdentityFilter()
 
         turn_events = []
 
@@ -266,6 +245,7 @@ class TestTurnTrackingObserver(unittest.IsolatedAsyncioTestCase):
             processor,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            observers=[turn_observer],
         )
 
         # Should only be one turn with a normal end
