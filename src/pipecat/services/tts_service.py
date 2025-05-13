@@ -315,7 +315,7 @@ class TTSService(AIService):
             dict: Attributes for this service
         """
         # Extract service name from class name
-        service_name = self.__class__.__name__.replace("TTSService", "").lower()
+        service_name = self.__class__.__name__
 
         # Build basic attributes
         attributes = {

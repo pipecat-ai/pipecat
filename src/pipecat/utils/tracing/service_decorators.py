@@ -11,6 +11,7 @@ rich information about service execution including configuration,
 parameters, and performance metrics.
 """
 
+import contextlib
 import functools
 import inspect
 import json
@@ -81,24 +82,6 @@ def _add_token_usage_to_span(span, token_usage):
         span.set_attribute("llm.completion_tokens", getattr(token_usage, "completion_tokens", 0))
 
 
-def _generate_default_span_name(self, service_type):
-    """Generate a default span name using service type and class name.
-
-    Args:
-        self: The service instance.
-        service_type: The service type (e.g., 'llm', 'stt', 'tts').
-
-    Returns:
-        A default span name string like "type_classname".
-    """
-    # Get the full class name in lowercase
-    class_name = self.__class__.__name__.lower()
-
-    # Return a name in the format "type_classname"
-    # Examples: "llm_openaillmservice", "stt_deepgramsttservice", "tts_cartesiattservice"
-    return f"{service_type}_{class_name}"
-
-
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
     """Traces TTS service methods with TTS-specific attributes.
 
@@ -112,7 +95,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
     Args:
         func: The TTS method to trace.
-        name: Custom span name. Defaults to function name.
+        name: Custom span name. Defaults to service type and class name.
 
     Returns:
         Wrapped method with TTS-specific tracing.
@@ -121,8 +104,49 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
-        # Check if we're dealing with a coroutine or an async generator
         is_async_generator = inspect.isasyncgenfunction(f)
+
+        @contextlib.asynccontextmanager
+        async def tracing_context(self, text):
+            """Async context manager for TTS tracing."""
+            if not is_tracing_available():
+                yield None
+                return
+
+            service_class_name = self.__class__.__name__
+            span_name = f"tts_{service_class_name.lower()}"
+
+            # Get parent context
+            turn_context = get_current_turn_context()
+            parent_context = turn_context or _get_parent_service_context(self)
+
+            # Create span
+            tracer = trace.get_tracer("pipecat")
+            with tracer.start_as_current_span(span_name, context=parent_context) as span:
+                try:
+                    add_tts_span_attributes(
+                        span=span,
+                        service_name=service_class_name,
+                        model=getattr(self, "model_name", "unknown"),
+                        voice_id=getattr(self, "_voice_id", "unknown"),
+                        text=text,
+                        settings=getattr(self, "_settings", {}),
+                        character_count=len(text),
+                        operation_name="tts",
+                        cartesia_version=getattr(self, "_cartesia_version", None),
+                        context_id=getattr(self, "_context_id", None),
+                    )
+
+                    yield span
+
+                except Exception as e:
+                    logging.warning(f"Error in TTS tracing: {e}")
+                    raise
+                finally:
+                    # Update TTFB metric at the end
+                    ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
+                    if ttfb_ms is not None:
+                        span.set_attribute("metrics.ttfb_ms", ttfb_ms)
 
         if is_async_generator:
 
@@ -133,51 +157,9 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         yield item
                     return
 
-                # Generate a default name if none provided
-                span_name = name
-                if span_name is None:
-                    span_name = _generate_default_span_name(self, "tts")
-
-                # Get the turn context first, then fall back to service context
-                turn_context = get_current_turn_context()
-                parent_context = turn_context or _get_parent_service_context(self)
-
-                # Create a new span as child of the turn span or service span
-                tracer = trace.get_tracer("pipecat")
-                with tracer.start_as_current_span(
-                    span_name, context=parent_context
-                ) as current_span:
-                    try:
-                        # Immediately add attributes to the span
-                        service_name = self.__class__.__name__.replace("TTSService", "").lower()
-
-                        # Add TTS attributes right away
-                        add_tts_span_attributes(
-                            span=current_span,
-                            service_name=service_name,
-                            model=getattr(self, "model_name", "unknown"),
-                            voice_id=getattr(self, "_voice_id", "unknown"),
-                            text=text,
-                            settings=getattr(self, "_settings", {}),
-                            character_count=len(text),
-                            operation_name="tts",
-                            cartesia_version=getattr(self, "_cartesia_version", None),
-                            context_id=getattr(self, "_context_id", None),
-                        )
-
-                        # For async generators, we need to yield from it
-                        async for item in f(self, text, *args, **kwargs):
-                            yield item
-
-                    except Exception as e:
-                        # Log any exception but don't disrupt the main flow
-                        logging.warning(f"Error in TTS tracing: {e}")
-                        raise
-                    finally:
-                        # Update TTFB metric at the end
-                        ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
-                        if ttfb_ms is not None:
-                            current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+                async with tracing_context(self, text):
+                    async for item in f(self, text, *args, **kwargs):
+                        yield item
 
             return gen_wrapper
         else:
@@ -187,49 +169,9 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 if not is_tracing_available():
                     return await f(self, text, *args, **kwargs)
 
-                # Generate a default name if none provided
-                span_name = name
-                if span_name is None:
-                    span_name = _generate_default_span_name(self, "tts")
-
-                # Get the parent context - turn context if available, otherwise service context
-                turn_context = get_current_turn_context()
-                parent_context = turn_context or _get_parent_service_context(self)
-
-                # Create a new span as child of the service span
-                tracer = trace.get_tracer("pipecat")
-                with tracer.start_as_current_span(
-                    span_name, context=parent_context
-                ) as current_span:
-                    try:
-                        # Immediately add attributes to the span
-                        service_name = self.__class__.__name__.replace("TTSService", "").lower()
-
-                        # Add TTS attributes right away
-                        add_tts_span_attributes(
-                            span=current_span,
-                            service_name=service_name,
-                            model=getattr(self, "model_name", "unknown"),
-                            voice_id=getattr(self, "_voice_id", "unknown"),
-                            text=text,
-                            settings=getattr(self, "_settings", {}),
-                            character_count=len(text),
-                            operation_name="tts",
-                            cartesia_version=getattr(self, "_cartesia_version", None),
-                            context_id=getattr(self, "_context_id", None),
-                        )
-
-                        # Call the function
-                        return await f(self, text, *args, **kwargs)
-                    except Exception as e:
-                        # Log any exception but don't disrupt the main flow
-                        logging.warning(f"Error in TTS tracing: {e}")
-                        raise
-                    finally:
-                        # Update TTFB metric at the end
-                        ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
-                        if ttfb_ms is not None:
-                            current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+                async with tracing_context(self, text):
+                    result = await f(self, text, *args, **kwargs)
+                    return result
 
             return wrapper
 
@@ -263,10 +205,8 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, transcript, is_final, language)
 
-            # Generate a default name if none provided
-            span_name = name
-            if span_name is None:
-                span_name = _generate_default_span_name(self, "stt")
+            service_class_name = self.__class__.__name__
+            span_name = f"stt_{service_class_name.lower()}"
 
             # Get the turn context first, then fall back to service context
             turn_context = get_current_turn_context()
@@ -276,19 +216,15 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             tracer = trace.get_tracer("pipecat")
             with tracer.start_as_current_span(span_name, context=parent_context) as current_span:
                 try:
-                    # Get service name from class name
-                    service_name = self.__class__.__name__.replace("STTService", "").lower()
-
                     # Get TTFB metric if available
                     ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
 
                     # Use settings from the service if available
                     settings = getattr(self, "_settings", {})
 
-                    # Add all STT attributes immediately
                     add_stt_span_attributes(
                         span=current_span,
-                        service_name=service_name,
+                        service_name=service_class_name,
                         model=getattr(self, "model_name", settings.get("model", "unknown")),
                         transcript=transcript,
                         is_final=is_final,
@@ -338,10 +274,8 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
             if not is_tracing_available():
                 return await f(self, context, *args, **kwargs)
 
-            # Generate a default name if none provided
-            span_name = name
-            if span_name is None:
-                span_name = _generate_default_span_name(self, "llm")
+            service_class_name = self.__class__.__name__
+            span_name = f"llm_{service_class_name.lower()}"
 
             # Get the parent context - turn context if available, otherwise service context
             turn_context = get_current_turn_context()
@@ -368,12 +302,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                         # Replace the method temporarily
                         self.start_llm_usage_metrics = wrapped_start_llm_usage_metrics
 
-                    # Add basic attributes immediately
-                    service_name = self.__class__.__name__.replace("LLMService", "").lower()
-
                     try:
                         # Detect if we're using Google's service
-                        is_google_service = "google" in service_name.lower()
+                        is_google_service = "google" in service_class_name.lower()
 
                         # Try to get messages based on service type
                         messages = None
@@ -447,7 +378,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                         # Add all available attributes to the span
                         attribute_kwargs = {
-                            "service_name": service_name,
+                            "service_name": service_class_name,
                             "model": getattr(self, "model_name", "unknown"),
                             "stream": True,  # Most LLM services use streaming
                             "parameters": params,

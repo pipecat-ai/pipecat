@@ -331,7 +331,7 @@ class LLMService(AIService):
     def get_trace_attributes(self, **kwargs) -> dict:
         """Get trace attributes for this LLM service."""
         # Extract service name from class name
-        service_name = self.__class__.__name__.replace("LLMService", "").lower()
+        service_name = self.__class__.__name__
 
         # Build basic attributes
         attributes = {
