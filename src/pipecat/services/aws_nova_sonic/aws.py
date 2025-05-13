@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -757,6 +758,7 @@ class AWSNovaSonicLLMService(LLMService):
                 if not self._assistant_is_responding:
                     # The assistant has started responding.
                     self._assistant_is_responding = True
+                    await self._report_user_transcription_ended()  # Consider user turn over
                     await self._report_assistant_response_started()
 
     async def _handle_text_output_event(self, event_json):
@@ -789,6 +791,9 @@ class AWSNovaSonicLLMService(LLMService):
     async def _handle_tool_use_event(self, event_json):
         if not self._content_being_received or not self._context:  # should never happen
             return
+
+        # Consider user turn over
+        await self._report_user_transcription_ended()
 
         # Get tool use details
         tool_use = event_json["toolUse"]
@@ -836,6 +841,14 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _handle_completion_end_event(self, event_json):
         pass
+
+    #
+    # assistant response reporting
+    #
+    # 1. Started
+    # 2. Text added
+    # 3. Ended
+    #
 
     async def _report_assistant_response_started(self):
         logger.debug("Assistant response started")
@@ -885,6 +898,15 @@ class AWSNovaSonicLLMService(LLMService):
         # For an explanation of this hack, see _report_assistant_response_text_added.
         self._context.flush_aggregated_assistant_text()
 
+    #
+    # user transcription reporting
+    #
+    # 1. Text added
+    # 2. Ended
+    #
+    # Note: "started" does not need to be reported
+    #
+
     async def _report_user_transcription_text_added(self, text):
         if not self._context:  # should never happen
             return
@@ -893,12 +915,30 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Manually add new user transcription text to context.
         # We can't rely on the user context aggregator to do this since it's upstream from the LLM.
-        self._context.add_user_transcription_text(text)
+        self._context.buffer_user_text(text)
 
         # Report that some new user transcription text is available.
         if self._send_transcription_frames:
             await self.push_frame(
-                TranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
+                InterimTranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
+            )
+
+    async def _report_user_transcription_ended(self):
+        if not self._context:  # should never happen
+            return
+
+        # Manually add user transcription to context (if any has been buffered).
+        # We can't rely on the user context aggregator to do this since it's upstream from the LLM.
+        transcription = self._context.flush_aggregated_user_text()
+
+        if not transcription:
+            return
+
+        logger.debug(f"User transcription ended")
+
+        if self._send_transcription_frames:
+            await self.push_frame(
+                TranscriptionFrame(text=transcription, user_id="", timestamp=time_now_iso8601())
             )
 
     #
