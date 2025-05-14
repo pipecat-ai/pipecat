@@ -420,7 +420,7 @@ class GladiaSTTService(STTService):
                                 is_final=is_final,
                                 language=language,
                             )
-                            logger.debug(f">> Deepgram: {transcript}")
+                            logger.debug(f">> Gladia: {transcript}")
                             if self.vad_enabled:
                                 await self.push_frame(UserStoppedSpeakingFrame())
                         else:
