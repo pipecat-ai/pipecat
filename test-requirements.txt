@@ -1,1 +1,1 @@
--e ".[anthropic,aws,google,langchain,tracing]"
+-e ".[anthropic,aws,google,langchain]"
