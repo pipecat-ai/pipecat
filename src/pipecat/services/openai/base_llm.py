@@ -35,6 +35,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 
 class OpenAIUnhandledFunctionException(Exception):
@@ -176,6 +177,7 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []

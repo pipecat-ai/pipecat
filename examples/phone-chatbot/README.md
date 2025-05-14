@@ -235,10 +235,10 @@ For incoming calls from customers, Daily will send a webhook to your `/start` en
 
 ```json
 {
-	"From": "+CALLERS_PHONE",
-	"To": "$PURCHASED_PHONE",
-	"callId": "callid-read-only-string",
-	"callDomain": "callDomain-read-only-string"
+  "From": "+CALLERS_PHONE",
+  "To": "$PURCHASED_PHONE",
+  "callId": "callid-read-only-string",
+  "callDomain": "callDomain-read-only-string"
 }
 ```
 
@@ -266,63 +266,63 @@ When making requests to the `/start` endpoint, the config object can include:
 
 ```json
 {
-	"config": {
-		"prompts": [
-			{
-				"name": "call_transfer_initial_prompt",
-				"text": "Your custom prompt here"
-			},
-			{
-				"name": "call_transfer_prompt",
-				"text": "Your custom prompt here"
-			},
-			{
-				"name": "call_transfer_finished_prompt",
-				"text": "Your custom prompt here"
-			},
-			{
-				"name": "voicemail_detection_prompt",
-				"text": "Your custom prompt here"
-			},
-			{
-				"name": "voicemail_prompt",
-				"text": "Your custom prompt here"
-			},
-			{
-				"name": "human_conversation_prompt",
-				"text": "Your custom prompt here"
-			}
-		],
-		"dialin_settings": {
-			"From": "+CALLERS_PHONE",
-			"To": "$PURCHASED_PHONE",
-			"callId": "callid-read-only-string",
-			"callDomain": "callDomain-read-only-string"
-		},
-		"dialout_settings": [
-			{
-				"phoneNumber": "+12345678910",
-				"callerId": "caller-id-uuid",
-				"sipUri": "sip:maria@example.com"
-			}
-		],
-		"call_transfer": {
-			"mode": "dialout",
-			"speakSummary": true,
-			"storeSummary": false,
-			"operatorNumber": "+12345678910",
-			"testInPrebuilt": false
-		},
-		"voicemail_detection": {
-			"testInPrebuilt": true
-		},
-		"simple_dialin": {
-			"testInPrebuilt": true
-		},
-		"simple_dialout": {
-			"testInPrebuilt": true
-		}
-	}
+  "config": {
+    "prompts": [
+      {
+        "name": "call_transfer_initial_prompt",
+        "text": "Your custom prompt here"
+      },
+      {
+        "name": "call_transfer_prompt",
+        "text": "Your custom prompt here"
+      },
+      {
+        "name": "call_transfer_finished_prompt",
+        "text": "Your custom prompt here"
+      },
+      {
+        "name": "voicemail_detection_prompt",
+        "text": "Your custom prompt here"
+      },
+      {
+        "name": "voicemail_prompt",
+        "text": "Your custom prompt here"
+      },
+      {
+        "name": "human_conversation_prompt",
+        "text": "Your custom prompt here"
+      }
+    ],
+    "dialin_settings": {
+      "From": "+CALLERS_PHONE",
+      "To": "$PURCHASED_PHONE",
+      "callId": "callid-read-only-string",
+      "callDomain": "callDomain-read-only-string"
+    },
+    "dialout_settings": [
+      {
+        "phoneNumber": "+12345678910",
+        "callerId": "caller-id-uuid",
+        "sipUri": "sip:maria@example.com"
+      }
+    ],
+    "call_transfer": {
+      "mode": "dialout",
+      "speakSummary": true,
+      "storeSummary": false,
+      "operatorNumber": "+12345678910",
+      "testInPrebuilt": false
+    },
+    "voicemail_detection": {
+      "testInPrebuilt": true
+    },
+    "simple_dialin": {
+      "testInPrebuilt": true
+    },
+    "simple_dialout": {
+      "testInPrebuilt": true
+    }
+  }
 }
 ```
 
@@ -393,19 +393,19 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"dialin_settings": {
-			"from": "+12345678901",
-			"to": "+19876543210",
-			"call_id": "call-id-string",
-			"call_domain": "domain-string"
-		},
-		"call_transfer": {
-			"mode": "dialout",
-			"speakSummary": true,
-			"operatorNumber": "+12345678910"
-		}
-	}
+  "config": {
+    "dialin_settings": {
+      "from": "+12345678901",
+      "to": "+19876543210",
+      "call_id": "call-id-string",
+      "call_domain": "domain-string"
+    },
+    "call_transfer": {
+      "mode": "dialout",
+      "speakSummary": true,
+      "operatorNumber": "+12345678910"
+    }
+  }
 }
 ```
 
@@ -413,14 +413,14 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"call_transfer": {
-			"mode": "dialout",
-			"speakSummary": true,
-			"operatorNumber": "+12345678910",
-			"testInPrebuilt": true
-		}
-	}
+  "config": {
+    "call_transfer": {
+      "mode": "dialout",
+      "speakSummary": true,
+      "operatorNumber": "+12345678910",
+      "testInPrebuilt": true
+    }
+  }
 }
 ```
 
@@ -428,11 +428,11 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"voicemail_detection": {
-			"testInPrebuilt": true
-		}
-	}
+  "config": {
+    "voicemail_detection": {
+      "testInPrebuilt": true
+    }
+  }
 }
 ```
 
@@ -440,16 +440,16 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"dialout_settings": [
-			{
-				"phoneNumber": "+12345678910"
-			}
-		],
-		"voicemail_detection": {
-			"testInPrebuilt": false
-		}
-	}
+  "config": {
+    "dialout_settings": [
+      {
+        "phoneNumber": "+12345678910"
+      }
+    ],
+    "voicemail_detection": {
+      "testInPrebuilt": false
+    }
+  }
 }
 ```
 
@@ -457,15 +457,15 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"dialin_settings": {
-			"from": "+12345678901",
-			"to": "+19876543210",
-			"call_id": "call-id-string",
-			"call_domain": "domain-string"
-		},
-		"simple_dialin": {}
-	}
+  "config": {
+    "dialin_settings": {
+      "from": "+12345678901",
+      "to": "+19876543210",
+      "call_id": "call-id-string",
+      "call_domain": "domain-string"
+    },
+    "simple_dialin": {}
+  }
 }
 ```
 
@@ -473,11 +473,11 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"simple_dialin": {
-			"testInPrebuilt": true
-		}
-	}
+  "config": {
+    "simple_dialin": {
+      "testInPrebuilt": true
+    }
+  }
 }
 ```
 
@@ -485,14 +485,14 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"dialout_settings": [
-			{
-				"phoneNumber": "+12345678910"
-			}
-		],
-		"simple_dialout": {}
-	}
+  "config": {
+    "dialout_settings": [
+      {
+        "phoneNumber": "+12345678910"
+      }
+    ],
+    "simple_dialout": {}
+  }
 }
 ```
 
@@ -500,36 +500,13 @@ The following table shows which feature combinations are supported when making r
 
 ```json
 {
-	"config": {
-		"simple_dialout": {
-			"testInPrebuilt": true
-		}
-	}
+  "config": {
+    "simple_dialout": {
+      "testInPrebuilt": true
+    }
+  }
 }
 ```
-
-## Using Twilio (Alternative)
-
-To use Twilio for call handling:
-
-1. Start the bot runner:
-
-   ```shell
-   python bot_runner.py --host localhost
-   ```
-
-2. Start ngrok:
-
-   ```shell
-   ngrok http --domain yourdomain.ngrok.app 7860
-   ```
-
-3. In another terminal, run the Twilio bot:
-   ```shell
-   python bot_twilio.py
-   ```
-
-Make requests to `/start_twilio_bot` for Twilio-specific functionality.
 
 ## Deployment
 

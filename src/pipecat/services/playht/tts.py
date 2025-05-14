@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from pyht.async_client import AsyncClient
@@ -157,7 +158,7 @@ class PlayHTTTSService(InterruptibleTTSService):
     async def _connect(self):
         await self._connect_websocket()
 
-        if not self._receive_task:
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -169,7 +170,7 @@ class PlayHTTTSService(InterruptibleTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket:
+            if self._websocket and self._websocket.open:
                 return
 
             logger.debug("Connecting to PlayHT")
@@ -197,11 +198,11 @@ class PlayHTTTSService(InterruptibleTTSService):
             if self._websocket:
                 logger.debug("Disconnecting from PlayHT")
                 await self._websocket.close()
-                self._websocket = None
-
-            self._request_id = None
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
+        finally:
+            self._request_id = None
+            self._websocket = None
 
     async def _get_websocket_url(self):
         async with aiohttp.ClientSession() as session:
@@ -268,6 +269,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -391,6 +393,7 @@ class PlayHTHttpTTSService(TTSService):
     def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

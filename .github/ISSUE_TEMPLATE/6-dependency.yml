@@ -1,0 +1,74 @@
+name: Dependency Issue
+description: An issue with a Pipecat dependency (not a third-party service)
+type: Dependency Issue
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Dependency Issue
+
+        Use this form to report an issue with a Pipecat dependency.
+
+  - type: input
+    id: pipecat-version
+    attributes:
+      label: pipecat version
+      description: Which version are you using?
+      placeholder: e.g., 0.0.63
+    validations:
+      required: true
+
+  - type: input
+    id: dependency-name
+    attributes:
+      label: Dependency Name
+      description: Which Pipecat dependency is causing the issue?
+      placeholder: e.g., openai, anthropic, fastapi
+    validations:
+      required: true
+
+  - type: input
+    id: dependency-version
+    attributes:
+      label: Dependency Version
+      description: Which version of the dependency are you using?
+      placeholder: e.g., 1.2.3
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue Description
+      description: Provide a clear description of the dependency issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: How is this dependency issue affecting your usage of pipecat?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction Steps
+      description: If applicable, provide steps to reproduce the issue.
+      placeholder: |
+        1. Install dependency X
+        2. Run command Y
+        3. See error Z
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs
+      description: If applicable, include any relevant error messages or logs.
+      render: shell
+    validations:
+      required: false

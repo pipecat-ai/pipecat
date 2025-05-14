@@ -9,9 +9,9 @@ import os
 import sys
 
 import aiohttp
+from daily_runner import configure
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -37,9 +37,8 @@ async def main():
             token,
             "Respond bot",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_enabled=True,
-                vad_audio_passthrough=True,
                 # set stop_secs to something roughly similar to the internal setting
                 # of the Multimodal Live api, just to align events. This doesn't really
                 # matter because we can only use the Multimodal Live API's phrase
@@ -53,7 +52,6 @@ async def main():
             voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
             # system_instruction="Talk like a pirate."
             transcribe_user_audio=True,
-            transcribe_model_audio=True,
             # inference_on_context_initialization=False,
         )
 

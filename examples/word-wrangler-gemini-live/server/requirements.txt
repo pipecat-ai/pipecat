@@ -1,0 +1,5 @@
+pipecatcloud
+pipecat-ai[daily,google,silero]
+fastapi
+uvicorn
+python-dotenv

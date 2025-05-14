@@ -4,17 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
+import argparse
 import glob
 import json
 import os
-import sys
 from datetime import datetime
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -25,46 +22,50 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.llm_service import FunctionCallParams
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 video_participant_id = None
 
 
 BASE_FILENAME = "/tmp/pipecat_conversation_"
 tts = None
+webrtc_peer_id = ""
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    temperature = 75 if args["format"] == "fahrenheit" else 24
-    await result_callback(
+async def fetch_weather_from_api(params: FunctionCallParams):
+    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+    await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": args["format"],
+            "format": params.arguments["format"],
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
-async def get_image(function_name, tool_call_id, arguments, llm, context, result_callback):
-    question = arguments["question"]
-    await llm.request_image_frame(
-        user_id=video_participant_id,
-        function_name=function_name,
-        tool_call_id=tool_call_id,
+async def get_image(params: FunctionCallParams):
+    question = params.arguments["question"]
+    logger.debug(f"Requesting image with user_id={webrtc_peer_id}, question={question}")
+
+    # Request the image frame
+    await params.llm.request_image_frame(
+        user_id=webrtc_peer_id,
+        function_name=params.function_name,
+        tool_call_id=params.tool_call_id,
         text_content=question,
     )
 
 
-async def get_saved_conversation_filenames(
-    function_name, tool_call_id, args, llm, context, result_callback
-):
+async def get_saved_conversation_filenames(params: FunctionCallParams):
     # Construct the full pattern including the BASE_FILENAME
     full_pattern = f"{BASE_FILENAME}*.json"
 
@@ -72,43 +73,43 @@ async def get_saved_conversation_filenames(
     matching_files = glob.glob(full_pattern)
     logger.debug(f"matching files: {matching_files}")
 
-    await result_callback({"filenames": matching_files})
+    await params.result_callback({"filenames": matching_files})
 
 
-async def save_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(context.get_messages_for_logging(), indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages_for_logging(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
             # todo: extract 'system' into the first message in the list
-            messages = context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages_for_persistent_storage()
             # remove the last message (the instruction to save the context)
             messages.pop()
             json.dump(messages, file, indent=2)
-        await result_callback({"success": True})
+        await params.result_callback({"success": True})
     except Exception as e:
         logger.debug(f"error saving conversation: {e}")
-        await result_callback({"success": False, "error": str(e)})
+        await params.result_callback({"success": False, "error": str(e)})
 
 
-async def load_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+async def load_conversation(params: FunctionCallParams):
     global tts
-    filename = args["filename"]
+    filename = params.arguments["filename"]
     logger.debug(f"loading conversation from {filename}")
     try:
         with open(filename, "r") as file:
-            context.set_messages(json.load(file))
-        await result_callback(
+            params.context.set_messages(json.load(file))
+        await params.result_callback(
             {
                 "success": True,
                 "message": "The most recent conversation has been loaded. Awaiting further instructions.",
             }
         )
     except Exception as e:
-        await result_callback({"success": False, "error": str(e)})
+        await params.result_callback({"success": False, "error": str(e)})
 
 
 # Test message munging ...
@@ -220,75 +221,85 @@ tools = [
 ]
 
 
-async def main():
-    global tts
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    global tts, webrtc_peer_id
+    webrtc_peer_id = webrtc_connection.pc_id
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Respond bot",
-            DailyParams(
-                audio_out_enabled=True,
-                transcription_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
-            ),
-        )
+    logger.info(f"Starting bot with peer_id: {webrtc_peer_id}")
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            video_in_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
+        ),
+    )
 
-        llm = GoogleLLMService(model="gemini-2.0-flash-001", api_key=os.getenv("GOOGLE_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        # you can either register a single function for all function calls, or specific functions
-        # llm.register_function(None, fetch_weather_from_api)
-        llm.register_function("get_current_weather", fetch_weather_from_api)
-        llm.register_function("save_conversation", save_conversation)
-        llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
-        llm.register_function("load_conversation", load_conversation)
-        llm.register_function("get_image", get_image)
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
 
-        context = OpenAILLMContext(messages, tools)
-        context_aggregator = llm.create_context_aggregator(context)
+    llm = GoogleLLMService(model="gemini-2.0-flash-001", api_key=os.getenv("GOOGLE_API_KEY"))
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                context_aggregator.user(),
-                llm,  # LLM
-                tts,
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),
-            ]
-        )
+    # you can either register a single function for all function calls, or specific functions
+    # llm.register_function(None, fetch_weather_from_api)
+    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("save_conversation", save_conversation)
+    llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
+    llm.register_function("load_conversation", load_conversation)
+    llm.register_function("get_image", get_image)
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-                # report_only_initial_ttfb=True,
-            ),
-        )
+    context = OpenAILLMContext(messages, tools)
+    context_aggregator = llm.create_context_aggregator(context)
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            global video_participant_id
-            video_participant_id = participant["id"]
-            await transport.capture_participant_transcription(participant["id"])
-            await transport.capture_participant_video(video_participant_id, framerate=0)
-            # Kick off the conversation.
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,  # STT
+            context_aggregator.user(),
+            llm,  # LLM
+            tts,
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),
+        ]
+    )
 
-        runner = PipelineRunner()
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+            # report_only_initial_ttfb=True,
+        ),
+    )
 
-        await runner.run(task)
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation.
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
+
+    runner = PipelineRunner(handle_sigint=False)
+
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

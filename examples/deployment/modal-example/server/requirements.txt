@@ -1,0 +1,2 @@
+python-dotenv==1.0.1
+modal==0.71.3

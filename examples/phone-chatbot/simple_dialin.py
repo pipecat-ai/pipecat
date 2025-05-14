@@ -22,7 +22,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 
@@ -64,8 +64,7 @@ async def main(
             api_key=daily_api_key,
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
+            video_out_enabled=False,
             vad_analyzer=SileroVADAnalyzer(),
             transcription_enabled=True,
         )
@@ -79,8 +78,7 @@ async def main(
             dialin_settings=daily_dialin_settings,
             audio_in_enabled=True,
             audio_out_enabled=True,
-            camera_out_enabled=False,
-            vad_enabled=True,
+            video_out_enabled=False,
             vad_analyzer=SileroVADAnalyzer(),
             transcription_enabled=True,
         )
@@ -101,16 +99,14 @@ async def main(
 
     # ------------ FUNCTION DEFINITIONS ------------
 
-    async def terminate_call(
-        function_name, tool_call_id, args, llm: LLMService, context, result_callback
-    ):
+    async def terminate_call(params: FunctionCallParams):
         """Function the bot can call to terminate the call upon completion of a voicemail message."""
         if session_manager:
             # Mark that the call was terminated by the bot
             session_manager.call_flow_state.set_call_terminated()
 
         # Then end the call
-        await llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     # Define function schemas for tools
     terminate_call_function = FunctionSchema(
@@ -129,7 +125,7 @@ async def main(
     system_instruction = """You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself. If the user ends the conversation, **IMMEDIATELY** call the `terminate_call` function. """
 
     # Initialize LLM
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     # Register functions with the LLM
     llm.register_function("terminate_call", terminate_call)
