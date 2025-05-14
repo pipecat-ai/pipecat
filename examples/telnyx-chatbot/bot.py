@@ -33,22 +33,30 @@ logger.add(sys.stderr, level="DEBUG")
 async def run_bot(
     websocket_client,
     stream_id: str,
+    call_control_id: str,
     outbound_encoding: str,
     inbound_encoding: str,
 ):
+    serializer = TelnyxFrameSerializer(
+        stream_id=stream_id,
+        outbound_encoding=outbound_encoding,
+        inbound_encoding=inbound_encoding,
+        call_control_id=call_control_id,
+        api_key=os.getenv("TELNYX_API_KEY"),
+    )
+
     transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
         params=FastAPIWebsocketParams(
+            audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
-            vad_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
-            vad_audio_passthrough=True,
-            serializer=TelnyxFrameSerializer(stream_id, outbound_encoding, inbound_encoding),
+            serializer=serializer,
         ),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 

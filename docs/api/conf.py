@@ -50,7 +50,6 @@ autodoc_mock_imports = [
     "pyht.protos",
     "pyht.protos.api_pb2",
     "pipecat_ai_playht",  # PlayHT wrapper
-    "vllm",
     "aiortc",
     "aiortc.mediastreams",
     "cv2",
@@ -76,7 +75,6 @@ autodoc_mock_imports = [
     "openpipe",
     "simli",
     "soundfile",
-    # Existing mocks
     "pipecat_ai_krisp",
     "pyaudio",
     "_tkinter",
@@ -87,6 +85,66 @@ autodoc_mock_imports = [
     "pydantic.Field",
     "pydantic._internal._model_construction",
     "pydantic._internal._fields",
+    # Moondream dependencies
+    "torch",
+    "transformers",
+    "intel_extension_for_pytorch",
+    # Ultravox dependencies
+    "huggingface_hub",
+    "vllm",
+    "vllm.engine.arg_utils",
+    "transformers.AutoTokenizer",
+    # Langchain dependencies
+    "langchain_core",
+    "langchain_core.messages",
+    "langchain_core.runnables",
+    "langchain_core.messages.AIMessageChunk",
+    "langchain_core.runnables.Runnable",
+    # LiveKit dependencies
+    "livekit",
+    "livekit.rtc",
+    "livekit_api",
+    "livekit_protocol",
+    "tenacity",
+    "tenacity.retry",
+    "tenacity.stop_after_attempt",
+    "tenacity.wait_exponential",
+    "rtc",
+    "rtc.Room",
+    "rtc.RoomOptions",
+    "rtc.AudioSource",
+    "rtc.LocalAudioTrack",
+    "rtc.TrackPublishOptions",
+    "rtc.TrackSource",
+    "rtc.AudioStream",
+    "rtc.AudioFrameEvent",
+    "rtc.AudioFrame",
+    "rtc.Track",
+    "rtc.TrackKind",
+    "rtc.RemoteParticipant",
+    "rtc.RemoteTrackPublication",
+    "rtc.DataPacket",
+    # Riva dependencies
+    "riva",
+    "riva.client",
+    "riva.client.Auth",
+    "riva.client.ASRService",
+    "riva.client.StreamingRecognitionConfig",
+    "riva.client.RecognitionConfig",
+    "riva.client.AudioEncoding",
+    "riva.client.proto.riva_tts_pb2",
+    "riva.client.SpeechSynthesisService",
+    # Local CoreML Smart Turn dependencies
+    "coremltools",
+    "coremltools.models",
+    "coremltools.models.MLModel",
+    "torch",
+    "torch.nn",
+    "torch.nn.functional",
+    "transformers",
+    "transformers.AutoFeatureExtractor",
+    # Also add specific classes that are imported
+    "AutoFeatureExtractor",
 ]
 
 # HTML output settings
@@ -118,12 +176,25 @@ def verify_modules():
         },
     }
 
+    # Skip importing modules that are in autodoc_mock_imports
+    skipped_modules = set(autodoc_mock_imports)
+
     missing = []
     for category, modules in required_modules.items():
         if isinstance(modules, dict):
             # Handle nested structure
             for subcategory, submodules in modules.items():
                 for module in submodules:
+                    # Check if module is in autodoc_mock_imports
+                    if (
+                        f"pipecat.{category}.{subcategory}.{module}" in skipped_modules
+                        or module in skipped_modules
+                    ):
+                        logger.info(
+                            f"Skipping import of mocked module: pipecat.{category}.{subcategory}.{module}"
+                        )
+                        continue
+
                     try:
                         __import__(f"pipecat.{category}.{subcategory}.{module}")
                         logger.info(
@@ -137,6 +208,11 @@ def verify_modules():
         else:
             # Handle flat structure
             for module in modules:
+                # Check if module is in autodoc_mock_imports
+                if f"pipecat.{category}.{module}" in skipped_modules or module in skipped_modules:
+                    logger.info(f"Skipping import of mocked module: pipecat.{category}.{module}")
+                    continue
+
                 try:
                     __import__(f"pipecat.{category}.{module}")
                     logger.info(f"Successfully imported pipecat.{category}.{module}")

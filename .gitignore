@@ -7,7 +7,7 @@ venv
 /.idea
 #*#
 
-# Distribution / packaging
+# Distribution / Packaging
 .Python
 build/
 develop-eggs/
@@ -30,23 +30,23 @@ MANIFEST
 .env
 fly.toml
 
-# Example files
-pipecat/examples/twilio-chatbot/templates/streams.xml
-pipecat/examples/bot-ready-signalling/client/react-native/node_modules/
-pipecat/examples/bot-ready-signalling/client/react-native/.expo/
-pipecat/examples/bot-ready-signalling/client/react-native/dist/
-pipecat/examples/bot-ready-signalling/client/react-native/npm-debug.*
-pipecat/examples/bot-ready-signalling/client/react-native/*.jks
-pipecat/examples/bot-ready-signalling/client/react-native/*.p8
-pipecat/examples/bot-ready-signalling/client/react-native/*.p12
-pipecat/examples/bot-ready-signalling/client/react-native/*.key
-pipecat/examples/bot-ready-signalling/client/react-native/*.mobileprovision
-pipecat/examples/bot-ready-signalling/client/react-native/*.orig.*
-pipecat/examples/bot-ready-signalling/client/react-native/web-build/
+# Examples
+examples/telnyx-chatbot/templates/streams.xml
+examples/twilio-chatbot/templates/streams.xml
+examples/**/node_modules/
+examples/**/.expo/
+examples/**/dist/
+examples/**/npm-debug.*
+examples/**/*.jks
+examples/**/*.p8
+examples/**/*.p12
+examples/**/*.key
+examples/**/*.mobileprovision
+examples/**/*.orig.*
+examples/**/web-build/
 
 # macOS
 .DS_Store
-
 
 # Documentation
 docs/api/_build/

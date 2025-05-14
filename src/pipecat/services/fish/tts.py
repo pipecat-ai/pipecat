@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import ormsgpack
@@ -104,7 +105,8 @@ class FishAudioTTSService(InterruptibleTTSService):
 
     async def _connect(self):
         await self._connect_websocket()
-        if not self._receive_task:
+
+        if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
@@ -116,7 +118,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket:
+            if self._websocket and self._websocket.open:
                 return
 
             logger.debug("Connecting to Fish Audio")
@@ -141,16 +143,17 @@ class FishAudioTTSService(InterruptibleTTSService):
                 stop_message = {"event": "stop"}
                 await self._websocket.send(ormsgpack.packb(stop_message))
                 await self._websocket.close()
-                self._websocket = None
-            self._request_id = None
-            self._started = False
         except Exception as e:
             logger.error(f"Error closing websocket: {e}")
+        finally:
+            self._request_id = None
+            self._started = False
+            self._websocket = None
 
     async def flush_audio(self):
         """Flush any buffered audio by sending a flush event to Fish Audio."""
         logger.trace(f"{self}: Flushing audio buffers")
-        if not self._websocket:
+        if not self._websocket or self._websocket.closed:
             return
         flush_message = {"event": "flush"}
         await self._get_websocket().send(ormsgpack.packb(flush_message))
@@ -184,6 +187,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating Fish TTS: [{text}]")
         try:

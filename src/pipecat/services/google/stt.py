@@ -9,6 +9,8 @@ import json
 import os
 import time
 
+from pipecat.utils.tracing.service_decorators import traced_stt
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -32,6 +34,8 @@ from pipecat.utils.time import time_now_iso8601
 
 try:
     from google.api_core.client_options import ClientOptions
+    from google.auth import default
+    from google.auth.exceptions import GoogleAuthError
     from google.cloud import speech_v2
     from google.cloud.speech_v2.types import cloud_speech
     from google.oauth2 import service_account
@@ -451,6 +455,7 @@ class GoogleSTTService(STTService):
             client_options = ClientOptions(api_endpoint=f"{self._location}-speech.googleapis.com")
 
         # Extract project ID and create client
+        creds: Optional[service_account.Credentials] = None
         if credentials:
             json_account_info = json.loads(credentials)
             self._project_id = json_account_info.get("project_id")
@@ -461,7 +466,16 @@ class GoogleSTTService(STTService):
                 self._project_id = json_account_info.get("project_id")
             creds = service_account.Credentials.from_service_account_file(credentials_path)
         else:
-            raise ValueError("Either credentials or credentials_path must be provided")
+            try:
+                creds, project_id = default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+                self._project_id = project_id
+            except GoogleAuthError:
+                pass
+
+        if not creds:
+            raise ValueError("No valid credentials provided.")
 
         if not self._project_id:
             raise ValueError("Project ID not found in credentials")
@@ -483,6 +497,9 @@ class GoogleSTTService(STTService):
             "enable_interim_results": params.enable_interim_results,
             "enable_voice_activity_events": params.enable_voice_activity_events,
         }
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     def language_to_service_language(self, language: Language | List[Language]) -> str | List[str]:
         """Convert Language enum(s) to Google STT language code(s).
@@ -761,8 +778,16 @@ class GoogleSTTService(STTService):
         """Process an audio chunk for STT transcription."""
         if self._streaming_task:
             # Queue the audio data
+            await self.start_ttfb_metrics()
+            await self.start_processing_metrics()
             await self._request_queue.put(audio)
         yield None
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[str] = None
+    ):
+        pass
 
     async def _process_responses(self, streaming_recognize):
         """Process streaming recognition responses."""
@@ -791,8 +816,15 @@ class GoogleSTTService(STTService):
                         await self.push_frame(
                             TranscriptionFrame(transcript, "", time_now_iso8601(), primary_language)
                         )
+                        await self.stop_processing_metrics()
+                        await self._handle_transcription(
+                            transcript,
+                            is_final=True,
+                            language=primary_language,
+                        )
                     else:
                         self._last_transcript_was_final = False
+                        await self.stop_ttfb_metrics()
                         await self.push_frame(
                             InterimTranscriptionFrame(
                                 transcript, "", time_now_iso8601(), primary_language

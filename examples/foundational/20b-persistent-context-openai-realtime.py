@@ -4,17 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
 import glob
 import json
 import os
-import sys
 from datetime import datetime
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -24,37 +22,36 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
 )
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
     OpenAIRealtimeBetaLLMService,
     SessionProperties,
     TurnDetection,
 )
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 BASE_FILENAME = "/tmp/pipecat_conversation_"
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    temperature = 75 if args["format"] == "fahrenheit" else 24
-    await result_callback(
+async def fetch_weather_from_api(params: FunctionCallParams):
+    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+    await params.result_callback(
         {
             "conditions": "nice",
             "temperature": temperature,
-            "format": args["format"],
+            "format": params.arguments["format"],
             "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
         }
     )
 
 
-async def get_saved_conversation_filenames(
-    function_name, tool_call_id, args, llm, context, result_callback
-):
+async def get_saved_conversation_filenames(params: FunctionCallParams):
     # Construct the full pattern including the BASE_FILENAME
     full_pattern = f"{BASE_FILENAME}*.json"
 
@@ -62,48 +59,37 @@ async def get_saved_conversation_filenames(
     matching_files = glob.glob(full_pattern)
     logger.debug(f"matching files: {matching_files}")
 
-    await result_callback({"filenames": matching_files})
+    await params.result_callback({"filenames": matching_files})
 
 
-# async def get_saved_conversation_filenames(
-#     function_name, tool_call_id, args, llm, context, result_callback
-# ):
-#     pattern = re.compile(re.escape(BASE_FILENAME) + "\\d{8}_\\d{6}\\.json$")
-#     matching_files = []
-
-#     for filename in os.listdir("."):
-#         if pattern.match(filename):
-#             matching_files.append(filename)
-
-#     await result_callback({"filenames": matching_files})
-
-
-async def save_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
-    logger.debug(f"writing conversation to {filename}\n{json.dumps(context.messages, indent=4)}")
+    logger.debug(
+        f"writing conversation to {filename}\n{json.dumps(params.context.messages, indent=4)}"
+    )
     try:
         with open(filename, "w") as file:
-            messages = context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages_for_persistent_storage()
             # remove the last message, which is the instruction we just gave to save the conversation
             messages.pop()
             json.dump(messages, file, indent=2)
-        await result_callback({"success": True})
+        await params.result_callback({"success": True})
     except Exception as e:
-        await result_callback({"success": False, "error": str(e)})
+        await params.result_callback({"success": False, "error": str(e)})
 
 
-async def load_conversation(function_name, tool_call_id, args, llm, context, result_callback):
+async def load_conversation(params: FunctionCallParams):
     async def _reset():
-        filename = args["filename"]
+        filename = params.arguments["filename"]
         logger.debug(f"loading conversation from {filename}")
         try:
             with open(filename, "r") as file:
-                context.set_messages(json.load(file))
-                await llm.reset_conversation()
-                await llm._create_response()
+                params.context.set_messages(json.load(file))
+                await params.llm.reset_conversation()
+                await params.llm._create_response()
         except Exception as e:
-            await result_callback({"success": False, "error": str(e)})
+            await params.result_callback({"success": False, "error": str(e)})
 
     asyncio.create_task(_reset())
 
@@ -167,33 +153,29 @@ tools = [
 ]
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Respond bot",
-            DailyParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                transcription_enabled=False,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
-                vad_audio_passthrough=True,
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
+        ),
+    )
 
-        session_properties = SessionProperties(
-            input_audio_transcription=InputAudioTranscription(),
-            # Set openai TurnDetection parameters. Not setting this at all will turn it
-            # on by default
-            turn_detection=TurnDetection(silence_duration_ms=1000),
-            # Or set to False to disable openai turn detection and use transport VAD
-            # turn_detection=False,
-            # tools=tools,
-            instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
+    session_properties = SessionProperties(
+        input_audio_transcription=InputAudioTranscription(),
+        # Set openai TurnDetection parameters. Not setting this at all will turn it
+        # on by default
+        turn_detection=TurnDetection(silence_duration_ms=1000),
+        # Or set to False to disable openai turn detection and use transport VAD
+        # turn_detection=False,
+        # tools=tools,
+        instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
 things in the real world. Your voice and personality should be warm and engaging, with a lively and
@@ -207,54 +189,66 @@ You are participating in a voice conversation. Keep your responses concise, shor
 unless specifically asked to elaborate on a topic.
 
 Remember, your responses should be short. Just one or two sentences, usually.""",
-        )
+    )
 
-        llm = OpenAIRealtimeBetaLLMService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            session_properties=session_properties,
-            start_audio_paused=False,
-        )
+    llm = OpenAIRealtimeBetaLLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        session_properties=session_properties,
+        start_audio_paused=False,
+    )
 
-        # you can either register a single function for all function calls, or specific functions
-        # llm.register_function(None, fetch_weather_from_api)
-        llm.register_function("get_current_weather", fetch_weather_from_api)
-        llm.register_function("save_conversation", save_conversation)
-        llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
-        llm.register_function("load_conversation", load_conversation)
+    # you can either register a single function for all function calls, or specific functions
+    # llm.register_function(None, fetch_weather_from_api)
+    llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("save_conversation", save_conversation)
+    llm.register_function("get_saved_conversation_filenames", get_saved_conversation_filenames)
+    llm.register_function("load_conversation", load_conversation)
 
-        context = OpenAILLMContext([], tools)
-        context_aggregator = llm.create_context_aggregator(context)
+    context = OpenAILLMContext([], tools)
+    context_aggregator = llm.create_context_aggregator(context)
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                context_aggregator.user(),
-                llm,  # LLM
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),
-            ]
-        )
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,  # STT
+            context_aggregator.user(),
+            llm,  # LLM
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),
+        ]
+    )
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-                # report_only_initial_ttfb=True,
-            ),
-        )
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+            report_only_initial_ttfb=True,
+        ),
+    )
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
-            # Kick off the conversation.
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation.
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        runner = PipelineRunner()
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
 
-        await runner.run(task)
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
+
+    runner = PipelineRunner(handle_sigint=False)
+
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

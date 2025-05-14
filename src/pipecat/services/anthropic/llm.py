@@ -11,7 +11,7 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Mapping, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 from loguru import logger
@@ -35,7 +35,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
+    LLMUserAggregatorParams,
     LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
@@ -44,15 +46,13 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`. "
-        + "Also, set `ANTHROPIC_API_KEY` environment variable."
-    )
+    logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -120,8 +120,8 @@ class AnthropicLLMService(LLMService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> AnthropicContextAggregatorPair:
         """Create an instance of AnthropicContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -129,12 +129,10 @@ class AnthropicLLMService(LLMService):
 
         Args:
             context (OpenAILLMContext): The LLM context.
-            user_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the user context aggregator constructor. Defaults
-                to an empty mapping.
-            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the assistant context aggregator
-                constructor. Defaults to an empty mapping.
+            user_params (LLMUserAggregatorParams, optional): User aggregator
+                parameters.
+            assistant_params (LLMAssistantAggregatorParams, optional): User
+                aggregator parameters.
 
         Returns:
             AnthropicContextAggregatorPair: A pair of context aggregators, one
@@ -146,10 +144,11 @@ class AnthropicLLMService(LLMService):
 
         if isinstance(context, OpenAILLMContext):
             context = AnthropicLLMContext.from_openai_context(context)
-        user = AnthropicUserContextAggregator(context, **user_kwargs)
-        assistant = AnthropicAssistantContextAggregator(context, **assistant_kwargs)
+        user = AnthropicUserContextAggregator(context, params=user_params)
+        assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text
@@ -253,14 +252,24 @@ class AnthropicLLMService(LLMService):
                         if hasattr(event.message.usage, "output_tokens")
                         else 0
                     )
-                    if hasattr(event.message.usage, "cache_creation_input_tokens"):
-                        cache_creation_input_tokens += (
-                            event.message.usage.cache_creation_input_tokens
+                    cache_creation_input_tokens += (
+                        event.message.usage.cache_creation_input_tokens
+                        if (
+                            hasattr(event.message.usage, "cache_creation_input_tokens")
+                            and event.message.usage.cache_creation_input_tokens is not None
                         )
-                        logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
-                    if hasattr(event.message.usage, "cache_read_input_tokens"):
-                        cache_read_input_tokens += event.message.usage.cache_read_input_tokens
-                        logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
+                        else 0
+                    )
+                    logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
+                    cache_read_input_tokens += (
+                        event.message.usage.cache_read_input_tokens
+                        if (
+                            hasattr(event.message.usage, "cache_read_input_tokens")
+                            and event.message.usage.cache_read_input_tokens is not None
+                        )
+                        else 0
+                    )
+                    logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
                     total_input_tokens = (
                         prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
                     )

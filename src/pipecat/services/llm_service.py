@@ -5,8 +5,9 @@
 #
 
 import asyncio
+import inspect
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional, Set, Tuple, Type
+from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol, Set, Tuple, Type
 
 from loguru import logger
 
@@ -17,19 +18,65 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallResultProperties,
     StartInterruptionFrame,
     UserImageRequestFrame,
+)
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 
+# Type alias for a callable that handles LLM function calls.
+FunctionCallHandler = Callable[["FunctionCallParams"], Awaitable[None]]
+
+
+# Type alias for a callback function that handles the result of an LLM function call.
+class FunctionCallResultCallback(Protocol):
+    async def __call__(
+        self, result: Any, *, properties: Optional[FunctionCallResultProperties] = None
+    ) -> None: ...
+
 
 @dataclass
-class FunctionEntry:
+class FunctionCallEntry:
+    """Represents an internal entry for a function call.
+
+    Attributes:
+        function_name (Optional[str]): The name of the function.
+        handler (FunctionCallHandler): The handler for processing function call parameters.
+        cancel_on_interruption (bool): Flag indicating whether to cancel the call on interruption.
+
+    """
+
     function_name: Optional[str]
-    callback: Any  # TODO(aleix): add proper typing.
+    handler: FunctionCallHandler
     cancel_on_interruption: bool
+
+
+@dataclass
+class FunctionCallParams:
+    """Parameters for a function call.
+
+    Attributes:
+        function_name (str): The name of the function being called.
+        arguments (Mapping[str, Any]): The arguments for the function.
+        tool_call_id (str): A unique identifier for the function call.
+        llm (LLMService): The LLMService instance being used.
+        context (OpenAILLMContext): The LLM context.
+        result_callback (FunctionCallResultCallback): Callback to handle the result of the function call.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+    llm: "LLMService"
+    context: OpenAILLMContext
+    result_callback: FunctionCallResultCallback
 
 
 class LLMService(AIService):
@@ -55,8 +102,8 @@ class LLMService(AIService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> Any:
         pass
 
@@ -74,16 +121,16 @@ class LLMService(AIService):
     def register_function(
         self,
         function_name: Optional[str],
-        callback: Any,
+        handler: Any,
         start_callback=None,
         *,
         cancel_on_interruption: bool = False,
     ):
-        # Registering a function with the function_name set to None will run that callback
-        # for all functions
-        self._functions[function_name] = FunctionEntry(
+        # Registering a function with the function_name set to None will run
+        # that handler for all functions
+        self._functions[function_name] = FunctionCallEntry(
             function_name=function_name,
-            callback=callback,
+            handler=handler,
             cancel_on_interruption=cancel_on_interruption,
         )
 
@@ -116,7 +163,7 @@ class LLMService(AIService):
         context: OpenAILLMContext,
         tool_call_id: str,
         function_name: str,
-        arguments: str,
+        arguments: Mapping[str, Any],
         run_llm: bool = True,
     ):
         if not function_name in self._functions.keys() and not None in self._functions.keys():
@@ -143,6 +190,7 @@ class LLMService(AIService):
         function_name: Optional[str] = None,
         tool_call_id: Optional[str] = None,
         text_content: Optional[str] = None,
+        video_source: Optional[str] = None,
     ):
         await self.push_frame(
             UserImageRequestFrame(
@@ -150,6 +198,7 @@ class LLMService(AIService):
                 function_name=function_name,
                 tool_call_id=tool_call_id,
                 context=text_content,
+                video_source=video_source,
             ),
             FrameDirection.UPSTREAM,
         )
@@ -159,7 +208,7 @@ class LLMService(AIService):
         context: OpenAILLMContext,
         tool_call_id: str,
         function_name: str,
-        arguments: str,
+        arguments: Mapping[str, Any],
         run_llm: bool = True,
     ):
         if function_name in self._functions.keys():
@@ -198,7 +247,9 @@ class LLMService(AIService):
         await self.push_frame(progress_frame_upstream, FrameDirection.UPSTREAM)
 
         # Define a callback function that pushes a FunctionCallResultFrame upstream & downstream.
-        async def function_call_result_callback(result, *, properties=None):
+        async def function_call_result_callback(
+            result: Any, *, properties: Optional[FunctionCallResultProperties] = None
+        ):
             result_frame_downstream = FunctionCallResultFrame(
                 function_name=function_name,
                 tool_call_id=tool_call_id,
@@ -217,9 +268,30 @@ class LLMService(AIService):
             await self.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
             await self.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
-        await entry.callback(
-            function_name, tool_call_id, arguments, self, context, function_call_result_callback
-        )
+        signature = inspect.signature(entry.handler)
+        if len(signature.parameters) > 1:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
+                    DeprecationWarning,
+                )
+
+            await entry.handler(
+                function_name, tool_call_id, arguments, self, context, function_call_result_callback
+            )
+        else:
+            params = FunctionCallParams(
+                function_name=function_name,
+                tool_call_id=tool_call_id,
+                arguments=arguments,
+                llm=self,
+                context=context,
+                result_callback=function_call_result_callback,
+            )
+            await entry.handler(params)
 
     async def _cancel_function_call(self, function_name: str):
         cancelled_tasks = set()

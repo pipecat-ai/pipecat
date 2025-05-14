@@ -20,7 +20,9 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    OutputAudioRawFrame,
     OutputImageRawFrame,
+    SpriteFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -282,11 +284,13 @@ class SmallWebRTCClient:
                 )
                 yield audio_frame
 
-    async def write_raw_audio_frames(self, data: bytes):
+    async def write_raw_audio_frames(self, data: bytes, destination: Optional[str] = None):
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(data)
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         if self._can_send() and self._video_output_track:
             self._video_output_track.add_video_frame(frame)
 
@@ -308,7 +312,7 @@ class SmallWebRTCClient:
         if self.is_connected and not self.is_closing:
             logger.info(f"Disconnecting to Small WebRTC")
             self._closing = True
-            await self._webrtc_connection.close()
+            await self._webrtc_connection.disconnect()
             await self._handle_client_disconnected()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
@@ -326,9 +330,9 @@ class SmallWebRTCClient:
             self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
             self._webrtc_connection.replace_audio_track(self._audio_output_track)
 
-        if self._params.camera_out_enabled:
+        if self._params.video_out_enabled:
             self._video_output_track = RawVideoTrack(
-                width=self._params.camera_out_width, height=self._params.camera_out_height
+                width=self._params.video_out_width, height=self._params.video_out_height
             )
             self._webrtc_connection.replace_video_track(self._video_output_track)
 
@@ -387,12 +391,11 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
-        if not self._receive_audio_task and (
-            self._params.audio_in_enabled or self._params.vad_enabled
-        ):
+        if not self._receive_audio_task and self._params.audio_in_enabled:
             self._receive_audio_task = self.create_task(self._receive_audio())
-        if not self._receive_video_task and self._params.camera_in_enabled:
+        if not self._receive_video_task and self._params.video_in_enabled:
             self._receive_video_task = self.create_task(self._receive_video())
+        await self.set_transport_ready(frame)
 
     async def _stop_tasks(self):
         if self._receive_audio_task:
@@ -465,7 +468,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._image_requests[request_id] = frame
 
         # If we're not already receiving video, try to get a frame now
-        if not self._receive_video_task and self._params.camera_in_enabled:
+        if not self._receive_video_task and self._params.video_in_enabled:
             # Start video reception if it's not already running
             self._receive_video_task = self.create_task(self._receive_video())
 
@@ -485,6 +488,7 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -497,11 +501,13 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
-        await self._client.write_frame_to_camera(frame)
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
+        await self._client.write_raw_video_frame(frame)
 
 
 class SmallWebRTCTransport(BaseTransport):
@@ -524,10 +530,8 @@ class SmallWebRTCTransport(BaseTransport):
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
 
-        self._input = SmallWebRTCInputTransport(self._client, self._params, name=self._input_name)
-        self._output = SmallWebRTCOutputTransport(
-            self._client, self._params, name=self._output_name
-        )
+        self._input: Optional[SmallWebRTCInputTransport] = None
+        self._output: Optional[SmallWebRTCOutputTransport] = None
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
@@ -549,6 +553,14 @@ class SmallWebRTCTransport(BaseTransport):
                 self._client, self._params, name=self._input_name
             )
         return self._output
+
+    async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
+        if self._output:
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
+
+    async def send_audio(self, frame: OutputAudioRawFrame):
+        if self._output:
+            await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def _on_app_message(self, message: Any):
         if self._input:

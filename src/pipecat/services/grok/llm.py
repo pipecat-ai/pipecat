@@ -5,11 +5,14 @@
 #
 
 from dataclasses import dataclass
-from typing import Any, Mapping
 
 from loguru import logger
 
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
@@ -39,7 +42,7 @@ class GrokLLMService(OpenAILLMService):
     Args:
         api_key (str): The API key for accessing Grok's API
         base_url (str, optional): The base URL for Grok API. Defaults to "https://api.x.ai/v1"
-        model (str, optional): The model identifier to use. Defaults to "grok-2"
+        model (str, optional): The model identifier to use. Defaults to "grok-3-beta"
         **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
@@ -48,7 +51,7 @@ class GrokLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.x.ai/v1",
-        model: str = "grok-2",
+        model: str = "grok-3-beta",
         **kwargs,
     ):
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
@@ -124,8 +127,8 @@ class GrokLLMService(OpenAILLMService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> GrokContextAggregatorPair:
         """Create an instance of GrokContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -133,12 +136,10 @@ class GrokLLMService(OpenAILLMService):
 
         Args:
             context (OpenAILLMContext): The LLM context.
-            user_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the user context aggregator constructor. Defaults
-                to an empty mapping.
-            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the assistant context aggregator
-                constructor. Defaults to an empty mapping.
+            user_params (LLMUserAggregatorParams, optional): User aggregator
+                parameters.
+            assistant_params (LLMAssistantAggregatorParams, optional): User
+                aggregator parameters.
 
         Returns:
             GrokContextAggregatorPair: A pair of context aggregators, one for
@@ -148,6 +149,6 @@ class GrokLLMService(OpenAILLMService):
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
-        user = OpenAIUserContextAggregator(context, **user_kwargs)
-        assistant = OpenAIAssistantContextAggregator(context, **assistant_kwargs)
+        user = OpenAIUserContextAggregator(context, params=user_params)
+        assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)

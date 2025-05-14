@@ -4,16 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
 import os
-import sys
 import time
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -46,15 +44,15 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 classifier_statement = "Determine if the user's statement ends with a complete thought and you should respond. The user text is transcribed speech. It may contain multiple fragments concatentated together. You are trying to determine only the completeness of the last user statement. The previous assistant statement is provided only for context. Categorize the text as either complete with the user now expecting a response, or incomplete. Return 'YES' if text is likely complete and the user is expecting a response. Return 'NO' if the text seems to be a partial expression or unfinished thought."
@@ -199,191 +197,197 @@ class OutputGate(FrameProcessor):
                 break
 
 
-async def fetch_weather_from_api(function_name, tool_call_id, args, llm, context, result_callback):
-    await llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    await result_callback({"conditions": "nice", "temperature": "75"})
+async def fetch_weather_from_api(params: FunctionCallParams):
+    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
+    await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, _) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
-        transport = DailyTransport(
-            room_url,
-            None,
-            "Respond bot",
-            DailyParams(
-                audio_out_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        )
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
 
-        # This is the LLM that will be used to detect if the user has finished a
-        # statement. This doesn't really need to be an LLM, we could use NLP
-        # libraries for that, but we have the machinery to use an LLM, so we might as well!
-        statement_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+    # This is the LLM that will be used to detect if the user has finished a
+    # statement. This doesn't really need to be an LLM, we could use NLP
+    # libraries for that, but we have the machinery to use an LLM, so we might as well!
+    statement_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-        # This is the regular LLM.
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
-        # You can also register a function_name of None to get all functions
-        # sent to the same callback with an additional function_name parameter.
-        llm.register_function("get_current_weather", fetch_weather_from_api)
+    # This is the regular LLM.
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    # You can also register a function_name of None to get all functions
+    # sent to the same callback with an additional function_name parameter.
+    llm.register_function("get_current_weather", fetch_weather_from_api)
 
-        tools = [
-            ChatCompletionToolParam(
-                type="function",
-                function={
-                    "name": "get_current_weather",
-                    "description": "Get the current weather",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "location": {
-                                "type": "string",
-                                "description": "The city and state, e.g. San Francisco, CA",
-                            },
-                            "format": {
-                                "type": "string",
-                                "enum": ["celsius", "fahrenheit"],
-                                "description": "The temperature unit to use. Infer this from the users location.",
-                            },
+    tools = [
+        ChatCompletionToolParam(
+            type="function",
+            function={
+                "name": "get_current_weather",
+                "description": "Get the current weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city and state, e.g. San Francisco, CA",
                         },
-                        "required": ["location", "format"],
+                        "format": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"],
+                            "description": "The temperature unit to use. Infer this from the users location.",
+                        },
                     },
+                    "required": ["location", "format"],
                 },
-            )
-        ]
-
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
+        )
+    ]
+
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
+
+    context = OpenAILLMContext(messages, tools)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    # We have instructed the LLM to return 'YES' if it thinks the user
+    # completed a sentence. So, if it's 'YES' we will return true in this
+    # predicate which will wake up the notifier.
+    async def wake_check_filter(frame):
+        logger.debug(f"Completeness check frame: {frame}")
+        return frame.text == "YES"
+
+    # This is a notifier that we use to synchronize the two LLMs.
+    notifier = EventNotifier()
+
+    # This turns the LLM context into an inference request to classify the user's speech
+    # as complete or incomplete.
+    statement_judge_context_filter = StatementJudgeContextFilter(notifier=notifier)
+
+    # This sends a UserStoppedSpeakingFrame and triggers the notifier event
+    completeness_check = CompletenessCheck(notifier=notifier)
+
+    # # Notify if the user hasn't said anything.
+    async def user_idle_notifier(frame):
+        await notifier.notify()
+
+    # Sometimes the LLM will fail detecting if a user has completed a
+    # sentence, this will wake up the notifier if that happens.
+    user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=5.0)
+
+    # We start with the gate open because we send an initial context frame
+    # to start the conversation.
+    bot_output_gate = OutputGate(notifier=notifier, start_open=True)
+
+    async def block_user_stopped_speaking(frame):
+        return not isinstance(frame, UserStoppedSpeakingFrame)
+
+    async def pass_only_llm_trigger_frames(frame):
+        return (
+            isinstance(frame, OpenAILLMContextFrame)
+            or isinstance(frame, LLMMessagesFrame)
+            or isinstance(frame, StartInterruptionFrame)
+            or isinstance(frame, StopInterruptionFrame)
+            or isinstance(frame, FunctionCallInProgressFrame)
+            or isinstance(frame, FunctionCallResultFrame)
+        )
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            context_aggregator.user(),
+            ParallelPipeline(
+                [
+                    # Pass everything except UserStoppedSpeaking to the elements after
+                    # this ParallelPipeline
+                    FunctionFilter(filter=block_user_stopped_speaking),
+                ],
+                [
+                    # Ignore everything except an OpenAILLMContextFrame. Pass a specially constructed
+                    # LLMMessagesFrame to the statement classifier LLM. The only frame this
+                    # sub-pipeline will output is a UserStoppedSpeakingFrame.
+                    statement_judge_context_filter,
+                    statement_llm,
+                    completeness_check,
+                ],
+                [
+                    # Block everything except OpenAILLMContextFrame and LLMMessagesFrame
+                    FunctionFilter(filter=pass_only_llm_trigger_frames),
+                    llm,
+                    bot_output_gate,  # Buffer all llm/tts output until notified.
+                ],
+            ),
+            tts,
+            user_idle,
+            transport.output(),
+            context_aggregator.assistant(),
         ]
+    )
 
-        context = OpenAILLMContext(messages, tools)
-        context_aggregator = llm.create_context_aggregator(context)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+            report_only_initial_ttfb=True,
+        ),
+    )
 
-        # We have instructed the LLM to return 'YES' if it thinks the user
-        # completed a sentence. So, if it's 'YES' we will return true in this
-        # predicate which will wake up the notifier.
-        async def wake_check_filter(frame):
-            logger.debug(f"Completeness check frame: {frame}")
-            return frame.text == "YES"
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        # This is a notifier that we use to synchronize the two LLMs.
-        notifier = EventNotifier()
+    @transport.event_handler("on_app_message")
+    async def on_app_message(transport, message):
+        logger.debug(f"Received app message: {message}")
+        if "message" not in message:
+            return
 
-        # This turns the LLM context into an inference request to classify the user's speech
-        # as complete or incomplete.
-        statement_judge_context_filter = StatementJudgeContextFilter(notifier=notifier)
-
-        # This sends a UserStoppedSpeakingFrame and triggers the notifier event
-        completeness_check = CompletenessCheck(notifier=notifier)
-
-        # # Notify if the user hasn't said anything.
-        async def user_idle_notifier(frame):
-            await notifier.notify()
-
-        # Sometimes the LLM will fail detecting if a user has completed a
-        # sentence, this will wake up the notifier if that happens.
-        user_idle = UserIdleProcessor(callback=user_idle_notifier, timeout=5.0)
-
-        # We start with the gate open because we send an initial context frame
-        # to start the conversation.
-        bot_output_gate = OutputGate(notifier=notifier, start_open=True)
-
-        async def block_user_stopped_speaking(frame):
-            return not isinstance(frame, UserStoppedSpeakingFrame)
-
-        async def pass_only_llm_trigger_frames(frame):
-            return (
-                isinstance(frame, OpenAILLMContextFrame)
-                or isinstance(frame, LLMMessagesFrame)
-                or isinstance(frame, StartInterruptionFrame)
-                or isinstance(frame, StopInterruptionFrame)
-                or isinstance(frame, FunctionCallInProgressFrame)
-                or isinstance(frame, FunctionCallResultFrame)
-            )
-
-        pipeline = Pipeline(
+        await task.queue_frames(
             [
-                transport.input(),
-                stt,
-                context_aggregator.user(),
-                ParallelPipeline(
-                    [
-                        # Pass everything except UserStoppedSpeaking to the elements after
-                        # this ParallelPipeline
-                        FunctionFilter(filter=block_user_stopped_speaking),
-                    ],
-                    [
-                        # Ignore everything except an OpenAILLMContextFrame. Pass a specially constructed
-                        # LLMMessagesFrame to the statement classifier LLM. The only frame this
-                        # sub-pipeline will output is a UserStoppedSpeakingFrame.
-                        statement_judge_context_filter,
-                        statement_llm,
-                        completeness_check,
-                    ],
-                    [
-                        # Block everything except OpenAILLMContextFrame and LLMMessagesFrame
-                        FunctionFilter(filter=pass_only_llm_trigger_frames),
-                        llm,
-                        bot_output_gate,  # Buffer all llm/tts output until notified.
-                    ],
-                ),
-                tts,
-                user_idle,
-                transport.output(),
-                context_aggregator.assistant(),
+                UserStartedSpeakingFrame(),
+                TranscriptionFrame(user_id="", timestamp=time.time(), text=message["message"]),
+                UserStoppedSpeakingFrame(),
             ]
         )
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
-            ),
-        )
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
-            # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
 
-        @transport.event_handler("on_app_message")
-        async def on_app_message(transport, message, sender):
-            logger.debug(f"Received app message: {message} - {sender}")
-            if "message" not in message:
-                return
+    runner = PipelineRunner(handle_sigint=False)
 
-            await task.queue_frames(
-                [
-                    UserStartedSpeakingFrame(),
-                    TranscriptionFrame(
-                        user_id=sender, timestamp=time.time(), text=message["message"]
-                    ),
-                    UserStoppedSpeakingFrame(),
-                ]
-            )
-
-        runner = PipelineRunner()
-        await runner.run(task)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

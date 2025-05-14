@@ -6,7 +6,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
@@ -16,7 +16,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.llm_response import (
     BetterLLMUserContextAggregator,
+    LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
+    LLMUserAggregatorParams,
     LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -39,7 +41,7 @@ class OpenAILLMService(BaseOpenAILLMService):
     def __init__(
         self,
         *,
-        model: str = "gpt-4o",
+        model: str = "gpt-4.1",
         params: BaseOpenAILLMService.InputParams = BaseOpenAILLMService.InputParams(),
         **kwargs,
     ):
@@ -49,8 +51,8 @@ class OpenAILLMService(BaseOpenAILLMService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> OpenAIContextAggregatorPair:
         """Create an instance of OpenAIContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -58,12 +60,8 @@ class OpenAILLMService(BaseOpenAILLMService):
 
         Args:
             context (OpenAILLMContext): The LLM context.
-            user_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the user context aggregator constructor. Defaults
-                to an empty mapping.
-            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the assistant context aggregator
-                constructor. Defaults to an empty mapping.
+            user_params (LLMUserAggregatorParams, optional): User aggregator parameters.
+            assistant_params (LLMAssistantAggregatorParams, optional): User aggregator parameters.
 
         Returns:
             OpenAIContextAggregatorPair: A pair of context aggregators, one for
@@ -72,8 +70,8 @@ class OpenAILLMService(BaseOpenAILLMService):
 
         """
         context.set_llm_adapter(self.get_llm_adapter())
-        user = OpenAIUserContextAggregator(context, **user_kwargs)
-        assistant = OpenAIAssistantContextAggregator(context, **assistant_kwargs)
+        user = OpenAIUserContextAggregator(context, params=user_params)
+        assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 

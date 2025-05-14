@@ -39,6 +39,11 @@ class RoomRequest(BaseModel):
         None, description="A flag to perform voicemail or answeing-machine detection"
     )
     call_transfer: Optional[Dict[str, Any]] = Field(None, description="to initiate a call transfer")
+    sipHeaders: Optional[Dict[str, Any]] = Field(
+        None,
+        alias="sip_headers",
+        description="Custom SIP headers received from the external SIP provider",
+    )
 
     class Config:
         populate_by_name = True
@@ -56,6 +61,14 @@ class RoomRequest(BaseModel):
     "callId": "string-contains-uuid",
     "callDomain": "string-contains-uuid"
     These need to be remapped to dialin_settings
+
+    In addition, we may receive in the body that can be 
+    sent to the bot as a custom field, sip_headers
+    "sipHeaders": {
+        "X-My-Custom-Header": "value",
+        "x-caller": "+14158483432",
+        "x-called": "+14152251493",
+    },
 
     "dialout_settings": [
         {"phoneNumber": "+14158483432", "callerId": "+14152251493"}, 
@@ -141,6 +154,7 @@ async def dial(request: RoomRequest, raw_request: Request):
             "display_name": request.From,
             "sip_mode": "dial-in",
             "num_endpoints": 2 if request.call_transfer is not None else 1,
+            "codecs": {"audio": ["OPUS"]},
         }
         daily_room_properties["sip"] = sip_config
 
@@ -156,6 +170,7 @@ async def dial(request: RoomRequest, raw_request: Request):
             "dialout_settings": request.dialout_settings,
             "voicemail_detection": request.voicemail_detection,
             "call_transfer": request.call_transfer,
+            "sip_headers": request.sipHeaders,  # passing the SIP headers to the bot
         },
     }
 

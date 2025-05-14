@@ -7,9 +7,8 @@
 import asyncio
 import json
 import time
-from typing import Any, Literal, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
-from av.frame import Frame
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
 
@@ -24,6 +23,7 @@ try:
         RTCSessionDescription,
     )
     from aiortc.rtcrtpreceiver import RemoteStreamTrack
+    from av.frame import Frame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
@@ -42,6 +42,10 @@ class TrackStatusMessage(BaseModel):
 
 class RenegotiateMessage(BaseModel):
     type: Literal["renegotiate"] = "renegotiate"
+
+
+class PeerLeftMessage(BaseModel):
+    type: Literal["peerLeft"] = "peerLeft"
 
 
 class SignallingMessage:
@@ -83,13 +87,21 @@ class SmallWebRTCTrack:
         return getattr(self._track, name)
 
 
+# Alias so we don't need to expose RTCIceServer
+IceServer = RTCIceServer
+
+
 class SmallWebRTCConnection(BaseObject):
-    def __init__(self, ice_servers=None):
+    def __init__(self, ice_servers: Optional[Union[List[str], List[IceServer]]] = None):
         super().__init__()
-        if ice_servers:
-            self.ice_servers = [RTCIceServer(urls=server) for server in ice_servers]
+        if not ice_servers:
+            self.ice_servers: List[IceServer] = []
+        elif all(isinstance(s, IceServer) for s in ice_servers):
+            self.ice_servers = ice_servers
+        elif all(isinstance(s, str) for s in ice_servers):
+            self.ice_servers = [IceServer(urls=s) for s in ice_servers]
         else:
-            self.ice_servers = []
+            raise TypeError("ice_servers must be either List[str] or List[RTCIceServer]")
         self._connect_invoked = False
         self._track_map = {}
         self._track_getters = {
@@ -215,7 +227,9 @@ class SmallWebRTCConnection(BaseObject):
             await self._call_event_handler("connected")
             # We are renegotiating here, because likely we have loose the first video frames
             # and aiortc does not handle that pretty well.
-            await self.video_input_track().discard_old_frames()
+            video_input_track = self.video_input_track()
+            if video_input_track:
+                await self.video_input_track().discard_old_frames()
             self.ask_to_renegotiate()
 
     async def renegotiate(self, sdp: str, type: str, restart_pc: bool = False):
@@ -226,7 +240,7 @@ class SmallWebRTCConnection(BaseObject):
             logger.debug("Closing old peer connection")
             # removing the listeners to prevent the bot from closing
             self._pc.remove_all_listeners()
-            await self.close()
+            await self._close()
             # we are initializing a new peer connection in this case.
             self._initialize()
 
@@ -271,7 +285,11 @@ class SmallWebRTCConnection(BaseObject):
         else:
             logger.warning("Video transceiver not found. Cannot replace video track.")
 
-    async def close(self):
+    async def disconnect(self):
+        self.send_app_message({"type": SIGNALLING_TYPE, "message": PeerLeftMessage().model_dump()})
+        await self._close()
+
+    async def _close(self):
         if self._pc:
             await self._pc.close()
         self._message_queue.clear()
@@ -296,7 +314,7 @@ class SmallWebRTCConnection(BaseObject):
         await self._call_event_handler(state)
         if state == "failed":
             logger.warning("Connection failed, closing peer connection.")
-            await self.close()
+            await self._close()
 
     # Despite the fact that aiortc provides this listener, they don't have a status for "disconnected"
     # So, there is no advantage in looking at self._pc.connectionState

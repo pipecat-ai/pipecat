@@ -8,17 +8,13 @@ import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping, Optional
+from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
 
 import aiohttp
-from daily import (
-    VirtualCameraDevice,
-    VirtualMicrophoneDevice,
-    VirtualSpeakerDevice,
-)
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.utils import create_default_resampler
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
@@ -34,10 +30,11 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -45,7 +42,17 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio import BaseTaskManager
 
 try:
-    from daily import CallClient, Daily, EventHandler
+    from daily import (
+        AudioData,
+        CallClient,
+        CustomAudioSource,
+        Daily,
+        EventHandler,
+        VideoFrame,
+        VirtualCameraDevice,
+        VirtualMicrophoneDevice,
+        VirtualSpeakerDevice,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -149,6 +156,8 @@ class DailyParams(TransportParams):
         api_url: Daily API base URL
         api_key: Daily API authentication key
         dialin_settings: Optional settings for dial-in functionality
+        camera_out_enabled: Whether to enable the main camera output track. If enabled, it still needs `video_out_enabled=True`
+        microphone_out_enabled: Whether to enable the main microphone track. If enabled, it still needs `audio_out_enabled=True`
         transcription_enabled: Whether to enable speech transcription
         transcription_settings: Configuration for transcription service
     """
@@ -156,6 +165,8 @@ class DailyParams(TransportParams):
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
     dialin_settings: Optional[DailyDialinSettings] = None
+    camera_out_enabled: bool = True
+    microphone_out_enabled: bool = True
     transcription_enabled: bool = False
     transcription_settings: DailyTranscriptionSettings = DailyTranscriptionSettings()
 
@@ -164,11 +175,14 @@ class DailyCallbacks(BaseModel):
     """Callback handlers for Daily events.
 
     Attributes:
+        on_active_speaker_changed: Called when the active speaker of the call has changed.
         on_joined: Called when bot successfully joined a room.
         on_left: Called when bot left a room.
         on_error: Called when an error occurs.
         on_app_message: Called when receiving an app message.
         on_call_state_updated: Called when call state changes.
+        on_client_connected: Called when a client (participant) connects.
+        on_client_disconnected: Called when a client (participant) disconnects.
         on_dialin_connected: Called when dial-in is connected.
         on_dialin_ready: Called when dial-in is ready.
         on_dialin_stopped: Called when dial-in is stopped.
@@ -188,11 +202,14 @@ class DailyCallbacks(BaseModel):
         on_recording_error: Called when recording encounters an error.
     """
 
+    on_active_speaker_changed: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_left: Callable[[], Awaitable[None]]
     on_error: Callable[[str], Awaitable[None]]
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_call_state_updated: Callable[[str], Awaitable[None]]
+    on_client_connected: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_client_disconnected: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_dialin_connected: Callable[[Any], Awaitable[None]]
     on_dialin_ready: Callable[[str], Awaitable[None]]
     on_dialin_stopped: Callable[[Any], Awaitable[None]]
@@ -271,6 +288,7 @@ class DailyTransportClient(EventHandler):
         self._transport_name = transport_name
 
         self._participant_id: str = ""
+        self._audio_renderers = {}
         self._video_renderers = {}
         self._transcription_ids = []
         self._transcription_status = None
@@ -306,6 +324,7 @@ class DailyTransportClient(EventHandler):
         self._camera: Optional[VirtualCameraDevice] = None
         self._mic: Optional[VirtualMicrophoneDevice] = None
         self._speaker: Optional[VirtualSpeakerDevice] = None
+        self._audio_sources: Dict[str, CustomAudioSource] = {}
 
     def _camera_name(self):
         return f"camera-{self}"
@@ -323,6 +342,14 @@ class DailyTransportClient(EventHandler):
     @property
     def participant_id(self) -> str:
         return self._participant_id
+
+    @property
+    def in_sample_rate(self) -> int:
+        return self._in_sample_rate
+
+    @property
+    def out_sample_rate(self) -> int:
+        return self._out_sample_rate
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if not self._joined:
@@ -361,30 +388,56 @@ class DailyTransportClient(EventHandler):
             await asyncio.sleep(0.01)
             return None
 
-    async def write_raw_audio_frames(self, frames: bytes):
-        if not self._mic:
-            return None
+    async def register_audio_destination(self, destination: str):
+        self._audio_sources[destination] = await self.add_custom_audio_track(destination)
+        self._client.update_publishing({"customAudio": {destination: True}})
 
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         future = self._get_event_loop().create_future()
-        self._mic.write_frames(frames, completion=completion_callback(future))
+        if not destination and self._mic:
+            self._mic.write_frames(frames, completion=completion_callback(future))
+        elif destination and destination in self._audio_sources:
+            source = self._audio_sources[destination]
+            source.write_frames(frames, completion=completion_callback(future))
+        else:
+            logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
+            future.set_result(None)
         await future
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
-        if not self._camera:
-            return None
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
+        if not destination and self._camera:
+            self._camera.write_frame(frame.image)
 
-        self._camera.write_frame(frame.image)
+    async def setup(self, setup: FrameProcessorSetup):
+        if self._task_manager:
+            return
 
-    async def setup(self, frame: StartFrame):
+        self._task_manager = setup.task_manager
+        self._callback_task = self._task_manager.create_task(
+            self._callback_task_handler(),
+            f"{self}::callback_task",
+        )
+
+    async def cleanup(self):
+        if self._callback_task and self._task_manager:
+            await self._task_manager.cancel_task(self._callback_task)
+            self._callback_task = None
+        # Make sure we don't block the event loop in case `client.release()`
+        # takes extra time.
+        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
+
+    async def start(self, frame: StartFrame):
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
-        if self._params.camera_out_enabled and not self._camera:
+        if self._params.video_out_enabled and not self._camera:
             self._camera = Daily.create_camera_device(
                 self._camera_name(),
-                width=self._params.camera_out_width,
-                height=self._params.camera_out_height,
-                color_format=self._params.camera_out_color_format,
+                width=self._params.video_out_width,
+                height=self._params.video_out_height,
+                color_format=self._params.video_out_color_format,
             )
 
         if self._params.audio_out_enabled and not self._mic:
@@ -395,7 +448,7 @@ class DailyTransportClient(EventHandler):
                 non_blocking=True,
             )
 
-        if (self._params.audio_in_enabled or self._params.vad_enabled) and not self._speaker:
+        if self._params.audio_in_enabled and not self._speaker:
             self._speaker = Daily.create_speaker_device(
                 self._speaker_name(),
                 sample_rate=self._in_sample_rate,
@@ -403,13 +456,6 @@ class DailyTransportClient(EventHandler):
                 non_blocking=True,
             )
             Daily.select_speaker_device(self._speaker_name())
-
-        if not self._task_manager:
-            self._task_manager = frame.task_manager
-            self._callback_task = self._task_manager.create_task(
-                self._callback_task_handler(),
-                f"{self}::callback_task",
-            )
 
     async def join(self):
         # Transport already joined or joining, ignore.
@@ -482,6 +528,9 @@ class DailyTransportClient(EventHandler):
     async def _join(self):
         future = self._get_event_loop().create_future()
 
+        camera_enabled = self._params.video_out_enabled and self._params.camera_out_enabled
+        microphone_enabled = self._params.audio_out_enabled and self._params.microphone_out_enabled
+
         self._client.join(
             self._room_url,
             self._token,
@@ -489,13 +538,13 @@ class DailyTransportClient(EventHandler):
             client_settings={
                 "inputs": {
                     "camera": {
-                        "isEnabled": self._params.camera_out_enabled,
+                        "isEnabled": camera_enabled,
                         "settings": {
                             "deviceId": self._camera_name(),
                         },
                     },
                     "microphone": {
-                        "isEnabled": self._params.audio_out_enabled,
+                        "isEnabled": microphone_enabled,
                         "settings": {
                             "deviceId": self._mic_name(),
                             "customConstraints": {
@@ -512,8 +561,8 @@ class DailyTransportClient(EventHandler):
                             "maxQuality": "low",
                             "encodings": {
                                 "low": {
-                                    "maxBitrate": self._params.camera_out_bitrate,
-                                    "maxFramerate": self._params.camera_out_framerate,
+                                    "maxBitrate": self._params.video_out_bitrate,
+                                    "maxFramerate": self._params.video_out_framerate,
                                 }
                             },
                         }
@@ -548,6 +597,10 @@ class DailyTransportClient(EventHandler):
         if self._params.transcription_enabled:
             await self._stop_transcription()
 
+        # Remove any custom tracks, if any.
+        for track_name, _ in self._audio_sources.items():
+            await self.remove_custom_audio_track(track_name)
+
         try:
             error = await self._leave()
             if not error:
@@ -575,14 +628,6 @@ class DailyTransportClient(EventHandler):
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
         return await asyncio.wait_for(future, timeout=10)
-
-    async def cleanup(self):
-        if self._callback_task and self._task_manager:
-            await self._task_manager.cancel_task(self._callback_task)
-            self._callback_task = None
-        # Make sure we don't block the event loop in case `client.release()`
-        # takes extra time.
-        await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
 
     def _cleanup(self):
         if self._client:
@@ -653,6 +698,32 @@ class DailyTransportClient(EventHandler):
         if self._joined and self._transcription_status:
             await self.update_transcription(self._transcription_ids)
 
+    async def capture_participant_audio(
+        self,
+        participant_id: str,
+        callback: Callable,
+        audio_source: str = "microphone",
+    ):
+        # Only enable the desired audio source subscription on this participant.
+        if audio_source in ("microphone", "screenAudio"):
+            media = {"media": {audio_source: "subscribed"}}
+        else:
+            media = {"media": {"customAudio": {audio_source: "subscribed"}}}
+
+        await self.update_subscriptions(participant_settings={participant_id: media})
+
+        self._audio_renderers.setdefault(participant_id, {})[audio_source] = callback
+
+        logger.info(
+            f"Starting to capture audio from participant {participant_id} to {audio_source}"
+        )
+
+        self._client.set_audio_renderer(
+            participant_id,
+            self._audio_data_received,
+            audio_source=audio_source,
+        )
+
     async def capture_participant_video(
         self,
         participant_id: str,
@@ -661,12 +732,15 @@ class DailyTransportClient(EventHandler):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        # Only enable the desired video source subscription on this participant.
-        await self.update_subscriptions(
-            participant_settings={participant_id: {"media": {video_source: "subscribed"}}}
-        )
+        # Only enable the desired audio source subscription on this participant.
+        if video_source in ("camera", "screenVideo"):
+            media = {"media": {video_source: "subscribed"}}
+        else:
+            media = {"media": {"customVideo": {video_source: "subscribed"}}}
 
-        self._video_renderers[participant_id] = callback
+        await self.update_subscriptions(participant_settings={participant_id: media})
+
+        self._video_renderers.setdefault(participant_id, {})[video_source] = callback
 
         self._client.set_video_renderer(
             participant_id,
@@ -674,6 +748,28 @@ class DailyTransportClient(EventHandler):
             video_source=video_source,
             color_format=color_format,
         )
+
+    async def add_custom_audio_track(self, track_name: str) -> CustomAudioSource:
+        future = self._get_event_loop().create_future()
+
+        audio_source = CustomAudioSource(self._out_sample_rate, 1)
+        self._client.add_custom_audio_track(
+            track_name=track_name,
+            audio_source=audio_source,
+            completion=completion_callback(future),
+        )
+
+        await future
+
+        return audio_source
+
+    async def remove_custom_audio_track(self, track_name: str):
+        future = self._get_event_loop().create_future()
+        self._client.remove_custom_audio_track(
+            track_name=track_name,
+            completion=completion_callback(future),
+        )
+        await future
 
     async def update_transcription(self, participants=None, instance_id=None):
         future = self._get_event_loop().create_future()
@@ -691,7 +787,15 @@ class DailyTransportClient(EventHandler):
         )
         await future
 
-    async def update_remote_participants(self, remote_participants: Mapping[str, Any] = None):
+    async def update_publishing(self, publishing_settings: Mapping[str, Any]):
+        future = self._get_event_loop().create_future()
+        self._client.update_publishing(
+            publishing_settings=publishing_settings,
+            completion=completion_callback(future),
+        )
+        await future
+
+    async def update_remote_participants(self, remote_participants: Mapping[str, Any]):
         future = self._get_event_loop().create_future()
         self._client.update_remote_participants(
             remote_participants=remote_participants, completion=completion_callback(future)
@@ -702,6 +806,9 @@ class DailyTransportClient(EventHandler):
     #
     # Daily (EventHandler)
     #
+
+    def on_active_speaker_changed(self, participant):
+        self._call_async_callback(self._callbacks.on_active_speaker_changed, participant)
 
     def on_app_message(self, message: Any, sender: str):
         self._call_async_callback(self._callbacks.on_app_message, message, sender)
@@ -778,15 +885,15 @@ class DailyTransportClient(EventHandler):
     # Daily (CallClient callbacks)
     #
 
-    def _video_frame_received(self, participant_id, video_frame):
-        callback = self._video_renderers[participant_id]
-        self._call_async_callback(
-            callback,
-            participant_id,
-            video_frame.buffer,
-            (video_frame.width, video_frame.height),
-            video_frame.color_format,
-        )
+    def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
+        callback = self._audio_renderers[participant_id][audio_source]
+        self._call_async_callback(callback, participant_id, audio_data, audio_source)
+
+    def _video_frame_received(
+        self, participant_id: str, video_frame: VideoFrame, video_source: str
+    ):
+        callback = self._video_renderers[participant_id][video_source]
+        self._call_async_callback(callback, participant_id, video_frame, video_source)
 
     def _call_async_callback(self, callback, *args):
         future = asyncio.run_coroutine_threadsafe(
@@ -842,6 +949,8 @@ class DailyInputTransport(BaseInputTransport):
         # internally to be processed.
         self._audio_in_task = None
 
+        self._resampler = create_default_resampler()
+
         self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
 
     @property
@@ -851,26 +960,37 @@ class DailyInputTransport(BaseInputTransport):
     def start_audio_in_streaming(self):
         # Create audio task. It reads audio frames from Daily and push them
         # internally for VAD processing.
-        if not self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if not self._audio_in_task and self._params.audio_in_enabled:
             logger.debug(f"Start receiving audio")
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
-    async def start(self, frame: StartFrame):
-        # Parent start.
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._client.setup(setup)
 
+    async def cleanup(self):
+        await super().cleanup()
+        await self._client.cleanup()
+        await self._transport.cleanup()
+
+    async def start(self, frame: StartFrame):
         if self._initialized:
             return
 
         self._initialized = True
 
+        # Parent start.
+        await super().start(frame)
+
         # Setup client.
-        await self._client.setup(frame)
+        await self._client.start(frame)
+
         # Join the room.
         await self._client.join()
-        # Inialize WebRTC VAD if needed.
-        if self._params.vad_enabled and not self._params.vad_analyzer:
-            self._vad_analyzer = WebRTCVADAnalyzer(sample_rate=self.sample_rate)
+
+        # Indicate the transport that we are connected.
+        await self.set_transport_ready(frame)
+
         if self._params.audio_in_stream_on_start:
             self.start_audio_in_streaming()
 
@@ -880,7 +1000,7 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_in_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
 
@@ -890,14 +1010,9 @@ class DailyInputTransport(BaseInputTransport):
         # Leave the room.
         await self._client.leave()
         # Stop audio thread.
-        if self._audio_in_task and (self._params.audio_in_enabled or self._params.vad_enabled):
+        if self._audio_in_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_in_task)
             self._audio_in_task = None
-
-    async def cleanup(self):
-        await super().cleanup()
-        await self._client.cleanup()
-        await self._transport.cleanup()
 
     #
     # FrameProcessor
@@ -924,6 +1039,31 @@ class DailyInputTransport(BaseInputTransport):
     # Audio in
     #
 
+    async def capture_participant_audio(
+        self,
+        participant_id: str,
+        audio_source: str = "microphone",
+    ):
+        await self._client.capture_participant_audio(
+            participant_id, self._on_participant_audio_data, audio_source
+        )
+
+    async def _on_participant_audio_data(
+        self, participant_id: str, audio: AudioData, audio_source: str
+    ):
+        resampled = await self._resampler.resample(
+            audio.audio_frames, audio.sample_rate, self._client.out_sample_rate
+        )
+
+        frame = UserAudioRawFrame(
+            user_id=participant_id,
+            audio=resampled,
+            sample_rate=self._client.out_sample_rate,
+            num_channels=audio.num_channels,
+        )
+        frame.transport_source = audio_source
+        await self.push_frame(frame)
+
     async def _audio_in_task_handler(self):
         while True:
             frame = await self._client.read_next_audio_frame()
@@ -941,7 +1081,10 @@ class DailyInputTransport(BaseInputTransport):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
-        self._video_renderers[participant_id] = {
+        if participant_id not in self._video_renderers:
+            self._video_renderers[participant_id] = {}
+
+        self._video_renderers[participant_id][video_source] = {
             "framerate": framerate,
             "timestamp": 0,
             "render_next_frame": [],
@@ -953,14 +1096,17 @@ class DailyInputTransport(BaseInputTransport):
 
     async def request_participant_image(self, frame: UserImageRequestFrame):
         if frame.user_id in self._video_renderers:
-            self._video_renderers[frame.user_id]["render_next_frame"].append(frame)
+            video_source = frame.video_source if frame.video_source else "camera"
+            self._video_renderers[frame.user_id][video_source]["render_next_frame"].append(frame)
 
-    async def _on_participant_video_frame(self, participant_id: str, buffer, size, format):
+    async def _on_participant_video_frame(
+        self, participant_id: str, video_frame: VideoFrame, video_source: str
+    ):
         render_frame = False
 
         curr_time = time.time()
-        prev_time = self._video_renderers[participant_id]["timestamp"]
-        framerate = self._video_renderers[participant_id]["framerate"]
+        prev_time = self._video_renderers[participant_id][video_source]["timestamp"]
+        framerate = self._video_renderers[participant_id][video_source]["framerate"]
 
         # Some times we render frames because of a request.
         request_frame = None
@@ -969,20 +1115,23 @@ class DailyInputTransport(BaseInputTransport):
             next_time = prev_time + 1 / framerate
             render_frame = (next_time - curr_time) < 0.1
 
-        elif self._video_renderers[participant_id]["render_next_frame"]:
-            request_frame = self._video_renderers[participant_id]["render_next_frame"].pop(0)
+        elif self._video_renderers[participant_id][video_source]["render_next_frame"]:
+            request_frame = self._video_renderers[participant_id][video_source][
+                "render_next_frame"
+            ].pop(0)
             render_frame = True
 
         if render_frame:
             frame = UserImageRawFrame(
                 user_id=participant_id,
                 request=request_frame,
-                image=buffer,
-                size=size,
-                format=format,
+                image=video_frame.buffer,
+                size=(video_frame.width, video_frame.height),
+                format=video_frame.color_format,
             )
+            frame.transport_source = video_source
             await self.push_frame(frame)
-            self._video_renderers[participant_id]["timestamp"] = curr_time
+            self._video_renderers[participant_id][video_source]["timestamp"] = curr_time
 
 
 class DailyOutputTransport(BaseOutputTransport):
@@ -1006,19 +1155,32 @@ class DailyOutputTransport(BaseOutputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
-    async def start(self, frame: StartFrame):
-        # Parent start.
-        await super().start(frame)
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._client.setup(setup)
 
+    async def cleanup(self):
+        await super().cleanup()
+        await self._client.cleanup()
+        await self._transport.cleanup()
+
+    async def start(self, frame: StartFrame):
         if self._initialized:
             return
 
         self._initialized = True
 
+        # Parent start.
+        await super().start(frame)
+
         # Setup client.
-        await self._client.setup(frame)
+        await self._client.start(frame)
+
         # Join the room.
         await self._client.join()
+
+        # Indicate the transport that we are connected.
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
@@ -1032,19 +1194,22 @@ class DailyOutputTransport(BaseOutputTransport):
         # Leave the room.
         await self._client.leave()
 
-    async def cleanup(self):
-        await super().cleanup()
-        await self._client.cleanup()
-        await self._transport.cleanup()
-
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes):
-        await self._client.write_raw_audio_frames(frames)
+    async def register_video_destination(self, destination: str):
+        logger.warning(f"{self} registering video destinations is not supported yet")
 
-    async def write_frame_to_camera(self, frame: OutputImageRawFrame):
-        await self._client.write_frame_to_camera(frame)
+    async def register_audio_destination(self, destination: str):
+        await self._client.register_audio_destination(destination)
+
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+        await self._client.write_raw_audio_frames(frames, destination)
+
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
+        await self._client.write_raw_video_frame(frame, destination)
 
 
 class DailyTransport(BaseTransport):
@@ -1074,11 +1239,14 @@ class DailyTransport(BaseTransport):
         super().__init__(input_name=input_name, output_name=output_name)
 
         callbacks = DailyCallbacks(
+            on_active_speaker_changed=self._on_active_speaker_changed,
             on_joined=self._on_joined,
             on_left=self._on_left,
             on_error=self._on_error,
             on_app_message=self._on_app_message,
             on_call_state_updated=self._on_call_state_updated,
+            on_client_connected=self._on_client_connected,
+            on_client_disconnected=self._on_client_disconnected,
             on_dialin_connected=self._on_dialin_connected,
             on_dialin_ready=self._on_dialin_ready,
             on_dialin_stopped=self._on_dialin_stopped,
@@ -1107,11 +1275,14 @@ class DailyTransport(BaseTransport):
 
         # Register supported handlers. The user will only be able to register
         # these handlers.
+        self._register_event_handler("on_active_speaker_changed")
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
         self._register_event_handler("on_error")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
+        self._register_event_handler("on_client_connected")
+        self._register_event_handler("on_client_disconnected")
         self._register_event_handler("on_dialin_connected")
         self._register_event_handler("on_dialin_ready")
         self._register_event_handler("on_dialin_stopped")
@@ -1210,6 +1381,14 @@ class DailyTransport(BaseTransport):
     async def capture_participant_transcription(self, participant_id: str):
         await self._client.capture_participant_transcription(participant_id)
 
+    async def capture_participant_audio(
+        self,
+        participant_id: str,
+        audio_source: str = "microphone",
+    ):
+        if self._input:
+            await self._input.capture_participant_audio(participant_id, audio_source)
+
     async def capture_participant_video(
         self,
         participant_id: str,
@@ -1222,13 +1401,19 @@ class DailyTransport(BaseTransport):
                 participant_id, framerate, video_source, color_format
             )
 
+    async def update_publishing(self, publishing_settings: Mapping[str, Any]):
+        await self._client.update_publishing(publishing_settings=publishing_settings)
+
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
         await self._client.update_subscriptions(
             participant_settings=participant_settings, profile_settings=profile_settings
         )
 
-    async def update_remote_participants(self, remote_participants: Mapping[str, Any] = None):
+    async def update_remote_participants(self, remote_participants: Mapping[str, Any]):
         await self._client.update_remote_participants(remote_participants=remote_participants)
+
+    async def _on_active_speaker_changed(self, participant: Any):
+        await self._call_event_handler("on_active_speaker_changed", participant)
 
     async def _on_joined(self, data):
         await self._call_event_handler("on_joined", data)
@@ -1256,6 +1441,12 @@ class DailyTransport(BaseTransport):
 
     async def _on_call_state_updated(self, state: str):
         await self._call_event_handler("on_call_state_updated", state)
+
+    async def _on_client_connected(self, participant: Any):
+        await self._call_event_handler("on_client_connected", participant)
+
+    async def _on_client_disconnected(self, participant: Any):
+        await self._call_event_handler("on_client_disconnected", participant)
 
     async def _handle_dialin_ready(self, sip_endpoint: str):
         if not self._params.dialin_settings:
@@ -1332,11 +1523,15 @@ class DailyTransport(BaseTransport):
             await self._call_event_handler("on_first_participant_joined", participant)
 
         await self._call_event_handler("on_participant_joined", participant)
+        # Also call on_client_connected for compatibility with other transports
+        await self._call_event_handler("on_client_connected", participant)
 
     async def _on_participant_left(self, participant, reason):
         id = participant["id"]
         logger.info(f"Participant left {id}")
         await self._call_event_handler("on_participant_left", participant, reason)
+        # Also call on_client_disconnected for compatibility with other transports
+        await self._call_event_handler("on_client_disconnected", participant)
 
     async def _on_participant_updated(self, participant):
         await self._call_event_handler("on_participant_updated", participant)

@@ -12,7 +12,9 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     STTMuteFrame,
+    TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -92,6 +94,45 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
             STTMuteFrame,  # mute=True
             BotStoppedSpeakingFrame,
             STTMuteFrame,  # mute=False
+        ]
+
+        await run_test(
+            filter,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_returned_frames,
+        )
+
+    async def test_transcription_frames_with_always_strategy(self):
+        filter = STTMuteFilter(config=STTMuteConfig(strategies={STTMuteStrategy.ALWAYS}))
+
+        frames_to_send = [
+            # Bot speaking - should mute
+            BotStartedSpeakingFrame(),
+            SleepFrame(sleep=0.1),  # Wait for StartedSpeaking to process
+            InterimTranscriptionFrame(
+                user_id="user1", text="This should be suppressed", timestamp="1234567890"
+            ),
+            TranscriptionFrame(
+                user_id="user1", text="This should be suppressed", timestamp="1234567890"
+            ),
+            SleepFrame(sleep=0.1),  # Wait for transcription frames to queue
+            BotStoppedSpeakingFrame(),
+            # Bot not speaking - should pass through
+            InterimTranscriptionFrame(
+                user_id="user1", text="This should pass", timestamp="1234567891"
+            ),
+            TranscriptionFrame(
+                user_id="user1", text="This should pass through", timestamp="1234567891"
+            ),
+        ]
+
+        expected_returned_frames = [
+            BotStartedSpeakingFrame,
+            STTMuteFrame,  # mute=True
+            BotStoppedSpeakingFrame,
+            STTMuteFrame,  # mute=False
+            InterimTranscriptionFrame,  # Only passes through after bot stops speaking
+            TranscriptionFrame,  # Only passes through after bot stops speaking
         ]
 
         await run_test(

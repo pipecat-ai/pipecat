@@ -8,18 +8,8 @@ import base64
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Mapping
 
 from loguru import logger
-
-try:
-    import websockets
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use OpenAI, you need to `pip install pipecat-ai[openai]`. Also, set `OPENAI_API_KEY` environment variable."
-    )
-    raise Exception(f"Missing module: {e}")
 
 from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
 from pipecat.frames.frames import (
@@ -48,6 +38,10 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -64,6 +58,13 @@ from .context import (
     OpenAIRealtimeUserContextAggregator,
 )
 from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
+
+try:
+    import websockets
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
+    raise Exception(f"Missing module: {e}")
 
 
 @dataclass
@@ -561,13 +562,11 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
 
     async def _handle_assistant_output(self, output):
-        # logger.debug(f"!!! HANDLE Assistant output: {output}")
         # We haven't seen intermixed audio and function_call items in the same response. But let's
         # try to write logic that handles that, if it does happen.
-        messages = [item for item in output if item.type == "message"]
+        # Also, the assistant output is pushed as LLMTextFrame and TTSTextFrame to be handled by
+        # the assistant context aggregator.
         function_calls = [item for item in output if item.type == "function_call"]
-        for item in messages:
-            self._context.add_assistant_content_item_as_message(item)
         await self._handle_function_call_items(function_calls)
 
     async def _handle_function_call_items(self, items):
@@ -578,15 +577,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             arguments = json.loads(item.arguments)
             if self.has_function(function_name):
                 run_llm = index == total_items - 1
-                if function_name in self._functions.keys():
-                    await self.call_function(
-                        context=self._context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
-                        arguments=arguments,
-                        run_llm=run_llm,
-                    )
-                elif None in self._functions.keys():
+                if function_name in self._functions.keys() or None in self._functions.keys():
                     await self.call_function(
                         context=self._context,
                         tool_call_id=tool_id,
@@ -650,8 +641,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         context: OpenAILLMContext,
         *,
-        user_kwargs: Mapping[str, Any] = {},
-        assistant_kwargs: Mapping[str, Any] = {},
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> OpenAIContextAggregatorPair:
         """Create an instance of OpenAIContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -659,12 +650,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         Args:
             context (OpenAILLMContext): The LLM context.
-            user_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the user context aggregator constructor. Defaults
-                to an empty mapping.
-            assistant_kwargs (Mapping[str, Any], optional): Additional keyword
-                arguments for the assistant context aggregator
-                constructor. Defaults to an empty mapping.
+            user_params (LLMUserAggregatorParams, optional): User aggregator
+                parameters.
+            assistant_params (LLMAssistantAggregatorParams, optional): User
+                aggregator parameters.
 
         Returns:
             OpenAIContextAggregatorPair: A pair of context aggregators, one for
@@ -675,9 +664,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         context.set_llm_adapter(self.get_llm_adapter())
 
         OpenAIRealtimeLLMContext.upgrade_to_realtime(context)
-        user = OpenAIRealtimeUserContextAggregator(context, **user_kwargs)
+        user = OpenAIRealtimeUserContextAggregator(context, params=user_params)
 
-        default_assistant_kwargs = {"expect_stripped_words": False}
-        default_assistant_kwargs.update(assistant_kwargs)
-        assistant = OpenAIRealtimeAssistantContextAggregator(context, **default_assistant_kwargs)
+        assistant_params.expect_stripped_words = False
+        assistant = OpenAIRealtimeAssistantContextAggregator(context, params=assistant_params)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)

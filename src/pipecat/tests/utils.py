@@ -6,7 +6,7 @@
 
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Optional, Sequence, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple
 
 from pipecat.frames.frames import (
     EndFrame,
@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     StartFrame,
     SystemFrame,
 )
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -42,14 +42,10 @@ class HeartbeatsObserver(BaseObserver):
         self._target = target
         self._callback = heartbeat_callback
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
+        src = data.source
+        frame = data.frame
+
         if src == self._target and isinstance(frame, HeartbeatFrame):
             await self._callback(self._target, frame)
 
@@ -83,6 +79,7 @@ async def run_test(
     expected_down_frames: Optional[Sequence[type]] = None,
     expected_up_frames: Optional[Sequence[type]] = None,
     ignore_start: bool = True,
+    observers: List[BaseObserver] = [],
     start_metadata: Dict[str, Any] = {},
     send_end_frame: bool = True,
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
@@ -104,6 +101,7 @@ async def run_test(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(start_metadata=start_metadata),
+        observers=observers,
         cancel_on_idle_timeout=False,
     )
 

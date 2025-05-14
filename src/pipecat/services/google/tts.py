@@ -8,6 +8,8 @@ import asyncio
 import json
 import os
 
+from pipecat.utils.tracing.service_decorators import traced_tts
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -27,6 +29,8 @@ from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
 
 try:
+    from google.auth import default
+    from google.auth.exceptions import GoogleAuthError
     from google.cloud import texttospeech_v1
     from google.oauth2 import service_account
 
@@ -251,6 +255,16 @@ class GoogleTTSService(TTSService):
         elif credentials_path:
             # Use service account JSON file if provided
             creds = service_account.Credentials.from_service_account_file(credentials_path)
+        else:
+            try:
+                creds, project_id = default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+            except GoogleAuthError:
+                pass
+
+        if not creds:
+            raise ValueError("No valid credentials provided.")
 
         return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
 
@@ -306,6 +320,7 @@ class GoogleTTSService(TTSService):
 
         return ssml
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -346,9 +361,9 @@ class GoogleTTSService(TTSService):
             audio_content = response.audio_content[44:]
 
             # Read and yield audio data in chunks
-            chunk_size = 8192
-            for i in range(0, len(audio_content), chunk_size):
-                chunk = audio_content[i : i + chunk_size]
+            CHUNK_SIZE = 1024
+            for i in range(0, len(audio_content), CHUNK_SIZE):
+                chunk = audio_content[i : i + CHUNK_SIZE]
                 if not chunk:
                     break
                 await self.stop_ttfb_metrics()

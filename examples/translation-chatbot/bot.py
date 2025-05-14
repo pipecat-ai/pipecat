@@ -132,10 +132,9 @@ async def main():
             token,
             "Translator",
             DailyParams(
+                audio_in_enabled=True,
                 audio_out_enabled=True,
-                vad_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
-                vad_audio_passthrough=True,
             ),
         )
 
@@ -150,7 +149,7 @@ async def main():
         in_language = "English"
         out_language = "Spanish"
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
         context = OpenAILLMContext()
         context_aggregator = llm.create_context_aggregator(context)
 

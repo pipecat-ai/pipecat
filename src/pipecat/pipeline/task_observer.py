@@ -5,13 +5,12 @@
 #
 
 import asyncio
+import inspect
 from typing import List
 
 from attr import dataclass
 
-from pipecat.frames.frames import Frame
-from pipecat.observers.base_observer import BaseObserver
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.utils.asyncio import BaseTaskManager
 
 
@@ -25,20 +24,6 @@ class Proxy:
     queue: asyncio.Queue
     task: asyncio.Task
     observer: BaseObserver
-
-
-@dataclass
-class ObserverData:
-    """This is the data we receive from the main observer and that we put into a
-    proxy queue for later processing.
-
-    """
-
-    src: FrameProcessor
-    dst: FrameProcessor
-    frame: Frame
-    direction: FrameDirection
-    timestamp: int
 
 
 class TaskObserver(BaseObserver):
@@ -68,20 +53,9 @@ class TaskObserver(BaseObserver):
         for proxy in self._proxies:
             await self._task_manager.cancel_task(proxy.task)
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
         for proxy in self._proxies:
-            await proxy.queue.put(
-                ObserverData(
-                    src=src, dst=dst, frame=frame, direction=direction, timestamp=timestamp
-                )
-            )
+            await proxy.queue.put(data)
 
     def _create_proxies(self, observers) -> List[Proxy]:
         proxies = []
@@ -96,8 +70,26 @@ class TaskObserver(BaseObserver):
         return proxies
 
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):
+        warning_reported = False
         while True:
             data = await queue.get()
-            await observer.on_push_frame(
-                data.src, data.dst, data.frame, data.direction, data.timestamp
-            )
+
+            signature = inspect.signature(observer.on_push_frame)
+            if len(signature.parameters) > 1:
+                if not warning_reported:
+                    import warnings
+
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("always")
+                        warnings.warn(
+                            "Observer `on_push_frame(source, destination, frame, direction, timestamp)` is deprecated, us `on_push_frame(data: FramePushed)` instead.",
+                            DeprecationWarning,
+                        )
+                    warning_reported = True
+                await observer.on_push_frame(
+                    data.src, data.dst, data.frame, data.direction, data.timestamp
+                )
+            else:
+                await observer.on_push_frame(data)
+
+            queue.task_done()

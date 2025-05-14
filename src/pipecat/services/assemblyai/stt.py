@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import assemblyai as aai
@@ -59,6 +60,9 @@ class AssemblyAISTTService(STTService):
     def vad_enabled(self):
         return self._vad
 
+    def can_generate_metrics(self) -> bool:
+        return True
+
     async def set_language(self, language: Language):
         logger.info(f"Switching STT language to: [{language}]")
         self._settings["language"] = language
@@ -85,9 +89,9 @@ class AssemblyAISTTService(STTService):
         :yield: None (transcription frames are pushed via self.push_frame in callbacks)
         """
         if self._transcriber:
+            await self.start_ttfb_metrics()
             await self.start_processing_metrics()
             self._transcriber.stream(audio)
-            await self.stop_processing_metrics()
         yield None
 
     async def frame_dispatcher(self, frame, frame_type):
@@ -99,6 +103,14 @@ class AssemblyAISTTService(STTService):
                 await self.push_frame(UserStoppedSpeakingFrame())
         else:
             await self.push_frame(frame)
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
 
     async def _connect(self):
         """Establish a connection to the AssemblyAI real-time transcription service.
@@ -124,18 +136,21 @@ class AssemblyAISTTService(STTService):
                 return
 
             timestamp = time_now_iso8601()
+            is_final = isinstance(transcript, aai.RealtimeFinalTranscript)
+            language = self._settings["language"]
 
             frame_type = ""
-            if isinstance(transcript, aai.RealtimeFinalTranscript):
+            if is_final:
                 frame_type = "final"
-                frame = TranscriptionFrame(
-                    transcript.text, "", timestamp, self._settings["language"]
-                )
+                frame = TranscriptionFrame(transcript.text, "", timestamp, language)
             else:
                 frame_type = "interim"
-                frame = InterimTranscriptionFrame(
-                    transcript.text, "", timestamp, self._settings["language"]
-                )
+                frame = InterimTranscriptionFrame(transcript.text, "", timestamp, language)
+
+            asyncio.run_coroutine_threadsafe(
+                self._handle_transcription(transcript.text, is_final, language),
+                self.get_event_loop(),
+            )
 
             # Schedule the coroutine to run in the main event loop
             # This is necessary because this callback runs in a different thread

@@ -47,17 +47,14 @@ Customization options:
 - change the function calling logic
 """
 
-import asyncio
+import argparse
 import json
 import os
-import sys
 import time
 
-import aiohttp
 import google.generativeai as genai
 from dotenv import load_dotenv
 from loguru import logger
-from runner import configure
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -65,15 +62,14 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.llm_service import FunctionCallParams
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="INFO")
-
-video_participant_id = None
 
 
 def get_rag_content():
@@ -112,11 +108,9 @@ Here is the knowledge base you have access to:
 genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 
-async def query_knowledge_base(
-    function_name, tool_call_id, arguments, llm, context, result_callback
-):
+async def query_knowledge_base(params: FunctionCallParams):
     """Query the knowledge base for the answer to the question."""
-    logger.info(f"Querying knowledge base for question: {arguments['question']}")
+    logger.info(f"Querying knowledge base for question: {params.arguments['question']}")
     client = genai.GenerativeModel(
         model_name=RAG_MODEL,
         system_instruction=RAG_PROMPT,
@@ -127,11 +121,11 @@ async def query_knowledge_base(
     )
     # for our case, the first two messages are the instructions and the user message
     # so we remove them.
-    conversation_turns = context.messages[2:]
+    conversation_turns = params.context.messages[2:]
     # convert to standard messages
     messages = []
     for turn in conversation_turns:
-        messages.extend(context.to_standard_messages(turn))
+        messages.extend(params.context.to_standard_messages(turn))
 
     def _is_tool_call(turn):
         if turn.get("role", None) == "tool":
@@ -155,100 +149,107 @@ async def query_knowledge_base(
     end = time.perf_counter()
     logger.info(f"Time taken: {end - start:.2f} seconds")
     logger.info(response.text)
-    await result_callback(response.text)
+    await params.result_callback(response.text)
 
 
-async def main():
-    async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Gemini RAG Bot",
-            DailyParams(
-                audio_out_enabled=True,
-                transcription_enabled=True,
-                vad_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        webrtc_connection=webrtc_connection,
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="f9836c6e-a0bd-460e-9d3c-f7299fa60f94",  # Southern Lady
-        )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        llm = GoogleLLMService(
-            model=VOICE_MODEL,
-            api_key=os.getenv("GOOGLE_API_KEY"),
-        )
-        llm.register_function("query_knowledge_base", query_knowledge_base)
-        tools = [
-            {
-                "function_declarations": [
-                    {
-                        "name": "query_knowledge_base",
-                        "description": "Query the knowledge base for the answer to the question.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "question": {
-                                    "type": "string",
-                                    "description": "The question to query the knowledge base with.",
-                                },
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="f9836c6e-a0bd-460e-9d3c-f7299fa60f94",  # Southern Lady
+    )
+
+    llm = GoogleLLMService(
+        model=VOICE_MODEL,
+        api_key=os.getenv("GOOGLE_API_KEY"),
+    )
+    llm.register_function("query_knowledge_base", query_knowledge_base)
+    tools = [
+        {
+            "function_declarations": [
+                {
+                    "name": "query_knowledge_base",
+                    "description": "Query the knowledge base for the answer to the question.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "question": {
+                                "type": "string",
+                                "description": "The question to query the knowledge base with.",
                             },
                         },
                     },
-                ],
-            },
-        ]
-        system_prompt = """\
+                },
+            ],
+        },
+    ]
+    system_prompt = """\
 You are a helpful assistant who converses with a user and answers questions.
 
 You have access to the tool, query_knowledge_base, that allows you to query the knowledge base for the answer to the user's question.
 
 Your response will be turned into speech so use only simple words and punctuation.
 """
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": "Greet the user."},
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "Greet the user."},
+    ]
+
+    context = OpenAILLMContext(messages, tools)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            stt,
+            context_aggregator.user(),
+            llm,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
         ]
+    )
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
-        context = OpenAILLMContext(messages, tools)
-        context_aggregator = llm.create_context_aggregator(context)
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Start conversation - empty prompt to let LLM follow system instructions
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        pipeline = Pipeline(
-            [
-                transport.input(),
-                context_aggregator.user(),
-                llm,
-                tts,
-                transport.output(),
-                context_aggregator.assistant(),
-            ]
-        )
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-        )
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            global video_participant_id
-            video_participant_id = participant["id"]
-            await transport.capture_participant_transcription(participant["id"])
-            await transport.capture_participant_video(video_participant_id, framerate=0)
-            # Kick off the conversation.
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
 
-        runner = PipelineRunner()
-        await runner.run(task)
+    runner = PipelineRunner(handle_sigint=False)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()
