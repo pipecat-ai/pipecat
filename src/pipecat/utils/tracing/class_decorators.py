@@ -18,10 +18,10 @@ import functools
 import inspect
 from typing import Callable, Optional, TypeVar
 
-from pipecat.utils.tracing.setup import OPENTELEMETRY_AVAILABLE
+from pipecat.utils.tracing.setup import is_tracing_available
 
 # Import OpenTelemetry if available
-if OPENTELEMETRY_AVAILABLE:
+if is_tracing_available():
     import opentelemetry.trace
     from opentelemetry import metrics, trace
 
@@ -59,7 +59,7 @@ class Traceable:
         """
         super().__init__(**kwargs)
 
-        if not OPENTELEMETRY_AVAILABLE:
+        if not is_tracing_available():
             self._tracer = self._meter = self._parent_span_id = self._span = None
             return
 
@@ -177,7 +177,7 @@ def traced(
         RuntimeError: If used in a class not inheriting from Traceable.
         ValueError: If used on a non-async function.
     """
-    if not OPENTELEMETRY_AVAILABLE:
+    if not is_tracing_available():
         # Just return the original function or a simple decorator
         def decorator(f):
             return f
@@ -204,7 +204,7 @@ def traceable(cls: C) -> C:
     Returns:
         A new class with tracing capabilities.
     """
-    if not OPENTELEMETRY_AVAILABLE:
+    if not is_tracing_available():
         return cls
 
     @functools.wraps(cls, updated=())
