@@ -408,27 +408,27 @@ class GladiaSTTService(STTService):
                     language = utterance["language"]
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
-                    if confidence >= self._confidence:
-                        if is_final:
-                            if self.vad_enabled:
-                                await self.push_frame(UserStartedSpeakingFrame())
-                            await self.push_frame(
-                                TranscriptionFrame(transcript, "", time_now_iso8601(), language)
-                            )
-                            await self._handle_transcription(
-                                transcript=transcript,
-                                is_final=is_final,
-                                language=language,
-                            )
-                            logger.debug(f">> Gladia: {transcript}")
-                            if self.vad_enabled:
-                                await self.push_frame(UserStoppedSpeakingFrame())
-                        else:
-                            await self.push_frame(
-                                InterimTranscriptionFrame(
-                                    transcript, "", time_now_iso8601(), language
-                                )
-                            )
+                    # logger.info(
+                    #     f"""confidence: {confidence} is_final: {is_final} transcript: {transcript}"""
+                    # )
+                    if confidence >= self._confidence and is_final:
+                        if self.vad_enabled:
+                            await self.push_frame(UserStartedSpeakingFrame())
+                        await self.push_frame(
+                            TranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                        )
+                        logger.debug(f">> Gladia: {transcript}")
+                        if self.vad_enabled:
+                            await self.push_frame(UserStoppedSpeakingFrame())
+                        await self._handle_transcription(
+                            transcript=transcript,
+                            is_final=is_final,
+                            language=language,
+                        )
+                    else:
+                        await self.push_frame(
+                            InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                        )
                 elif content["type"] == "translation":
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]
