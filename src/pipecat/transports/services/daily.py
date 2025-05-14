@@ -677,7 +677,7 @@ class DailyTransportClient(EventHandler):
         self._client.stop_recording(stream_id, completion=completion_callback(future))
         await future
 
-    async def capture_participant_audio(self, participant_id: str):
+    async def subscribe_to_participant_audio(self, participant_id: str):
         await self.update_subscriptions({participant_id: {"media": {"microphone": "subscribed"}}})
 
     async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
@@ -1367,7 +1367,8 @@ class DailyTransport(BaseTransport):
         await self._client.stop_recording(stream_id)
 
     async def update_subscription(self, participant_id):
-        await self._client.capture_participant_audio(participant_id)
+        logger.info(f"Subscribing to {participant_id}'s audio")
+        await self._client.subscribe_to_participant_audio(participant_id)
 
     async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
         """Sends a chat message to Daily's Prebuilt main room.
