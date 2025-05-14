@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Dict, Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 from loguru import logger
 
@@ -13,6 +13,10 @@ from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.utils.tracing.conversation_context_provider import ConversationContextProvider
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_context_provider import TurnContextProvider
+
+# Import types for type checking only
+if TYPE_CHECKING:
+    from opentelemetry.trace import Span, SpanContext
 
 if is_tracing_available():
     from opentelemetry import trace
@@ -33,13 +37,13 @@ class TurnTraceObserver(BaseObserver):
     def __init__(self, turn_tracker: TurnTrackingObserver, conversation_id: Optional[str] = None):
         super().__init__()
         self._turn_tracker = turn_tracker
-        self._current_span: Optional[Span] = None
+        self._current_span: Optional["Span"] = None
         self._current_turn_number: int = 0
-        self._trace_context_map: Dict[int, SpanContext] = {}
+        self._trace_context_map: Dict[int, "SpanContext"] = {}
         self._tracer = trace.get_tracer("pipecat.turn") if is_tracing_available() else None
 
         # Conversation tracking properties
-        self._conversation_span: Optional[Span] = None
+        self._conversation_span: Optional["Span"] = None
         self._conversation_id = conversation_id
 
         if turn_tracker:
@@ -180,7 +184,7 @@ class TurnTraceObserver(BaseObserver):
 
             logger.debug(f"Ended tracing for Turn {turn_number}")
 
-    def get_current_turn_context(self) -> Optional[SpanContext]:
+    def get_current_turn_context(self) -> Optional["SpanContext"]:
         """Get the span context for the current turn.
 
         This can be used by services to create child spans.
@@ -190,7 +194,7 @@ class TurnTraceObserver(BaseObserver):
 
         return self._current_span.get_span_context()
 
-    def get_turn_context(self, turn_number: int) -> Optional[SpanContext]:
+    def get_turn_context(self, turn_number: int) -> Optional["SpanContext"]:
         """Get the span context for a specific turn.
 
         This can be used by services to create child spans.

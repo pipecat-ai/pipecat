@@ -6,13 +6,20 @@
 
 """Functions for adding attributes to OpenTelemetry spans."""
 
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from opentelemetry.trace import Span
+# Import for type checking only
+if TYPE_CHECKING:
+    from opentelemetry.trace import Span
+
+from pipecat.utils.tracing.setup import is_tracing_available
+
+if is_tracing_available():
+    from opentelemetry.trace import Span
 
 
 def add_tts_span_attributes(
-    span: Span,
+    span: "Span",
     service_name: str,
     model: str,
     voice_id: str,
@@ -66,7 +73,7 @@ def add_tts_span_attributes(
 
 
 def add_stt_span_attributes(
-    span: Span,
+    span: "Span",
     service_name: str,
     model: str,
     transcript: Optional[str] = None,
@@ -122,7 +129,7 @@ def add_stt_span_attributes(
 
 
 def add_llm_span_attributes(
-    span: Span,
+    span: "Span",
     service_name: str,
     model: str,
     stream: bool = True,

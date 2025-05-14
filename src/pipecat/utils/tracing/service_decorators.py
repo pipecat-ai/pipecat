@@ -16,18 +16,24 @@ import functools
 import inspect
 import json
 import logging
-from typing import Callable, Optional, TypeVar
+from typing import TYPE_CHECKING, Callable, Optional, TypeVar
 
-from opentelemetry import context as context_api
-from opentelemetry import trace
+# Type imports for type checking only
+if TYPE_CHECKING:
+    from opentelemetry import context as context_api
+    from opentelemetry import trace
 
 from pipecat.utils.tracing.service_attributes import (
     add_llm_span_attributes,
     add_stt_span_attributes,
     add_tts_span_attributes,
 )
-from pipecat.utils.tracing.setup import OPENTELEMETRY_AVAILABLE, is_tracing_available
+from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_context_provider import get_current_turn_context
+
+if is_tracing_available():
+    from opentelemetry import context as context_api
+    from opentelemetry import trace
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -114,7 +120,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     Returns:
         Wrapped method with TTS-specific tracing.
     """
-    if not OPENTELEMETRY_AVAILABLE:
+    if not is_tracing_available():
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
@@ -220,7 +226,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     Returns:
         Wrapped method with STT-specific tracing.
     """
-    if not OPENTELEMETRY_AVAILABLE:
+    if not is_tracing_available():
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
@@ -296,7 +302,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     Returns:
         Wrapped method with LLM-specific tracing.
     """
-    if not OPENTELEMETRY_AVAILABLE:
+    if not is_tracing_available():
         return _noop_decorator if func is None else _noop_decorator(func)
 
     def decorator(f):
