@@ -6,7 +6,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Union
 
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
@@ -27,7 +27,7 @@ from pipecat.services.openai.base_llm import BaseOpenAILLMService
 
 @dataclass
 class OpenAIContextAggregatorPair:
-    _user: "OpenAIUserContextAggregator"
+    _user: Union["OpenAIUserContextAggregator", "PipecatOpenAIUserContextAggregator"]
     _assistant: "OpenAIAssistantContextAggregator"
 
     def user(self) -> "OpenAIUserContextAggregator":
@@ -53,6 +53,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        aggregator_type: str = "ours",  # or "theirs"
     ) -> OpenAIContextAggregatorPair:
         """Create an instance of OpenAIContextAggregatorPair from an
         OpenAILLMContext. Constructor keyword arguments for both the user and
@@ -70,12 +71,19 @@ class OpenAILLMService(BaseOpenAILLMService):
 
         """
         context.set_llm_adapter(self.get_llm_adapter())
-        user = OpenAIUserContextAggregator(context, params=user_params)
+        if aggregator_type == "ours":
+            user = OpenAIUserContextAggregator(context, params=user_params)
+        else:
+            user = PipecatOpenAIUserContextAggregator(context, params=user_params)
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
 
 class OpenAIUserContextAggregator(BetterLLMUserContextAggregator):
+    pass
+
+
+class PipecatOpenAIUserContextAggregator(LLMUserContextAggregator):
     pass
 
 
