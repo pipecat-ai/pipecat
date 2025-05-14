@@ -5,7 +5,12 @@
 #
 
 import uuid
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+# Import types for type checking only
+if TYPE_CHECKING:
+    from opentelemetry.context import Context
+    from opentelemetry.trace import SpanContext
 
 from pipecat.utils.tracing.setup import is_tracing_available
 
@@ -22,7 +27,7 @@ class ConversationContextProvider:
     """
 
     _instance = None
-    _current_conversation_context: Optional[Context] = None
+    _current_conversation_context: Optional["Context"] = None
     _conversation_id: Optional[str] = None
 
     @classmethod
@@ -33,7 +38,7 @@ class ConversationContextProvider:
         return cls._instance
 
     def set_current_conversation_context(
-        self, span_context: Optional[SpanContext], conversation_id: Optional[str] = None
+        self, span_context: Optional["SpanContext"], conversation_id: Optional[str] = None
     ):
         """Set the current conversation context.
 
@@ -53,7 +58,7 @@ class ConversationContextProvider:
         else:
             self._current_conversation_context = None
 
-    def get_current_conversation_context(self) -> Optional[Context]:
+    def get_current_conversation_context(self) -> Optional["Context"]:
         """Get the OpenTelemetry context for the current conversation.
 
         Returns:
@@ -79,7 +84,7 @@ class ConversationContextProvider:
 
 
 # Create a simple helper function to get the current conversation context
-def get_current_conversation_context() -> Optional[Context]:
+def get_current_conversation_context() -> Optional["Context"]:
     """Get the OpenTelemetry context for the current conversation.
 
     Returns:
