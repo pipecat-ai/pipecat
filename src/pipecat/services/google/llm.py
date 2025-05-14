@@ -508,7 +508,7 @@ class GoogleLLMService(LLMService):
         try:
             logger.debug(
                 # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
-                f"{self}: Generating chat {context.get_messages_for_logging()}"
+                f"{self}: Generating chat [{context.get_messages_for_logging()}]"
             )
 
             messages = context.messages
