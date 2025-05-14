@@ -4,7 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+# Import types for type checking only
+if TYPE_CHECKING:
+    from opentelemetry.context import Context
+    from opentelemetry.trace import SpanContext
 
 from pipecat.utils.tracing.setup import is_tracing_available
 
@@ -21,7 +26,7 @@ class TurnContextProvider:
     """
 
     _instance = None
-    _current_turn_context: Optional[Context] = None
+    _current_turn_context: Optional["Context"] = None
 
     @classmethod
     def get_instance(cls):
@@ -30,7 +35,7 @@ class TurnContextProvider:
             cls._instance = TurnContextProvider()
         return cls._instance
 
-    def set_current_turn_context(self, span_context: Optional[SpanContext]):
+    def set_current_turn_context(self, span_context: Optional["SpanContext"]):
         """Set the current turn context.
 
         Args:
@@ -46,7 +51,7 @@ class TurnContextProvider:
         else:
             self._current_turn_context = None
 
-    def get_current_turn_context(self) -> Optional[Context]:
+    def get_current_turn_context(self) -> Optional["Context"]:
         """Get the OpenTelemetry context for the current turn.
 
         Returns:
@@ -56,7 +61,7 @@ class TurnContextProvider:
 
 
 # Create a simple helper function to get the current turn context
-def get_current_turn_context() -> Optional[Context]:
+def get_current_turn_context() -> Optional["Context"]:
     """Get the OpenTelemetry context for the current turn.
 
     Returns:
