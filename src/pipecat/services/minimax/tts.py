@@ -1,26 +1,36 @@
-from typing import AsyncGenerator, Optional
-import aiohttp
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import json
+import time
+from typing import AsyncGenerator, Optional
+
+import aiohttp
 from loguru import logger
 from pydantic import BaseModel
-import time
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     ErrorFrame,
     Frame,
+    StartFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
 from pipecat.services.ai_services import TTSService
-from pipecat.transcriptions.language import Language
 
-class HailuoHttpTTSService(TTSService):
+
+class MiniMaxHttpTTSService(TTSService):
     class InputParams(BaseModel):
         speed: Optional[float] = 1.0
         volume: Optional[float] = 1.0
         pitch: Optional[float] = 0
-        
+
     def __init__(
         self,
         *,
@@ -33,12 +43,12 @@ class HailuoHttpTTSService(TTSService):
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
-        
+
         self._api_key = api_key
         self._group_id = group_id
         self._base_url = f"https://api.minimaxi.chat/v1/t2a_v2?GroupId={group_id}"
         self._session = None
-        
+
         self._settings = {
             "model": model,
             "stream": True,
@@ -46,14 +56,14 @@ class HailuoHttpTTSService(TTSService):
                 "voice_id": voice_id,
                 "speed": params.speed,
                 "vol": params.volume,
-                "pitch": params.pitch
+                "pitch": params.pitch,
             },
             "audio_setting": {
                 "sample_rate": sample_rate,
                 "bitrate": 128000,
                 "format": "pcm",
-                "channel": 1
-            }
+                "channel": 1,
+            },
         }
 
     def can_generate_metrics(self) -> bool:
@@ -68,24 +78,24 @@ class HailuoHttpTTSService(TTSService):
             await self._session.close()
             self._session = None
 
-    async def start(self, frame: Frame):
+    async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._init_session()
 
-    async def stop(self, frame: Frame):
+    async def stop(self, frame: EndFrame):
         await super().stop(frame)
         await self._close_session()
 
-    async def cancel(self, frame: Frame):
+    async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._close_session()
 
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         text = text.strip()
-        if not text or text in ['"', "'", ']', '[']:
+        if not text or text in ['"', "'", "]", "["]:
             logger.debug(f"Skipping invalid text for TTS: [{text}]")
             return
-            
+
         logger.debug(f"Generating TTS: [{text}]")
         start_time = time.time()
 
@@ -95,9 +105,9 @@ class HailuoHttpTTSService(TTSService):
             yield TTSStartedFrame()
 
             headers = {
-                'accept': 'application/json, text/plain, */*',
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {self._api_key}'
+                "accept": "application/json, text/plain, */*",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self._api_key}",
             }
 
             payload = {
@@ -105,13 +115,11 @@ class HailuoHttpTTSService(TTSService):
                 "text": text,
                 "stream": True,
                 "voice_setting": self._settings["voice_setting"],
-                "audio_setting": self._settings["audio_setting"]
+                "audio_setting": self._settings["audio_setting"],
             }
 
             async with self._session.post(
-                self._base_url,
-                headers=headers,
-                json=payload
+                self._base_url, headers=headers, json=payload
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
@@ -125,26 +133,26 @@ class HailuoHttpTTSService(TTSService):
                 async for chunk in response.content.iter_chunked(4096):
                     if not chunk:
                         continue
-                        
+
                     buffer.extend(chunk)
-                    
+
                     # Find complete data blocks
-                    while b'data:' in buffer:
-                        start = buffer.find(b'data:')
-                        next_start = buffer.find(b'data:', start + 5)
-                        
+                    while b"data:" in buffer:
+                        start = buffer.find(b"data:")
+                        next_start = buffer.find(b"data:", start + 5)
+
                         if next_start == -1:
                             # No next data block found, keep current data for next iteration
                             if start > 0:
                                 buffer = buffer[start:]
                             break
-                            
+
                         # Extract a complete data block
                         data_block = buffer[start:next_start]
                         buffer = buffer[next_start:]
-                        
+
                         try:
-                            data = json.loads(data_block[5:].decode('utf-8'))
+                            data = json.loads(data_block[5:].decode("utf-8"))
                             # Skip data blocks containing extra_info
                             if "extra_info" in data:
                                 logger.debug("Received final chunk with extra info")
@@ -162,18 +170,20 @@ class HailuoHttpTTSService(TTSService):
                             CHUNK_SIZE = 4096  # 4KB per chunk
                             for i in range(0, len(audio_data), CHUNK_SIZE * 2):  # *2 for hex string
                                 # Split hex string
-                                hex_chunk = audio_data[i:i + CHUNK_SIZE * 2]
+                                hex_chunk = audio_data[i : i + CHUNK_SIZE * 2]
                                 if not hex_chunk:
                                     continue
-                                    
+
                                 try:
                                     # Convert this chunk of data
                                     audio_chunk = bytes.fromhex(hex_chunk)
                                     if audio_chunk:
                                         yield TTSAudioRawFrame(
                                             audio=audio_chunk,
-                                            sample_rate=self._settings["audio_setting"]["sample_rate"],
-                                            num_channels=self._settings["audio_setting"]["channel"]
+                                            sample_rate=self._settings["audio_setting"][
+                                                "sample_rate"
+                                            ],
+                                            num_channels=self._settings["audio_setting"]["channel"],
                                         )
                                 except ValueError as e:
                                     logger.error(f"Error converting hex to binary: {e}")
@@ -184,7 +194,7 @@ class HailuoHttpTTSService(TTSService):
                             continue
 
             yield TTSStoppedFrame()
-            
+
             total_time = time.time() - start_time
             logger.debug(f"Total TTS processing time: {total_time:.4f}s for {len(text)} chars")
 
