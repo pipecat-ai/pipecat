@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added additional languages to `LmntTTSService`. Languages include: `hi`, `id`,
+  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`. 
+
+- Added a `model` parameter to the `LmntTTSService` constructor, allowing
+  switching between LMNT models.
+
 - Added `MiniMaxHttpTTSService`, which implements MiniMax's T2A API for TTS.
   Learn more: https://www.minimax.io/platform_overview
 
