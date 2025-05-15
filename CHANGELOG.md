@@ -9,11 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `MiniMaxHttpTTSService`, which implements MiniMax's T2A API for TTS.
+  Learn more: https://www.minimax.io/platform_overview
+
 - A new function `FrameProcessor.setup()` has been added to allow setting up
   frame processors before receiving a `StartFrame`. This is what's happening
   internally: `FrameProcessor.setup()` is called, `StartFrame` is pushed from
-  the beginning of the pipeline, your regular pipeline operations, `EndFrame` or
-  `CancelFrame` are pushed from the beginning of the pipeline and finally
+  the beginning of the pipeline, your regular pipeline operations, `EndFrame`
+  or `CancelFrame` are pushed from the beginning of the pipeline and finally
   `FrameProcessor.cleanup()` is called.
 
 - Added support for OpenTelemetry tracing in Pipecat. This initial
@@ -55,12 +58,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Added foundation example `07y-minimax-http.py` to show how to use the
+  `MiniMaxHttpTTSService`.
+
 - Added an `open-telemetry-tracing` example, showing how to setup tracing. The
   example also includes Jaeger as an open source OpenTelemetry client to review
   traces from the example runs.
 
 - Added foundational example `29-turn-tracking-observer.py` to show how to use
-  the `TurnTrackingObserver.
+  the `TurnTrackingObserver`.
 
 ## [0.0.67] - 2025-05-07
 
