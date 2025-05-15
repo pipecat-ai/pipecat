@@ -53,6 +53,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GoogleLLMService` has been updated to use `google-genai` instead of the
   deprecated `google-generativeai`.
 
+### Removed
+
+- Removed `SileroVAD` frame processor, just use `SileroVADAnalyzer`
+  instead. Also removed, `07a-interruptible-vad.py` example.
+
 ### Other
 
 - Added an `open-telemetry-tracing` example, showing how to setup tracing. The
