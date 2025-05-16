@@ -63,6 +63,7 @@ from pipecat.utils.time import time_now_iso8601
 
 from . import events
 from .audio_transcriber import AudioTranscriber
+from .file_api import GeminiFileAPI
 
 try:
     import websockets
@@ -187,6 +188,29 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                     system_instruction += str(content)
         return system_instruction
 
+    def add_file_reference(self, file_uri: str, mime_type: str, text: Optional[str] = None):
+        """Add a file reference to the context.
+        
+        This adds a user message with a file reference that will be sent during context initialization.
+        
+        Args:
+            file_uri: URI of the uploaded file
+            mime_type: MIME type of the file
+            text: Optional text prompt to accompany the file
+        """
+        # Create parts list with file reference
+        parts = []
+        if text:
+            parts.append({"type": "text", "text": text})
+        
+        # Add file reference part
+        parts.append({"type": "file_data", "file_data": {"mime_type": mime_type, "file_uri": file_uri}})
+        
+        # Add to messages
+        message = {"role": "user", "content": parts}
+        self.messages.append(message)
+        logger.info(f"Added file reference to context: {file_uri}")
+        
     def get_messages_for_initializing_history(self):
         messages = []
         for item in self.messages:
@@ -206,6 +230,14 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                 for part in content:
                     if part.get("type") == "text":
                         parts.append({"text": part.get("text")})
+                    elif part.get("type") == "file_data":
+                        file_data = part.get("file_data", {})
+                        parts.append({
+                            "fileData": {
+                                "mimeType": file_data.get("mime_type"),
+                                "fileUri": file_data.get("file_uri")
+                            }
+                        })
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
@@ -305,6 +337,62 @@ class GeminiMultimodalLiveLLMService(LLMService):
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
+    """Gemini Live LLM Service with multimodal capabilities including File API support.
+    
+    This service implements the Gemini Multimodal Live API with support for:
+    - Audio input and output
+    - Image/video input
+    - File API (upload, reference, and management)
+    - Tools/function calling
+    
+    Example usage of File API:
+    ```python
+    # Initialize the service
+    gemini_service = GeminiMultimodalLiveLLMService(api_key="YOUR_API_KEY")
+    
+    # Upload a file from the client
+    file_path = "/path/to/user_uploaded_file.pdf"
+    file_info = await gemini_service.file_api.upload_file(file_path)
+    
+    # Get file URI and mime type from response
+    file_uri = file_info["file"]["uri"]
+    mime_type = "application/pdf"  # Set appropriate MIME type
+    
+    # When starting a new bot session:
+    # 1. Initialize the context
+    context = GeminiMultimodalLiveContext()
+    
+    # 2. Add file reference to context BEFORE starting the conversation
+    context.add_file_reference(
+        file_uri=file_uri,
+        mime_type=mime_type,
+        text="Please analyze this document"
+    )
+    
+    # 3. Now set the context to start the conversation with file reference included
+    await gemini_service.set_context(context)
+    
+    # Gemini now has access to the file reference in its context window
+    # The file URI remains valid for 48 hours before Google deletes it
+    
+    # Optional: List all files for this user
+    files = await gemini_service.file_api.list_files()
+    
+    # Optional: Get metadata for a specific file
+    file_metadata = await gemini_service.file_api.get_file(file_info["file"]["name"])
+    
+    # Optional: Delete a file when no longer needed
+    await gemini_service.file_api.delete_file(file_info["file"]["name"])
+    ```
+    
+    Notes:
+    - Files are stored for 48 hours on Google's servers
+    - Maximum file size is 2GB
+    - Total storage per project is 20GB
+    - File references should be added to the context BEFORE starting the conversation
+    - The same file reference can be reused for multiple sessions within the 48-hour window
+    """
+
     def __init__(
         self,
         *,
@@ -319,6 +407,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         transcribe_user_audio: bool = False,
         params: InputParams = InputParams(),
         inference_on_context_initialization: bool = True,
+        file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
@@ -378,6 +467,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
             else {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
+        
+        # Initialize the File API client
+        self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -776,7 +868,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._needs_turn_complete_message = True
 
     async def _create_single_response(self, messages_list):
-        # refactor to combine this logic with same logic in GeminiMultimodalLiveContext
+        # Refactor to combine this logic with same logic in GeminiMultimodalLiveContext
         messages = []
         for item in messages_list:
             role = item.get("role")
@@ -795,6 +887,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 for part in content:
                     if part.get("type") == "text":
                         parts.append({"text": part.get("text")})
+                    elif part.get("type") == "file_data":
+                        file_data = part.get("file_data", {})
+                        parts.append({
+                            "fileData": {
+                                "mimeType": file_data.get("mime_type"),
+                                "fileUri": file_data.get("file_uri")
+                            }
+                        })
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
