@@ -7,6 +7,8 @@ import argparse
 import asyncio
 import os
 import sys
+import time
+import asyncio
 
 from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
@@ -95,12 +97,58 @@ class SummaryFinished(FrameProcessor):
 
         await self.push_frame(frame, direction)
 
+# ------------ SILENCE DETECTION ------------
+class SilenceDetectionProcessor(FrameProcessor):
+    """Detects user silence, plays a TTS prompt after 10 seconds, and ends call after 3 unanswered prompts."""
 
+    def __init__(self, tts_service, stats, prompt="Are you still there?", silence_seconds=10, max_prompts=3):
+        super().__init__()
+        self.tts_service = tts_service
+        self.prompt = prompt
+        self.silence_seconds = silence_seconds
+        self.max_prompts = max_prompts
+        self.last_speech_time = time.monotonic()
+        self.silence_task = None
+        self.unanswered_prompts = 0
+        self.awaiting_response = False
+        self.stats = stats  # <-- pass stats dict
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if direction == FrameDirection.DOWNSTREAM and isinstance(frame, TranscriptionFrame):
+            if frame.text.strip():
+                self.last_speech_time = time.monotonic()
+                self.unanswered_prompts = 0
+                self.awaiting_response = False
+
+        if self.silence_task is None or self.silence_task.done():
+            self.silence_task = asyncio.create_task(self.check_silence())
+
+        await self.push_frame(frame, direction)
+
+    async def check_silence(self):
+        await asyncio.sleep(self.silence_seconds)
+        now = time.monotonic()
+        if now - self.last_speech_time >= self.silence_seconds and not self.awaiting_response:
+            await self.tts_service.speak(self.prompt)
+            self.unanswered_prompts += 1
+            self.awaiting_response = True
+            self.last_speech_time = time.monotonic()
+            self.stats["silence_events"] += 1  # <-- increment silence event count
+            if self.unanswered_prompts >= self.max_prompts:
+                await self.push_frame(EndTaskFrame(), FrameDirection.DOWNSTREAM)
 async def main(
     room_url: str,
     token: str,
     body: dict,
 ):
+    # --- Stats tracking ---
+    stats = {
+        "start_time": None,
+        "end_time": None,
+        "silence_events": 0,
+    }    
     # ------------ CONFIGURATION AND SETUP ------------
 
     # Create a routing manager using the provided body
@@ -301,6 +349,7 @@ async def main(
     context = OpenAILLMContext(messages, tools)
     context_aggregator = llm.create_context_aggregator(context)
 
+
     # ------------ PIPELINE SETUP ------------
 
     # Use the session manager's references
@@ -308,6 +357,8 @@ async def main(
     transcription_modifier = TranscriptionModifierProcessor(
         session_manager.get_session_id_ref("operator")
     )
+    silence_detector = SilenceDetectionProcessor(tts, stats, prompt="Are you still there?", silence_seconds=10)
+
 
     # Define function to determine if bot should speak
     async def should_speak(self) -> bool:
@@ -322,6 +373,7 @@ async def main(
         [
             transport.input(),  # Transport user input
             transcription_modifier,  # Prepends operator transcription with [OPERATOR]
+            silence_detector,
             context_aggregator.user(),  # User responses
             FunctionFilter(should_speak),
             llm,
@@ -446,7 +498,21 @@ async def main(
     # ------------ RUN PIPELINE ------------
 
     runner = PipelineRunner()
-    await runner.run(task)
+
+    # Record start time
+    stats["start_time"] = time.time()
+
+    try:
+        await runner.run(task)
+    finally:
+        # Record end time
+        stats["end_time"] = time.time()
+        duration = stats["end_time"] - stats["start_time"]
+        logger.info("=== POST-CALL SUMMARY ===")
+        logger.info(f"Call duration: {duration:.1f} seconds")
+        logger.info(f"Silence events: {stats['silence_events']}")
+        # Add more stats as needed
+
 
 
 if __name__ == "__main__":
