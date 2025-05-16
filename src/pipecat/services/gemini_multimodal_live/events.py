@@ -120,6 +120,7 @@ class Setup(BaseModel):
     system_instruction: Optional[SystemInstruction] = None
     tools: Optional[List[dict]] = None
     generation_config: Optional[dict] = None
+    input_audio_transcription: Optional[AudioTranscriptionConfig] = None
     output_audio_transcription: Optional[AudioTranscriptionConfig] = None
     realtime_input_config: Optional[RealtimeInputConfig] = None
 
@@ -167,6 +168,7 @@ class ServerContent(BaseModel):
     modelTurn: Optional[ModelTurn] = None
     interrupted: Optional[bool] = None
     turnComplete: Optional[bool] = None
+    inputTranscription: Optional[BidiGenerateContentTranscription] = None
     outputTranscription: Optional[BidiGenerateContentTranscription] = None
 
 
