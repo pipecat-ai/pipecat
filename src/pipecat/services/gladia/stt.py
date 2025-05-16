@@ -408,9 +408,6 @@ class GladiaSTTService(STTService):
                     language = utterance["language"]
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
-                    # logger.info(
-                    #     f"""confidence: {confidence} is_final: {is_final} transcript: {transcript}"""
-                    # )
                     if confidence >= self._confidence and is_final:
                         if self.vad_enabled:
                             await self.push_frame(UserStartedSpeakingFrame())

@@ -16,6 +16,8 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.stt_service import STTService
@@ -47,10 +49,11 @@ class AzureSTTService(STTService):
         api_key: str,
         region: str,
         language_code: Optional[str] = (
-            "en-US"  #FIXME: DEPRECATE THIS: necessary for compatibility with languages supported by azure but not by other service
+            "en-US"  # FIXME: DEPRECATE THIS: necessary for compatibility with languages supported by azure but not by other service
         ),
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
+        vad_enabled: bool = False,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -69,6 +72,7 @@ class AzureSTTService(STTService):
             "language": language_to_azure_language(language),
             "sample_rate": sample_rate,
         }
+        self.vad_enabled = vad_enabled
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -125,16 +129,30 @@ class AzureSTTService(STTService):
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
+    async def frame_dispatcher(self, frame, frame_type):
+        if frame_type == "final":
+            if self.vad_enabled:
+                await self.push_frame(UserStartedSpeakingFrame())
+            await self.push_frame(frame)
+            if self.vad_enabled:
+                await self.push_frame(UserStoppedSpeakingFrame())
+        else:
+            await self.push_frame(frame)
+
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             language = getattr(event.result, "language", None) or self._settings.get("language")
             frame = TranscriptionFrame(event.result.text, "", time_now_iso8601(), language)
             asyncio.run_coroutine_threadsafe(
+                self.frame_dispatcher(frame, "final"), self.get_event_loop()
+            )
+            asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
             )
-            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
 
     def _on_handle_recognizing(self, event):
         if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
             frame = InterimTranscriptionFrame(event.result.text, "", time_now_iso8601())
-            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+            asyncio.run_coroutine_threadsafe(
+                self.frame_dispatcher(frame, "interim"), self.get_event_loop()
+            )
