@@ -301,6 +301,32 @@ class InputParams(BaseModel):
 
 
 class GeminiMultimodalLiveLLMService(LLMService):
+    """Provides access to Google's Gemini Multimodal Live API.
+
+    This service enables real-time conversations with Gemini, supporting both
+    text and audio modalities. It handles voice transcription, streaming audio
+    responses, and tool usage.
+
+    Args:
+        api_key (str): Google AI API key
+        base_url (str, optional): API endpoint base URL. Defaults to
+            "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent".
+        model (str, optional): Model identifier to use. Defaults to
+            "models/gemini-2.0-flash-live-001".
+        voice_id (str, optional): TTS voice identifier. Defaults to "Charon".
+        start_audio_paused (bool, optional): Whether to start with audio input paused.
+            Defaults to False.
+        start_video_paused (bool, optional): Whether to start with video input paused.
+            Defaults to False.
+        system_instruction (str, optional): System prompt for the model. Defaults to None.
+        tools (Union[List[dict], ToolsSchema], optional): Tools/functions available to the model.
+            Defaults to None.
+        params (InputParams, optional): Configuration parameters for the model.
+            Defaults to InputParams().
+        inference_on_context_initialization (bool, optional): Whether to generate a response
+            when context is first set. Defaults to True.
+    """
+
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
@@ -859,7 +885,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             )
 
     async def _handle_evt_turn_complete(self, evt):
-        print(f"GeminiMultimodalLiveLLMService: _handle_evt_turn_complete: {evt}")
         self._bot_is_speaking = False
         text = self._bot_text_buffer
         self._bot_text_buffer = ""
