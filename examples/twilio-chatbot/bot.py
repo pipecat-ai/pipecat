@@ -24,7 +24,7 @@ from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.waves.tts import WavesHttpTTSService
+from pipecat.services.waves.tts import WavesSSETTSService
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -83,9 +83,14 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     #     push_silence_after_stop=testing,
     # )
 
-    tts = WavesHttpTTSService(
+    # tts = WavesHttpTTSService(
+    #     api_key=os.getenv("WAVES_API_KEY"),
+    #     voice_id="deepika",
+    # )
+
+    tts = WavesSSETTSService(
         api_key=os.getenv("WAVES_API_KEY"),
-        voice_id="deepika",
+        voice_id="nyah",
     )
 
     messages = [
