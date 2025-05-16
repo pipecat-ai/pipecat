@@ -4,12 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
+import argparse
 import os
-import sys
 
 import aiohttp
-from daily_runner import configure
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -22,25 +20,23 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.tavus.video import TavusVideoService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
-
-async def main():
+async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+    logger.info(f"Starting bot")
     async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
-
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Pipecat bot",
-            DailyParams(
-                audio_out_enabled=True,
+        transport = SmallWebRTCTransport(
+            webrtc_connection=webrtc_connection,
+            params=TransportParams(
                 audio_in_enabled=True,
+                audio_out_enabled=True,
+                video_out_enabled=True,
+                video_out_is_live=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
         )
@@ -97,14 +93,20 @@ async def main():
             ),
         )
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, client):
+            logger.info(f"Client connected")
             # Kick off the conversation.
             messages.append({"role": "system", "content": "Please introduce yourself to the user."})
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        @transport.event_handler("on_participant_left")
-        async def on_participant_left(transport, participant, reason):
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, client):
+            logger.info(f"Client disconnected")
+
+        @transport.event_handler("on_client_closed")
+        async def on_client_closed(transport, client):
+            logger.info(f"Client closed connection")
             await task.cancel()
 
         runner = PipelineRunner()
@@ -113,4 +115,6 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    from run import main
+
+    main()

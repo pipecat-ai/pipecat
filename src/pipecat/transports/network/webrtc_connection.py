@@ -144,6 +144,7 @@ class SmallWebRTCConnection(BaseObject):
         self._renegotiation_in_progress = False
         self._last_received_time = None
         self._message_queue = []
+        self._pending_app_messages = []
 
     def _setup_listeners(self):
         @self._pc.on("datachannel")
@@ -170,7 +171,11 @@ class SmallWebRTCConnection(BaseObject):
                         if json_message["type"] == SIGNALLING_TYPE and json_message.get("message"):
                             self._handle_signalling_message(json_message["message"])
                         else:
-                            await self._call_event_handler("app-message", json_message)
+                            if self.is_connected():
+                                await self._call_event_handler("app-message", json_message)
+                            else:
+                                logger.debug("Client not connected. Queuing app-message.")
+                                self._pending_app_messages.append(json_message)
                 except Exception as e:
                     logger.exception(f"Error parsing JSON message {message}, {e}")
 
@@ -225,6 +230,9 @@ class SmallWebRTCConnection(BaseObject):
         # If we already connected, trigger again the connected event
         if self.is_connected():
             await self._call_event_handler("connected")
+            logger.debug("Flushing pending app-messages")
+            for message in self._pending_app_messages:
+                await self._call_event_handler("app-message", message)
             # We are renegotiating here, because likely we have loose the first video frames
             # and aiortc does not handle that pretty well.
             video_input_track = self.video_input_track()
@@ -293,6 +301,7 @@ class SmallWebRTCConnection(BaseObject):
         if self._pc:
             await self._pc.close()
         self._message_queue.clear()
+        self._pending_app_messages.clear()
         self._track_map = {}
 
     def get_answer(self):
