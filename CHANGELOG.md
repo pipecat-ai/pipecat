@@ -53,10 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `GeminiMultimodalLiveLLMService` now uses the user transcription provided by
+  Gemini Live.
+
 - `GoogleLLMService` has been updated to use `google-genai` instead of the
   deprecated `google-generativeai`.
 
 ### Removed
+
+- Since `GeminiMultimodalLiveLLMService` now transcribes it's own audio, the
+  `transcribe_user_audio` arg has been removed. Audio is now transcribed
+  automatically.
 
 - Removed `SileroVAD` frame processor, just use `SileroVADAnalyzer`
   instead. Also removed, `07a-interruptible-vad.py` example.
