@@ -663,8 +663,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_setup_complete(evt)
             elif evt.serverContent and evt.serverContent.modelTurn:
                 await self._handle_evt_model_turn(evt)
-            elif evt.serverContent and evt.serverContent.turnComplete:
+            elif evt.serverContent and evt.serverContent.turnComplete and evt.usageMetadata:
                 await self._handle_evt_turn_complete(evt)
+                await self._handle_evt_usage_metadata(evt)
             elif evt.serverContent and evt.serverContent.inputTranscription:
                 await self._handle_evt_input_transcription(evt)
             elif evt.serverContent and evt.serverContent.outputTranscription:
@@ -858,6 +859,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             )
 
     async def _handle_evt_turn_complete(self, evt):
+        print(f"GeminiMultimodalLiveLLMService: _handle_evt_turn_complete: {evt}")
         self._bot_is_speaking = False
         text = self._bot_text_buffer
         self._bot_text_buffer = ""
@@ -926,6 +928,19 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
+
+    async def _handle_evt_usage_metadata(self, evt):
+        if not evt.usageMetadata:
+            return
+
+        usage = evt.usageMetadata
+
+        tokens = LLMTokenUsage(
+            prompt_tokens=usage.promptTokenCount,
+            completion_tokens=usage.responseTokenCount,
+            total_tokens=usage.totalTokenCount,
+        )
+        await self.start_llm_usage_metrics(tokens)
 
     def create_context_aggregator(
         self,

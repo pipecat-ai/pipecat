@@ -182,10 +182,43 @@ class ToolCall(BaseModel):
     functionCalls: List[FunctionCall]
 
 
+class Modality(str, Enum):
+    """Modality types in token counts."""
+
+    UNSPECIFIED = "MODALITY_UNSPECIFIED"
+    TEXT = "TEXT"
+    IMAGE = "IMAGE"
+    AUDIO = "AUDIO"
+    VIDEO = "VIDEO"
+
+
+class ModalityTokenCount(BaseModel):
+    """Token count for a specific modality."""
+
+    modality: Modality
+    tokenCount: int
+
+
+class UsageMetadata(BaseModel):
+    """Usage metadata about the response."""
+
+    promptTokenCount: Optional[int] = None
+    cachedContentTokenCount: Optional[int] = None
+    responseTokenCount: Optional[int] = None
+    toolUsePromptTokenCount: Optional[int] = None
+    thoughtsTokenCount: Optional[int] = None
+    totalTokenCount: Optional[int] = None
+    promptTokensDetails: Optional[List[ModalityTokenCount]] = None
+    cacheTokensDetails: Optional[List[ModalityTokenCount]] = None
+    responseTokensDetails: Optional[List[ModalityTokenCount]] = None
+    toolUsePromptTokensDetails: Optional[List[ModalityTokenCount]] = None
+
+
 class ServerEvent(BaseModel):
     setupComplete: Optional[SetupComplete] = None
     serverContent: Optional[ServerContent] = None
     toolCall: Optional[ToolCall] = None
+    usageMetadata: Optional[UsageMetadata] = None
 
 
 def parse_server_event(str):
