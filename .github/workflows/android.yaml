@@ -6,11 +6,13 @@ on:
       - main
     paths:
       - "examples/simple-chatbot/client/android/**"
+      - "examples/p2p-webrtc/video-transform/client/android/**"
   pull_request:
     branches:
       - "**"
     paths:
       - "examples/simple-chatbot/client/android/**"
+      - "examples/p2p-webrtc/video-transform/client/android/**"
   workflow_dispatch:
     inputs:
       sdk_git_ref:
@@ -23,7 +25,7 @@ concurrency:
 
 jobs:
   sdk:
-    name: "Simple chatbot demo"
+    name: "Demo apps"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -37,12 +39,22 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Build demo app
+      - name: "Example app: Simple Chatbot"
         working-directory: examples/simple-chatbot/client/android
         run: ./gradlew :simple-chatbot-client:assembleDebug
 
-      - name: Upload demo APK
+      - name: Upload Simple Chatbot APK
         uses: actions/upload-artifact@v4
         with:
           name: Simple Chatbot Android Client
           path: examples/simple-chatbot/client/android/simple-chatbot-client/build/outputs/apk/debug/simple-chatbot-client-debug.apk
+
+      - name: "Example app: Small WebRTC Client"
+        working-directory: examples/p2p-webrtc/video-transform/client/android
+        run: ./gradlew :small-webrtc-client:assembleDebug
+
+      - name: Upload Small WebRTC APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Small WebRTC Android Client
+          path: examples/p2p-webrtc/video-transform/client/android/small-webrtc-client/build/outputs/apk/debug/small-webrtc-client-debug.apk
