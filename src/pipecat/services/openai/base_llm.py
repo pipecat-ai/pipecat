@@ -240,6 +240,13 @@ class BaseOpenAILLMService(LLMService):
             elif chunk.choices[0].delta.content:
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
 
+            # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
+            # we need to get LLMTextFrame for the transcript
+            elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
+                "transcript"
+            ):
+                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
