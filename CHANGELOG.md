@@ -53,8 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `GeminiMultimodalLiveLLMService` now uses the user transcription provided by
-  Gemini Live.
+- `GeminiMultimodalLiveLLMService` now uses the user transcription and usage
+  metrics provided by Gemini Live.
 
 - `GoogleLLMService` has been updated to use `google-genai` instead of the
   deprecated `google-generativeai`.
