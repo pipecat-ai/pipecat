@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added additional languages to `LmntTTSService`. Languages include: `hi`, `id`,
-  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`. 
+  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
 
 - Added a `model` parameter to the `LmntTTSService` constructor, allowing
   switching between LMNT models.
@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow passing observers to `run_test()` while running unit tests.
 
 ### Changed
+
+- `DailyTransport` now captures audio from individual participants instead of
+  the whole room. This allows identifying audio frames per participant.
 
 - `GoogleLLMService` has been updated to use `google-genai` instead of the
   deprecated `google-generativeai`.
