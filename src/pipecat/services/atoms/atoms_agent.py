@@ -89,6 +89,26 @@ logger = logging.getLogger(__name__)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
+class TestAgent(FrameProcessor):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        logger.debug(f"Processing frame in test agent: {frame}")
+        if isinstance(frame, LLMMessagesFrame):
+            human_input = self._get_user_input_from_frame_message(frame)
+            await self.generate_response(human_input)
+        else:
+            await self.push_frame(frame, direction)
+
+    async def generate_response(self, human_input):
+        logger.debug(f"Generating response in test agent: {human_input}")
+        await self.push_frame(LLMFullResponseStartFrame())
+        await self.push_frame(LLMTextFrame(text="Hello, how can I help you today?"))
+        await self.push_frame(LLMFullResponseEndFrame())
+
+
 class AtomsAgent(FrameProcessor):
     """Implementation of the Atoms conversational agent."""
 
