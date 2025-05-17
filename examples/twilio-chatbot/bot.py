@@ -22,6 +22,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
+from pipecat.services.atoms.atoms_agent import CallData, initialize_conversational_agent
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.waves.tts import WavesSSETTSService
@@ -88,9 +89,21 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     #     voice_id="deepika",
     # )
 
-    tts = WavesSSETTSService(
-        api_key=os.getenv("WAVES_API_KEY"),
-        voice_id="nyah",
+    # tts = WavesSSETTSService(
+    #     api_key=os.getenv("WAVES_API_KEY"),
+    #     voice_id="nyah",
+    # )
+
+    agent = await initialize_conversational_agent(
+        agent_id="68186085cffd8fb97d1f84ad",
+        call_id="CALL-1747224604782-94a54d",
+        call_data=CallData(
+            variables={
+                "call_id": "CALL-1747224604782-94a54d",
+                "user_number": "+918815141212",
+                "agent_number": "+918815141212",
+            }
+        ),
     )
 
     messages = [
@@ -111,12 +124,12 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         [
             transport.input(),  # Websocket input from client
             stt,  # Speech-To-Text
-            context_aggregator.user(),
+            # context_aggregator.user(),
             llm,  # LLM
-            tts,  # Text-To-Speech
+            agent,  # Text-To-Speech
             transport.output(),  # Websocket output to client
             audiobuffer,  # Used to buffer the audio in the pipeline
-            context_aggregator.assistant(),
+            # context_aggregator.assistant(),
         ]
     )
 
