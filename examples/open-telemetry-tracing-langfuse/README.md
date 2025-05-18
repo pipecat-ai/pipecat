@@ -131,7 +131,7 @@ The tracing system consists of:
 - **No Traces in Langfuse**: Ensure that your credentials are correct and follow this [troubleshooting guide](https://langfuse.com/faq/all/missing-traces)
 - **Debugging Traces**: Set `OTEL_CONSOLE_EXPORT=true` to print traces to the console for debugging
 - **Missing Metrics**: Check that `enable_metrics=True` in PipelineParams
-- **Connection Errors**: Verify network connectivity to the Jaeger container
+- **Connection Errors**: Verify network connectivity to Langfuse
 - **Exporter Issues**: Try the Console exporter (`OTEL_CONSOLE_EXPORT=true`) to verify tracing works
 
 ## References
