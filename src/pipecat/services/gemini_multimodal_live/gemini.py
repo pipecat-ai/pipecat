@@ -960,11 +960,17 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         usage = evt.usageMetadata
 
+        # Ensure we have valid integers for all token counts
+        prompt_tokens = usage.promptTokenCount or 0
+        completion_tokens = usage.responseTokenCount or 0
+        total_tokens = usage.totalTokenCount or (prompt_tokens + completion_tokens)
+
         tokens = LLMTokenUsage(
-            prompt_tokens=usage.promptTokenCount,
-            completion_tokens=usage.responseTokenCount,
-            total_tokens=usage.totalTokenCount,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
+
         await self.start_llm_usage_metrics(tokens)
 
     def create_context_aggregator(
