@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `SileroVAD` frame processor, just use `SileroVADAnalyzer`
   instead. Also removed, `07a-interruptible-vad.py` example.
 
+### Fixed
+
+- Fixed an issue with `CartesiaTTSService` where `TTSTextFrame` messages weren't being emitted when the model was set to `sonic`. This resulted in the assistant context not being updated with assistant messages.
+
 ### Other
 
 - Added foundation example `07y-minimax-http.py` to show how to use the
