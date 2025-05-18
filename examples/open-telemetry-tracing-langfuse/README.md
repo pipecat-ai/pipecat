@@ -6,6 +6,8 @@ This is a fork of the [OpenTelemetry Tracing for Pipecat](../open-telemetry-trac
 
 Pipecat trace in Langfuse:
 
+https://github.com/user-attachments/assets/13dd7431-bf5e-42e3-8d6d-2ed84c51195d
+
 ## Features
 
 - **Hierarchical Tracing**: Track entire conversations, turns, and service calls
