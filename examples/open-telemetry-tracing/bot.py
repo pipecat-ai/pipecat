@@ -9,7 +9,7 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -35,7 +35,10 @@ IS_TRACING_ENABLED = bool(os.getenv("ENABLE_TRACING"))
 # Initialize tracing if enabled
 if IS_TRACING_ENABLED:
     # Create the exporter
-    otlp_exporter = OTLPSpanExporter()
+    otlp_exporter = OTLPSpanExporter(
+        endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+        insecure=True,
+    )
 
     # Set up tracing with the exporter
     setup_tracing(
