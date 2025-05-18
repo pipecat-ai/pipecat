@@ -147,28 +147,33 @@ class CartesiaTTSService(AudioContextWordTTSService):
     def _build_msg(
         self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
     ):
-        voice_config = {}
-        voice_config["mode"] = "id"
-        voice_config["id"] = self._voice_id
+        voice = {}
+        voice["mode"] = "id"
+        voice["id"] = self._voice_id
 
+        # __experimental_controls will be deprecated in future versions
         if self._settings["speed"] or self._settings["emotion"]:
-            voice_config["__experimental_controls"] = {}
+            voice["__experimental_controls"] = {}
             if self._settings["speed"]:
-                voice_config["__experimental_controls"]["speed"] = self._settings["speed"]
+                voice["__experimental_controls"]["speed"] = self._settings["speed"]
             if self._settings["emotion"]:
-                voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
+                voice["__experimental_controls"]["emotion"] = self._settings["emotion"]
 
         msg = {
             "transcript": text,
             "continue": continue_transcript,
             "context_id": self._context_id,
             "model_id": self.model_name,
-            "voice": voice_config,
+            "voice": voice,
             "output_format": self._settings["output_format"],
             "language": self._settings["language"],
             "add_timestamps": add_timestamps,
             "use_original_timestamps": False if self.model_name == "sonic" else True,
         }
+
+        if self._settings["speed"] in ["slow", "normal", "fast"]:
+            msg["speed"] = self._settings["speed"]
+
         return json.dumps(msg)
 
     async def start(self, frame: StartFrame):
