@@ -144,7 +144,26 @@ class PipelineTask(BaseTask):
     `LLMFullResponseEndFrame` are received within `idle_timeout_secs`.
 
        @task.event_handler("on_idle_timeout")
-       async def on_idle_timeout(task):
+       async def on_pipeline_idle_timeout(task):
+           ...
+
+    There are also events to know if a pipeline has been started, stopped, ended
+    or cancelled.
+
+       @task.event_handler("on_pipeline_started")
+       async def on_pipeline_started(task, frame: StartFrame):
+           ...
+
+       @task.event_handler("on_pipeline_stopped")
+       async def on_pipeline_stopped(task, frame: StopFrame):
+           ...
+
+       @task.event_handler("on_pipeline_ended")
+       async def on_pipeline_ended(task, frame: EndFrame):
+           ...
+
+       @task.event_handler("on_pipeline_cancelled")
+       async def on_pipeline_cancelled(task, frame: CancelFrame):
            ...
 
     Args:
@@ -264,6 +283,10 @@ class PipelineTask(BaseTask):
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
         self._register_event_handler("on_idle_timeout")
+        self._register_event_handler("on_pipeline_started")
+        self._register_event_handler("on_pipeline_stopped")
+        self._register_event_handler("on_pipeline_ended")
+        self._register_event_handler("on_pipeline_cancelled")
 
     @property
     def params(self) -> PipelineParams:
@@ -552,8 +575,16 @@ class PipelineTask(BaseTask):
             if isinstance(frame, self._reached_downstream_types):
                 await self._call_event_handler("on_frame_reached_downstream", frame)
 
-            if isinstance(frame, (EndFrame, StopFrame)):
+            if isinstance(frame, StartFrame):
+                await self._call_event_handler("on_pipeline_started", frame)
+            elif isinstance(frame, EndFrame):
+                await self._call_event_handler("on_pipeline_ended", frame)
                 self._pipeline_end_event.set()
+            elif isinstance(frame, StopFrame):
+                await self._call_event_handler("on_pipeline_stopped", frame)
+                self._pipeline_end_event.set()
+            elif isinstance(frame, CancelFrame):
+                await self._call_event_handler("on_pipeline_cancelled", frame)
             elif isinstance(frame, HeartbeatFrame):
                 await self._heartbeat_queue.put(frame)
             self._down_queue.task_done()

@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `PipelineTask` event handlers `on_pipeline_started`,
+  `on_pipeline_stopped`, `on_pipeline_ended` and `on_pipeline_cancelled`, which
+  correspond to the `StartFrame`, `StopFrame`, `EndFrame` and `CancelFrame`
+  respectively.
+
 - Added additional languages to `LmntTTSService`. Languages include: `hi`, `id`,
-  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`. 
+  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
 
 - Added a `model` parameter to the `LmntTTSService` constructor, allowing
   switching between LMNT models.

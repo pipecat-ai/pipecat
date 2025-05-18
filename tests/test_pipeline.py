@@ -8,7 +8,13 @@ import asyncio
 import time
 import unittest
 
-from pipecat.frames.frames import EndFrame, HeartbeatFrame, StartFrame, TextFrame
+from pipecat.frames.frames import (
+    EndFrame,
+    HeartbeatFrame,
+    StartFrame,
+    StopFrame,
+    TextFrame,
+)
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -95,7 +101,50 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await task.run()
         assert task.has_finished()
 
-    async def test_task_event_handlers(self):
+    async def test_task_started_ended_event_handler(self):
+        start_received = False
+        end_received = False
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline)
+        task.set_event_loop(asyncio.get_event_loop())
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame: StartFrame):
+            nonlocal start_received
+            start_received = True
+
+        @task.event_handler("on_pipeline_ended")
+        async def on_pipeline_ended(task, frame: EndFrame):
+            nonlocal end_received
+            end_received = True
+
+        await task.queue_frame(EndFrame())
+        await task.run()
+
+        assert start_received
+        assert end_received
+
+    async def test_task_stopped_event_handler(self):
+        stop_received = False
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline)
+        task.set_event_loop(asyncio.get_event_loop())
+
+        @task.event_handler("on_pipeline_stopped")
+        async def on_pipeline_ended(task, frame: StopFrame):
+            nonlocal stop_received
+            stop_received = True
+
+        await task.queue_frame(StopFrame())
+        await task.run()
+
+        assert stop_received
+
+    async def test_task_frame_reached_event_handlers(self):
         upstream_received = False
         downstream_received = False
 
