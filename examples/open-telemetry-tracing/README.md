@@ -118,6 +118,13 @@ Many cloud providers offer OpenTelemetry-compatible observability services:
 See the OpenTelemetry documentation for specific exporter configurations:
 https://opentelemetry.io/ecosystem/vendors/
 
+#### LLM Tracing and Evaluation Providers
+
+Many LLM-focused tracing and evaluation projects support OpenTelemetry, for example:
+
+- Langfuse ([integration example](../open-telemetry-tracing-langfuse/))
+- Arize Phoenix
+
 ### 5. Install Dependencies
 
 ```bash
