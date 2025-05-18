@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added additional languages to `LmntTTSService`. Languages include: `hi`, `id`,
-  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`. 
+  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
 
 - Added a `model` parameter to the `LmntTTSService` constructor, allowing
   switching between LMNT models.
@@ -89,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added foundational example `29-turn-tracking-observer.py` to show how to use
   the `TurnTrackingObserver`.
+
+- Added support for speed control in `CartesiaTTSService`. The latest sonic-2 model now supports "slow", "normal", and "fast" speed options. Note that the existing experimental_controls speed setting is maintained for backward compatibility but may be deprecated in future versions.
 
 ## [0.0.67] - 2025-05-07
 
