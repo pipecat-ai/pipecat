@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from pipecat.frames.frames import Frame, TTSAudioRawFrame, TTSStartedFrame, TTSStoppedFrame
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from groq import AsyncGroq
@@ -25,7 +26,6 @@ class GroqTTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
-        seed: Optional[int] = None
 
     GROQ_SAMPLE_RATE = 48000  # Groq TTS only supports 48kHz sample rate
 
@@ -54,11 +54,21 @@ class GroqTTSService(TTSService):
         self._voice_id = voice_id
         self._params = params
 
+        self._settings = {
+            "model": model_name,
+            "voice_id": voice_id,
+            "output_format": output_format,
+            "language": str(params.language) if params.language else "en",
+            "speed": params.speed,
+            "sample_rate": sample_rate,
+        }
+
         self._client = AsyncGroq(api_key=self._api_key)
 
     def can_generate_metrics(self) -> bool:
         return True
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
         measuring_ttfb = True

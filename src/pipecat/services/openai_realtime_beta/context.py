@@ -12,8 +12,11 @@ from loguru import logger
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
+    InterimTranscriptionFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolsFrame,
+    LLMTextFrame,
+    TranscriptionFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
@@ -136,15 +139,6 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
         }
         self.add_message(message)
 
-    def add_assistant_content_item_as_message(self, item):
-        message = {"role": "assistant", "content": []}
-        for content in item.content:
-            if content.type == "audio":
-                message["content"].append({"type": "text", "text": content.transcript})
-            else:
-                logger.error(f"Unhandled content type in assistant item: {content.type} - {item}")
-        self.add_message(message)
-
 
 class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
     async def process_frame(
@@ -170,6 +164,16 @@ class OpenAIRealtimeUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class OpenAIRealtimeAssistantContextAggregator(OpenAIAssistantContextAggregator):
+    # The LLMAssistantContextAggregator uses TextFrames to aggregate the LLM output,
+    # but the OpenAIRealtimeLLMService pushes LLMTextFrames and TTSTextFrames. We
+    # need to override this proces_frame for LLMTextFrame, so that only the TTSTextFrames
+    # are process. This ensures that the context gets only one set of messages.
+    # OpenAIRealtimeLLMService also pushes TranscriptionFrames and InterimTranscriptionFrames,
+    # so we need to ignore pushing those as well, as they're also TextFrames.
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        if not isinstance(frame, (LLMTextFrame, TranscriptionFrame, InterimTranscriptionFrame)):
+            await super().process_frame(frame, direction)
+
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
         await super().handle_function_call_result(frame)
 

@@ -58,7 +58,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
-        transcribe_user_audio=True,
         system_instruction=system_instruction,
         tools=tools,
     )

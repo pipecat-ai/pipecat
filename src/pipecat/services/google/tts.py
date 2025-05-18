@@ -8,6 +8,8 @@ import asyncio
 import json
 import os
 
+from pipecat.utils.tracing.service_decorators import traced_tts
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -318,6 +320,7 @@ class GoogleTTSService(TTSService):
 
         return ssml
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

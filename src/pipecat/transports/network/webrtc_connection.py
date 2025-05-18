@@ -7,9 +7,8 @@
 import asyncio
 import json
 import time
-from typing import Any, Literal, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
-from av.frame import Frame
 from loguru import logger
 from pydantic import BaseModel, TypeAdapter
 
@@ -24,6 +23,7 @@ try:
         RTCSessionDescription,
     )
     from aiortc.rtcrtpreceiver import RemoteStreamTrack
+    from av.frame import Frame
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
@@ -87,13 +87,21 @@ class SmallWebRTCTrack:
         return getattr(self._track, name)
 
 
+# Alias so we don't need to expose RTCIceServer
+IceServer = RTCIceServer
+
+
 class SmallWebRTCConnection(BaseObject):
-    def __init__(self, ice_servers=None):
+    def __init__(self, ice_servers: Optional[Union[List[str], List[IceServer]]] = None):
         super().__init__()
-        if ice_servers:
-            self.ice_servers = [RTCIceServer(urls=server) for server in ice_servers]
+        if not ice_servers:
+            self.ice_servers: List[IceServer] = []
+        elif all(isinstance(s, IceServer) for s in ice_servers):
+            self.ice_servers = ice_servers
+        elif all(isinstance(s, str) for s in ice_servers):
+            self.ice_servers = [IceServer(urls=s) for s in ice_servers]
         else:
-            self.ice_servers = []
+            raise TypeError("ice_servers must be either List[str] or List[RTCIceServer]")
         self._connect_invoked = False
         self._track_map = {}
         self._track_getters = {

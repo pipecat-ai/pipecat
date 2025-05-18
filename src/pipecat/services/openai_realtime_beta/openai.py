@@ -562,13 +562,11 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
 
     async def _handle_assistant_output(self, output):
-        # logger.debug(f"!!! HANDLE Assistant output: {output}")
         # We haven't seen intermixed audio and function_call items in the same response. But let's
         # try to write logic that handles that, if it does happen.
-        messages = [item for item in output if item.type == "message"]
+        # Also, the assistant output is pushed as LLMTextFrame and TTSTextFrame to be handled by
+        # the assistant context aggregator.
         function_calls = [item for item in output if item.type == "function_call"]
-        for item in messages:
-            self._context.add_assistant_content_item_as_message(item)
         await self._handle_function_call_items(function_calls)
 
     async def _handle_function_call_items(self, items):
@@ -579,15 +577,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             arguments = json.loads(item.arguments)
             if self.has_function(function_name):
                 run_llm = index == total_items - 1
-                if function_name in self._functions.keys():
-                    await self.call_function(
-                        context=self._context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
-                        arguments=arguments,
-                        run_llm=run_llm,
-                    )
-                elif None in self._functions.keys():
+                if function_name in self._functions.keys() or None in self._functions.keys():
                     await self.call_function(
                         context=self._context,
                         tool_call_id=tool_id,

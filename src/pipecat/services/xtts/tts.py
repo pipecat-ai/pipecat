@@ -20,6 +20,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 # The server below can connect to XTTS through a local running docker
 #
@@ -117,6 +118,7 @@ class XTTSService(TTSService):
                 return
             self._studio_speakers = await r.json()
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

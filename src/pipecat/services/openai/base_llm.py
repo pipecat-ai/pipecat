@@ -35,6 +35,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 
 class OpenAIUnhandledFunctionException(Exception):
@@ -176,6 +177,7 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []
@@ -237,6 +239,13 @@ class BaseOpenAILLMService(LLMService):
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
+
+            # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
+            # we need to get LLMTextFrame for the transcript
+            elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
+                "transcript"
+            ):
+                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to

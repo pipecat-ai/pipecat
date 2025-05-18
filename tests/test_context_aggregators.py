@@ -8,8 +8,6 @@ import json
 import unittest
 from typing import Any
 
-import google.ai.generativelanguage as glm
-
 from pipecat.frames.frames import (
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
@@ -39,6 +37,11 @@ from pipecat.services.anthropic.llm import (
     AnthropicAssistantContextAggregator,
     AnthropicLLMContext,
     AnthropicUserContextAggregator,
+)
+from pipecat.services.aws.llm import (
+    AWSBedrockAssistantContextAggregator,
+    AWSBedrockLLMContext,
+    AWSBedrockUserContextAggregator,
 )
 from pipecat.services.google.llm import (
     GoogleAssistantContextAggregator,
@@ -670,26 +673,6 @@ class TestLLMUserContextAggregator(BaseTestUserContextAggregator, unittest.Isola
 
 
 #
-# OpenAI
-#
-
-
-class TestOpenAIUserContextAggregator(
-    BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
-):
-    CONTEXT_CLASS = OpenAILLMContext
-    AGGREGATOR_CLASS = OpenAIUserContextAggregator
-
-
-class TestOpenAIAssistantContextAggregator(
-    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
-):
-    CONTEXT_CLASS = OpenAILLMContext
-    AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
-
-
-#
 # Anthropic
 #
 
@@ -725,6 +708,43 @@ class TestAnthropicAssistantContextAggregator(
 
 
 #
+# AWS (Bedrock)
+#
+
+
+class TestAWSBedrockUserContextAggregator(
+    BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = AWSBedrockLLMContext
+    AGGREGATOR_CLASS = AWSBedrockUserContextAggregator
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        messages = context.messages[content_index]
+        assert messages["content"][index]["text"] == content
+
+
+class TestAWSBedrockAssistantContextAggregator(
+    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = AWSBedrockLLMContext
+    AGGREGATOR_CLASS = AWSBedrockAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+
+    def check_message_multi_content(
+        self, context: OpenAILLMContext, content_index: int, index: int, content: str
+    ):
+        messages = context.messages[content_index]
+        assert messages["content"][index]["text"] == content
+
+    def check_function_call_result(self, context: OpenAILLMContext, index: int, content: Any):
+        assert context.messages[index]["content"][0]["toolResult"]["content"][0][
+            "text"
+        ] == json.dumps(content)
+
+
+#
 # Google
 #
 
@@ -736,13 +756,13 @@ class TestGoogleUserContextAggregator(
     AGGREGATOR_CLASS = GoogleUserContextAggregator
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
-        obj = glm.Content.to_dict(context.messages[index])
+        obj = context.messages[index].to_json_dict()
         assert obj["parts"][0]["text"] == content
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
     ):
-        obj = glm.Content.to_dict(context.messages[index])
+        obj = context.messages[index].to_json_dict()
         assert obj["parts"][0]["text"] == content
 
 
@@ -754,15 +774,35 @@ class TestGoogleAssistantContextAggregator(
     EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
-        obj = glm.Content.to_dict(context.messages[index])
+        obj = context.messages[index].to_json_dict()
         assert obj["parts"][0]["text"] == content
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
     ):
-        obj = glm.Content.to_dict(context.messages[index])
+        obj = context.messages[index].to_json_dict()
         assert obj["parts"][0]["text"] == content
 
     def check_function_call_result(self, context: OpenAILLMContext, index: int, content: Any):
-        obj = glm.Content.to_dict(context.messages[index])
+        obj = context.messages[index].to_json_dict()
         assert obj["parts"][0]["function_response"]["response"]["value"] == json.dumps(content)
+
+
+#
+# OpenAI
+#
+
+
+class TestOpenAIUserContextAggregator(
+    BaseTestUserContextAggregator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = OpenAILLMContext
+    AGGREGATOR_CLASS = OpenAIUserContextAggregator
+
+
+class TestOpenAIAssistantContextAggregator(
+    BaseTestAssistantContextAggreagator, unittest.IsolatedAsyncioTestCase
+):
+    CONTEXT_CLASS = OpenAILLMContext
+    AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
