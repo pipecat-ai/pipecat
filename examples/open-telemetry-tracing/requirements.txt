@@ -1,6 +1,6 @@
 fastapi
 uvicorn
 python-dotenv
-git+https://github.com/pipecat-ai/pipecat.git@main#egg=pipecat-ai[webrtc,silero,cartesia,deepgram,openai,tracing]
-git+https://github.com/pipecat-ai/small-webrtc-prebuilt.git@main#egg=pipecat-ai-small-webrtc-prebuilt
-opentelemetry-exporter-otlp-proto-http
+pipecat-ai[webrtc,silero,cartesia,deepgram,openai,tracing]
+pipecat-ai-small-webrtc-prebuilt
+opentelemetry-exporter-otlp-proto-grpc
