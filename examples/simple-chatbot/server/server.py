@@ -32,7 +32,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
+from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams, DailyRoomProperties
 
 # Load environment variables from .env file
 load_dotenv(override=True)
@@ -113,8 +113,11 @@ async def create_room_and_token() -> tuple[str, str]:
     """
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
     token = os.getenv("DAILY_SAMPLE_ROOM_TOKEN", None)
+    room_properties = DailyRoomProperties(
+        enable_recording="cloud"
+    )
     if not room_url:
-        room = await daily_helpers["rest"].create_room(DailyRoomParams())
+        room = await daily_helpers["rest"].create_room(DailyRoomParams(properties=room_properties))
         if not room.url:
             raise HTTPException(status_code=500, detail="Failed to create room")
         room_url = room.url
@@ -221,6 +224,64 @@ def get_status(pid: int):
     # Check the status of the subprocess
     status = "running" if proc[0].poll() is None else "finished"
     return JSONResponse({"bot_id": pid, "status": status})
+
+
+@app.get("/latest_recording/")
+async def get_latest_recording():
+    """Get the download link for the latest recording.
+    
+    Returns:
+        JSONResponse: The download link for the latest recording
+        
+    Raises:
+        HTTPException: If no recordings are found or if there's an error getting the access link
+    """
+    print("Server: Received request for /latest_recording/")
+    
+    # Get all recordings
+    recordings_url = f"{daily_helpers['rest'].daily_api_url}/recordings"
+    print(f"Server: Fetching recordings from {recordings_url}")
+    
+    async with daily_helpers["rest"].aiohttp_session.get(
+        recordings_url,
+        headers={"Authorization": f"Bearer {daily_helpers['rest'].daily_api_key}"}
+    ) as response:
+        if response.status != 200:
+            print(f"Server: Failed to get recordings, status {response.status}")
+            raise HTTPException(status_code=response.status, detail="Failed to get recordings")
+        
+        recordings_data = await response.json()
+        print(f"Server: Found {recordings_data.get('total_count', 0)} recordings")
+        
+    # Check if there are any recordings
+    if not recordings_data.get("data") or not recordings_data["total_count"]:
+        print("Server: No recordings found")
+        raise HTTPException(status_code=404, detail="No recordings found")
+    
+    # Find the latest recording based on start_ts
+    latest_recording = max(recordings_data["data"], key=lambda x: x["start_ts"])
+    recording_id = latest_recording["id"]
+    print(f"Server: Latest recording ID: {recording_id}")
+    
+    # Get the access link for the latest recording
+    access_link_url = f"{daily_helpers['rest'].daily_api_url}/recordings/{recording_id}/access-link"
+    print(f"Server: Fetching access link from {access_link_url}")
+    
+    async with daily_helpers["rest"].aiohttp_session.get(
+        access_link_url,
+        headers={"Authorization": f"Bearer {daily_helpers['rest'].daily_api_key}"}
+    ) as response:
+        if response.status != 200:
+            print(f"Server: Failed to get recording access link, status {response.status}")
+            raise HTTPException(status_code=response.status, detail="Failed to get recording access link")
+        
+        access_link_data = await response.json()
+        print(f"Server: Received access link data")
+    
+    # Return the download link
+    result = {"download_link": access_link_data.get("download_link", "")}
+    print(f"Server: Returning result: {result}")
+    return result
 
 
 if __name__ == "__main__":

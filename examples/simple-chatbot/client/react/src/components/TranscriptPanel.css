@@ -1,0 +1,127 @@
+.transcript-panel {
+  background-color: transparent;
+  border-radius: 12px;
+  padding: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.transcript-panel h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.transcript-panel h4 {
+  margin: 0.75rem 0 0.5rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #4b5563;
+}
+
+.transcript-container {
+  flex: 1;
+  overflow-y: auto;
+  background-color: rgba(249, 250, 251, 0.8);
+  padding: 1rem;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  max-height: 300px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.transcript-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.transcript-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.transcript-container::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 3px;
+}
+
+.transcript-message {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.user-message {
+  background-color: #eff6ff;
+  margin-left: 1.5rem;
+  border-bottom-left-radius: 4px;
+}
+
+.bot-message {
+  background-color: #f0fdf4;
+  margin-right: 1.5rem;
+  border-bottom-right-radius: 4px;
+}
+
+.message-sender {
+  font-weight: 600;
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+  color: #4b5563;
+}
+
+.message-text {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #1f2937;
+}
+
+.message-time {
+  font-size: 0.625rem;
+  color: #9ca3af;
+  text-align: right;
+  margin-top: 0.5rem;
+}
+
+.word-level-transcription {
+  background-color: #f3f4f6;
+  padding: 1rem;
+  border-radius: 12px;
+  line-height: 1.6;
+  max-height: 120px;
+  overflow-y: auto;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+.word-level-transcription::-webkit-scrollbar {
+  width: 6px;
+}
+
+.word-level-transcription::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.word-level-transcription::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 3px;
+}
+
+.highlighted-word {
+  background-color: #fef08a;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-weight: 500;
+  color: #854d0e;
+  transition: background-color 0.2s ease;
+}
+
+.word {
+  color: #4b5563;
+  padding: 2px 0;
+} 

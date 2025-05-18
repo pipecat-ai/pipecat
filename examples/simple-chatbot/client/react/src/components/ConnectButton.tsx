@@ -2,6 +2,7 @@ import {
   useRTVIClient,
   useRTVIClientTransportState,
 } from '@pipecat-ai/client-react';
+import { RTVIEvent, Participant } from '@pipecat-ai/client-js';
 
 export function ConnectButton() {
   const client = useRTVIClient();
@@ -16,7 +17,19 @@ export function ConnectButton() {
 
     try {
       if (isConnected) {
-        await client.disconnect();
+        // Manually disconnect
+        await client.disconnect(); // Simple disconnect without storing room URL
+        
+        // Create a mock participant object matching the required interface
+        const mockParticipant: Participant = {
+          id: 'bot',
+          name: 'bot',
+          local: false
+        }; // Required param for the event
+        
+        // Trigger BotDisconnected event to show recording
+        client.emit(RTVIEvent.BotDisconnected, mockParticipant); // Directly emit event without delay
+        console.log('Manually triggered BotDisconnected event after user disconnect');
       } else {
         await client.connect();
       }
