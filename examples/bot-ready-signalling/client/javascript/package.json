@@ -12,7 +12,7 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "vite": "^6.0.9"
+    "vite": "^6.3.5"
   },
   "dependencies": {
     "@daily-co/daily-js": "0.74.0"

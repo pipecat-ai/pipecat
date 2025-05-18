@@ -131,6 +131,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         await self._client.trigger_client_connected()
         if not self._receive_task:
             self._receive_task = self.create_task(self._receive_messages())
+        await self.set_transport_ready(frame)
 
     async def _stop_tasks(self):
         if self._monitor_websocket_task:
@@ -203,7 +204,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await super().start(frame)
         await self._client.setup(frame)
         await self._params.serializer.setup(frame)
-        self._send_interval = (self._audio_chunk_size / self.sample_rate) / 2
+        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -229,7 +231,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         if self._client.is_closing:
             return
 

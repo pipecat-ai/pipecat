@@ -44,7 +44,8 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 
         tts = RimeHttpTTSService(
             api_key=os.getenv("RIME_API_KEY", ""),
-            voice_id="rex",
+            voice_id="luna",
+            model="arcana",
             aiohttp_session=session,
         )
 

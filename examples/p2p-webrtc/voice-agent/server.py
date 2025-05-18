@@ -17,7 +17,7 @@ from fastapi import BackgroundTasks, FastAPI
 from fastapi.responses import FileResponse
 from loguru import logger
 
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.network.webrtc_connection import IceServer, SmallWebRTCConnection
 
 # Load environment variables
 load_dotenv(override=True)
@@ -26,6 +26,13 @@ app = FastAPI()
 
 # Store connections by pc_id
 pcs_map: Dict[str, SmallWebRTCConnection] = {}
+
+
+ice_servers = [
+    IceServer(
+        urls="stun:stun.l.google.com:19302",
+    )
+]
 
 
 @app.post("/api/offer")
@@ -37,7 +44,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
         logger.info(f"Reusing existing connection for pc_id: {pc_id}")
         await pipecat_connection.renegotiate(sdp=request["sdp"], type=request["type"])
     else:
-        pipecat_connection = SmallWebRTCConnection()
+        pipecat_connection = SmallWebRTCConnection(ice_servers)
         await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
 
         @pipecat_connection.event_handler("closed")

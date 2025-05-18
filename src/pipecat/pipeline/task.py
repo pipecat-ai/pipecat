@@ -30,11 +30,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BaseTask
 from pipecat.pipeline.task_observer import TaskObserver
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.utils.asyncio import BaseTaskManager, TaskManager
+from pipecat.utils.tracing.setup import is_tracing_available
+from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 HEARTBEAT_SECONDS = 1.0
 HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
@@ -157,6 +160,8 @@ class PipelineTask(BaseTask):
             timeout if not received withing `idle_timeout_seconds`.
         cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
             the idle timeout is reached.
+        enable_turn_tracking: Whether to enable turn tracking.
+        enable_turn_tracing: Whether to enable turn tracing.
 
     """
 
@@ -175,6 +180,9 @@ class PipelineTask(BaseTask):
             LLMFullResponseEndFrame,
         ),
         cancel_on_idle_timeout: bool = True,
+        enable_turn_tracking: bool = True,
+        enable_tracing: bool = False,
+        conversation_id: Optional[str] = None,
     ):
         super().__init__()
         self._pipeline = pipeline
@@ -184,6 +192,9 @@ class PipelineTask(BaseTask):
         self._idle_timeout_secs = idle_timeout_secs
         self._idle_timeout_frames = idle_timeout_frames
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
+        self._enable_turn_tracking = enable_turn_tracking
+        self._enable_tracing = enable_tracing and is_tracing_available()
+        self._conversation_id = conversation_id
         if self._params.observers:
             import warnings
 
@@ -194,6 +205,14 @@ class PipelineTask(BaseTask):
                     DeprecationWarning,
                 )
             observers = self._params.observers
+        if self._enable_turn_tracking:
+            self._turn_tracking_observer = TurnTrackingObserver()
+            observers = [self._turn_tracking_observer] + list(observers)
+        if self._enable_turn_tracking and self._enable_tracing:
+            self._turn_trace_observer = TurnTraceObserver(
+                self._turn_tracking_observer, conversation_id=self._conversation_id
+            )
+            observers = [self._turn_trace_observer] + list(observers)
         self._finished = False
 
         # This queue receives frames coming from the pipeline upstream.
@@ -251,6 +270,16 @@ class PipelineTask(BaseTask):
         """Returns the pipeline parameters of this task."""
         return self._params
 
+    @property
+    def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
+        """Return the turn tracking observer if enabled."""
+        return getattr(self, "_turn_tracking_observer", None)
+
+    @property
+    def turn_trace_observer(self) -> Optional[TurnTraceObserver]:
+        """Return the turn trace observer if enabled."""
+        return getattr(self, "_turn_trace_observer", None)
+
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self._task_manager.set_event_loop(loop)
 
@@ -286,12 +315,7 @@ class PipelineTask(BaseTask):
     async def cancel(self):
         """Stops the running pipeline immediately."""
         logger.debug(f"Canceling pipeline task {self}")
-        # Make sure everything is cleaned up downstream. This is sent
-        # out-of-band from the main streaming task which is what we want since
-        # we want to cancel right away.
-        await self._source.push_frame(CancelFrame())
-        # Only cancel the push task. Everything else will be cancelled in run().
-        await self._task_manager.cancel_task(self._process_push_task)
+        await self._cancel()
 
     async def run(self):
         """Starts and manages the pipeline execution until completion or cancellation."""
@@ -299,8 +323,15 @@ class PipelineTask(BaseTask):
             return
         cleanup_pipeline = True
         try:
+            # Setup processors.
+            await self._setup()
+
+            # Create all main tasks and wait of the main push task. This is the
+            # task that pushes frames to the very beginning of our pipeline (our
+            # controlled PipelineTaskSource processor).
             push_task = await self._create_tasks()
             await self._task_manager.wait_for_task(push_task)
+
             # We have already cleaned up the pipeline inside the task.
             cleanup_pipeline = False
         except asyncio.CancelledError:
@@ -309,11 +340,17 @@ class PipelineTask(BaseTask):
             # well, because you get a CancelledError in every place you are
             # awaiting a task.
             pass
-        await self._cancel_tasks()
-        await self._cleanup(cleanup_pipeline)
-        if self._check_dangling_tasks:
-            self._print_dangling_tasks()
-        self._finished = True
+        finally:
+            # It's possibe that we get an asyncio.CancelledError from the
+            # outside, if so we need to make sure everything gets cancelled
+            # properly.
+            if cleanup_pipeline:
+                await self._cancel()
+            await self._cancel_tasks()
+            await self._cleanup(cleanup_pipeline)
+            if self._check_dangling_tasks:
+                self._print_dangling_tasks()
+            self._finished = True
 
     async def queue_frame(self, frame: Frame):
         """Queue a single frame to be pushed down the pipeline.
@@ -335,6 +372,14 @@ class PipelineTask(BaseTask):
         elif isinstance(frames, Iterable):
             for frame in frames:
                 await self.queue_frame(frame)
+
+    async def _cancel(self):
+        # Make sure everything is cleaned up downstream. This is sent
+        # out-of-band from the main streaming task which is what we want since
+        # we want to cancel right away.
+        await self._source.push_frame(CancelFrame())
+        # Only cancel the push task. Everything else will be cancelled in run().
+        await self._task_manager.cancel_task(self._process_push_task)
 
     async def _create_tasks(self):
         self._process_up_task = self._task_manager.create_task(
@@ -396,9 +441,23 @@ class PipelineTask(BaseTask):
         await self._pipeline_end_event.wait()
         self._pipeline_end_event.clear()
 
+    async def _setup(self):
+        setup = FrameProcessorSetup(
+            clock=self._clock,
+            task_manager=self._task_manager,
+            observer=self._observer,
+        )
+        await self._source.setup(setup)
+        await self._pipeline.setup(setup)
+        await self._sink.setup(setup)
+
     async def _cleanup(self, cleanup_pipeline: bool):
         # Cleanup base object.
         await self.cleanup()
+
+        # End conversation tracing if it's active - this will also close any active turn span
+        if self._enable_tracing and hasattr(self, "_turn_trace_observer"):
+            self._turn_trace_observer.end_conversation_tracing()
 
         # Cleanup pipeline processors.
         await self._source.cleanup()
@@ -418,14 +477,11 @@ class PipelineTask(BaseTask):
         self._maybe_start_idle_task()
 
         start_frame = StartFrame(
-            clock=self._clock,
-            task_manager=self._task_manager,
             allow_interruptions=self._params.allow_interruptions,
             audio_in_sample_rate=self._params.audio_in_sample_rate,
             audio_out_sample_rate=self._params.audio_out_sample_rate,
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
-            observer=self._observer,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
         )
         start_frame.metadata = self._params.start_metadata

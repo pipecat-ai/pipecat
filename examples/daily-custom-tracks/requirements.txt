@@ -1,0 +1,2 @@
+pydub
+pipecat-ai[daily]

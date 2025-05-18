@@ -284,11 +284,13 @@ class SmallWebRTCClient:
                 )
                 yield audio_frame
 
-    async def write_raw_audio_frames(self, data: bytes):
+    async def write_raw_audio_frames(self, data: bytes, destination: Optional[str] = None):
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(data)
 
-    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         if self._can_send() and self._video_output_track:
             self._video_output_track.add_video_frame(frame)
 
@@ -393,6 +395,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             self._receive_audio_task = self.create_task(self._receive_audio())
         if not self._receive_video_task and self._params.video_in_enabled:
             self._receive_video_task = self.create_task(self._receive_video())
+        await self.set_transport_ready(frame)
 
     async def _stop_tasks(self):
         if self._receive_audio_task:
@@ -485,6 +488,7 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         await super().start(frame)
         await self._client.setup(self._params, frame)
         await self._client.connect()
+        await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -497,10 +501,12 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._client.send_message(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         await self._client.write_raw_audio_frames(frames)
 
-    async def write_raw_video_frame(self, frame: OutputImageRawFrame):
+    async def write_raw_video_frame(
+        self, frame: OutputImageRawFrame, destination: Optional[str] = None
+    ):
         await self._client.write_raw_video_frame(frame)
 
 

@@ -61,6 +61,8 @@ class LocalAudioInputTransport(BaseInputTransport):
         )
         self._in_stream.start_stream()
 
+        await self.set_transport_ready(frame)
+
     async def cleanup(self):
         await super().cleanup()
         if self._in_stream:
@@ -111,6 +113,8 @@ class LocalAudioOutputTransport(BaseOutputTransport):
         )
         self._out_stream.start_stream()
 
+        await self.set_transport_ready(frame)
+
     async def cleanup(self):
         await super().cleanup()
         if self._out_stream:
@@ -118,7 +122,7 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             self._out_stream.close()
             self._out_stream = None
 
-    async def write_raw_audio_frames(self, frames: bytes):
+    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         if self._out_stream:
             await self.get_event_loop().run_in_executor(
                 self._executor, self._out_stream.write, frames

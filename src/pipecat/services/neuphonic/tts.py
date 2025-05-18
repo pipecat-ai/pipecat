@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import websockets
@@ -239,6 +240,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             logger.debug(f"Sending text to websocket: {msg}")
             await self._websocket.send(json.dumps(msg))
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -315,6 +317,7 @@ class NeuphonicHttpTTSService(TTSService):
     async def flush_audio(self):
         pass
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic streaming API.
 

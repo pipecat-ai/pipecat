@@ -93,49 +93,55 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """Aggregates and emits text fragments as a transcript message.
 
         This method uses a heuristic to automatically detect whether text fragments
-        use pre-spacing (spaces at the beginning of fragments) or not, and applies
-        the appropriate joining strategy. It handles fragments from different TTS
-        services with different formatting patterns.
+        contain embedded spacing (spaces at the beginning or end of fragments) or not,
+        and applies the appropriate joining strategy. It handles fragments from different
+        TTS services with different formatting patterns.
 
         Examples:
-            Pre-spaced fragments (concatenated):
+            Fragments with embedded spacing (concatenated):
                 ```
                 TTSTextFrame: ["Hello"]
-                TTSTextFrame: [" there"]
+                TTSTextFrame: [" there"]  # Leading space
                 TTSTextFrame: ["!"]
-                TTSTextFrame: [" How"]
+                TTSTextFrame: [" How"]    # Leading space
                 TTSTextFrame: ["'s"]
-                TTSTextFrame: [" it"]
-                TTSTextFrame: [" going"]
-                TTSTextFrame: ["?"]
+                TTSTextFrame: [" it"]     # Leading space
                 ```
-                Result: "Hello there! How's it going?"
+                Result: "Hello there! How's it"
 
-            Word-by-word fragments (joined with spaces):
+            Fragments with trailing spaces (concatenated):
+                ```
+                TTSTextFrame: ["Hel"]
+                TTSTextFrame: ["lo "]     # Trailing space
+                TTSTextFrame: ["to "]     # Trailing space
+                TTSTextFrame: ["you"]
+                ```
+                Result: "Hello to you"
+
+            Word-by-word fragments without spacing (joined with spaces):
                 ```
                 TTSTextFrame: ["Hello"]
-                TTSTextFrame: ["there!"]
-                TTSTextFrame: ["How"]
-                TTSTextFrame: ["is"]
-                TTSTextFrame: ["it"]
-                TTSTextFrame: ["going?"]
+                TTSTextFrame: ["there"]
+                TTSTextFrame: ["how"]
+                TTSTextFrame: ["are"]
+                TTSTextFrame: ["you"]
                 ```
-                Result: "Hello there! How is it going?"
+                Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
-            # Heuristic to detect pre-spaced fragments
-            uses_prespacing = False
-            if len(self._current_text_parts) > 1:
-                # Check if any fragment after the first one starts with whitespace
-                has_spaced_parts = any(
-                    part and part[0].isspace() for part in self._current_text_parts[1:]
-                )
-                if has_spaced_parts:
-                    uses_prespacing = True
+            has_leading_spaces = any(
+                part and part[0].isspace() for part in self._current_text_parts[1:]
+            )
+            has_trailing_spaces = any(
+                part and part[-1].isspace() for part in self._current_text_parts[:-1]
+            )
 
-            # Apply appropriate joining method
-            if uses_prespacing:
-                # Pre-spaced fragments - just concatenate
+            # If there are embedded spaces in the fragments, use direct concatenation
+            contains_spacing_between_fragments = has_leading_spaces or has_trailing_spaces
+
+            # Apply corresponding joining method
+            if contains_spacing_between_fragments:
+                # Fragments already have spacing - just concatenate
                 content = "".join(self._current_text_parts)
             else:
                 # Word-by-word fragments - join with spaces

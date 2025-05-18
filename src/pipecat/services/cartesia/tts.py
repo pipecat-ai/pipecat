@@ -28,6 +28,7 @@ from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for Cartesia configuration needed
 try:
@@ -250,9 +251,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 continue
             if msg["type"] == "done":
                 await self.stop_ttfb_metrics()
-                await self.add_word_timestamps(
-                    [("TTSStoppedFrame", 0), ("LLMFullResponseEndFrame", 0), ("Reset", 0)]
-                )
+                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
                 await self.remove_audio_context(msg["context_id"])
             elif msg["type"] == "timestamps":
                 await self.add_word_timestamps(
@@ -276,6 +275,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -362,6 +362,7 @@ class CartesiaHttpTTSService(TTSService):
         await super().cancel(frame)
         await self._client.close()
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

@@ -120,6 +120,7 @@ class Setup(BaseModel):
     system_instruction: Optional[SystemInstruction] = None
     tools: Optional[List[dict]] = None
     generation_config: Optional[dict] = None
+    input_audio_transcription: Optional[AudioTranscriptionConfig] = None
     output_audio_transcription: Optional[AudioTranscriptionConfig] = None
     realtime_input_config: Optional[RealtimeInputConfig] = None
 
@@ -167,6 +168,7 @@ class ServerContent(BaseModel):
     modelTurn: Optional[ModelTurn] = None
     interrupted: Optional[bool] = None
     turnComplete: Optional[bool] = None
+    inputTranscription: Optional[BidiGenerateContentTranscription] = None
     outputTranscription: Optional[BidiGenerateContentTranscription] = None
 
 
@@ -180,10 +182,43 @@ class ToolCall(BaseModel):
     functionCalls: List[FunctionCall]
 
 
+class Modality(str, Enum):
+    """Modality types in token counts."""
+
+    UNSPECIFIED = "MODALITY_UNSPECIFIED"
+    TEXT = "TEXT"
+    IMAGE = "IMAGE"
+    AUDIO = "AUDIO"
+    VIDEO = "VIDEO"
+
+
+class ModalityTokenCount(BaseModel):
+    """Token count for a specific modality."""
+
+    modality: Modality
+    tokenCount: int
+
+
+class UsageMetadata(BaseModel):
+    """Usage metadata about the response."""
+
+    promptTokenCount: Optional[int] = None
+    cachedContentTokenCount: Optional[int] = None
+    responseTokenCount: Optional[int] = None
+    toolUsePromptTokenCount: Optional[int] = None
+    thoughtsTokenCount: Optional[int] = None
+    totalTokenCount: Optional[int] = None
+    promptTokensDetails: Optional[List[ModalityTokenCount]] = None
+    cacheTokensDetails: Optional[List[ModalityTokenCount]] = None
+    responseTokensDetails: Optional[List[ModalityTokenCount]] = None
+    toolUsePromptTokensDetails: Optional[List[ModalityTokenCount]] = None
+
+
 class ServerEvent(BaseModel):
     setupComplete: Optional[SetupComplete] = None
     serverContent: Optional[ServerContent] = None
     toolCall: Optional[ToolCall] = None
+    usageMetadata: Optional[UsageMetadata] = None
 
 
 def parse_server_event(str):
@@ -193,3 +228,10 @@ def parse_server_event(str):
     except Exception as e:
         print(f"Error parsing server event: {e}")
         return None
+
+
+class ContextWindowCompressionConfig(BaseModel):
+    """Configuration for context window compression."""
+
+    sliding_window: Optional[bool] = Field(default=True)
+    trigger_tokens: Optional[int] = Field(default=None)
