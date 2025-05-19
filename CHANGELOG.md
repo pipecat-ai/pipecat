@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `BaseTextFilter` methods `filter()`, `update_settings()`,
+  `handle_interruption()` and `reset_interruption()` are now async.
+
 - `BaseTextAggregator` methods `aggregate()`, `handle_interruption()` and
   `reset()` are now async.
 

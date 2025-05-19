@@ -157,7 +157,7 @@ class TTSService(AIService):
                 self.set_voice(value)
             elif key == "text_filter":
                 for filter in self._text_filters:
-                    filter.update_settings(value)
+                    await filter.update_settings(value)
             else:
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
@@ -236,7 +236,7 @@ class TTSService(AIService):
         self._processing_text = False
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
-            filter.handle_interruption()
+            await filter.handle_interruption()
 
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
@@ -274,8 +274,8 @@ class TTSService(AIService):
 
         # Process all filter.
         for filter in self._text_filters:
-            filter.reset_interruption()
-            text = filter.filter(text)
+            await filter.reset_interruption()
+            text = await filter.filter(text)
 
         if text:
             await self.process_generator(self.run_tts(text))
