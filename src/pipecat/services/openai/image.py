@@ -8,12 +8,12 @@ import io
 from collections.abc import AsyncGenerator
 from functools import partial
 from os import PathLike
-from typing import IO, Literal, Mapping, Optional, cast, overload
+from typing import IO, Literal, Mapping, Protocol, cast, overload
 
 import aiohttp
 from loguru import logger
 from openai import AsyncOpenAI
-from openai.types import ImageModel
+from openai.types import ImageModel, ImagesResponse
 from PIL import Image
 from typing_extensions import NotRequired, Required, TypedDict, Unpack, deprecated
 
@@ -27,9 +27,9 @@ from pipecat.services.image_service import ImageGenService
 _FileContent = IO[bytes] | bytes | PathLike[str]
 _FileTypes = (
     _FileContent
-    | tuple[Optional[str], _FileContent]
-    | tuple[Optional[str], _FileContent, Optional[str]]
-    | tuple[Optional[str], _FileContent, Optional[str], Mapping[str, str]]
+    | tuple[str | None, _FileContent]
+    | tuple[str | None, _FileContent, str | None]
+    | tuple[str | None, _FileContent, str | None, Mapping[str, str]]
 )
 
 
@@ -44,13 +44,13 @@ class ImageGenerateParams(TypedDict, total=False):
     https://platform.openai.com/docs/api-reference/images/create
     """
 
-    background: Optional[Literal["transparent", "opaque", "auto"]]
-    moderation: Optional[Literal["low", "auto"]]
-    output_compression: Optional[int]
-    output_format: Optional[Literal["png", "jpeg", "webp"]]
-    quality: Optional[Literal["standard", "hd", "low", "medium", "high", "auto"]]
-    response_format: Optional[Literal["url", "b64_json"]]
-    size: Optional[
+    background: Literal["transparent", "opaque", "auto"] | None
+    moderation: Literal["low", "auto"] | None
+    output_compression: int | None
+    output_format: Literal["png", "jpeg", "webp"] | None
+    quality: Literal["standard", "hd", "low", "medium", "high", "auto"] | None
+    response_format: Literal["url", "b64_json"] | None
+    size: (
         Literal[
             "auto",
             "1024x1024",
@@ -61,8 +61,9 @@ class ImageGenerateParams(TypedDict, total=False):
             "1792x1024",
             "1024x1792",
         ]
-    ]
-    style: Optional[Literal["vivid", "natural"]]
+        | None
+    )
+    style: Literal["vivid", "natural"] | None
     user: str
 
 
@@ -75,9 +76,9 @@ class ImageEditParams(TypedDict, total=False):
 
     image: Required[_FileTypes | list[_FileTypes]]
     mask: _FileTypes
-    quality: Optional[Literal["standard", "low", "medium", "high", "auto"]]
-    response_format: Optional[Literal["url", "b64_json"]]
-    size: Optional[Literal["256x256", "512x512", "1024x1024"]]
+    quality: Literal["standard", "low", "medium", "high", "auto"] | None
+    response_format: Literal["url", "b64_json"] | None
+    size: Literal["256x256", "512x512", "1024x1024"] | None
     user: str
 
 
@@ -95,13 +96,16 @@ class OpenAIImageGenService(ImageGenService):
 
     ImageInitParams = ImageGenerateInitParams | ImageEditInitParams
 
+    class ImageGenerationFunction(Protocol):
+        async def __call__(self, *, prompt: str) -> ImagesResponse: ...
+
     @overload
     @deprecated('Use `params["image_size"]` to set the image size instead')
     def __init__(
         self,
         *,
         api_key: str,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
         image_size: Literal["256x256", "512x512", "1024x1024", "1792x1024", "1024x1792"],
         model: str = "dall-e-3",
@@ -112,7 +116,7 @@ class OpenAIImageGenService(ImageGenService):
         self,
         *,
         api_key: str,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
         model: ImageModel = "dall-e-3",
         **kwargs: Unpack[ImageGenerateInitParams],
@@ -123,7 +127,7 @@ class OpenAIImageGenService(ImageGenService):
         self,
         *,
         api_key: str,
-        base_url: Optional[str] = None,
+        base_url: str | None = None,
         aiohttp_session: aiohttp.ClientSession,
         model: ImageModel = "dall-e-3",
         **kwargs: Unpack[ImageEditInitParams],
@@ -135,11 +139,11 @@ class OpenAIImageGenService(ImageGenService):
         api_key,
         base_url=None,
         aiohttp_session,
-        image_size,
+        image_size=None,
         model="dall-e-3",
         **kwargs,
     ):
-        unpacked_args: OpenAIImageGenService.ImageInitParams
+        unpacked_args: OpenAIImageGenService.ImageInitParams | None = None
         is_deprecated_overload_call = image_size is not None and not kwargs
         if is_deprecated_overload_call:
             # Adapt the deprecated overload params into the standard approach
@@ -151,32 +155,49 @@ class OpenAIImageGenService(ImageGenService):
             # states unreachable in Python, we just raise an error instead
             raise ValueError("Incompatible parameters in function call")
 
-        # At this point, we can consider that `unpacked_args` contains the keys and
-        # values we expect from the type system
-        unpacked_args = cast(OpenAIImageGenService.ImageInitParams, kwargs)
-
-        if unpacked_args["modality"] == "edit":
-            print(unpacked_args)
-
-        # modality = unpacked_args["modality"]
-        # if modality != "generate" and not "params" in unpacked_args:
-        #     # Unreachable state, as the one in the previous guard block, typing should
-        #     # deter users from reaching here as well
-        #     raise ValueError(f"Required \"params\" argument for modality \"{modality}\"")
-
-        # params = unpacked_args.get("params") or ImageGenerateParams({})
+        # At this point, we can consider that either `unpacked_args` or `kwargs`
+        # contain the keys and values we expect from the type system
+        # Important: Note that this is not runtime checked - a runtime error might occur
+        # down the line if the user doesn't provide what the type checker asks for.
+        unpacked_args = cast(OpenAIImageGenService.ImageInitParams, unpacked_args or kwargs)
 
         super().__init__()
         self.set_model_name(model)
         self._aiohttp_session = aiohttp_session
 
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-        self._generate_image = partial(
-            client.images.generate,
-            **params,
-            n=1,
-            model=self.model_name,
-        )
+        self._generate_image = self.init_generation_function(client, unpacked_args)
+
+    def init_generation_function(
+        self,
+        client: AsyncOpenAI,
+        unpacked_args: ImageInitParams,
+    ) -> ImageGenerationFunction:
+        """Initialize an image generation function using the OpenAI API based on the specified modality.
+
+        This method creates a partial function for image generation or editing based on the 'modality'
+        parameter.
+
+        Raises:
+            KeyError: If `unpacked_args` doesn't contain "modality" or "params"
+            ValueError: If the provided modality is not one of the supported options
+        """
+        params = {
+            "n": 1,
+            "model": self.model_name,
+        }
+        match unpacked_args["modality"]:
+            case "generate":
+                generation_function = client.images.generate
+                if "params" in unpacked_args:
+                    params = {**unpacked_args["params"], **params}
+            case "edit":
+                generation_function = client.images.edit
+                params = {**unpacked_args["params"], **params}
+            case _:
+                raise ValueError(f'Unknown modality "{unpacked_args["modality"]}"')
+
+        return partial(generation_function, **params)
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating image from prompt: {prompt}")
