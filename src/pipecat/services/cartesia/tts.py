@@ -326,6 +326,7 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str,
         model: str = "sonic-2",
         base_url: str = "https://api.cartesia.ai",
+        cartesia_version: str = "2024-11-13",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
@@ -335,6 +336,8 @@ class CartesiaHttpTTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._api_key = api_key
+        self._base_url = base_url
+        self._cartesia_version = cartesia_version
         self._settings = {
             "output_format": {
                 "container": container,
@@ -350,7 +353,10 @@ class CartesiaHttpTTSService(TTSService):
         self.set_voice(voice_id)
         self.set_model_name(model)
 
-        self._client = AsyncCartesia(api_key=api_key, base_url=base_url)
+        self._client = AsyncCartesia(
+            api_key=api_key,
+            base_url=base_url,
+        )
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -375,45 +381,63 @@ class CartesiaHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            voice_controls = None
+            voice_config = {"mode": "id", "id": self._voice_id}
+
             if self._settings["emotion"]:
                 warnings.warn(
-                    "The 'emotion' parameter in _experimental_voice_controls is deprecated and will be removed in a future version.",
+                    "The 'emotion' parameter in voice.__experimental_controls is deprecated and will be removed in a future version.",
                     DeprecationWarning,
                     stacklevel=2,
                 )
-                voice_controls = {}
-                if self._settings["emotion"]:
-                    voice_controls["emotion"] = self._settings["emotion"]
+                voice_config["__experimental_controls"] = {"emotion": self._settings["emotion"]}
 
             await self.start_ttfb_metrics()
 
-            kwargs = {
+            payload = {
                 "model_id": self._model_name,
                 "transcript": text,
-                "voice_id": self._voice_id,
+                "voice": voice_config,
                 "output_format": self._settings["output_format"],
                 "language": self._settings["language"],
-                "stream": False,
-                "_experimental_voice_controls": voice_controls,
             }
 
             if self._settings["speed"]:
-                kwargs["speed"] = self._settings["speed"]
-
-            output = await self._client.tts.sse(**kwargs)
-
-            await self.start_tts_usage_metrics(text)
+                payload["speed"] = self._settings["speed"]
 
             yield TTSStartedFrame()
 
+            session = await self._client._get_session()
+
+            headers = {
+                "Cartesia-Version": self._cartesia_version,
+                "X-API-Key": self._api_key,
+                "Content-Type": "application/json",
+            }
+
+            url = f"{self._base_url}/tts/bytes"
+
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Cartesia API error: {error_text}")
+                    await self.push_error(ErrorFrame(f"Cartesia API error: {error_text}"))
+                    raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
+
+                audio_data = await response.read()
+
+            await self.start_tts_usage_metrics(text)
+
             frame = TTSAudioRawFrame(
-                audio=output["audio"], sample_rate=self.sample_rate, num_channels=1
+                audio=audio_data,
+                sample_rate=self.sample_rate,
+                num_channels=1,
             )
 
             yield frame
+
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
