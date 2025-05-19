@@ -183,7 +183,7 @@ class TTSService(AIService):
             await self._maybe_pause_frame_processing()
 
             sentence = self._text_aggregator.text
-            self._text_aggregator.reset()
+            await self._text_aggregator.reset()
             self._processing_text = False
             await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
@@ -234,7 +234,7 @@ class TTSService(AIService):
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         self._processing_text = False
-        self._text_aggregator.handle_interruption()
+        await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
             filter.handle_interruption()
 
@@ -251,7 +251,7 @@ class TTSService(AIService):
         if not self._aggregate_sentences:
             text = frame.text
         else:
-            text = self._text_aggregator.aggregate(frame.text)
+            text = await self._text_aggregator.aggregate(frame.text)
 
         if text:
             await self._push_tts_frames(text)
