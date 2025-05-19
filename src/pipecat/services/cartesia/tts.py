@@ -84,7 +84,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        cartesia_version: str = "2024-06-10",
+        cartesia_version: str = "2025-04-16",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str = "sonic-2",
         sample_rate: Optional[int] = None,
