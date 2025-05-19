@@ -205,7 +205,7 @@ def language_to_google_tts_language(language: Language) -> Optional[str]:
 class GoogleTTSService(TTSService):
     class InputParams(BaseModel):
         pitch: Optional[str] = None
-        rate: Optional[str] = None
+        speaking_rate: Optional[str] = None
         volume: Optional[str] = None
         emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
         language: Optional[Language] = Language.EN
@@ -226,7 +226,7 @@ class GoogleTTSService(TTSService):
 
         self._settings = {
             "pitch": params.pitch,
-            "rate": params.rate,
+            "speaking_rate": params.speaking_rate,
             "volume": params.volume,
             "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
@@ -291,8 +291,8 @@ class GoogleTTSService(TTSService):
         prosody_attrs = []
         if self._settings["pitch"]:
             prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
-        if self._settings["rate"]:
-            prosody_attrs.append(f"rate='{self._settings['rate']}'")
+        if self._settings["speaking_rate"]:
+            prosody_attrs.append(f"rate='{self._settings['speaking_rate']}'")
         if self._settings["volume"]:
             prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
@@ -331,45 +331,60 @@ class GoogleTTSService(TTSService):
             is_chirp_voice = "chirp" in self._voice_id.lower()
             is_journey_voice = "journey" in self._voice_id.lower()
 
-            # Create synthesis input based on voice_id
-            if is_chirp_voice or is_journey_voice:
-                # Chirp and Journey voices don't support SSML, use plain text
-                synthesis_input = texttospeech_v1.SynthesisInput(text=text)
-            else:
-                ssml = self._construct_ssml(text)
-                synthesis_input = texttospeech_v1.SynthesisInput(ssml=ssml)
-
             voice = texttospeech_v1.VoiceSelectionParams(
                 language_code=self._settings["language"], name=self._voice_id
             )
-            audio_config = texttospeech_v1.AudioConfig(
-                audio_encoding=texttospeech_v1.AudioEncoding.LINEAR16,
-                sample_rate_hertz=self.sample_rate,
+
+            streaming_config = texttospeech_v1.StreamingSynthesizeConfig(
+                voice=voice,
+                streaming_audio_config=texttospeech_v1.StreamingAudioConfig(
+                    audio_encoding=texttospeech_v1.AudioEncoding.PCM,
+                    sample_rate_hertz=self.sample_rate,
+                ),
             )
-
-            request = texttospeech_v1.SynthesizeSpeechRequest(
-                input=synthesis_input, voice=voice, audio_config=audio_config
+            config_request = texttospeech_v1.StreamingSynthesizeRequest(
+                streaming_config=streaming_config
             )
+            async def request_generator():
+                yield config_request
+                if is_chirp_voice or is_journey_voice:
+                    yield texttospeech_v1.StreamingSynthesizeRequest(
+                        input=texttospeech_v1.StreamingSynthesisInput(text=text)
+                    )
+                else:
+                    ssml = self._construct_ssml(text)
+                    yield texttospeech_v1.StreamingSynthesizeRequest(
+                        input=texttospeech_v1.StreamingSynthesisInput(ssml=ssml)
+                    )
 
-            response = await self._client.synthesize_speech(request=request)
-
+            streaming_responses = await self._client.streaming_synthesize(request_generator())
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
 
-            # Skip the first 44 bytes to remove the WAV header
-            audio_content = response.audio_content[44:]
-
-            # Read and yield audio data in chunks
+            audio_buffer = b""
             CHUNK_SIZE = 1024
-            for i in range(0, len(audio_content), CHUNK_SIZE):
-                chunk = audio_content[i : i + CHUNK_SIZE]
+            first_chunk_for_ttfb = False
+
+            async for response in streaming_responses:
+                chunk = response.audio_content
                 if not chunk:
-                    break
-                await self.stop_ttfb_metrics()
-                frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
-                yield frame
-                await asyncio.sleep(0)  # Allow other tasks to run
+                    continue
+
+                if not first_chunk_for_ttfb:
+                    await self.stop_ttfb_metrics()
+                    first_chunk_for_ttfb = True
+
+                audio_buffer += chunk
+                while len(audio_buffer) >= CHUNK_SIZE:
+                    piece = audio_buffer[:CHUNK_SIZE]
+                    audio_buffer = audio_buffer[CHUNK_SIZE:]
+                    yield TTSAudioRawFrame(piece, self.sample_rate, 1)
+                    await asyncio.sleep(0)
+
+            if audio_buffer:
+                yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1)
+                await asyncio.sleep(0)
 
             yield TTSStoppedFrame()
 
