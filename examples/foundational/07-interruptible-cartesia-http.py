@@ -10,12 +10,12 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.audio.vad.silero import SileroVAD
-from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
@@ -33,14 +33,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
         ),
     )
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    vad = SileroVAD()
-
-    tts = CartesiaTTSService(
+    tts = CartesiaHttpTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
@@ -59,14 +58,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 
     pipeline = Pipeline(
         [
-            transport.input(),
+            transport.input(),  # Transport user input
             stt,
-            vad,
-            context_aggregator.user(),
-            llm,
-            tts,
-            transport.output(),
-            context_aggregator.assistant(),
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 

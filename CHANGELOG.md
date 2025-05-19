@@ -9,11 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `PipelineTask` event handlers `on_pipeline_started`,
+  `on_pipeline_stopped`, `on_pipeline_ended` and `on_pipeline_cancelled`, which
+  correspond to the `StartFrame`, `StopFrame`, `EndFrame` and `CancelFrame`
+  respectively.
+
+- Added additional languages to `LmntTTSService`. Languages include: `hi`, `id`,
+  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
+
+- Added a `model` parameter to the `LmntTTSService` constructor, allowing
+  switching between LMNT models.
+
+- Added `MiniMaxHttpTTSService`, which implements MiniMax's T2A API for TTS.
+  Learn more: https://www.minimax.io/platform_overview
+
 - A new function `FrameProcessor.setup()` has been added to allow setting up
   frame processors before receiving a `StartFrame`. This is what's happening
   internally: `FrameProcessor.setup()` is called, `StartFrame` is pushed from
-  the beginning of the pipeline, your regular pipeline operations, `EndFrame` or
-  `CancelFrame` are pushed from the beginning of the pipeline and finally
+  the beginning of the pipeline, your regular pipeline operations, `EndFrame`
+  or `CancelFrame` are pushed from the beginning of the pipeline and finally
   `FrameProcessor.cleanup()` is called.
 
 - Added support for OpenTelemetry tracing in Pipecat. This initial
@@ -50,17 +64,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The API version for `CartesiaTTSService` and `CartesiaHttpTTSService` has
+  been updated. Also, the `cartesia` dependency has been updated to 2.x.
+
+- `CartesiaTTSService` and `CartesiaHttpTTSService` now support Cartesia's new
+  `speed` parameter which accepts values of `slow`, `normal`, and `fast`.
+
+- `GeminiMultimodalLiveLLMService` now uses the user transcription and usage
+  metrics provided by Gemini Live.
+
 - `GoogleLLMService` has been updated to use `google-genai` instead of the
   deprecated `google-generativeai`.
 
+### Deprecated
+
+- In `CartesiaTTSService` and `CartesiaHttpTTSService`, `emotion` has been
+  deprecated by Cartesia. Pipecat is following suit and deprecating `emotion`
+  as well.
+
+### Removed
+
+- Since `GeminiMultimodalLiveLLMService` now transcribes it's own audio, the
+  `transcribe_user_audio` arg has been removed. Audio is now transcribed
+  automatically.
+
+- Removed `SileroVAD` frame processor, just use `SileroVADAnalyzer`
+  instead. Also removed, `07a-interruptible-vad.py` example.
+
+### Fixed
+
+- Fixed an issue with `CartesiaTTSService` where `TTSTextFrame` messages weren't
+  being emitted when the model was set to `sonic`. This resulted in the
+  assistant context not being updated with assistant messages.
+
+### Performance
+
+- Don't create event handler tasks if no user event handlers have been
+  registered.
+
 ### Other
+
+- Added foundation example `07y-minimax-http.py` to show how to use the
+  `MiniMaxHttpTTSService`.
 
 - Added an `open-telemetry-tracing` example, showing how to setup tracing. The
   example also includes Jaeger as an open source OpenTelemetry client to review
   traces from the example runs.
 
 - Added foundational example `29-turn-tracking-observer.py` to show how to use
-  the `TurnTrackingObserver.
+  the `TurnTrackingObserver`.
 
 ## [0.0.67] - 2025-05-07
 

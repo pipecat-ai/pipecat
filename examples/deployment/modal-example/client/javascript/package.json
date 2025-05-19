@@ -12,7 +12,7 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "vite": "^6.0.9"
+    "vite": "^6.3.5"
   },
   "dependencies": {
     "@pipecat-ai/client-js": "^0.3.5",

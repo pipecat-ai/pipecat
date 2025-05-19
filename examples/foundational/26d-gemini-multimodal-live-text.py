@@ -59,7 +59,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 
     llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        transcribe_user_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
         tools=[{"google_search": {}}, {"code_execution": {}}],
         params=InputParams(modalities=GeminiMultimodalModalities.TEXT),

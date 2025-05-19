@@ -568,6 +568,7 @@ async def main(room_url: str, token: str):
         token,
         "Word Wrangler Bot",
         DailyParams(
+            audio_in_enabled=True,
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         ),

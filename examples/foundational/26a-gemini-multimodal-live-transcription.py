@@ -47,7 +47,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
         # system_instruction="Talk like a pirate."
-        transcribe_user_audio=True,
         # inference_on_context_initialization=False,
     )
 
