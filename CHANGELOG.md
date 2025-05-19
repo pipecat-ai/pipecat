@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `BaseTextAggregator` methods `aggregate()`, `handle_interruption()` and
+  `reset()` are now async.
+
 - The API version for `CartesiaTTSService` and `CartesiaHttpTTSService` has
   been updated. Also, the `cartesia` dependency has been updated to 2.x.
 
