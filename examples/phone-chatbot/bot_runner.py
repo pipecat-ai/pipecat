@@ -1,247 +1,294 @@
-import argparse
-import json
+# bot_runner.py
+
 import os
-import shlex
-import subprocess
-from contextlib import asynccontextmanager
-from typing import Any, Dict
+import json
+import io
+import wave
+import asyncio
+import logging
+from datetime import datetime
 
-import aiohttp
-from bot_constants import (
-    MAX_SESSION_TIME,
-    REQUIRED_ENV_VARS,
-)
-from bot_definitions import bot_registry
-from bot_runner_helpers import (
-    determine_room_capabilities,
-    ensure_prompt_config,
-    process_dialin_request,
-)
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import PlainTextResponse
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
-from pipecat.transports.services.helpers.daily_rest import (
-    DailyRESTHelper,
-    DailyRoomParams,
-    DailyRoomProperties,
-    DailyRoomSipParams,
+# Configure logging
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    level=logging.DEBUG,
 )
+logger = logging.getLogger("bot_runner")
 
+# Load environment variables from .env
 load_dotenv(override=True)
 
-daily_helpers = {}
+# Twilio REST client
+from twilio.rest import Client as TwilioClient
 
-
-# ----------------- Daily Room Management ----------------- #
-
-
-async def create_daily_room(room_url: str = None, config_body: Dict[str, Any] = None):
-    """Create or retrieve a Daily room with appropriate properties based on the configuration.
-
-    Args:
-        room_url: Optional existing room URL
-        config_body: Optional configuration that determines room capabilities
-
-    Returns:
-        Dict containing room URL, token, and SIP endpoint
-    """
-    if not room_url:
-        # Get room capabilities based on the configuration
-        capabilities = determine_room_capabilities(config_body)
-
-        # Configure SIP parameters if dialin is needed
-        sip_params = None
-        if capabilities["enable_dialin"]:
-            sip_params = DailyRoomSipParams(
-                display_name="dialin-user", video=False, sip_mode="dial-in", num_endpoints=2
-            )
-
-        # Create the properties object with the appropriate settings
-        properties = DailyRoomProperties(sip=sip_params)
-
-        # Set dialout capability if needed
-        if capabilities["enable_dialout"]:
-            properties.enable_dialout = True
-
-        # Log the capabilities being used
-        capability_str = ", ".join([f"{k}={v}" for k, v in capabilities.items()])
-        print(f"Creating room with capabilities: {capability_str}")
-
-        params = DailyRoomParams(properties=properties)
-
-        print("Creating new room...")
-        room = await daily_helpers["rest"].create_room(params=params)
-    else:
-        # Check if passed room URL exists
-        try:
-            room = await daily_helpers["rest"].get_room_from_url(room_url)
-        except Exception:
-            raise HTTPException(status_code=500, detail=f"Room not found: {room_url}")
-
-    print(f"Daily room: {room.url} {room.config.sip_endpoint}")
-
-    # Get token for the agent
-    token = await daily_helpers["rest"].get_token(room.url, MAX_SESSION_TIME)
-
-    if not room or not token:
-        raise HTTPException(status_code=500, detail="Failed to get room or token")
-
-    return {"room": room.url, "token": token, "sip_endpoint": room.config.sip_endpoint}
-
-
-# ----------------- Bot Process Management ----------------- #
-
-
-async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], example: str) -> bool:
-    """Start a bot process with the given configuration.
-
-    Args:
-        room_details: Room URL and token
-        body: Bot configuration
-        example: Example script to run
-
-    Returns:
-        Boolean indicating success
-    """
-    room_url = room_details["room"]
-    token = room_details["token"]
-
-    # Properly format body as JSON string for command line
-    body_json = json.dumps(body).replace('"', '\\"')
-    print(f"++++ Body JSON: {body_json}")
-
-    # Modified to use non-LLM-specific bot module names
-    bot_proc = f'python3 -m {example} -u {room_url} -t {token} -b "{body_json}"'
-    print(f"Starting bot. Example: {example}, Room: {room_url}")
-
-    try:
-        command_parts = shlex.split(bot_proc)
-        subprocess.Popen(command_parts, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__)))
-        return True
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
-
-
-# ----------------- API Setup ----------------- #
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    aiohttp_session = aiohttp.ClientSession()
-    daily_helpers["rest"] = DailyRESTHelper(
-        daily_api_key=os.getenv("DAILY_API_KEY", ""),
-        daily_api_url=os.getenv("DAILY_API_URL", "https://api.daily.co/v1"),
-        aiohttp_session=aiohttp_session,
-    )
-    yield
-    await aiohttp_session.close()
-
-
-app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Pipecat transports & pipeline
+from pipecat.transports.network.fastapi_websocket import (
+    FastAPIWebsocketTransport,
+    FastAPIWebsocketParams,
+)
+from pipecat.serializers.twilio import TwilioFrameSerializer
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.task import PipelineParams
+from pipecat.pipeline.runner import PipelineRunner
+from pipecat.frames.frames import (
+    LLMMessagesFrame,
+    LLMTextFrame,
+    EndFrame,
+    TTSStartedFrame,
+    TTSAudioRawFrame,
+    TTSStoppedFrame,
 )
 
+# Azure Speech-to-Text
+from pipecat.services.azure.stt import AzureSTTService
 
-# ----------------- API Endpoints ----------------- #
+class LoggingAzureSTTService(AzureSTTService):
+    async def run(self, input_frames):
+        async for frame in super().run(input_frames):
+            if getattr(frame, "text", "").strip():
+                logger.info(f"{datetime.now().isoformat()} USER: {frame.text}")
+            yield frame
 
+# OpenAI LLM (GPT-4o-mini)
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+
+class LoggingLLMService(OpenAILLMService):
+    async def run(self, input_frames):
+        async for frame in super().run(input_frames):
+            if isinstance(frame, LLMTextFrame) and frame.text.strip():
+                logger.info(f"{datetime.now().isoformat()} LLM: {frame.text}")
+            yield frame
+
+# -----------------------------------------------------------------------------
+# Smallest.ai Lightning v2 TTS adapter
+# -----------------------------------------------------------------------------
+from pipecat.services.tts_service import TTSService
+import requests
+
+class SmallestTTSService(TTSService):
+    def __init__(self, api_key=None, voice_id=None, sample_rate=8000, speed=1.0):
+        # Use 8kHz for Twilio compatibility (phone calls)
+        super().__init__(sample_rate=sample_rate)
+        self.api_key = api_key or os.getenv("SMALLEST_API_KEY")
+        self.voice_id = voice_id or os.getenv("SMALLEST_VOICE_ID", "priya")
+        self.speed = speed
+        # note: sample_rate is read-only in base class
+
+    def _chunk_text(self, text: str, max_len: int = 500):
+        chunks = []
+        while text:
+            if len(text) <= max_len:
+                chunks.append(text); break
+            cut = text.rfind(".", 0, max_len)
+            cut = (cut + 1) if cut != -1 else max_len
+            chunks.append(text[:cut])
+            text = text[cut:].lstrip()
+        return chunks
+
+    def _synthesize(self, text: str) -> bytes:
+        logger.info(f"{datetime.now().isoformat()} AGENT → TTS: {text}")
+        url = "https://waves-api.smallest.ai/api/v1/lightning-v2/get_speech"  # :contentReference[oaicite:1]{index=1}
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        pcm_parts = []
+        for chunk in self._chunk_text(text):
+            payload = {
+                "text": chunk,
+                "voice_id": self.voice_id,
+                "add_wav_header": True,
+                "sample_rate": self.sample_rate,
+                "speed": self.speed,
+                "language": "en",        # adjust for multi-language support
+                "consistency": 0.5,      # voice consistency control
+                "similarity": 0.0,       # voice similarity (0=none,1=clone)
+                "enhancement": 1,        # 0=no enhancement,1=default enhancement
+            }
+            resp = requests.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+            buf = io.BytesIO(resp.content)
+            with wave.open(buf, "rb") as wf:
+                pcm_parts.append(wf.readframes(wf.getnframes()))
+        return b"".join(pcm_parts)
+
+    async def run_tts(self, text: str):
+        import audioop
+        
+        # Get raw PCM audio from TTS service
+        pcm_audio = await asyncio.get_running_loop().run_in_executor(None, self._synthesize, text)
+        logger.info(f"TTS generated PCM audio: {len(pcm_audio)} bytes")
+        
+        # Convert from linear PCM to mulaw encoding (required by Twilio)
+        mulaw_audio = audioop.lin2ulaw(pcm_audio, 2)  # 2 = 16-bit samples
+        logger.info(f"Converted to mulaw: {len(mulaw_audio)} bytes")
+        
+        yield TTSStartedFrame()
+        yield TTSAudioRawFrame(audio=mulaw_audio, sample_rate=8000, num_channels=1)
+        yield TTSStoppedFrame()
+
+# -----------------------------------------------------------------------------
+# FastAPI app & Twilio setup
+# -----------------------------------------------------------------------------
+app = FastAPI()
+logger.info("Starting Pipecat phone chatbot runner")
+
+TWILIO = TwilioClient(
+    os.getenv("TWILIO_ACCOUNT_SID"),
+    os.getenv("TWILIO_AUTH_TOKEN"),
+)
+CALLER_ID = os.getenv("TWILIO_CALLER_ID")
+PUBLIC_HOST = os.getenv("PUBLIC_HOSTNAME")
+
+@app.post("/start_call")
+async def start_call(req: Request):
+    data = await req.json()
+    to_number = data.get("to")
+    logger.info("start_call to=%s", to_number)
+    if not to_number:
+        return PlainTextResponse("Missing 'to' in JSON body", status_code=400)
+    call = TWILIO.calls.create(
+        to=to_number,
+        from_=CALLER_ID,
+        url=f"https://{PUBLIC_HOST}/twilio_call",
+        record=True,
+    )
+    logger.info("Twilio call SID=%s", call.sid)
+    return {"status": "calling", "call_sid": call.sid}
 
 @app.post("/start")
-async def handle_start_request(request: Request) -> JSONResponse:
-    """Unified endpoint to handle bot configuration for different scenarios."""
-    # Get default room URL from environment
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
+async def start_alias(req: Request):
+    return await start_call(req)
 
+@app.api_route("/twilio_call", methods=["GET", "POST"])
+async def twilio_call(request: Request):
+    logger.info("Twilio webhook /twilio_call")
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Start>
+    <Stream url="wss://{PUBLIC_HOST}/ws/twilio" track="both"/>
+  </Start>
+  <Pause length="3600"/>
+</Response>"""
+    return PlainTextResponse(content=twiml, media_type="application/xml")
+
+# -----------------------------------------------------------------------------
+# WebSocket handler
+# -----------------------------------------------------------------------------
+@app.websocket("/ws/twilio")
+async def ws_twilio(websocket: WebSocket):
+    await websocket.accept()
+    logger.info("WebSocket accepted")
     try:
-        data = await request.json()
-
-        # Handle webhook test
-        if "test" in data:
-            return JSONResponse({"test": True})
-
-        # Handle direct dialin webhook from Daily
-        if all(key in data for key in ["From", "To", "callId", "callDomain"]):
-            body = await process_dialin_request(data)
-        # Handle body-based request
-        elif "config" in data:
-            # Use the registry to set up the bot configuration
-            body = bot_registry.setup_configuration(data["config"])
+        # Handshake
+        msg = await websocket.receive_text()
+        ev = json.loads(msg)
+        event = ev.get("event")
+        if event == "connected":
+            sid, csid = ev.get("streamSid"), ev.get("callSid")
+        elif event == "start":
+            sid, csid = ev["start"]["streamSid"], ev["start"].get("callSid")
         else:
-            raise HTTPException(status_code=400, detail="Invalid request format")
+            logger.warning("Unexpected event %r", event); return
+        logger.info("Handshake OK sid=%s csid=%s", sid, csid)
 
-        # Ensure prompt configuration
-        body = ensure_prompt_config(body)
+        serializer = TwilioFrameSerializer(
+            stream_sid=sid,
+            call_sid=csid,
+            account_sid=os.getenv("TWILIO_ACCOUNT_SID"),
+            auth_token=os.getenv("TWILIO_AUTH_TOKEN"),
+        )
+        transport = FastAPIWebsocketTransport(
+            websocket=websocket,
+            params=FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                serializer=serializer,
+            ),
+        )
 
-        # Detect which bot type to use
-        bot_type_name = bot_registry.detect_bot_type(body)
-        if not bot_type_name:
-            raise HTTPException(
-                status_code=400, detail="Configuration doesn't match any supported scenario"
-            )
+        stt = LoggingAzureSTTService(
+            api_key=os.getenv("AZURE_SPEECH_KEY"),
+            region=os.getenv("AZURE_SPEECH_REGION"),
+        )
+        llm = LoggingLLMService(
+            name="llm",
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model=os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini"),
+        )
+        tts = SmallestTTSService(
+            api_key=os.getenv("SMALLEST_API_KEY"),
+            voice_id=os.getenv("SMALLEST_VOICE_ID", "priya"),
+            sample_rate=8000,           # Use 8kHz for Twilio compatibility
+            speed=float(os.getenv("SMALLEST_VOICE_SPEED", "1.0")),
+        )
 
-        # Create the Daily room
-        room_details = await create_daily_room(room_url, body)
+        system_prompt = os.getenv("BOT_SYSTEM_PROMPT", "You are a helpful phone agent.")
+        ctx = OpenAILLMContext(messages=[{"role": "system", "content": system_prompt}])
+        agg = llm.create_context_aggregator(ctx)
 
-        # Start the bot
-        await start_bot(room_details, body, bot_type_name)
+        pipeline = Pipeline([
+            transport.input(),
+            stt,
+            agg.user(),
+            llm,
+            tts,
+            transport.output(),
+            agg.assistant(),
+        ])
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                audio_in_sample_rate=8000,    # Twilio uses 8kHz for phone calls
+                audio_out_sample_rate=8000,   # Must match Twilio's expected format
+                allow_interruptions=True,
+            ),
+        )
 
-        # Get the bot type
-        bot_type = bot_registry.get_bot(bot_type_name)
+        @transport.event_handler("on_client_connected")
+        async def on_connect(_, client):
+            logger.info("Client connected → greeting")
+            await task.queue_frames([
+                LLMMessagesFrame([
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": "<call started>"},
+                ])
+            ])
 
-        # Build the response
-        response = {"status": "Bot started", "bot_type": bot_type_name}
+        @transport.event_handler("on_client_disconnected")
+        async def on_disconnect(_, client):
+            logger.info("Client disconnected → end")
+            await task.queue_frames([EndFrame()])
 
-        # Add room URL for test mode
-        if bot_type.has_test_mode(body):
-            response["room_url"] = room_details["room"]
-            # Remove llm_model from response as it's no longer relevant
-            if "llm" in body:
-                response["llm_provider"] = body["llm"]  # Optionally keep track of provider
+        runner = PipelineRunner(handle_sigint=False)
+        await runner.run(task)
 
-        # Add dialout info for dialout scenarios
-        if "dialout_settings" in body and len(body["dialout_settings"]) > 0:
-            first_setting = body["dialout_settings"][0]
-            if "phoneNumber" in first_setting:
-                response["dialing_to"] = f"phone:{first_setting['phoneNumber']}"
-            elif "sipUri" in first_setting:
-                response["dialing_to"] = f"sip:{first_setting['sipUri']}"
+    except Exception:
+        logger.exception("WebSocket error:")
+    finally:
+        logger.info("Closing WebSocket")
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
 
-        return JSONResponse(response)
-
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Invalid JSON in request body")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Request processing error: {str(e)}")
-
-
-# ----------------- Main ----------------- #
-
+# -----------------------------------------------------------------------------
+# Entrypoint
+# -----------------------------------------------------------------------------
 if __name__ == "__main__":
-    # Check environment variables
-    for env_var in REQUIRED_ENV_VARS:
-        if env_var not in os.environ:
-            raise Exception(f"Missing environment variable: {env_var}.")
-
-    parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
-    parser.add_argument(
-        "--host", type=str, default=os.getenv("HOST", "0.0.0.0"), help="Host address"
+    import uvicorn
+    uvicorn.run(
+        "bot_runner:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", "8000")),
+        reload=True,
+        log_level="debug",
     )
-    parser.add_argument("--port", type=int, default=os.getenv("PORT", 7860), help="Port number")
-    parser.add_argument("--reload", action="store_true", default=True, help="Reload code on change")
-
-    config = parser.parse_args()
-
-    try:
-        import uvicorn
-
-        uvicorn.run("bot_runner:app", host=config.host, port=config.port, reload=config.reload)
-
-    except KeyboardInterrupt:
-        print("Pipecat runner shutting down...")
