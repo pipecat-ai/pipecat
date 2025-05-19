@@ -8,6 +8,8 @@
 
 **Pipecat** is an open-source Python framework for building real-time voice and multimodal conversational agents. Orchestrate audio and video, AI services, different transports, and conversation pipelines effortlessly—so you can focus on what makes your agent unique.
 
+> Want to dive right in? [Install Pipecat](https://docs.pipecat.ai/getting-started/installation) then try the [quickstart](https://docs.pipecat.ai/getting-started/quickstart).
+
 ## 🚀 What You Can Build
 
 - **Voice Assistants** – natural, streaming conversations with AI
