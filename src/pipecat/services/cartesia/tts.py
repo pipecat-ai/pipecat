@@ -7,6 +7,7 @@
 import base64
 import json
 import uuid
+import warnings
 from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
@@ -151,10 +152,13 @@ class CartesiaTTSService(AudioContextWordTTSService):
         voice_config["mode"] = "id"
         voice_config["id"] = self._voice_id
 
-        if self._settings["speed"] or self._settings["emotion"]:
+        if self._settings["emotion"]:
+            warnings.warn(
+                "The 'emotion' parameter in __experimental_controls is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             voice_config["__experimental_controls"] = {}
-            if self._settings["speed"]:
-                voice_config["__experimental_controls"]["speed"] = self._settings["speed"]
             if self._settings["emotion"]:
                 voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
 
@@ -169,6 +173,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "add_timestamps": add_timestamps,
             "use_original_timestamps": False if self.model_name == "sonic" else True,
         }
+
+        if self._settings["speed"]:
+            msg["speed"] = self._settings["speed"]
+
         return json.dumps(msg)
 
     async def start(self, frame: StartFrame):
@@ -368,24 +376,32 @@ class CartesiaHttpTTSService(TTSService):
 
         try:
             voice_controls = None
-            if self._settings["speed"] or self._settings["emotion"]:
+            if self._settings["emotion"]:
+                warnings.warn(
+                    "The 'emotion' parameter in _experimental_voice_controls is deprecated and will be removed in a future version.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
                 voice_controls = {}
-                if self._settings["speed"]:
-                    voice_controls["speed"] = self._settings["speed"]
                 if self._settings["emotion"]:
                     voice_controls["emotion"] = self._settings["emotion"]
 
             await self.start_ttfb_metrics()
 
-            output = await self._client.tts.sse(
-                model_id=self._model_name,
-                transcript=text,
-                voice_id=self._voice_id,
-                output_format=self._settings["output_format"],
-                language=self._settings["language"],
-                stream=False,
-                _experimental_voice_controls=voice_controls,
-            )
+            kwargs = {
+                "model_id": self._model_name,
+                "transcript": text,
+                "voice_id": self._voice_id,
+                "output_format": self._settings["output_format"],
+                "language": self._settings["language"],
+                "stream": False,
+                "_experimental_voice_controls": voice_controls,
+            }
+
+            if self._settings["speed"]:
+                kwargs["speed"] = self._settings["speed"]
+
+            output = await self._client.tts.sse(**kwargs)
 
             await self.start_tts_usage_metrics(text)
 
