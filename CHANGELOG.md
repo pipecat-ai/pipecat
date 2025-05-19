@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `user_id` field to `TranscriptionMessage`. This allows identifying the
+  user in a multi-user scenario. Note that this requires that
+  `TranscriptionFrame` has the `user_id` properly set.
+
 - Added new `PipelineTask` event handlers `on_pipeline_started`,
   `on_pipeline_stopped`, `on_pipeline_ended` and `on_pipeline_cancelled`, which
   correspond to the `StartFrame`, `StopFrame`, `EndFrame` and `CancelFrame`
