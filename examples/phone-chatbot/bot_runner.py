@@ -33,7 +33,7 @@ from pipecat.transports.network.fastapi_websocket import (
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.task import PipelineParams
+from pipecat.pipeline.task import PipelineTask, PipelineParams
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.frames.frames import (
     LLMMessagesFrame,
@@ -72,11 +72,11 @@ from pipecat.services.tts_service import TTSService
 import requests
 
 class SmallestTTSService(TTSService):
-    def __init__(self, api_key=None, voice_id=None, sample_rate=8000, speed=1.0):
-        # Use 8kHz for Twilio compatibility (phone calls)
+    def __init__(self, api_key=None, voice_id=None, sample_rate=24000, speed=1.0):
+        # Lightning v2 supports up to 24 kHz for higher fidelity
         super().__init__(sample_rate=sample_rate)
         self.api_key = api_key or os.getenv("SMALLEST_API_KEY")
-        self.voice_id = voice_id or os.getenv("SMALLEST_VOICE_ID", "priya")
+        self.voice_id = voice_id or os.getenv("SMALLEST_VOICE_ID", "arman")
         self.speed = speed
         # note: sample_rate is read-only in base class
 
@@ -119,18 +119,9 @@ class SmallestTTSService(TTSService):
         return b"".join(pcm_parts)
 
     async def run_tts(self, text: str):
-        import audioop
-        
-        # Get raw PCM audio from TTS service
-        pcm_audio = await asyncio.get_running_loop().run_in_executor(None, self._synthesize, text)
-        logger.info(f"TTS generated PCM audio: {len(pcm_audio)} bytes")
-        
-        # Convert from linear PCM to mulaw encoding (required by Twilio)
-        mulaw_audio = audioop.lin2ulaw(pcm_audio, 2)  # 2 = 16-bit samples
-        logger.info(f"Converted to mulaw: {len(mulaw_audio)} bytes")
-        
+        audio = await asyncio.get_running_loop().run_in_executor(None, self._synthesize, text)
         yield TTSStartedFrame()
-        yield TTSAudioRawFrame(audio=mulaw_audio, sample_rate=8000, num_channels=1)
+        yield TTSAudioRawFrame(audio=audio, sample_rate=self.sample_rate, num_channels=1)
         yield TTSStoppedFrame()
 
 # -----------------------------------------------------------------------------
@@ -157,7 +148,6 @@ async def start_call(req: Request):
         to=to_number,
         from_=CALLER_ID,
         url=f"https://{PUBLIC_HOST}/twilio_call",
-        record=True,
     )
     logger.info("Twilio call SID=%s", call.sid)
     return {"status": "calling", "call_sid": call.sid}
@@ -227,7 +217,7 @@ async def ws_twilio(websocket: WebSocket):
         tts = SmallestTTSService(
             api_key=os.getenv("SMALLEST_API_KEY"),
             voice_id=os.getenv("SMALLEST_VOICE_ID", "priya"),
-            sample_rate=8000,           # Use 8kHz for Twilio compatibility
+            sample_rate=24000,          # match Lightning v2 default
             speed=float(os.getenv("SMALLEST_VOICE_SPEED", "1.0")),
         )
 
@@ -247,8 +237,8 @@ async def ws_twilio(websocket: WebSocket):
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
-                audio_in_sample_rate=8000,    # Twilio uses 8kHz for phone calls
-                audio_out_sample_rate=8000,   # Must match Twilio's expected format
+                audio_in_sample_rate=16000,   # or match your call codec
+                audio_out_sample_rate=24000,  # Lightning v2 sample rate
                 allow_interruptions=True,
             ),
         )
