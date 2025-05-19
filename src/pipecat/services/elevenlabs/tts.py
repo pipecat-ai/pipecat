@@ -276,8 +276,16 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def flush_audio(self):
         if self._websocket and self._context_id:
-            msg = {"context_id": self._context_id, "flush": True}
+            self._context_id_to_close = self._context_id
+            msg = {"context_id": self._context_id, "flush": True, "xi_api_key": self._api_key}
             await self._websocket.send(json.dumps(msg))
+            msg = {
+                "context_id": self._context_id,
+                "close_context": True,
+                "xi_api_key": self._api_key,
+            }
+            await self._websocket.send(json.dumps(msg))
+            self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
@@ -386,7 +394,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             msg = json.loads(message)
             # Check if this message belongs to the current context
             # The default context may return null/None for context_id
-            received_ctx_id = msg.get("context_id")
+            received_ctx_id = msg.get("contextId")
             if (
                 self._context_id is not None
                 and received_ctx_id is not None
@@ -406,12 +414,17 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
                 await self.add_word_timestamps(word_times)
                 self._cumulative_time = word_times[-1][1]
-            if msg.get("is_final"):
+            if msg.get("isFinal"):
                 logger.trace(f"Received final message for context {received_ctx_id}")
                 # Context has finished
-                if self._context_id == received_ctx_id:
+                if (
+                    self._context_id == received_ctx_id
+                    or self._context_id_to_close == received_ctx_id
+                ):
                     self._context_id = None
+                    self._context_id_to_close = None
                     self._started = False
+                    await self.push_frame(TTSStoppedFrame())
 
     async def _keepalive_task_handler(self):
         while True:
