@@ -71,7 +71,7 @@ class ImageEditParams(TypedDict, total=False):
     """Params for OpenAI image generation API / Create image edit endpoint.
 
     Learn more about the parameters here:
-    https://platform.openai.com/docs/api-reference/images/create
+    https://platform.openai.com/docs/api-reference/images/createEdit
     """
 
     image: Required[_FileTypes | list[_FileTypes]]
@@ -82,7 +82,20 @@ class ImageEditParams(TypedDict, total=False):
     user: str
 
 
-ImageParams = ImageGenerateParams | ImageEditParams
+class ImageCreateVariationParams(TypedDict, total=False):
+    """Params for OpenAI image generation API / Create image variation endpoint.
+
+    Learn more about the parameters here:
+    https://platform.openai.com/docs/api-reference/images/createVariation
+    """
+
+    image: Required[_FileTypes]
+    response_format: Literal["url", "b64_json"]
+    size: Literal["256x256", "512x512", "1024x1024"] | None
+    user: str
+
+
+ImageParams = ImageGenerateParams | ImageEditParams | ImageCreateVariationParams
 
 
 class OpenAIImageGenService(ImageGenService):
@@ -94,7 +107,11 @@ class OpenAIImageGenService(ImageGenService):
         modality: Literal["edit"]
         params: ImageEditParams
 
-    ImageInitParams = ImageGenerateInitParams | ImageEditInitParams
+    class ImageCreateVariationInitParams(TypedDict):
+        modality: Literal["create_variation"]
+        params: ImageCreateVariationParams
+
+    ImageInitParams = ImageGenerateInitParams | ImageEditInitParams | ImageCreateVariationInitParams
 
     class ImageGenerationFunction(Protocol):
         async def __call__(self, *, prompt: str) -> ImagesResponse: ...
@@ -133,6 +150,17 @@ class OpenAIImageGenService(ImageGenService):
         **kwargs: Unpack[ImageEditInitParams],
     ): ...
 
+    @overload
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        base_url: str | None = None,
+        aiohttp_session: aiohttp.ClientSession,
+        model: ImageModel = "dall-e-2",
+        **kwargs: Unpack[ImageCreateVariationInitParams],
+    ): ...
+
     def __init__(
         self,
         *,
@@ -140,7 +168,7 @@ class OpenAIImageGenService(ImageGenService):
         base_url=None,
         aiohttp_session,
         image_size=None,
-        model="dall-e-3",
+        model=None,
         **kwargs,
     ):
         unpacked_args: OpenAIImageGenService.ImageInitParams | None = None
@@ -162,6 +190,13 @@ class OpenAIImageGenService(ImageGenService):
         unpacked_args = cast(OpenAIImageGenService.ImageInitParams, unpacked_args or kwargs)
 
         super().__init__()
+
+        # We have to set default model here, since overload defaults won't be passed to
+        # the actual runtime implementation of this method
+        is_create_variation_modality = unpacked_args["modality"] == "create_variation"
+        if model is None:
+            model = "dall-e-2" if is_create_variation_modality else "dall-e-3"
+
         self.set_model_name(model)
         self._aiohttp_session = aiohttp_session
 
@@ -193,6 +228,9 @@ class OpenAIImageGenService(ImageGenService):
                     params = {**unpacked_args["params"], **params}
             case "edit":
                 generation_function = client.images.edit
+                params = {**unpacked_args["params"], **params}
+            case "create_variation":
+                generation_function = client.images.create_variation
                 params = {**unpacked_args["params"], **params}
             case _:
                 raise ValueError(f'Unknown modality "{unpacked_args["modality"]}"')
