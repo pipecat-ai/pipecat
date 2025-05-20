@@ -79,10 +79,13 @@ async def run_test(
     expected_down_frames: Optional[Sequence[type]] = None,
     expected_up_frames: Optional[Sequence[type]] = None,
     ignore_start: bool = True,
-    observers: List[BaseObserver] = [],
-    start_metadata: Dict[str, Any] = {},
+    observers: Optional[List[BaseObserver]] = None,
+    start_metadata: Optional[Dict[str, Any]] = None,
     send_end_frame: bool = True,
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
+    observers = observers or []
+    start_metadata = start_metadata or {}
+
     received_up = asyncio.Queue()
     received_down = asyncio.Queue()
     source = QueuedFrameProcessor(

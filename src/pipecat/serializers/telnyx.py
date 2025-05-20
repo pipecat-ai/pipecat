@@ -79,7 +79,7 @@ class TelnyxFrameSerializer(FrameSerializer):
         inbound_encoding: str,
         call_control_id: Optional[str] = None,
         api_key: Optional[str] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
     ):
         """Initialize the TelnyxFrameSerializer.
 
@@ -92,11 +92,11 @@ class TelnyxFrameSerializer(FrameSerializer):
             params: Configuration parameters.
         """
         self._stream_id = stream_id
-        params.outbound_encoding = outbound_encoding
-        params.inbound_encoding = inbound_encoding
         self._call_control_id = call_control_id
         self._api_key = api_key
-        self._params = params
+        self._params = params or TelnyxFrameSerializer.InputParams()
+        self._params.outbound_encoding = outbound_encoding
+        self._params.inbound_encoding = inbound_encoding
 
         self._telnyx_sample_rate = self._params.telnyx_sample_rate
         self._sample_rate = 0  # Pipeline input rate

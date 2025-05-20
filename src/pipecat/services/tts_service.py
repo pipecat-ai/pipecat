@@ -64,7 +64,7 @@ class TTSService(AIService):
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
         # Text filter executed after text has been aggregated.
-        text_filters: Sequence[BaseTextFilter] = [],
+        text_filters: Optional[Sequence[BaseTextFilter]] = None,
         text_filter: Optional[BaseTextFilter] = None,
         # Audio transport destination of the generated frames.
         transport_destination: Optional[str] = None,
@@ -83,7 +83,7 @@ class TTSService(AIService):
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
-        self._text_filters: Sequence[BaseTextFilter] = text_filters
+        self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
 
         if text_filter:
