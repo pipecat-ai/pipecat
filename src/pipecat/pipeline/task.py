@@ -188,9 +188,9 @@ class PipelineTask(BaseTask):
         self,
         pipeline: BasePipeline,
         *,
-        params: PipelineParams = PipelineParams(),
-        observers: List[BaseObserver] = [],
-        clock: BaseClock = SystemClock(),
+        params: Optional[PipelineParams] = None,
+        observers: Optional[List[BaseObserver]] = None,
+        clock: Optional[BaseClock] = None,
         task_manager: Optional[BaseTaskManager] = None,
         check_dangling_tasks: bool = True,
         idle_timeout_secs: Optional[float] = 300,
@@ -205,8 +205,8 @@ class PipelineTask(BaseTask):
     ):
         super().__init__()
         self._pipeline = pipeline
-        self._clock = clock
-        self._params = params
+        self._clock = clock or SystemClock()
+        self._params = params or PipelineParams()
         self._check_dangling_tasks = check_dangling_tasks
         self._idle_timeout_secs = idle_timeout_secs
         self._idle_timeout_frames = idle_timeout_frames
@@ -224,6 +224,7 @@ class PipelineTask(BaseTask):
                     DeprecationWarning,
                 )
             observers = self._params.observers
+        observers = observers or []
         if self._enable_turn_tracking:
             self._turn_tracking_observer = TurnTrackingObserver()
             observers = [self._turn_tracking_observer] + list(observers)

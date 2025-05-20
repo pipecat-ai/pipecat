@@ -95,7 +95,7 @@ class WebRTCVADAnalyzer(VADAnalyzer):
         params: VAD configuration parameters (VADParams).
     """
 
-    def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams = VADParams()):
+    def __init__(self, *, sample_rate: Optional[int] = None, params: Optional[VADParams] = None):
         super().__init__(sample_rate=sample_rate, params=params)
 
         self._webrtc_vad = Daily.create_native_vad(
@@ -1223,7 +1223,7 @@ class DailyTransport(BaseTransport):
         room_url: str,
         token: Optional[str],
         bot_name: str,
-        params: DailyParams = DailyParams(),
+        params: Optional[DailyParams] = None,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ):
@@ -1256,9 +1256,11 @@ class DailyTransport(BaseTransport):
             on_recording_stopped=self._on_recording_stopped,
             on_recording_error=self._on_recording_error,
         )
-        self._params = params
+        self._params = params or DailyParams()
 
-        self._client = DailyTransportClient(room_url, token, bot_name, params, callbacks, self.name)
+        self._client = DailyTransportClient(
+            room_url, token, bot_name, self._params, callbacks, self.name
+        )
         self._input: Optional[DailyInputTransport] = None
         self._output: Optional[DailyOutputTransport] = None
 

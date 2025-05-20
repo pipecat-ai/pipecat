@@ -52,7 +52,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         model: str,  # This is the reference_id
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
@@ -61,6 +61,8 @@ class FishAudioTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or FishAudioTTSService.InputParams()
 
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"

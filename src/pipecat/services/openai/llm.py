@@ -6,7 +6,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
@@ -41,7 +41,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         self,
         *,
         model: str = "gpt-4.1",
-        params: BaseOpenAILLMService.InputParams = BaseOpenAILLMService.InputParams(),
+        params: Optional[BaseOpenAILLMService.InputParams] = None,
         **kwargs,
     ):
         super().__init__(model=model, params=params, **kwargs)

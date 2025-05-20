@@ -184,7 +184,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         model: str = "eleven_flash_v2_5",
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -209,6 +209,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or ElevenLabsTTSService.InputParams()
 
         self._api_key = api_key
         self._url = url
@@ -512,7 +514,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         model: str = "eleven_flash_v2_5",
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
@@ -522,6 +524,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or ElevenLabsHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._base_url = base_url

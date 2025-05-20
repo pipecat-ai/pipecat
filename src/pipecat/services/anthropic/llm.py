@@ -91,11 +91,12 @@ class AnthropicLLMService(LLMService):
         *,
         api_key: str,
         model: str = "claude-3-7-sonnet-20250219",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         client=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        params = params or AnthropicLLMService.InputParams()
         self._client = client or AsyncAnthropic(
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
