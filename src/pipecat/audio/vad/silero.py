@@ -105,7 +105,7 @@ class SileroOnnxModel:
 
 
 class SileroVADAnalyzer(VADAnalyzer):
-    def __init__(self, *, sample_rate: Optional[int] = None, params: VADParams = VADParams()):
+    def __init__(self, *, sample_rate: Optional[int] = None, params: Optional[VADParams] = None):
         super().__init__(sample_rate=sample_rate, params=params)
 
         logger.debug("Loading Silero VAD model...")

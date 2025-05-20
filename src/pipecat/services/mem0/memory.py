@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -49,15 +49,18 @@ class Mem0MemoryService(FrameProcessor):
     def __init__(
         self,
         *,
-        api_key: str = None,
-        local_config: Dict[str, Any] = {},
-        user_id: str = None,
-        agent_id: str = None,
-        run_id: str = None,
-        params: InputParams = InputParams(),
+        api_key: Optional[str] = None,
+        local_config: Optional[Dict[str, Any]] = None,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        run_id: Optional[str] = None,
+        params: Optional[InputParams] = None,
     ):
         # Important: Call the parent class __init__ first
         super().__init__()
+
+        local_config = local_config or {}
+        params = params or Mem0MemoryService.InputParams()
 
         if local_config:
             self.memory_client = Memory.from_config(local_config)

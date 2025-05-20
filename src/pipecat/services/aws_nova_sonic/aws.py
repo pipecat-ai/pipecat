@@ -142,7 +142,7 @@ class AWSNovaSonicLLMService(LLMService):
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
-        params: Params = Params(),
+        params: Optional[Params] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[ToolsSchema] = None,
         send_transcription_frames: bool = True,
@@ -155,7 +155,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._model = model
         self._client: Optional[BedrockRuntimeClient] = None
         self._voice_id = voice_id
-        self._params = params
+        self._params = params or Params()
         self._system_instruction = system_instruction
         self._tools = tools
         self._send_transcription_frames = send_transcription_frames

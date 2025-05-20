@@ -93,6 +93,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that would cause multiple instances of the same class to behave
+  incorrectly if any of the given constructor arguments defaulted to a mutable
+  value (e.g. lists, dictionaries, objects).
+
 - Fixed an issue with `CartesiaTTSService` where `TTSTextFrame` messages weren't
   being emitted when the model was set to `sonic`. This resulted in the
   assistant context not being updated with assistant messages.

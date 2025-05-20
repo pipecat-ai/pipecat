@@ -26,9 +26,9 @@ class MarkdownTextFilter(BaseTextFilter):
         filter_code: Optional[bool] = False
         filter_tables: Optional[bool] = False
 
-    def __init__(self, params: InputParams = InputParams(), **kwargs):
+    def __init__(self, params: Optional[InputParams] = None, **kwargs):
         super().__init__(**kwargs)
-        self._settings = params
+        self._settings = params or MarkdownTextFilter.InputParams()
         self._in_code_block = False
         self._in_table = False
         self._interrupted = False

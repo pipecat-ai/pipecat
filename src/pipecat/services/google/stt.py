@@ -412,7 +412,7 @@ class GoogleSTTService(STTService):
         credentials_path: Optional[str] = None,
         location: str = "global",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initialize the Google STT service.
@@ -430,6 +430,8 @@ class GoogleSTTService(STTService):
             ValueError: If project ID is not found in credentials.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or GoogleSTTService.InputParams()
 
         self._location = location
         self._stream = None
