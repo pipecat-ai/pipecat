@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `PipelineTask.add_observer()` and `PipelineTask.remove_observer()` to
+  allow mangaging observers at runtime. This is useful for cases where the task
+  is passed around to other code components that might want to observe the
+  pipeline dynamically.
+
 - Added `user_id` field to `TranscriptionMessage`. This allows identifying the
   user in a multi-user scenario. Note that this requires that
   `TranscriptionFrame` has the `user_id` properly set.
