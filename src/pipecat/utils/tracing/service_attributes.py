@@ -45,7 +45,7 @@ def add_tts_span_attributes(
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
-    span.set_attribute("service.name", service_name)
+    span.set_attribute("service", service_name)
     span.set_attribute("model", model)
     span.set_attribute("voice_id", voice_id)
     span.set_attribute("operation", operation_name)
@@ -55,7 +55,7 @@ def add_tts_span_attributes(
         span.set_attribute("text", text)
 
     if character_count is not None:
-        span.set_attribute("metrics.tts.character_count", character_count)
+        span.set_attribute("metrics.character_count", character_count)
 
     if ttfb_ms is not None:
         span.set_attribute("metrics.ttfb_ms", ttfb_ms)
@@ -99,7 +99,7 @@ def add_stt_span_attributes(
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
-    span.set_attribute("service.name", service_name)
+    span.set_attribute("service", service_name)
     span.set_attribute("model", model)
     span.set_attribute("vad_enabled", vad_enabled)
 
@@ -161,13 +161,13 @@ def add_llm_span_attributes(
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
-    span.set_attribute("service.name", service_name)
+    span.set_attribute("service", service_name)
     span.set_attribute("model", model)
     span.set_attribute("stream", stream)
 
     # Add optional attributes
     if messages:
-        span.set_attribute("messages", messages)
+        span.set_attribute("input", messages)
 
     if tools:
         span.set_attribute("tools", tools)

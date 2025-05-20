@@ -78,7 +78,7 @@ def _get_service_name(self, service_prefix: str) -> str:
         A default span name string like "type_classname" (e.g. llm_openaillmservice).
     """
     service_class_name = self.__class__.__name__.lower()
-    return f"{service_prefix}_{service_class_name}"
+    return f"{service_prefix}"
 
 
 def _add_token_usage_to_span(span, token_usage):
@@ -93,13 +93,19 @@ def _add_token_usage_to_span(span, token_usage):
 
     if isinstance(token_usage, dict):
         if "prompt_tokens" in token_usage:
-            span.set_attribute("llm.prompt_tokens", token_usage["prompt_tokens"])
+            span.set_attribute("llm.token_count.prompt_tokens", token_usage["prompt_tokens"])
         if "completion_tokens" in token_usage:
-            span.set_attribute("llm.completion_tokens", token_usage["completion_tokens"])
+            span.set_attribute(
+                "llm.token_count.completion_tokens", token_usage["completion_tokens"]
+            )
     else:
         # Handle LLMTokenUsage object
-        span.set_attribute("llm.prompt_tokens", getattr(token_usage, "prompt_tokens", 0))
-        span.set_attribute("llm.completion_tokens", getattr(token_usage, "completion_tokens", 0))
+        span.set_attribute(
+            "llm.token_count.prompt_tokens", getattr(token_usage, "prompt_tokens", 0)
+        )
+        span.set_attribute(
+            "llm.token_count.completion_tokens", getattr(token_usage, "completion_tokens", 0)
+        )
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
