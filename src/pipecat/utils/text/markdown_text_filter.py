@@ -33,12 +33,12 @@ class MarkdownTextFilter(BaseTextFilter):
         self._in_table = False
         self._interrupted = False
 
-    def update_settings(self, settings: Mapping[str, Any]):
+    async def update_settings(self, settings: Mapping[str, Any]):
         for key, value in settings.items():
             if hasattr(self._settings, key):
                 setattr(self._settings, key, value)
 
-    def filter(self, text: str) -> str:
+    async def filter(self, text: str) -> str:
         if self._settings.enable_text_filter:
             # Remove newlines and replace with a space only when there's no text before or after
             filtered_text = re.sub(r"^\s*\n", " ", text, flags=re.MULTILINE)
@@ -104,12 +104,12 @@ class MarkdownTextFilter(BaseTextFilter):
         else:
             return text
 
-    def handle_interruption(self):
+    async def handle_interruption(self):
         self._interrupted = True
         self._in_code_block = False
         self._in_table = False
 
-    def reset_interruption(self):
+    async def reset_interruption(self):
         self._interrupted = False
 
     #

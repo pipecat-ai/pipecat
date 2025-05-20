@@ -99,21 +99,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     )
 
     # Register handler for voice switching
-    def on_voice_tag(match: PatternMatch):
+    async def on_voice_tag(match: PatternMatch):
         voice_name = match.content.strip().lower()
         if voice_name in VOICE_IDS:
-            voice_id = VOICE_IDS[voice_name]
-
-            # Create task to reset the TTS context after voice change
-            async def change_voice():
-                # First flush any existing audio to finish the current context
-                await tts.flush_audio()
-                # Then set the new voice
-                tts.set_voice(voice_id)
-                logger.info(f"Switched to {voice_name} voice")
-
-            # Schedule the voice change task
-            asyncio.create_task(change_voice())
+            # First flush any existing audio to finish the current context
+            await tts.flush_audio()
+            # Then set the new voice
+            tts.set_voice(VOICE_IDS[voice_name])
+            logger.info(f"Switched to {voice_name} voice")
         else:
             logger.warning(f"Unknown voice: {voice_name}")
 
