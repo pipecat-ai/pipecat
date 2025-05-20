@@ -1,6 +1,12 @@
-# OpenTelemetry Tracing for Pipecat
+# Langfuse Tracing for Pipecat via OpenTelemetry
 
-This demo showcases OpenTelemetry tracing integration for Pipecat services, allowing you to visualize service calls, performance metrics, and dependencies in a Jaeger dashboard.
+This demo showcases [Langfuse](https://langfuse.com) tracing integration for Pipecat services via OpenTelemetry, allowing you to visualize service calls, performance metrics, and dependencies.
+
+This is a fork of the [OpenTelemetry Tracing for Pipecat](../open-telemetry-tracing) demo, but uses Langfuse instead of Jaeger. In contrast to the original demo, this demo uses the `opentelemetry-exporter-otlp-proto-http` exporter as the `grpc` exporter is not supported by Langfuse.
+
+Pipecat trace in Langfuse:
+
+https://github.com/user-attachments/assets/13dd7431-bf5e-42e3-8d6d-2ed84c51195d
 
 ## Features
 
@@ -8,7 +14,6 @@ This demo showcases OpenTelemetry tracing integration for Pipecat services, allo
 - **Service Tracing**: Detailed spans for TTS, STT, and LLM services with rich context
 - **TTFB Metrics**: Capture Time To First Byte metrics for latency analysis
 - **Usage Statistics**: Track character counts for TTS and token usage for LLMs
-- **Flexible Exporters**: Use Jaeger, Zipkin, or any OpenTelemetry-compatible backend
 
 ## Trace Structure
 
@@ -32,32 +37,28 @@ This organization helps you track conversation-to-conversation and turn-to-turn.
 
 ## Setup Instructions
 
-### 1. Start the Jaeger Container
+### 1. Create a Langfuse Project and get API keys
 
-Run Jaeger in Docker to collect and visualize traces:
-
-```bash
-docker run -d --name jaeger \
-  -e COLLECTOR_ZIPKIN_HOST_PORT=:9411 \
-  -p 16686:16686 \
-  -p 4317:4317 \
-  -p 4318:4318 \
-  jaegertracing/all-in-one:latest
-```
+[Self-host](https://langfuse.com/self-hosting) Langfuse or create a free [Langfuse Cloud](https://cloud.langfuse.com) account.
+Create a new project and get the API keys.
 
 ### 2. Environment Configuration
 
-Create a `.env` file with your API keys and enable tracing:
+Base64 encode your Langfuse public and secret key:
+
+```bash
+echo -n "pk-lf-1234567890:sk-lf-1234567890" | base64
+```
+
+Create a `.env` file with your API keys to enable tracing:
 
 ```
 ENABLE_TRACING=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317  # Point to your preferred backend
-# OTEL_CONSOLE_EXPORT=true  # Set to any value for debug output to console
-
-# Service API keys
-DEEPGRAM_API_KEY=your_key_here
-CARTESIA_API_KEY=your_key_here
-OPENAI_API_KEY=your_key_here
+# OTLP endpoint (defaults to localhost:4317 if not set)
+OTEL_EXPORTER_OTLP_ENDPOINT=http://cloud.langfuse.com/api/public/otel
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic%20<base64_encoded_api_key>
+# Set to any value to enable console output for debugging
+# OTEL_CONSOLE_EXPORT=true
 ```
 
 ### 3. Configure Your Pipeline Task
@@ -66,12 +67,10 @@ Enable tracing in your Pipecat application:
 
 ```python
 # Initialize OpenTelemetry with your chosen exporter
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
-exporter = OTLPSpanExporter(
-    endpoint="http://localhost:4317",  # Jaeger OTLP endpoint
-    insecure=True,
-)
+# Configured automatically from .env
+exporter = OTLPSpanExporter()
 
 setup_tracing(
     service_name="pipecat-demo",
@@ -91,55 +90,21 @@ task = PipelineTask(
 )
 ```
 
-### 4. Exporter Options
-
-While this demo uses Jaeger, you can configure any OpenTelemetry-compatible exporter:
-
-#### Jaeger (Default for the demo)
-
-```python
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-
-exporter = OTLPSpanExporter(
-    endpoint="http://localhost:4317",  # Jaeger OTLP endpoint
-    insecure=True,
-)
-```
-
-#### Cloud Providers
-
-Many cloud providers offer OpenTelemetry-compatible observability services:
-
-- AWS X-Ray
-- Google Cloud Trace
-- Azure Monitor
-- Datadog APM
-
-See the OpenTelemetry documentation for specific exporter configurations:
-https://opentelemetry.io/ecosystem/vendors/
-
-#### LLM Tracing and Evaluation Providers
-
-Many LLM-focused tracing and evaluation projects support OpenTelemetry, for example:
-
-- Langfuse ([integration example](../open-telemetry-tracing-langfuse/))
-- Arize Phoenix
-
-### 5. Install Dependencies
+### 4. Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 6. Run the Demo
+### 5. Run the Demo
 
 ```bash
 python bot.py
 ```
 
-### 7. View Traces in Jaeger
+### 6. View Traces in Langfuse
 
-Open your browser to [http://localhost:16686](http://localhost:16686) and select the "pipecat-demo" service to view traces.
+Open your browser to [https://cloud.langfuse.com](https://cloud.langfuse.com) to view traces.
 
 ## Understanding the Traces
 
@@ -163,14 +128,13 @@ The tracing system consists of:
 
 ## Troubleshooting
 
-- **No Traces in Jaeger**: Ensure the Docker container is running and the OTLP endpoint is correct
+- **No Traces in Langfuse**: Ensure that your credentials are correct and follow this [troubleshooting guide](https://langfuse.com/faq/all/missing-traces)
 - **Debugging Traces**: Set `OTEL_CONSOLE_EXPORT=true` to print traces to the console for debugging
 - **Missing Metrics**: Check that `enable_metrics=True` in PipelineParams
-- **Connection Errors**: Verify network connectivity to the Jaeger container
+- **Connection Errors**: Verify network connectivity to Langfuse
 - **Exporter Issues**: Try the Console exporter (`OTEL_CONSOLE_EXPORT=true`) to verify tracing works
-- **Other Backends**: If using a different backend, ensure you've configured the correct exporter and endpoint
 
 ## References
 
 - [OpenTelemetry Python Documentation](https://opentelemetry-python.readthedocs.io/)
-- [Jaeger Documentation](https://www.jaegertracing.io/docs/latest/)
+- [Langfuse OpenTelemetry Documentation](https://langfuse.com/docs/opentelemetry/get-started)
