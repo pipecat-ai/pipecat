@@ -80,7 +80,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         url: str = "wss://api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
@@ -91,6 +91,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or NeuphonicTTSService.InputParams()
 
         self._api_key = api_key
         self._url = url
@@ -293,10 +295,12 @@ class NeuphonicHttpTTSService(TTSService):
         url: str = "https://api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or NeuphonicHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._url = url

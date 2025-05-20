@@ -341,11 +341,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
         start_video_paused: bool = False,
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         inference_on_context_initialization: bool = True,
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
+
+        params = params or InputParams()
+
         self._last_sent_time = 0
         self._api_key = api_key
         self._base_url = base_url

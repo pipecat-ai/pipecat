@@ -6,7 +6,7 @@
 
 import asyncio
 import inspect
-from typing import List
+from typing import List, Optional
 
 from attr import dataclass
 
@@ -39,8 +39,10 @@ class TaskObserver(BaseObserver):
 
     """
 
-    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: BaseTaskManager):
-        self._observers = observers
+    def __init__(
+        self, *, observers: Optional[List[BaseObserver]] = None, task_manager: BaseTaskManager
+    ):
+        self._observers = observers or []
         self._task_manager = task_manager
         self._proxies: List[Proxy] = []
 

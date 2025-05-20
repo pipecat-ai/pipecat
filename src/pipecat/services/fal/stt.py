@@ -173,13 +173,15 @@ class FalSTTService(SegmentedSTTService):
         *,
         api_key: Optional[str] = None,
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or FalSTTService.InputParams()
 
         if api_key:
             os.environ["FAL_KEY"] = api_key

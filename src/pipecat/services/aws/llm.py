@@ -530,16 +530,18 @@ class AWSBedrockLLMService(LLMService):
     def __init__(
         self,
         *,
+        model: str,
         aws_access_key: Optional[str] = None,
         aws_secret_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         aws_region: str = "us-east-1",
-        model: str,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         client_config: Optional[Config] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        params = params or AWSBedrockLLMService.InputParams()
 
         # Initialize the AWS Bedrock client
         if not client_config:
