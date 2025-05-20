@@ -1,5 +1,21 @@
-pipecat-ai[daily,cartesia,deepgram,openai,google,silero]
-fastapi==0.115.6
-uvicorn
-python-dotenv
-python-multipart
+# Server and web framework
+fastapi>=0.103.1
+uvicorn>=0.23.2
+websockets>=11.0.3
+python-dotenv>=1.0.0
+httpx>=0.24.1
+python-multipart>=0.0.6
+aiofiles>=23.2.1
+
+# Twilio (for original implementation)
+twilio>=9.6.1
+
+# Audio processing
+numpy>=1.26.0
+scipy>=1.11.3
+
+# OpenAI
+openai>=1.10.0
+
+# Pipecat
+pipecat-ai[silero,daily,azure,openai,elevenlabs]>=0.0.67
