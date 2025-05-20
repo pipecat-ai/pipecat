@@ -31,7 +31,7 @@ class BaseClient:
         """Initialize the client. This method should be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement _initialize_client")
 
-    def _make_api_call(self, messages: List[Dict[str, Any]], **kwargs) -> str:
+    async def _make_api_call(self, messages: List[Dict[str, Any]], **kwargs) -> str:
         """Make the API call to the model. This method should be implemented by subclasses.
 
         Args:
@@ -43,7 +43,7 @@ class BaseClient:
         """
         raise NotImplementedError("Subclasses must implement _make_api_call")
 
-    def get_response(self, messages: List[Dict[str, Any]], **kwargs):
+    async def get_response(self, messages: List[Dict[str, Any]], **kwargs):
         """Get a response from the client.
 
         Args:
@@ -53,7 +53,7 @@ class BaseClient:
         Returns:
             str: The response from the client.
         """
-        output = self._make_api_call(messages=messages, **kwargs)
+        output = await self._make_api_call(messages=messages, **kwargs)
         return output
 
 
@@ -87,14 +87,14 @@ class AzureOpenAIClient(BaseClient):
         **kwargs,
     ) -> None:
         """Initialize the OpenAI client with the API key."""
-        self.client = openai.AzureOpenAI(
+        self.client = openai.AsyncAzureOpenAI(
             api_key=api_key,
             azure_endpoint=azure_endpoint,
             api_version=api_version,
             **kwargs,
         )
 
-    def _make_api_call(
+    async def _make_api_call(
         self,
         messages: List[Dict[str, Any]],
         **kwargs,
@@ -103,7 +103,7 @@ class AzureOpenAIClient(BaseClient):
         request_kwargs = self.default_response_kwargs.copy()
         request_kwargs.update(kwargs)
 
-        completion = self.client.chat.completions.create(
+        completion = await self.client.chat.completions.create(
             model=self.model_id,
             messages=messages,
             **request_kwargs,
@@ -135,9 +135,9 @@ class OpenAIClient(BaseClient):
 
     def _initialize_client(self, api_key: str, base_url: Optional[str] = None, **kwargs) -> None:
         """Initialize the OpenAI client with the API key."""
-        self.client = openai.OpenAI(api_key=api_key, base_url=base_url, **kwargs)
+        self.client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url, **kwargs)
 
-    def _make_api_call(
+    async def _make_api_call(
         self,
         messages: List[Dict[str, Any]],
         **kwargs,
@@ -146,7 +146,7 @@ class OpenAIClient(BaseClient):
         request_kwargs = self.default_response_kwargs.copy()
         request_kwargs.update(kwargs)
 
-        completion = self.client.chat.completions.create(
+        completion = await self.client.chat.completions.create(
             model=self.model_id,
             messages=messages,
             **request_kwargs,

@@ -98,7 +98,6 @@ class BaseConversationalAgent(ABC):
             api_version="2024-12-01-preview",
             azure_endpoint=azure_endpoint,
             api_key=azure_api_key,
-            keep_history=False,
             call_id=call_id,
         )
 

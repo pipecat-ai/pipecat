@@ -22,7 +22,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
-from pipecat.services.atoms.atoms_agent import CallData, TestAgent, initialize_conversational_agent
+from pipecat.services.atoms.atoms_agent import CallData, initialize_conversational_agent
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -95,19 +95,17 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     #     voice_id="nyah",
     # )
 
-    # agent = await initialize_conversational_agent(
-    #     agent_id="68186085cffd8fb97d1f84ad",
-    #     call_id="CALL-1747224604782-94a54d",
-    #     call_data=CallData(
-    #         variables={
-    #             "call_id": "CALL-1747224604782-94a54d",
-    #             "user_number": "+918815141212",
-    #             "agent_number": "+918815141212",
-    #         }
-    #     ),
-    # )
-
-    test_agent = TestAgent()
+    agent = await initialize_conversational_agent(
+        agent_id="68186085cffd8fb97d1f84ad",
+        call_id="CALL-1747224604782-94a54d",
+        call_data=CallData(
+            variables={
+                "call_id": "CALL-1747224604782-94a54d",
+                "user_number": "+918815141212",
+                "agent_number": "+918815141212",
+            }
+        ),
+    )
 
     messages = [
         {
@@ -127,13 +125,13 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         [
             transport.input(),  # Websocket input from client
             stt,  # Speech-To-Text
-            # context_aggregator.user(),
+            context_aggregator.user(),
             # llm,  # LLM
-            test_agent,
+            agent,
             tts,
             transport.output(),
             audiobuffer,  # Used to buffer the audio in the pipeline
-            # context_aggregator.assistant(),
+            context_aggregator.assistant(),
         ]
     )
 
@@ -146,13 +144,13 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         ),
     )
 
-    @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
-        # Start recording.
-        await audiobuffer.start_recording()
-        # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+    # @transport.event_handler("on_client_connected")
+    # async def on_client_connected(transport, client):
+    #     # Start recording.
+    #     await audiobuffer.start_recording()
+    #     # Kick off the conversation.
+    #     messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+    #     await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

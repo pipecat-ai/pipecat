@@ -32,7 +32,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 
-from .agent import AtomsConversationalAgent
 from .base_agent import BaseConversationalAgent
 from .llm_client import AzureOpenAIClient, OpenAIClient
 from .pathways import ConversationalPathway, Node, NodeType, Pathway
@@ -116,19 +115,23 @@ class FlowGraphManager(FrameProcessor):
 
     def __init__(
         self,
-        response_model_client: BaseClient,
+        flow_model_client: BaseClient,
         variable_extraction_client: BaseClient,
+        response_model_client: BaseClient,
         conversation_pathway: ConversationalPathway,
         initial_variables: Optional[Dict[str, Any]] = None,
     ):
         super().__init__()
-        self.response_model_client: BaseClient = response_model_client
+        self.flow_model_client: BaseClient = flow_model_client
         self.variable_extraction_client: BaseClient = variable_extraction_client
+        self.response_model_client: BaseClient = response_model_client
         self.conv_pathway: ConversationalPathway = conversation_pathway
         self.variables = self._initialize_variables(initial_variables)
         self.current_node: Node = self._find_root()
         self._process_pre_call_api_nodes()
         self.conv_pathway.start_node = self.current_node
+        self._last_state = None
+        self._end_call_tag = "<end_call>"
 
     def _initialize_variables(
         self, initial_variables: Optional[Dict[str, Any]] = None
@@ -226,16 +229,16 @@ class FlowGraphManager(FrameProcessor):
                 conditional_edges.append((pathway_id, pathway))
         return conditional_edges
 
-    def _hop_conditional_edges(
+    async def _hop_conditional_edges(
         self, conditional_edges: List[Tuple[str, Pathway]], context: OpenAILLMContext
     ) -> bool:
         for pathway_id, pathway in conditional_edges:
             if self._evaluate_conditional_edge(pathway.condition):
-                self._hop(pathway_id, context=context)
+                await self._hop(pathway_id, context=context)
                 return True
         return False
 
-    def _handle_hopping(self, context: OpenAILLMContext) -> bool:
+    async def _handle_hopping(self, context: OpenAILLMContext) -> bool:
         """Determine if a node transition is needed and execute if necessary.
 
         First checks conditional edges, then falls back to LLM-based decision.
@@ -262,19 +265,19 @@ class FlowGraphManager(FrameProcessor):
             return False
 
         selected_pathway_id = self._cleanup_think_tokens(
-            self.response_model_client.get_response(flow_history)
+            await self.flow_model_client.get_response(flow_history)
         )
 
         if selected_pathway_id == "null":
             return False
 
         try:
-            self._hop(pathway_id=selected_pathway_id, context=context)
+            await self._hop(pathway_id=selected_pathway_id, context=context)
             return True
         except Exception:
             return False
 
-    def _hop(self, pathway_id: str, context: OpenAILLMContext) -> None:
+    async def _hop(self, pathway_id: str, context: OpenAILLMContext) -> None:
         """Transition to a new node via the specified pathway.
 
         Args:
@@ -289,10 +292,10 @@ class FlowGraphManager(FrameProcessor):
                 f"Pathway '{pathway_id}' not found in current node '{self.current_node.name}'"
             )
 
-        self._extract_variables(context=context)
+        await self._extract_variables(context=context)
         self.current_node = self.current_node.pathways[pathway_id].target_node
 
-    def _extract_variables(self, context: OpenAILLMContext) -> Dict[str, Any]:
+    async def _extract_variables(self, context: OpenAILLMContext) -> Dict[str, Any]:
         """Extract variables from conversation context using LLM.
 
         Returns:
@@ -316,9 +319,9 @@ class FlowGraphManager(FrameProcessor):
 
         context = []
         for context_message in context.messages[2:]:
-            if isinstance(context_message, ChatCompletionUserMessageParam):
+            if context_message["role"] == "user":
                 context.append(f"User: {context_message.content}")
-            elif isinstance(context_message, ChatCompletionAssistantMessageParam):
+            elif context_message["role"] == "assistant":
                 context.append(f"Assistant: {context_message.content}")
 
         # Create extraction prompt
@@ -331,7 +334,7 @@ class FlowGraphManager(FrameProcessor):
         )
 
         # Get extraction response from GPT-4o
-        raw_extraction = self.variable_extraction_client.get_response(
+        raw_extraction = await self.variable_extraction_client.get_response(
             [{"role": "user", "content": extraction_prompt}],
         )
 
@@ -469,9 +472,9 @@ class FlowGraphManager(FrameProcessor):
         # Find the most recent node message
         current_node_index = None
         for idx, msg in enumerate(reversed(context.messages[1:])):
-            if isinstance(msg, ChatCompletionUserMessageParam):
+            if msg["role"] == "user":
                 try:
-                    content = json.loads(msg.content)
+                    content = json.loads(msg["content"])
                     if "id" in content and content["id"] == self.current_node.id:
                         current_node_index = len(context.messages) - 1 - idx
                         break
@@ -513,16 +516,15 @@ class FlowGraphManager(FrameProcessor):
         # we have to build flow navigation history by appending only assistant and user messages
         while current_node_index < len(context.messages):
             # check if the current context is a assistant message
-            if isinstance(
-                context.messages[current_node_index], ChatCompletionAssistantMessageParam
-            ):
+            if context.messages[current_node_index]["role"] == "assistant":
                 assistant_content: ChatCompletionAssistantMessageParam = context.messages[
                     current_node_index
                 ]["content"]
 
                 # now find the next user message
-                while current_node_index < len(context.messages) and not isinstance(
-                    context.messages[current_node_index], ChatCompletionUserMessageParam
+                while (
+                    current_node_index < len(context.messages)
+                    and context.messages[current_node_index]["role"] != "user"
                 ):
                     current_node_index += 1
 
@@ -578,6 +580,155 @@ class FlowGraphManager(FrameProcessor):
         else:
             return input_string
 
+    async def _process_context(self, context: OpenAILLMContext) -> None:
+        """Process the context and update the flow model client."""
+        if self.current_node.static_text:
+            await self._handle_static_response(context=context)
+        else:
+            await self._handle_dynamic_response(context=context)
+        await self._handle_hopping(context=context)
+
+    def _get_transcript_from_context(self, context: OpenAILLMContext) -> str:
+        """Get the transcript from the context."""
+        for idx in range(len(context.messages) - 1, -1, -1):
+            if context.messages[idx]["role"] == "user":
+                return context.messages[idx]["content"]
+        return ""
+
+    def _format_current_state_as_json(
+        self,
+        user_response: Optional[str] = None,
+        custom_instructions: Optional[list] = None,
+        add_variables: bool = False,
+        add_agent_persona: bool = False,
+    ) -> str:
+        """Convert current state and user response to JSON string.
+
+        Args:
+            user_response: User's input text
+            custom_instructions: Additional instructions for the LLM
+            add_variables: Whether to include variables in context
+            add_agent_persona: Whether to include agent persona in context
+
+        Returns:
+            JSON string representing the current state
+        """
+        current_state = {
+            "id": self.current_node.id,
+            "name": self.current_node.name,
+            "type": self.current_node.type.name,
+            "action": self.current_node.action,
+            "loop_condition": self.current_node.loop_condition,
+            "user_response": user_response,
+        }
+
+        if self.current_node.knowledge_base and self.current_node.knowledge_base.strip():
+            current_state["knowledge_base"] = self.current_node.knowledge_base
+        if add_variables:
+            current_state["variables"] = {
+                "current_date": self.curr_date,
+                "current_day": self.curr_day,
+                "current_time": self.curr_time,
+            }
+        if add_agent_persona and self.agent_persona:
+            current_state["agent_persona"] = self.agent_persona
+        if custom_instructions:
+            current_state["custom_instructions"] = custom_instructions
+        if current_state.get("loop_condition") is None or (
+            isinstance(current_state["loop_condition"], str)
+            and current_state["loop_condition"].strip() == ""
+        ):
+            current_state.pop("loop_condition")
+
+        # If we have a previous state
+        if self._last_state is not None and self._last_state.get("id") == current_state["id"]:
+            # Calculate delta
+            delta = {"user_response": user_response}
+
+            # Compare other fields and include only changed ones
+            for key, value in current_state.items():
+                if key != "user_response" and (
+                    key not in self._last_state or self._last_state[key] != value
+                ):
+                    delta[key] = value
+
+            # Store current state for next comparison
+            self._last_state = current_state
+
+            # Return delta
+            return json.dumps({"delta": delta}, indent=2, ensure_ascii=False)
+
+        # Store current state for next comparison
+        self._last_state = current_state
+
+        # Return full state if no delta or node changed
+        return json.dumps(current_state, indent=2, ensure_ascii=False)
+
+    # async def _handle_response(
+    #     self,
+    #     context: OpenAILLMContext,
+    #     add_variables: bool = False,
+    #     add_agent_persona: bool = False,
+    # ) -> None:
+    #     """Handle the response from the response model client."""
+    #     self.current_node.action = self._replace_variables(self.current_node.action, self.variables)
+    #     transcript = self._get_transcript_from_context(context)
+
+    #     if (
+    #         self.current_node.loop_condition
+    #         and isinstance(self.current_node.loop_condition, str)
+    #         and self.current_node.loop_condition.strip()
+    #     ):
+    #         self.current_node.loop_condition = self._replace_variables(
+    #             self.current_node.loop_condition, self.variables
+    #         )
+
+    #     # Do language switching if turned on
+    #     if self.language_switching and transcript:
+    #         self.language_now = self._detect_language(transcript)
+
+    #     custom_instructions = custom_instructions or []
+    #     custom_instructions.append(self._get_language_switch_inst())
+
+    #     # Get current state of conversation
+    #     current_state = self._format_current_state_as_json(
+    #         user_response=transcript,
+    #         custom_instructions=custom_instructions,
+    #         add_variables=add_variables,
+    #         add_agent_persona=add_agent_persona,
+    #     )
+
+    #     # Use static text or not
+    #     use_static_text = self.current_node.static_text
+
+    async def _handle_static_response(self, context: OpenAILLMContext) -> None:
+        """Handle the static response from the response model client."""
+        logger.debug(f"handling static response, text: {self.current_node.static_text}")
+        await self.push_frame(LLMTextFrame(text=self.current_node.static_text))
+
+    async def _handle_dynamic_response(self, context: OpenAILLMContext) -> None:
+        """Handle the dynamic response from the response model client."""
+        try:
+            logger.debug(
+                f"getting response from response model client, messages: {context.messages}"
+            )
+            async for chunk in await self.response_model_client.get_response(
+                context.messages, stream=True
+            ):
+                if chunk.choices:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        await self.push_frame(LLMTextFrame(text=content))
+                    if (
+                        chunk.choices[0].finish_reason
+                        and hasattr(chunk.choices[0], "stop_reason")
+                        and chunk.choices[0].stop_reason == self._end_call_tag
+                    ):
+                        # TODO: Handle end call tag
+                        pass
+        except Exception as e:
+            logger.error(f"Error handling dynamic response: {e}")
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -586,11 +737,6 @@ class FlowGraphManager(FrameProcessor):
             context: OpenAILLMContext = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             context = OpenAILLMContext.from_messages(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            context = OpenAILLMContext()
-            context.add_image_frame_message(
-                format=frame.format, size=frame.size, image=frame.image, text=frame.text
-            )
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
@@ -599,7 +745,6 @@ class FlowGraphManager(FrameProcessor):
         if context:
             try:
                 await self.push_frame(LLMFullResponseStartFrame())
-                await self.start_processing_metrics()
                 await self._process_context(context)
             except httpx.TimeoutException:
                 await self._call_event_handler("on_completion_timeout")
@@ -614,7 +759,7 @@ async def initialize_conversational_agent(
     call_id: str,
     call_data: CallData,
     initialize_first_message: bool = True,
-) -> AtomsAgent:
+) -> FlowGraphManager:
     """Initialize a conversational agent with the specified configuration.
 
     Args:
@@ -623,7 +768,6 @@ async def initialize_conversational_agent(
         call_data: Contains variables and other call-related information
         initialize_first_message: Whether to initialize first message
         save_msgs_path: Path to save messages
-        **kwargs: Additional arguments passed to AtomsConversationalAgent
 
     Returns:
         tuple: (initialized agent instance, agent configuration)
@@ -673,8 +817,6 @@ async def initialize_conversational_agent(
             api_key=os.getenv("ATOMS_INFER_API_KEY"),
             base_url=f"{os.getenv('FLOW_MODEL_ENDPOINT')}/v1",
             default_response_kwargs={"temperature": 0.0},
-            keep_history=False,
-            call_id=call_id,
         )
 
         response_model_client = OpenAIClient(
@@ -682,7 +824,6 @@ async def initialize_conversational_agent(
             api_key=os.getenv("ATOMS_INFER_API_KEY"),
             base_url=f"{os.getenv('RESPONSE_MODEL_ENDPOINT')}/v1",
             default_response_kwargs={"temperature": 0.7},
-            call_id=call_id,
         )
 
         variable_extraction_client = AzureOpenAIClient(
@@ -694,6 +835,7 @@ async def initialize_conversational_agent(
 
         return FlowGraphManager(
             response_model_client=response_model_client,
+            flow_model_client=flow_model_client,
             variable_extraction_client=variable_extraction_client,
             conversation_pathway=conv_pathway,
             initial_variables=initial_variables,
@@ -701,7 +843,6 @@ async def initialize_conversational_agent(
 
     except Exception as e:
         traceback.print_exc()
-
         raise Exception("Failed to initialize conversational agent")
 
 
