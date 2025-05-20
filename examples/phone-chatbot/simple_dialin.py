@@ -27,8 +27,11 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext, OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai.llm import OpenAILLMService
+
+# ← Import the AzureLLMService class
+from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.azure.stt import AzureSTTService
+
 from pipecat.transcriptions.language import Language
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 from pipecat.services.tts_service import TTSService
@@ -68,7 +71,6 @@ class LoggingSTTService(AzureSTTService):
             metrics.clear()
             log_event(STT_START)
 
-        # run default STT
         await super().process_frame(frame, direction)
 
         # On transcription → log what user said
@@ -77,7 +79,8 @@ class LoggingSTTService(AzureSTTService):
             logger.info(f"User said: '{frame.text.strip()}'")
 
 #––– Logging LLM Service ––––––––––––––––––––––––––––––––––––––––––––––––
-class LoggingLLMService(OpenAILLMService):
+class LoggingLLMService(AzureLLMService):
+    # Inherit AzureLLMService constructor—no need to override unless you have custom kwargs
     async def process_frame(self, frame, direction):
         # On context delivered → mark LLM start and STT latency
         if direction == FrameDirection.DOWNSTREAM and isinstance(frame, OpenAILLMContextFrame):
@@ -86,7 +89,6 @@ class LoggingLLMService(OpenAILLMService):
             cnt = len(frame.context.messages) if frame.context else "N/A"
             logger.info(f"LLM received context (messages: {cnt}).")
 
-        # run default LLM
         await super().process_frame(frame, direction)
 
         # On LLM output → log what bot responded
@@ -98,9 +100,9 @@ class LoggingLLMService(OpenAILLMService):
 class LoggingTTSService(TTSService):
     def __init__(self, api_key=None, voice_id=None, sample_rate=24000, speed=1.0):
         super().__init__(sample_rate=sample_rate)
-        self.api_key = api_key or os.getenv("SMALLEST_API_KEY")
+        self.api_key  = api_key  or os.getenv("SMALLEST_API_KEY")
         self.voice_id = voice_id or os.getenv("SMALLEST_VOICE_ID")
-        self.speed = speed
+        self.speed    = speed
 
     def _chunk_text(self, text: str, max_len: int = 500):
         chunks = []
@@ -138,31 +140,25 @@ class LoggingTTSService(TTSService):
         return b"".join(pcm)
 
     async def run_tts(self, text: str):
-        # TTS start → log LLM latency
         log_event(TTS_START)
         compute_and_log(LLM_START, TTS_START, "llm_latency", "llm")
         yield TTSStartedFrame()
 
-        # Synthesize
         audio = await asyncio.get_running_loop().run_in_executor(None, self._synthesize, text)
 
-        # TTS end → compute TTS latency
         log_event(TTS_END)
         tts_lat = compute_and_log(TTS_START, TTS_END, "tts_latency", "tts")
 
-        # Compute total = stt + llm + tts
         st = metrics.get("stt_latency", 0)
         ll = metrics.get("llm_latency", 0)
         total = st + ll + tts_lat
         logger.info(f"TOTAL_LATENCY (stt+llm+tts): {total:.2f}s")
 
-        # Emit audio frames
         yield TTSAudioRawFrame(audio=audio, sample_rate=self.sample_rate, num_channels=1)
         yield TTSStoppedFrame()
 
 #––– Main ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 async def main(room_url: str, token: str, body: object):
-    # parse config
     cfg = CallConfigManager.from_json_string(body) if isinstance(body, str) else CallConfigManager(body or {})
     test_mode = cfg.is_test_mode()
     dialin = cfg.get_dialin_settings()
@@ -177,10 +173,13 @@ async def main(room_url: str, token: str, body: object):
         "vad_analyzer":        SileroVADAnalyzer(),
         "transcription_enabled": False,
     }
-    tp = DailyParams(**base) if test_mode else DailyParams(**base, dialin_settings=DailyDialinSettings(
-        call_id=dialin.get("call_id"),
-        call_domain=dialin.get("call_domain","")
-    ))
+    tp = DailyParams(**base) if test_mode else DailyParams(
+        **base,
+        dialin_settings=DailyDialinSettings(
+            call_id=dialin.get("call_id"),
+            call_domain=dialin.get("call_domain","")
+        )
+    )
 
     transport = DailyTransport(room_url, token, "Dial-in Bot", tp)
 
@@ -190,8 +189,10 @@ async def main(room_url: str, token: str, body: object):
         language=Language.EN_IN,
     )
     llm = LoggingLLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model=os.getenv("OPENAI_MODEL","gpt-4o-mini"),
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),      # e.g. https://<resource>.openai.azure.com/
+        model=os.getenv("AZURE_OPENAI_DEPLOYMENT"),       # your deployment name
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-09-01-preview"),
     )
     tts = LoggingTTSService(
         api_key=os.getenv("SMALLEST_API_KEY"),
@@ -200,7 +201,6 @@ async def main(room_url: str, token: str, body: object):
         speed=float(os.getenv("SMALLEST_VOICE_SPEED","1.0")),
     )
 
-    # hang-up function
     async def terminate_call(params: FunctionCallParams):
         session_manager.call_flow_state.set_call_terminated()
         await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
@@ -209,7 +209,6 @@ async def main(room_url: str, token: str, body: object):
     tools = ToolsSchema(standard_tools=[fn])
     llm.register_function("terminate_call", terminate_call)
 
-    # build pipeline
     system = os.getenv("BOT_SYSTEM_PROMPT","You are a helpful phone agent.")
     ctx = OpenAILLMContext([cfg.create_system_message(system)], tools)
     agg = llm.create_context_aggregator(ctx)
