@@ -103,6 +103,155 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from .llm_client import BaseClient
 
 
+class AtomsAgentContext(OpenAILLMContext):
+    def __init__(
+        self,
+        messages: Optional[List[dict]] = None,
+        tools: Optional[List[dict]] = None,
+        tool_choice: Optional[dict] = None,
+        *,
+        system: Optional[str] = None,
+    ):
+        super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
+        self.system = system
+
+    @staticmethod
+    def upgrade_to_atoms_agent(obj: OpenAILLMContext) -> "AtomsAgentContext":
+        logger.debug(f"Upgrading to Atoms Agent: {obj}")
+        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AtomsAgentContext):
+            obj.__class__ = AtomsAgentContext
+            obj._restructure_from_openai_messages()
+        else:
+            obj._restructure_from_openai_messages()
+        return obj
+
+    @classmethod
+    def from_openai_context(cls, openai_context: OpenAILLMContext):
+        self = cls(
+            messages=openai_context.messages,
+            tools=openai_context.tools,
+            tool_choice=openai_context.tool_choice,
+        )
+        self.set_llm_adapter(openai_context.get_llm_adapter())
+        self._restructure_from_openai_messages()
+        return self
+
+    @classmethod
+    def from_messages(cls, messages: List[dict]) -> "AtomsAgentContext":
+        self = cls(messages=messages)
+        self._restructure_from_openai_messages()
+        return self
+
+    def set_messages(self, messages: List):
+        self._messages[:] = messages
+        self._restructure_from_openai_messages()
+
+    # convert a message in atoms agent format into one or more messages in OpenAI format
+    def to_standard_message(self, obj):
+        """Convert atoms agent message format to standard structured format.
+
+        Handles text content and function calls for both user and assistant messages.
+
+        Args:
+            obj: Message in atoms agent format:
+                {
+                    "role": "user/assistant",
+                    "content": [{"text": str} | {"toolUse": {...}} | {"toolResult": {...}}]
+                }
+
+        Returns:
+            List of messages in standard format:
+            [
+                {
+                    "role": "user/assistant/tool",
+                    "content": [{"type": "text", "text": str}]
+                }
+            ]
+        """
+        pass
+
+    def from_standard_message(self, message):
+        """Convert standard format message to atoms agent format.
+
+        Handles conversion of user response string to json format with user response and node data.
+
+        Args:
+            message: Message in standard format:
+                {
+                    "role": "user/assistant/tool",
+                    "content": str | [{"type": "text", ...}],
+                }
+
+        Returns:
+            Message in atoms agent format:
+            {
+                "role": "user/assistant",
+                "content": [
+                    {"text": str} |
+                    {"toolUse": {"toolUseId": str, "name": str, "input": dict}} |
+                    {"toolResult": {"toolUseId": str, "content": [...], "status": str}}
+                ]
+            }
+        """
+        pass
+
+    def _validate_messages(self, message):
+        """validate messages to ensure the roles alternate and the content is in the correct format."""
+        pass
+
+    def _restructure_from_atoms_agent_messages(self):
+        """restructure the open ai context from the atoms agent context."""
+        messages = []
+
+        for message in self.messages:
+            if message["role"] == "user":
+                try:
+                    json_content = json.loads(message["content"])
+                    transcript = json_content["transcript"]
+                    messages.append(ChatCompletionUserMessageParam(content=transcript))
+                except Exception:
+                    logger.debug(f"Error parsing user message: {message}")
+                    messages.append(ChatCompletionUserMessageParam(content=message["content"]))
+            else:
+                messages.append(message)
+
+        self.set_messages(messages=messages)
+
+    def _restructure_from_openai_messages(self):
+        """This function will restructure the openai user context messages to the atoms agent context messages."""
+        messages = []
+
+        for message in self.messages:
+            if message["role"] == "user":
+                messages.append(
+                    ChatCompletionUserMessageParam(
+                        content=json.dumps({"transcript": message["content"]})
+                    )
+                )
+            else:
+                messages.append(message)
+
+        self.set_messages(messages=messages)
+
+    def _format_messages_for_reponse_model(self):
+        """format the messages for the response model."""
+        pass
+
+    def _format_messages_for_flow_navigation(self):
+        """format the messages for the flow navigation."""
+        pass
+
+    def _get_variable_extraction_prompt(self):
+        """get the prompt for the variable extraction."""
+        messages = []
+        for message in self.messages:
+            if message["role"] == "user":
+                messages.append(f"User: {message['content']}")
+            else:
+                messages.append(f"Assistant: {message['content']}")
+        return "\n".join(messages)
+
+
 class FlowGraphManager(FrameProcessor):
     """This is a frame processor that manages the flow graph of the agent.
 
@@ -195,6 +344,7 @@ class FlowGraphManager(FrameProcessor):
             if http_request:
                 try:
                     response_data = self._make_api_request_from_node(self.current_node)
+                    logger.debug(f"response data from pre-call api node: {response_data}")
                 except Exception as e:
                     logger.error(
                         f"Error in API request for node {self.current_node.id}: {str(e)}",
@@ -233,6 +383,7 @@ class FlowGraphManager(FrameProcessor):
         self, conditional_edges: List[Tuple[str, Pathway]], context: OpenAILLMContext
     ) -> bool:
         for pathway_id, pathway in conditional_edges:
+            logger.debug(f"evaluating conditional edge: {pathway.condition}")
             if self._evaluate_conditional_edge(pathway.condition):
                 await self._hop(pathway_id, context=context)
                 return True
@@ -250,6 +401,7 @@ class FlowGraphManager(FrameProcessor):
         """
         # First, check if we have any conditional edges to evaluate
         conditional_edges = self._get_conditional_edges()
+        logger.debug(f"conditional edges: {conditional_edges}")
         # If we have conditional edges, evaluate them first
         if conditional_edges:
             is_conditional_edge_matched = self._hop_conditional_edges(
@@ -582,11 +734,11 @@ class FlowGraphManager(FrameProcessor):
 
     async def _process_context(self, context: OpenAILLMContext) -> None:
         """Process the context and update the flow model client."""
+        await self._handle_hopping(context=context)
         if self.current_node.static_text:
             await self._handle_static_response(context=context)
         else:
             await self._handle_dynamic_response(context=context)
-        await self._handle_hopping(context=context)
 
     def _get_transcript_from_context(self, context: OpenAILLMContext) -> str:
         """Get the transcript from the context."""

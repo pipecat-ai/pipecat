@@ -77,7 +77,10 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"), audio_passthrough=True)
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        audio_passthrough=True,
+    )
 
     # tts = CartesiaTTSService(
     #     api_key=os.getenv("CARTESIA_API_KEY"),
