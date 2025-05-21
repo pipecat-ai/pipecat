@@ -67,20 +67,6 @@ def _get_parent_service_context(self):
     return context_api.get_current()
 
 
-def _get_service_name(self, service_prefix: str) -> str:
-    """Generate a default span name using service type and class name.
-
-    Args:
-        self: The service instance.
-        service_prefix: The service type (e.g., 'llm', 'stt', 'tts').
-
-    Returns:
-        A default span name string like "type_classname" (e.g. llm_openaillmservice).
-    """
-    service_class_name = self.__class__.__name__.lower()
-    return f"{service_prefix}"
-
-
 def _add_token_usage_to_span(span, token_usage):
     """Add token usage metrics to a span (internal use only).
 
@@ -93,18 +79,14 @@ def _add_token_usage_to_span(span, token_usage):
 
     if isinstance(token_usage, dict):
         if "prompt_tokens" in token_usage:
-            span.set_attribute("llm.token_count.prompt_tokens", token_usage["prompt_tokens"])
+            span.set_attribute("gen_ai.usage.input_tokens", token_usage["prompt_tokens"])
         if "completion_tokens" in token_usage:
-            span.set_attribute(
-                "llm.token_count.completion_tokens", token_usage["completion_tokens"]
-            )
+            span.set_attribute("gen_ai.usage.output_tokens", token_usage["completion_tokens"])
     else:
         # Handle LLMTokenUsage object
+        span.set_attribute("gen_ai.usage.input_tokens", getattr(token_usage, "prompt_tokens", 0))
         span.set_attribute(
-            "llm.token_count.prompt_tokens", getattr(token_usage, "prompt_tokens", 0)
-        )
-        span.set_attribute(
-            "llm.token_count.completion_tokens", getattr(token_usage, "completion_tokens", 0)
+            "gen_ai.usage.output_tokens", getattr(token_usage, "completion_tokens", 0)
         )
 
 
@@ -140,7 +122,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 return
 
             service_class_name = self.__class__.__name__
-            span_name = name or _get_service_name(self, "tts")
+            span_name = "tts"
 
             # Get parent context
             turn_context = get_current_turn_context()
@@ -243,7 +225,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     return await f(self, transcript, is_final, language)
 
                 service_class_name = self.__class__.__name__
-                span_name = name or _get_service_name(self, "stt")
+                span_name = "stt"
 
                 # Get the turn context first, then fall back to service context
                 turn_context = get_current_turn_context()
@@ -319,7 +301,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     return await f(self, context, *args, **kwargs)
 
                 service_class_name = self.__class__.__name__
-                span_name = name or _get_service_name(self, "llm")
+                span_name = "llm"
 
                 # Get the parent context - turn context if available, otherwise service context
                 turn_context = get_current_turn_context()
