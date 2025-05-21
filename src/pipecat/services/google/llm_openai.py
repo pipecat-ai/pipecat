@@ -10,7 +10,7 @@ import os
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
-from pipecat.services.llm_service import FunctionCallLLM
+from pipecat.services.llm_service import FunctionCallFromLLM
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -127,7 +127,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
                 arguments = json.loads(arguments)
 
                 function_calls.append(
-                    FunctionCallLLM(
+                    FunctionCallFromLLM(
                         context=context,
                         tool_call_id=tool_id,
                         function_name=function_name,

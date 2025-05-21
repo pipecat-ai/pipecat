@@ -52,7 +52,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -893,7 +893,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             logger.error("Function calls are not supported without a context object.")
 
         function_calls_llm = [
-            FunctionCallLLM(
+            FunctionCallFromLLM(
                 context=self._context,
                 tool_call_id=f.id,
                 function_name=f.name,

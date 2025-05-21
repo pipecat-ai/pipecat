@@ -45,7 +45,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -227,7 +227,7 @@ class AnthropicLLMService(LLMService):
                     if tool_use_block:
                         args = json.loads(json_accumulator) if json_accumulator else {}
                         function_calls.append(
-                            FunctionCallLLM(
+                            FunctionCallFromLLM(
                                 context=context,
                                 tool_call_id=tool_use_block.id,
                                 function_name=tool_use_block.name,

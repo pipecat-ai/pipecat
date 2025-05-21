@@ -42,7 +42,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
-from pipecat.services.llm_service import FunctionCallLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -578,7 +578,7 @@ class GoogleLLMService(LLMService):
                                 id = function_call.id or str(uuid.uuid4())
                                 logger.debug(f"Function call: {function_call.name}:{id}")
                                 function_calls.append(
-                                    FunctionCallLLM(
+                                    FunctionCallFromLLM(
                                         context=context,
                                         tool_call_id=id,
                                         function_name=function_call.name,
