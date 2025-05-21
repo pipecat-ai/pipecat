@@ -108,6 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `ElevenLabsTTSService` where changing the model or voice
+  while the service is running wasn't working.
+
 - Fixed an issue that would cause multiple instances of the same class to behave
   incorrectly if any of the given constructor arguments defaulted to a mutable
   value (e.g. lists, dictionaries, objects).
