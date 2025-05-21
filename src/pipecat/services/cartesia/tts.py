@@ -171,7 +171,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "output_format": self._settings["output_format"],
             "language": self._settings["language"],
             "add_timestamps": add_timestamps,
-            "use_original_timestamps": False if self.model_name == "sonic" else True,
+            "use_original_timestamps": False,  # doesn't work for languages other than en
         }
 
         if self._settings["speed"]:
