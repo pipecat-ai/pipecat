@@ -51,21 +51,30 @@ async def run_bot(
 
     """
     # ------------ CONFIGURATION AND SETUP ------------
-
+    logger.info(f"Starting bot with room: {room_url}")
+    logger.info(f"Token: {token}")
+    logger.info(f"Body: {body}")
+    # Parse the body to get the dial-in settings
     body_data = json.loads(body)
 
-    dialin_settings = body_data.get("dialin_settings")
-    if not dialin_settings:
+    # Check if the body contains dial-in settings
+    logger.debug(f"Body data: {body_data}")
+
+    if not all([body_data.get("callId"), body_data.get("callDomain")]):
+        logger.error("Call ID and Call Domain are required in the body.")
         return None
 
-    call_id = dialin_settings.get("callId")
-    call_domain = dialin_settings.get("callDomain")
+    call_id = body_data.get("callId")
+    call_domain = body_data.get("callDomain")
+    logger.debug(f"Call ID: {call_id}")
+    logger.debug(f"Call Domain: {call_domain}")
 
     if not call_id or not call_domain:
         logger.error("Call ID and Call Domain are required for dial-in.")
         sys.exit(1)
 
     daily_dialin_settings = DailyDialinSettings(call_id=call_id, call_domain=call_domain)
+    logger.debug(f"Dial-in settings: {daily_dialin_settings}")
     transport_params = DailyParams(
         api_url=daily_api_url,
         api_key=daily_api_key,
@@ -76,6 +85,7 @@ async def run_bot(
         vad_analyzer=SileroVADAnalyzer(),
         transcription_enabled=True,
     )
+    logger.debug("setup transport params")
 
     # Initialize transport with Daily
     transport = DailyTransport(
@@ -84,12 +94,14 @@ async def run_bot(
         "Simple Dial-in Bot",
         transport_params,
     )
+    logger.debug("setup transport")
 
     # Initialize TTS
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
         voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
     )
+    logger.debug("setup tts")
 
     # ------------ LLM AND CONTEXT SETUP ------------
 
@@ -97,6 +109,7 @@ async def run_bot(
 
     # Initialize LLM
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    logger.debug("setup llm")
 
     # Initialize LLM context with system prompt
     messages = [
@@ -112,7 +125,9 @@ async def run_bot(
 
     # Setup the conversational context
     context = OpenAILLMContext(messages)
+    logger.debug("setup context")
     context_aggregator = llm.create_context_aggregator(context)
+    logger.debug("setup context aggregator")
 
     # ------------ PIPELINE SETUP ------------
 
@@ -127,6 +142,7 @@ async def run_bot(
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
+    logger.debug("setup pipeline")
 
     # Create pipeline task
     task = PipelineTask(
@@ -135,6 +151,7 @@ async def run_bot(
             allow_interruptions=True  # Enable barge-in so callers can interrupt the bot
         ),
     )
+    logger.debug("setup task")
 
     # ------------ EVENT HANDLERS ------------
 
@@ -186,13 +203,15 @@ async def main():
 
     args = parser.parse_args()
 
-    # Validate required arguments
-    if not all([args.u, args.t, args.b]):
+    logger.debug(f"url: {args.url}")
+    logger.debug(f"token: {args.token}")
+    logger.debug(f"body: {args.body}")
+    if not all([args.url, args.token, args.body]):
         logger.error("All arguments (-u, -t, -b) are required")
         parser.print_help()
         sys.exit(1)
 
-    await run_bot(args.u, args.t, args.b)
+    await run_bot(args.url, args.token, args.body)
 
 
 if __name__ == "__main__":
