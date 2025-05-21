@@ -591,8 +591,6 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             )
             return
 
-        in_progress = self._function_calls_in_progress[frame.tool_call_id]
-
         del self._function_calls_in_progress[frame.tool_call_id]
 
         properties = frame.properties
