@@ -34,8 +34,10 @@ class TurnTraceObserver(BaseObserver):
     conversation span that encapsulates the entire session.
     """
 
-    def __init__(self, turn_tracker: TurnTrackingObserver, conversation_id: Optional[str] = None):
-        super().__init__()
+    def __init__(
+        self, turn_tracker: TurnTrackingObserver, conversation_id: Optional[str] = None, **kwargs
+    ):
+        super().__init__(**kwargs)
         self._turn_tracker = turn_tracker
         self._current_span: Optional["Span"] = None
         self._current_turn_number: int = 0

@@ -38,7 +38,9 @@ class HeartbeatsObserver(BaseObserver):
         *,
         target: FrameProcessor,
         heartbeat_callback: Callable[[FrameProcessor, HeartbeatFrame], Awaitable[None]],
+        **kwargs,
     ):
+        super().__init__(**kwargs)
         self._target = target
         self._callback = heartbeat_callback
 
