@@ -137,6 +137,18 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
                 result, expected, f"Newline handling failed for:\n{input_text}\nGot:\n{result}"
             )
 
+    async def test_links_cleaning(self):
+        """Test cleaning of links and URLs, i.e. https?:// is removed."""
+        test_cases = {
+            "Please check http://example.com": "Please check example.com",
+            "Visit https://www.google.com for more": "Visit www.google.com for more",
+            "No link here": "No link here",  # No link to clean
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result, expected, f"Link cleaning failed for: '{input_text}'")
+
     async def test_numbered_list_marker_handling(self):
         """Test handling of numbered lists with the special §NUM§ marker."""
         test_cases = {
