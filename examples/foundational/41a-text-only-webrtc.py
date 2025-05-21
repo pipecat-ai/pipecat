@@ -45,6 +45,10 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
+# This is an example of a text-only chatbot using small webrtc tranport.
+# It uses the small webrtc transport prebuilt web UI.
+# https://github.com/pipecat-ai/small-webrtc-prebuilt
+
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
     logger.info(f"Starting bot")
@@ -78,12 +82,12 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             if run_immediately:
                 await rtvi.interrupt_bot()
 
-            # We just interrupted the bot so it should be fine to use the
-            # context directly instead of through frame.
-            if "messages" in arguments and arguments["messages"]:
-                mess = arguments["messages"]
-                frame = LLMMessagesAppendFrame(messages=arguments["messages"])
-                await rtvi.push_frame(frame)
+                # We just interrupted the bot so it should be fine to use the
+                # context directly instead of through frame.
+                if "messages" in arguments and arguments["messages"]:
+                    mess = arguments["messages"]
+                    frame = LLMMessagesAppendFrame(messages=arguments["messages"])
+                    await rtvi.push_frame(frame)
 
             if run_immediately:
                 frame = context_aggregator.user().get_context_frame()
