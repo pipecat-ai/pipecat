@@ -34,7 +34,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -263,7 +263,7 @@ class BaseOpenAILLMService(LLMService):
             ):
                 arguments = json.loads(arguments)
                 function_calls.append(
-                    FunctionCallLLM(
+                    FunctionCallFromLLM(
                         context=context,
                         tool_call_id=tool_id,
                         function_name=function_name,

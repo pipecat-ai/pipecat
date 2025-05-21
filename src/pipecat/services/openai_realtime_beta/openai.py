@@ -48,7 +48,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallLLM, LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -587,7 +587,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         for item in items:
             args = json.loads(item.arguments)
             function_calls.append(
-                FunctionCallLLM(
+                FunctionCallFromLLM(
                     context=self._context,
                     tool_call_id=item.call_id,
                     function_name=item.name,
