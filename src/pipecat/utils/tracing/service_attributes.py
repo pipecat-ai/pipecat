@@ -18,6 +18,39 @@ if is_tracing_available():
     from opentelemetry.trace import Span
 
 
+def _get_gen_ai_system_from_service_name(service_name: str) -> str:
+    """Extract the standardized gen_ai.system value from a service class name.
+
+    Source:
+    https://opentelemetry.io/docs/specs/semconv/attributes-registry/gen-ai/#gen-ai-system
+
+    Uses standard OTel names where possible, with special case mappings for
+    service names that don't follow the pattern.
+    """
+    SPECIAL_CASE_MAPPINGS = {
+        # AWS
+        "AWSBedrockLLMService": "aws.bedrock",
+        # Azure
+        "AzureLLMService": "az.ai.openai",
+        # Google
+        "GoogleLLMService": "gcp.gemini",
+        "GoogleLLMOpenAIBetaService": "gcp.gemini",
+        "GoogleVertexLLMService": "gcp.vertex_ai",
+        # Others
+        "GrokLLMService": "xai",
+    }
+
+    if service_name in SPECIAL_CASE_MAPPINGS:
+        return SPECIAL_CASE_MAPPINGS[service_name]
+
+    if service_name.endswith("LLMService"):
+        provider = service_name[:-10].lower()
+    else:
+        provider = service_name.lower()
+
+    return provider
+
+
 def add_tts_span_attributes(
     span: "Span",
     service_name: str,
@@ -45,10 +78,11 @@ def add_tts_span_attributes(
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
-    span.set_attribute("service", service_name)
-    span.set_attribute("model", model)
+    span.set_attribute("gen_ai.system", service_name.replace("TTSService", "").lower())
+    span.set_attribute("gen_ai.request.model", model)
+    span.set_attribute("gen_ai.operation.name", operation_name)
+    span.set_attribute("gen_ai.output.type", "speech")
     span.set_attribute("voice_id", voice_id)
-    span.set_attribute("operation", operation_name)
 
     # Add optional attributes
     if text:
@@ -76,6 +110,7 @@ def add_stt_span_attributes(
     span: "Span",
     service_name: str,
     model: str,
+    operation_name: str = "stt",
     transcript: Optional[str] = None,
     is_final: Optional[bool] = None,
     language: Optional[str] = None,
@@ -90,6 +125,7 @@ def add_stt_span_attributes(
         span: The span to add attributes to
         service_name: Name of the STT service (e.g., "deepgram")
         model: Model name/identifier
+        operation_name: Name of the operation (default: "stt")
         transcript: The transcribed text
         is_final: Whether this is a final transcript
         language: Detected or configured language
@@ -99,8 +135,9 @@ def add_stt_span_attributes(
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
-    span.set_attribute("service", service_name)
-    span.set_attribute("model", model)
+    span.set_attribute("gen_ai.system", service_name.replace("STTService", "").lower())
+    span.set_attribute("gen_ai.request.model", model)
+    span.set_attribute("gen_ai.operation.name", operation_name)
     span.set_attribute("vad_enabled", vad_enabled)
 
     # Add optional attributes
@@ -161,8 +198,10 @@ def add_llm_span_attributes(
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
-    span.set_attribute("service", service_name)
-    span.set_attribute("model", model)
+    span.set_attribute("gen_ai.system", _get_gen_ai_system_from_service_name(service_name))
+    span.set_attribute("gen_ai.request.model", model)
+    span.set_attribute("gen_ai.operation.name", "chat")
+    span.set_attribute("gen_ai.output.type", "text")
     span.set_attribute("stream", stream)
 
     # Add optional attributes
@@ -188,7 +227,19 @@ def add_llm_span_attributes(
     if parameters:
         for key, value in parameters.items():
             if isinstance(value, (str, int, float, bool)):
-                span.set_attribute(f"param.{key}", value)
+                if key in [
+                    "temperature",
+                    "max_tokens",
+                    "max_completion_tokens",
+                    "top_p",
+                    "top_k",
+                    "frequency_penalty",
+                    "presence_penalty",
+                    "seed",
+                ]:
+                    span.set_attribute(f"gen_ai.request.{key}", value)
+                else:
+                    span.set_attribute(f"param.{key}", value)
 
     # Add extra parameters if provided
     if extra_parameters:
