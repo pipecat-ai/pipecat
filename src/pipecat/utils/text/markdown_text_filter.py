@@ -100,6 +100,9 @@ class MarkdownTextFilter(BaseTextFilter):
             # Restore leading and trailing spaces
             filtered_text = re.sub("§", " ", filtered_text)
 
+            ## Make links more readable
+            filtered_text = re.sub(r"https?://", "", filtered_text)
+
             return filtered_text
         else:
             return text
