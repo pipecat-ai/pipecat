@@ -45,62 +45,6 @@ class FunctionCallResultCallback(Protocol):
 
 
 @dataclass
-class FunctionCallRegistryItem:
-    """Represents an entry of our function call registry.
-
-    Attributes:
-        function_name (Optional[str]): The name of the function.
-        handler (FunctionCallHandler): The handler for processing function call parameters.
-        cancel_on_interruption (bool): Flag indicating whether to cancel the call on interruption.
-
-    """
-
-    function_name: Optional[str]
-    handler: FunctionCallHandler
-    cancel_on_interruption: bool
-
-
-@dataclass
-class FunctionCallLLM:
-    """Represents a function call returned by the LLM to be registered for execution.
-
-    Attributes:
-        function_name (str): The name of the function.
-        tool_call_id (str): A unique identifier for the function call.
-        arguments (Mapping[str, Any]): The arguments for the function.
-        context (OpenAILLMContext): The LLM context.
-
-    """
-
-    function_name: str
-    tool_call_id: str
-    arguments: Mapping[str, Any]
-    context: OpenAILLMContext
-
-
-@dataclass
-class FunctionCallRunner:
-    """Represents an internal function call entry to our function call
-    runner. The runner executes function calls in order.
-
-    Attributes:
-        registry_name (Optional[str]): The function call name registration (could be None).
-        function_name (str): The name of the function.
-        tool_call_id (str): A unique identifier for the function call.
-        arguments (Mapping[str, Any]): The arguments for the function.
-        context (OpenAILLMContext): The LLM context.
-
-    """
-
-    registry_item: FunctionCallRegistryItem
-    function_name: str
-    tool_call_id: str
-    arguments: Mapping[str, Any]
-    context: OpenAILLMContext
-    run_llm: Optional[bool] = None
-
-
-@dataclass
 class FunctionCallParams:
     """Parameters for a function call.
 
@@ -122,6 +66,63 @@ class FunctionCallParams:
     result_callback: FunctionCallResultCallback
 
 
+@dataclass
+class FunctionCallFromLLM:
+    """Represents a function call returned by the LLM to be registered for execution.
+
+    Attributes:
+        function_name (str): The name of the function.
+        tool_call_id (str): A unique identifier for the function call.
+        arguments (Mapping[str, Any]): The arguments for the function.
+        context (OpenAILLMContext): The LLM context.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+    context: OpenAILLMContext
+
+
+@dataclass
+class FunctionCallRegistryItem:
+    """Represents an entry in our function call registry. This is what the user
+    registers.
+
+    Attributes:
+        function_name (Optional[str]): The name of the function.
+        handler (FunctionCallHandler): The handler for processing function call parameters.
+        cancel_on_interruption (bool): Flag indicating whether to cancel the call on interruption.
+
+    """
+
+    function_name: Optional[str]
+    handler: FunctionCallHandler
+    cancel_on_interruption: bool
+
+
+@dataclass
+class FunctionCallRunnerItem:
+    """Represents an internal function call entry to our function call
+    runner. The runner executes function calls in order.
+
+    Attributes:
+        registry_name (Optional[str]): The function call name registration (could be None).
+        function_name (str): The name of the function.
+        tool_call_id (str): A unique identifier for the function call.
+        arguments (Mapping[str, Any]): The arguments for the function.
+        context (OpenAILLMContext): The LLM context.
+
+    """
+
+    registry_item: FunctionCallRegistryItem
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+    context: OpenAILLMContext
+    run_llm: Optional[bool] = None
+
+
 class LLMService(AIService):
     """This class is a no-op but serves as a base class for LLM services."""
 
@@ -135,7 +136,7 @@ class LLMService(AIService):
         self._start_callbacks = {}
         self._adapter = self.adapter_class()
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
-        self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunner] = {}
+        self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
 
         self._register_event_handler("on_completion_timeout")
@@ -217,7 +218,7 @@ class LLMService(AIService):
             return True
         return function_name in self._functions.keys()
 
-    async def run_function_calls(self, function_calls: Sequence[FunctionCallLLM]):
+    async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         total_function_calls = len(function_calls)
         for index, function_call in enumerate(function_calls):
             if function_call.function_name in self._functions.keys():
@@ -237,7 +238,7 @@ class LLMService(AIService):
             if not self._run_in_parallel:
                 run_llm = index == total_function_calls - 1
 
-            runner_item = FunctionCallRunner(
+            runner_item = FunctionCallRunnerItem(
                 registry_item=item,
                 function_name=function_call.function_name,
                 tool_call_id=function_call.tool_call_id,
@@ -299,7 +300,7 @@ class LLMService(AIService):
             await self.wait_for_task(task)
             del self._function_call_tasks[task]
 
-    async def _run_function_call(self, runner_item: FunctionCallRunner):
+    async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
         if runner_item.function_name in self._functions.keys():
             item = self._functions[runner_item.function_name]
         elif None in self._functions.keys():
