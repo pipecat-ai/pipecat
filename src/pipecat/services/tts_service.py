@@ -278,6 +278,7 @@ class TTSService(AIService):
             text = filter.filter(text)
 
         if text:
+            logger.info(f"{self.__class__.__name__} generating audio for text: {text}")
             await self.process_generator(self.run_tts(text))
 
         await self.stop_processing_metrics()

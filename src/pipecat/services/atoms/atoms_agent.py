@@ -511,6 +511,10 @@ class FlowGraphManager(FrameProcessor):
         self._end_call_tag = "<end_call>"
         self.agent_persona = agent_persona
 
+    def _get_initial_user_message(self) -> str:
+        """Get the initial user message for the conversation."""
+        return self._get_current_state_as_json()
+
     def _initialize_variables(
         self, initial_variables: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -838,8 +842,8 @@ class FlowGraphManager(FrameProcessor):
         except Exception as e:
             return False
 
-    async def _process_context(self, context: AtomsAgentContext) -> None:
-        """Process the context and update the flow model client."""
+    async def get_response(self, context: AtomsAgentContext) -> AsyncGenerator[str, None]:
+        """Get the response from the response model client."""
         # validate the messages to ensure the roles alternate and the content is in the correct format else openai will throw an error
         await self._handle_hopping(context=context)
 
@@ -862,15 +866,18 @@ class FlowGraphManager(FrameProcessor):
             context._update_last_user_context("delta", delta)
 
         if self.current_node.static_text:
-            # await self._punctuation_based_response_generator(
-            #     self._handle_static_response(context=context)
-            # )
-            await self._handle_static_response(context=context)
+            return self._handle_static_response(context=context)
         else:
-            await self._handle_dynamic_response(context=context)
-            # await self._punctuation_based_response_generator(
-            #     self._handle_dynamic_response(context=context)
+            return self._handle_dynamic_response(context=context)
+
+    async def _process_context(self, context: AtomsAgentContext) -> None:
+        """Process the context and update the flow model client."""
+        response = await self.get_response(context=context)
+        async for chunk in response:
+            # logger.debug(
+            #     f"{self.__class__.__name__} generated text: {chunk} for message: {context.get_current_user_transcript()}"
             # )
+            await self.push_frame(LLMTextFrame(text=chunk))
 
     def _get_transcript_from_context(self, context: AtomsAgentContext) -> str:
         """Get the transcript from the context."""
@@ -971,8 +978,8 @@ class FlowGraphManager(FrameProcessor):
         """Handle the static response from the response model client."""
         logger.debug(f"handling static response, text: {self.current_node.action}")
         # await self.push_frame(LLMTextFrame(text=self.current_node.action))
-        # yield self.current_node.action
-        await self.push_frame(LLMTextFrame(text=self.current_node.action))
+        yield self.current_node.action
+        # await self.push_frame(LLMTextFrame(text=self.current_node.action))
 
     async def _punctuation_based_response_generator(self, stream: AsyncGenerator[str, None]):
         buffer = ""
@@ -1017,8 +1024,8 @@ class FlowGraphManager(FrameProcessor):
                 if chunk.choices:
                     content = chunk.choices[0].delta.content
                     if content:
-                        await self.push_frame(LLMTextFrame(text=content))
-                        # yield content
+                        # await self.push_frame(LLMTextFrame(text=content))
+                        yield content
                     if (
                         chunk.choices[0].finish_reason
                         and hasattr(chunk.choices[0], "stop_reason")
