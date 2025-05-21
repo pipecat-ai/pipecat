@@ -276,16 +276,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def flush_audio(self):
         if self._websocket and self._context_id:
-            self._context_id_to_close = self._context_id
-            msg = {"context_id": self._context_id, "flush": True, "xi_api_key": self._api_key}
+            msg = {"context_id": self._context_id, "flush": True}
             await self._websocket.send(json.dumps(msg))
-            msg = {
-                "context_id": self._context_id,
-                "close_context": True,
-                "xi_api_key": self._api_key,
-            }
-            await self._websocket.send(json.dumps(msg))
-            self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
@@ -417,14 +409,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             if msg.get("isFinal"):
                 logger.trace(f"Received final message for context {received_ctx_id}")
                 # Context has finished
-                if (
-                    self._context_id == received_ctx_id
-                    or self._context_id_to_close == received_ctx_id
-                ):
+                if self._context_id == received_ctx_id:
                     self._context_id = None
-                    self._context_id_to_close = None
                     self._started = False
-                    await self.push_frame(TTSStoppedFrame())
 
     async def _keepalive_task_handler(self):
         while True:
