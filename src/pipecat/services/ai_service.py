@@ -102,4 +102,5 @@ class AIService(FrameProcessor):
                 if isinstance(f, ErrorFrame):
                     await self.push_error(f)
                 else:
+                    logger.debug(f"Pushing frame: {f}")
                     await self.push_frame(f)

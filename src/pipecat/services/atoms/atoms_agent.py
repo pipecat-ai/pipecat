@@ -9,35 +9,30 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from loguru import logger
-from openai.types.chat import ChatCompletionAssistantMessageParam, ChatCompletionUserMessageParam
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionMessageParam,
+    ChatCompletionUserMessageParam,
+)
 from pydantic import BaseModel, Field, field_validator
 
 from pipecat.frames.frames import (
     Frame,
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    TranscriptionFrame,
-    TranscriptionMessage,
-    UserImageRawFrame,
-    VisionImageRawFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
 
-from .base_agent import BaseConversationalAgent
 from .llm_client import AzureOpenAIClient, OpenAIClient
 from .pathways import ConversationalPathway, Node, NodeType, Pathway
 from .prompts import (
     FT_FLOW_MODEL_SYSTEM_PROMPT,
-    GENERAL_RESPONSE_MODEL_SYSTEM_PROMPT,
     VARIABLE_EXTRACTION_PROMPT,
 )
 from .utils import convert_old_to_new_format, get_abbreviations, get_unallowed_variable_names
@@ -69,32 +64,8 @@ class CallType(Enum):
     CHAT = "chat"
 
 
-class AgentConfig(BaseModel):  # type: ignore
-    initial_message: str
-    generate_responses: bool = True
-    allowed_idle_time_seconds: Optional[float] = None
-    num_check_human_present_times: int = 0
-    allow_agent_to_be_cut_off: bool = True
-
-
-class AtomsAgentConfig(AgentConfig):
-    """Configuration for the Atoms conversational agent."""
-
-    agent: BaseConversationalAgent
-    llm_response_kwargs: Dict[str, Any] = {}
-    sample_rate: int = 8000
-    bytes_per_sample: int = 2
-    agent_id: str
-    conversation_id: str
-    call_id: str
-    user_number: Optional[str] = None
-    call_type: CallType
-
-    class Config:
-        arbitrary_types_allowed = True
-
-
 from datetime import datetime
+from typing import AsyncGenerator, Text
 
 import pytz
 
@@ -103,7 +74,38 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from .llm_client import BaseClient
 
 
+def replace_variables(input_string: Any, variables: Dict[str, Any]) -> Any:
+    """Replace variable placeholders in a string with their values.
+
+    Args:
+        input_string: String potentially containing variable placeholders
+        variables: Dictionary of variable names and values
+
+    Returns:
+        String with variables replaced
+    """
+    pattern = r"\{\{(\w+)\}\}"
+
+    def replace_func(match):
+        variable_name = match.group(1) if match.group(1) else match.group(2)
+
+        if variable_name in variables:
+            return str(variables[variable_name])
+        else:
+            logger.error(
+                f"Variable replacement failed for '{variable_name}' in node {self.current_node.id}"
+            )
+            return match.group(0)
+
+    if isinstance(input_string, str):
+        return re.sub(pattern, replace_func, input_string)
+    else:
+        return input_string
+
+
 class AtomsAgentContext(OpenAILLMContext):
+    """This is the adapater for upgrading the openai context to the atoms agent context."""
+
     def __init__(
         self,
         messages: Optional[List[dict]] = None,
@@ -136,15 +138,40 @@ class AtomsAgentContext(OpenAILLMContext):
         self._restructure_from_openai_messages()
         return self
 
-    @classmethod
-    def from_messages(cls, messages: List[dict]) -> "AtomsAgentContext":
-        self = cls(messages=messages)
-        self._restructure_from_openai_messages()
-        return self
+    def get_current_user_transcript(self):
+        """Get the transcript from the messages.
 
-    def set_messages(self, messages: List):
-        self._messages[:] = messages
-        self._restructure_from_openai_messages()
+        We expect that the last message in the context should be user message it will return empty string.
+        """
+        if len(self.messages) == 0:
+            return ""
+
+        last_message = self.messages[-1]
+        if last_message["role"] == "user":
+            try:
+                content = json.loads(last_message["content"])
+                transcript = content["transcript"]
+                return transcript
+            except Exception as e:
+                logger.error(f"Error in getting last user transcript from context messages: {e}")
+                return ""
+        logger.error(
+            f"Last message in the context is not a user message, last_message: {last_message}"
+        )
+        return ""
+
+    def add_message(self, message: ChatCompletionMessageParam):
+        if message["role"] == "user":
+            # check if the previous role is "user" as well then we have to add assistant message with content "None"
+            if self.messages and self.messages[-1]["role"] == "user":
+                self.messages.append(
+                    ChatCompletionAssistantMessageParam(role="assistant", content="None")
+                )
+        if message["role"] == "assistant":
+            # check if the previous role is "assistant" as well then we have to add user message with content "None"
+            if self.messages and self.messages[-1]["role"] == "assistant":
+                self.messages.append(ChatCompletionUserMessageParam(role="user", content="None"))
+        super().add_message(message=message)
 
     # convert a message in atoms agent format into one or more messages in OpenAI format
     def to_standard_message(self, obj):
@@ -168,32 +195,98 @@ class AtomsAgentContext(OpenAILLMContext):
                 }
             ]
         """
-        pass
+        if "role" in obj and obj["role"] == "user":
+            try:
+                json_content = json.loads(obj["content"])
+                transcript = json_content["transcript"]
+                return {"role": "user", "content": transcript}
+            except json.JSONDecodeError:
+                return obj
+            except Exception as e:
+                logger.error(f"Error parsing user message: {obj}")
+                return obj
+        else:
+            return obj
 
-    def from_standard_message(self, message):
-        """Convert standard format message to atoms agent format.
+    def get_user_context_delta(self) -> Optional[Dict[str, Any]]:
+        """This function will return the delta from the previous user message and the current user message.
 
-        Handles conversion of user response string to json format with user response and node data.
-
-        Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/tool",
-                    "content": str | [{"type": "text", ...}],
-                }
-
-        Returns:
-            Message in atoms agent format:
-            {
-                "role": "user/assistant",
-                "content": [
-                    {"text": str} |
-                    {"toolUse": {"toolUseId": str, "name": str, "input": dict}} |
-                    {"toolResult": {"toolUseId": str, "content": [...], "status": str}}
-                ]
-            }
+        To work it as exptected we have taken this into consideration that last message (current) we will get it at index [-1] and second last message (previous) we will get it at index [-3].
+        why not [-2] because the last message is the user message and the second last message is the assistant message.
         """
-        pass
+        if len(self.messages) < 3:
+            return None
+
+        try:
+            last_user_message = self.messages[-1]
+            second_last_user_message = self.messages[-3]
+            if last_user_message["role"] != "user" or second_last_user_message["role"] != "user":
+                return None
+
+            last_user_message_content = json.loads(last_user_message["content"])
+            second_last_user_message_content = json.loads(second_last_user_message["content"])
+
+            last_user_message_response_model_context_json = last_user_message_content[
+                "response_model_context"
+            ]
+            second_last_user_message_response_model_context_json = second_last_user_message_content[
+                "response_model_context"
+            ]
+
+            if (
+                last_user_message_response_model_context_json is None
+                or second_last_user_message_response_model_context_json is None
+            ):
+                return None
+
+            last_user_message_response_model_context: Dict[str, Any] = json.loads(
+                last_user_message_response_model_context_json
+            )
+            second_last_user_message_response_model_context: Dict[str, Any] = json.loads(
+                second_last_user_message_response_model_context_json
+            )
+
+            if (
+                last_user_message_response_model_context is None
+                or not isinstance(last_user_message_response_model_context, dict)
+                or second_last_user_message_response_model_context is None
+                or not isinstance(second_last_user_message_response_model_context, dict)
+            ):
+                return None
+
+            if (
+                last_user_message_response_model_context["id"]
+                != second_last_user_message_response_model_context["id"]
+            ):
+                return None
+
+            transcript = last_user_message_content["transcript"]
+
+            delta = {"user_response": transcript}
+
+            # Compare other fields and include only changed ones
+            for key, value in last_user_message_response_model_context.items():
+                if key != "user_response" and (
+                    key not in second_last_user_message_response_model_context
+                    or second_last_user_message_response_model_context[key] != value
+                ):
+                    delta[key] = value
+
+            return delta
+        except Exception as e:
+            logger.error(f"Error getting user content delta: {e}")
+            return None
+
+    def _update_last_user_context(self, key: str, value: Any):
+        if self.messages and self.messages[-1]["role"] == "user":
+            try:
+                json_content = json.loads(self.messages[-1]["content"])
+                json_content[key] = value
+                self.messages[-1]["content"] = json.dumps(json_content)
+            except Exception as e:
+                logger.error(
+                    f"Error updating last user context, description: updating the last user message the user content should be in the json format"
+                )
 
     def _validate_messages(self, message):
         """validate messages to ensure the roles alternate and the content is in the correct format."""
@@ -208,41 +301,176 @@ class AtomsAgentContext(OpenAILLMContext):
                 try:
                     json_content = json.loads(message["content"])
                     transcript = json_content["transcript"]
-                    messages.append(ChatCompletionUserMessageParam(content=transcript))
+                    messages.append(ChatCompletionUserMessageParam(role="user", content=transcript))
                 except Exception:
                     logger.debug(f"Error parsing user message: {message}")
-                    messages.append(ChatCompletionUserMessageParam(content=message["content"]))
+                    messages.append(
+                        ChatCompletionUserMessageParam(role="user", content=message["content"])
+                    )
             else:
                 messages.append(message)
 
-        self.set_messages(messages=messages)
+        self.messages.clear()
+        self.messages.extend(messages)
 
     def _restructure_from_openai_messages(self):
-        """This function will restructure the openai user context messages to the atoms agent context messages."""
+        """This function will restructure the openai user context messages which are in the default string format and convert them to the atoms agent context messages."""
         messages = []
 
         for message in self.messages:
             if message["role"] == "user":
-                messages.append(
-                    ChatCompletionUserMessageParam(
-                        content=json.dumps({"transcript": message["content"]})
+                try:
+                    json.loads(message["content"])
+                    # if the content is json than it is already in the atoms agent format no need to convert it
+                    messages.append(message)
+                except json.JSONDecodeError:
+                    # if json conversion fails than it is a user message and we need to convert it to the atoms agent format
+                    messages.append(
+                        ChatCompletionUserMessageParam(
+                            role="user", content=json.dumps({"transcript": message["content"]})
+                        )
                     )
-                )
+                except Exception as e:
+                    logger.error(f"Error parsing user message: {message}")
+                    messages.append(message)
             else:
                 messages.append(message)
 
-        self.set_messages(messages=messages)
+        self.messages.clear()
+        self.messages.extend(messages)
 
-    def _format_messages_for_reponse_model(self):
-        """format the messages for the response model."""
-        pass
+    def get_response_model_context(self):
+        """Get the response model context from the messages."""
+        try:
+            messages = []
+            for message in self.messages:
+                if message["role"] == "user":
+                    try:
+                        content = json.loads(message["content"])
+                        response_model_context = content["response_model_context"]
+                        delta = content.get("delta", None)
 
-    def _format_messages_for_flow_navigation(self):
-        """format the messages for the flow navigation."""
-        pass
+                        if delta:
+                            messages.append(
+                                ChatCompletionUserMessageParam(role="user", content=delta)
+                            )
+                        else:
+                            messages.append(
+                                ChatCompletionUserMessageParam(
+                                    role="user", content=response_model_context
+                                )
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Error in generating user message for response model context {message}"
+                        )
+                elif message["role"] == "assistant":
+                    messages.append(message)
+
+            return messages
+        except Exception as e:
+            logger.error(f"Error in getting response model context: {e}")
+            return []
+
+    def get_flow_navigation_model_context(
+        self, current_node: Node, variables: Optional[Dict[str, Any]]
+    ):
+        """Format the messages for the flow navigation."""
+        flow_navigation_history: List[Dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": FT_FLOW_MODEL_SYSTEM_PROMPT,
+            }
+        ]
+
+        # Find the most recent node message
+        current_node_index = None
+        for idx, msg in enumerate(reversed(self.messages[1:])):
+            if msg["role"] == "user":
+                try:
+                    content = json.loads(msg["content"])
+                    if "response_model_context" in content:
+                        repsonse_model_context = json.loads(content["response_model_context"])
+                        if (
+                            "id" in repsonse_model_context
+                            and repsonse_model_context["id"] == current_node.id
+                        ):
+                            current_node_index = len(self.messages) - 1 - idx
+                            break
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        else:
+            return []
+
+        # Build current node representation with specific order
+        node_data = {
+            "name": current_node.name,
+            "type": current_node.type.name,
+            "action": current_node.action,
+        }
+
+        # Add loop condition if it exists
+        if current_node.loop_condition and current_node.loop_condition.strip():
+            node_data["loop_condition"] = current_node.loop_condition
+
+        # Add pathways with non-empty descriptions
+        node_data["pathways"] = []
+        for pathway_id, pathway in current_node.pathways.items():
+            if not pathway.is_conditional_edge:
+                pathway_data = {
+                    "id": pathway_id,
+                    "condition": replace_variables(pathway.condition, variables),
+                }
+                if pathway.description and pathway.description.strip():
+                    pathway_data["description"] = replace_variables(pathway.description, variables)
+                node_data["pathways"].append(pathway_data)
+
+        # Add current node to flow history
+        flow_navigation_history.append(
+            {"role": "user", "content": json.dumps(node_data, indent=2, ensure_ascii=False)}
+        )
+
+        # we have to build flow navigation history by appending only assistant and user messages
+        while current_node_index < len(self.messages):
+            # check if the current context is a assistant message
+            if self.messages[current_node_index]["role"] == "assistant":
+                assistant_content: ChatCompletionAssistantMessageParam = self.messages[
+                    current_node_index
+                ]["content"]
+
+                # now find the next user message
+                while (
+                    current_node_index < len(self.messages)
+                    and self.messages[current_node_index]["role"] != "user"
+                ):
+                    current_node_index += 1
+
+                if current_node_index < len(self.messages):
+                    user_content: ChatCompletionUserMessageParam = self.messages[
+                        current_node_index
+                    ]["content"]
+
+                    flow_navigation_history += [
+                        {
+                            "role": "assistant",
+                            "content": "null",
+                        },
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {"assistant": assistant_content, "user": user_content},
+                                indent=2,
+                                ensure_ascii=False,
+                            ),
+                        },
+                    ]
+
+            current_node_index += 1
+
+        return flow_navigation_history
 
     def _get_variable_extraction_prompt(self):
-        """get the prompt for the variable extraction."""
+        """Get the prompt for the variable extraction."""
         messages = []
         for message in self.messages:
             if message["role"] == "user":
@@ -269,6 +497,7 @@ class FlowGraphManager(FrameProcessor):
         response_model_client: BaseClient,
         conversation_pathway: ConversationalPathway,
         initial_variables: Optional[Dict[str, Any]] = None,
+        agent_persona: Optional[str] = None,
     ):
         super().__init__()
         self.flow_model_client: BaseClient = flow_model_client
@@ -279,8 +508,8 @@ class FlowGraphManager(FrameProcessor):
         self.current_node: Node = self._find_root()
         self._process_pre_call_api_nodes()
         self.conv_pathway.start_node = self.current_node
-        self._last_state = None
         self._end_call_tag = "<end_call>"
+        self.agent_persona = agent_persona
 
     def _initialize_variables(
         self, initial_variables: Optional[Dict[str, Any]] = None
@@ -380,7 +609,7 @@ class FlowGraphManager(FrameProcessor):
         return conditional_edges
 
     async def _hop_conditional_edges(
-        self, conditional_edges: List[Tuple[str, Pathway]], context: OpenAILLMContext
+        self, conditional_edges: List[Tuple[str, Pathway]], context: AtomsAgentContext
     ) -> bool:
         for pathway_id, pathway in conditional_edges:
             logger.debug(f"evaluating conditional edge: {pathway.condition}")
@@ -389,13 +618,13 @@ class FlowGraphManager(FrameProcessor):
                 return True
         return False
 
-    async def _handle_hopping(self, context: OpenAILLMContext) -> bool:
+    async def _handle_hopping(self, context: AtomsAgentContext) -> bool:
         """Determine if a node transition is needed and execute if necessary.
 
         First checks conditional edges, then falls back to LLM-based decision.
 
         Args:
-            context: OpenAILLMContext
+            context: AtomsAgentContext
         Returns:
             True if hopping occurred, False otherwise
         """
@@ -404,14 +633,17 @@ class FlowGraphManager(FrameProcessor):
         logger.debug(f"conditional edges: {conditional_edges}")
         # If we have conditional edges, evaluate them first
         if conditional_edges:
-            is_conditional_edge_matched = self._hop_conditional_edges(
+            is_conditional_edge_matched = await self._hop_conditional_edges(
                 conditional_edges, context=context
             )
             if is_conditional_edge_matched:
                 return True
 
         # If no conditional edge matched (or none existed), continue with normal flow
-        flow_history = self._build_flow_navigation_history(context=context)
+        flow_history = context.get_flow_navigation_model_context(
+            current_node=self.current_node, variables=self.variables
+        )
+        logger.debug(f"flow navigation context: {flow_history}")
 
         if len(flow_history) < 3:
             return False
@@ -419,7 +651,7 @@ class FlowGraphManager(FrameProcessor):
         selected_pathway_id = self._cleanup_think_tokens(
             await self.flow_model_client.get_response(flow_history)
         )
-
+        logger.debug(f"selected pathway id: {selected_pathway_id}")
         if selected_pathway_id == "null":
             return False
 
@@ -429,7 +661,7 @@ class FlowGraphManager(FrameProcessor):
         except Exception:
             return False
 
-    async def _hop(self, pathway_id: str, context: OpenAILLMContext) -> None:
+    async def _hop(self, pathway_id: str, context: AtomsAgentContext) -> None:
         """Transition to a new node via the specified pathway.
 
         Args:
@@ -445,9 +677,10 @@ class FlowGraphManager(FrameProcessor):
             )
 
         await self._extract_variables(context=context)
+        self.previous_node = self.current_node
         self.current_node = self.current_node.pathways[pathway_id].target_node
 
-    async def _extract_variables(self, context: OpenAILLMContext) -> Dict[str, Any]:
+    async def _extract_variables(self, context: AtomsAgentContext) -> Dict[str, Any]:
         """Extract variables from conversation context using LLM.
 
         Returns:
@@ -605,149 +838,48 @@ class FlowGraphManager(FrameProcessor):
         except Exception as e:
             return False
 
-    def _build_flow_navigation_history(self, context: OpenAILLMContext) -> List[Dict[str, Any]]:
-        """Build message history for flow navigation decisions.
+    async def _process_context(self, context: AtomsAgentContext) -> None:
+        """Process the context and update the flow model client."""
+        # validate the messages to ensure the roles alternate and the content is in the correct format else openai will throw an error
+        await self._handle_hopping(context=context)
 
-        Args:
-            context: OpenAILLMContext
+        # # after hopping we have to update the node data in the context
+        # context._update_last_user_context("node_data", self.current_node.model_dump_json())
 
-        Returns:
-            List of messages formatted for the flow model
-        """
-        flow_navigation_history: List[Dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": FT_FLOW_MODEL_SYSTEM_PROMPT,
-            }
-        ]
-
-        # Find the most recent node message
-        current_node_index = None
-        for idx, msg in enumerate(reversed(context.messages[1:])):
-            if msg["role"] == "user":
-                try:
-                    content = json.loads(msg["content"])
-                    if "id" in content and content["id"] == self.current_node.id:
-                        current_node_index = len(context.messages) - 1 - idx
-                        break
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        else:
-            return []
-
-        # Build current node representation with specific order
-        node_data = {
-            "name": self.current_node.name,
-            "type": self.current_node.type.name,
-            "action": self.current_node.action,
-        }
-
-        # Add loop condition if it exists
-        if self.current_node.loop_condition and self.current_node.loop_condition.strip():
-            node_data["loop_condition"] = self.current_node.loop_condition
-
-        # Add pathways with non-empty descriptions
-        node_data["pathways"] = []
-        for pathway_id, pathway in self.current_node.pathways.items():
-            if not pathway.is_conditional_edge:
-                pathway_data = {
-                    "id": pathway_id,
-                    "condition": self._replace_variables(pathway.condition, self.variables),
-                }
-                if pathway.description and pathway.description.strip():
-                    pathway_data["description"] = self._replace_variables(
-                        pathway.description, self.variables
-                    )
-                node_data["pathways"].append(pathway_data)
-
-        # Add current node to flow history
-        flow_navigation_history.append(
-            {"role": "user", "content": json.dumps(node_data, indent=2, ensure_ascii=False)}
+        # format the messages for the response model
+        context._update_last_user_context(
+            "response_model_context",
+            self._get_current_state_as_json(
+                user_response=context.get_current_user_transcript(),
+            ),
         )
 
-        # we have to build flow navigation history by appending only assistant and user messages
-        while current_node_index < len(context.messages):
-            # check if the current context is a assistant message
-            if context.messages[current_node_index]["role"] == "assistant":
-                assistant_content: ChatCompletionAssistantMessageParam = context.messages[
-                    current_node_index
-                ]["content"]
+        # after hopping we have to update the delta in the context
+        # we will only get delta after updating the current reponse model context because the delta is calculated based on the current response model context and the previous user message
+        delta = context.get_user_context_delta()
+        if delta:
+            delta = json.dumps(delta, indent=2, ensure_ascii=False)
+            context._update_last_user_context("delta", delta)
 
-                # now find the next user message
-                while (
-                    current_node_index < len(context.messages)
-                    and context.messages[current_node_index]["role"] != "user"
-                ):
-                    current_node_index += 1
-
-                if current_node_index < len(context.messages):
-                    user_content: ChatCompletionUserMessageParam = context.messages[
-                        current_node_index
-                    ]["content"]
-
-                    flow_navigation_history += [
-                        {
-                            "role": "assistant",
-                            "content": "null",
-                        },
-                        {
-                            "role": "user",
-                            "content": json.dumps(
-                                {"assistant": assistant_content, "user": user_content},
-                                indent=2,
-                                ensure_ascii=False,
-                            ),
-                        },
-                    ]
-
-            current_node_index += 1
-
-        return flow_navigation_history
-
-    def _replace_variables(self, input_string: Any, variables: Dict[str, Any]) -> Any:
-        """Replace variable placeholders in a string with their values.
-
-        Args:
-            input_string: String potentially containing variable placeholders
-            variables: Dictionary of variable names and values
-
-        Returns:
-            String with variables replaced
-        """
-        pattern = r"\{\{(\w+)\}\}"
-
-        def replace_func(match):
-            variable_name = match.group(1) if match.group(1) else match.group(2)
-
-            if variable_name in variables:
-                return str(variables[variable_name])
-            else:
-                logger.error(
-                    f"Variable replacement failed for '{variable_name}' in node {self.current_node.id}"
-                )
-                return match.group(0)
-
-        if isinstance(input_string, str):
-            return re.sub(pattern, replace_func, input_string)
-        else:
-            return input_string
-
-    async def _process_context(self, context: OpenAILLMContext) -> None:
-        """Process the context and update the flow model client."""
-        await self._handle_hopping(context=context)
         if self.current_node.static_text:
+            # await self._punctuation_based_response_generator(
+            #     self._handle_static_response(context=context)
+            # )
             await self._handle_static_response(context=context)
         else:
             await self._handle_dynamic_response(context=context)
+            # await self._punctuation_based_response_generator(
+            #     self._handle_dynamic_response(context=context)
+            # )
 
-    def _get_transcript_from_context(self, context: OpenAILLMContext) -> str:
+    def _get_transcript_from_context(self, context: AtomsAgentContext) -> str:
         """Get the transcript from the context."""
         for idx in range(len(context.messages) - 1, -1, -1):
             if context.messages[idx]["role"] == "user":
                 return context.messages[idx]["content"]
         return ""
 
-    def _format_current_state_as_json(
+    def _get_current_state_as_json(
         self,
         user_response: Optional[str] = None,
         custom_instructions: Optional[list] = None,
@@ -782,6 +914,7 @@ class FlowGraphManager(FrameProcessor):
                 "current_day": self.curr_day,
                 "current_time": self.curr_time,
             }
+
         if add_agent_persona and self.agent_persona:
             current_state["agent_persona"] = self.agent_persona
         if custom_instructions:
@@ -791,27 +924,6 @@ class FlowGraphManager(FrameProcessor):
             and current_state["loop_condition"].strip() == ""
         ):
             current_state.pop("loop_condition")
-
-        # If we have a previous state
-        if self._last_state is not None and self._last_state.get("id") == current_state["id"]:
-            # Calculate delta
-            delta = {"user_response": user_response}
-
-            # Compare other fields and include only changed ones
-            for key, value in current_state.items():
-                if key != "user_response" and (
-                    key not in self._last_state or self._last_state[key] != value
-                ):
-                    delta[key] = value
-
-            # Store current state for next comparison
-            self._last_state = current_state
-
-            # Return delta
-            return json.dumps({"delta": delta}, indent=2, ensure_ascii=False)
-
-        # Store current state for next comparison
-        self._last_state = current_state
 
         # Return full state if no delta or node changed
         return json.dumps(current_state, indent=2, ensure_ascii=False)
@@ -853,24 +965,60 @@ class FlowGraphManager(FrameProcessor):
     #     # Use static text or not
     #     use_static_text = self.current_node.static_text
 
-    async def _handle_static_response(self, context: OpenAILLMContext) -> None:
+    async def _handle_static_response(
+        self, context: AtomsAgentContext
+    ) -> AsyncGenerator[str, None]:
         """Handle the static response from the response model client."""
-        logger.debug(f"handling static response, text: {self.current_node.static_text}")
-        await self.push_frame(LLMTextFrame(text=self.current_node.static_text))
+        logger.debug(f"handling static response, text: {self.current_node.action}")
+        # await self.push_frame(LLMTextFrame(text=self.current_node.action))
+        # yield self.current_node.action
+        await self.push_frame(LLMTextFrame(text=self.current_node.action))
 
-    async def _handle_dynamic_response(self, context: OpenAILLMContext) -> None:
+    async def _punctuation_based_response_generator(self, stream: AsyncGenerator[str, None]):
+        buffer = ""
+        async for chunk in stream:
+            buffer += chunk
+            punctuation_indices = []
+            for i, char in enumerate(buffer):
+                if char in ".!?।":
+                    # Check if it's not part of an abbreviation
+                    is_abbreviation = False
+                    for abbr in get_abbreviations():
+                        if buffer.endswith(abbr, 0, i + 1):
+                            is_abbreviation = True
+                            break
+
+                    # Check if followed by whitespace or end of buffer
+                    if not is_abbreviation and (i + 1 >= len(buffer) or buffer[i + 1].isspace()):
+                        punctuation_indices.append(i)
+
+            # Yield complete segments if we have enough content
+            if punctuation_indices and len(buffer) >= 10:
+                last_index = punctuation_indices[-1] + 1
+                segment = buffer[:last_index].strip()
+                buffer = buffer[last_index:]
+                await self.push_frame(LLMTextFrame(text=segment.strip()))
+
+        if buffer and buffer.strip():
+            await self.push_frame(LLMTextFrame(text=buffer.strip()))
+
+    async def _handle_dynamic_response(
+        self, context: AtomsAgentContext
+    ) -> AsyncGenerator[str, None]:
         """Handle the dynamic response from the response model client."""
         try:
+            response_model_context = context.get_response_model_context()
             logger.debug(
-                f"getting response from response model client, messages: {context.messages}"
+                f"getting response from response model client, messages: {response_model_context}"
             )
             async for chunk in await self.response_model_client.get_response(
-                context.messages, stream=True
+                response_model_context, stream=True
             ):
                 if chunk.choices:
                     content = chunk.choices[0].delta.content
                     if content:
                         await self.push_frame(LLMTextFrame(text=content))
+                        # yield content
                     if (
                         chunk.choices[0].finish_reason
                         and hasattr(chunk.choices[0], "stop_reason")
@@ -886,9 +1034,9 @@ class FlowGraphManager(FrameProcessor):
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAILLMContext = frame.context
+            context = AtomsAgentContext.upgrade_to_atoms_agent(frame.context)
         elif isinstance(frame, LLMMessagesFrame):
-            context = OpenAILLMContext.from_messages(frame.messages)
+            context = AtomsAgentContext.from_messages(frame.messages)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:

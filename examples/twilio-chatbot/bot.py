@@ -23,6 +23,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.atoms.atoms_agent import CallData, initialize_conversational_agent
+from pipecat.services.atoms.prompts import FT_RESPONSE_MODEL_SYSTEM_PROMPT
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -113,7 +114,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     messages = [
         {
             "role": "system",
-            "content": "You are an elementary teacher in an audio call. Your output will be converted to audio so don't include special characters in your answers. Respond to what the student said in a short short sentence.",
+            "content": FT_RESPONSE_MODEL_SYSTEM_PROMPT,
         },
     ]
 
@@ -147,13 +148,13 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         ),
     )
 
-    # @transport.event_handler("on_client_connected")
-    # async def on_client_connected(transport, client):
-    #     # Start recording.
-    #     await audiobuffer.start_recording()
-    #     # Kick off the conversation.
-    #     messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-    #     await task.queue_frames([context_aggregator.user().get_context_frame()])
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        # Start recording.
+        await audiobuffer.start_recording()
+        # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

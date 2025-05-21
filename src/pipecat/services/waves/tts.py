@@ -84,30 +84,31 @@ class WavesHttpTTSService(TTSService):
 
     async def _generate_audio(self, text: str) -> bytes:
         """Generate audio from text using the Waves API."""
-        payload = {
-            "voice_id": self._voice_id,
-            "text": text,
-            "sample_rate": self._sample_rate,
-            **self._settings,
-        }
+        try:
+            payload = {
+                "voice_id": self._voice_id,
+                "text": text,
+                "sample_rate": self._sample_rate,
+                **self._settings,
+            }
 
-        headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-        }
+            headers = {
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            }
 
-        logger.debug(f"Waves TTS: Generating audio for [{text}]")
+            url = f"{self.base_url}/api/v1/lightning/get_speech"
+            async with self.aiohttp_sesssion.post(url, json=payload, headers=headers) as response:
+                result = await response.read()
 
-        url = f"{self.base_url}/api/v1/lightning/get_speech"
-        async with self.aiohttp_sesssion.post(url, json=payload, headers=headers) as response:
-            result = await response.read()
-
-        return result
+            return result
+        except Exception as e:
+            logger.error(f"{self} exception: {e}")
+            raise e
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
-
         try:
             await self.start_ttfb_metrics()
 
@@ -118,6 +119,7 @@ class WavesHttpTTSService(TTSService):
             yield TTSStartedFrame()
 
             frame = TTSAudioRawFrame(audio=audio, sample_rate=self.sample_rate, num_channels=1)
+            logger.debug(f"TTS audio frame received for text: {text}")
 
             yield frame
         except Exception as e:
@@ -206,8 +208,6 @@ class WavesSSETTSService(TTSService):
                 "Content-Type": "application/json",
                 "Accept": "text/event-stream",
             }
-
-            logger.debug(f"Generating audio for [{text}]")
 
             await self.start_ttfb_metrics()
             url = f"{self.base_url}/api/v1/lightning-large/stream"
