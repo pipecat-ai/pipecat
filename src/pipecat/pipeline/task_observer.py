@@ -40,8 +40,13 @@ class TaskObserver(BaseObserver):
     """
 
     def __init__(
-        self, *, observers: Optional[List[BaseObserver]] = None, task_manager: BaseTaskManager
+        self,
+        *,
+        observers: Optional[List[BaseObserver]] = None,
+        task_manager: BaseTaskManager,
+        **kwargs,
     ):
+        super().__init__(**kwargs)
         self._observers = observers or []
         self._task_manager = task_manager
         self._proxies: Dict[BaseObserver, Proxy] = {}
@@ -78,7 +83,7 @@ class TaskObserver(BaseObserver):
         queue = asyncio.Queue()
         task = self._task_manager.create_task(
             self._proxy_task_handler(queue, observer),
-            f"TaskObserver::{observer.__class__.__name__}::_proxy_task_handler",
+            f"TaskObserver::{observer}::_proxy_task_handler",
         )
         proxy = Proxy(queue=queue, task=task, observer=observer)
         return proxy
