@@ -388,7 +388,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             msg = json.loads(message)
             # Check if this message belongs to the current context
             # The default context may return null/None for context_id
-            received_ctx_id = msg.get("context_id")
+            received_ctx_id = msg.get("contextId")
             if (
                 self._context_id is not None
                 and received_ctx_id is not None
@@ -408,7 +408,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
                 await self.add_word_timestamps(word_times)
                 self._cumulative_time = word_times[-1][1]
-            if msg.get("is_final"):
+            if msg.get("isFinal"):
                 logger.trace(f"Received final message for context {received_ctx_id}")
                 # Context has finished
                 if self._context_id == received_ctx_id:
