@@ -97,7 +97,7 @@ class WavesHttpTTSService(TTSService):
                 "Content-Type": "application/json",
             }
 
-            url = f"{self.base_url}/api/v1/lightning/get_speech"
+            url = f"{self.base_url}/api/v1/lightning/get_speech_long_text"
             async with self.aiohttp_sesssion.post(url, json=payload, headers=headers) as response:
                 result = await response.read()
 
@@ -119,7 +119,7 @@ class WavesHttpTTSService(TTSService):
             yield TTSStartedFrame()
 
             frame = TTSAudioRawFrame(audio=audio, sample_rate=self.sample_rate, num_channels=1)
-            logger.debug(f"TTS audio frame received for text: {text}")
+            logger.debug(f"TTS audio frame received for text: {text}, chunk: {len(audio)}")
 
             yield frame
         except Exception as e:

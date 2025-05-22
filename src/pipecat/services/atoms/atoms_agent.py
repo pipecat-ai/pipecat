@@ -5,7 +5,7 @@ import os
 import re
 import traceback
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import httpx
 from loguru import logger
@@ -94,7 +94,7 @@ def replace_variables(input_string: Any, variables: Dict[str, Any]) -> Any:
             return str(variables[variable_name])
         else:
             logger.error(
-                f"Variable replacement failed for '{variable_name}' in node {self.current_node.id}"
+                f"Variable replacement failed for '{variable_name} in text `{input_string}`'"
             )
             return match.group(0)
 
@@ -481,6 +481,20 @@ class AtomsAgentContext(OpenAILLMContext):
         return "\n".join(messages)
 
 
+class BackgroundTaskManager:
+    def __init__(self):
+        self.tasks: List[asyncio.Task] = []
+
+    def run_task(self, task: Callable, *args, **kwargs):
+        task: asyncio.Task = asyncio.create_task(task(*args, **kwargs))
+        self.tasks.append(task)
+        task.add_done_callback(lambda _: self.tasks.remove(task))
+        return task
+
+    async def wait(self):
+        await asyncio.gather(*self.tasks)
+
+
 class FlowGraphManager(FrameProcessor):
     """This is a frame processor that manages the flow graph of the agent.
 
@@ -497,6 +511,7 @@ class FlowGraphManager(FrameProcessor):
         variable_extraction_client: BaseClient,
         response_model_client: BaseClient,
         conversation_pathway: ConversationalPathway,
+        background_task_manager: Optional[BackgroundTaskManager] = BackgroundTaskManager(),
         initial_variables: Optional[Dict[str, Any]] = None,
         agent_persona: Optional[str] = None,
     ):
@@ -511,6 +526,7 @@ class FlowGraphManager(FrameProcessor):
         self.conv_pathway.start_node = self.current_node
         self._end_call_tag = "<end_call>"
         self.agent_persona = agent_persona
+        self._background_task_manager = background_task_manager
 
     def _get_initial_user_message(self) -> str:
         """Get the initial user message for the conversation."""
@@ -911,8 +927,8 @@ class FlowGraphManager(FrameProcessor):
             "id": self.current_node.id,
             "name": self.current_node.name,
             "type": self.current_node.type.name,
-            "action": self.current_node.action,
-            "loop_condition": self.current_node.loop_condition,
+            "action": replace_variables(self.current_node.action, self.variables),
+            "loop_condition": replace_variables(self.current_node.loop_condition, self.variables),
             "user_response": user_response,
         }
 

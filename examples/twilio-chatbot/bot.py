@@ -105,15 +105,15 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     #     push_silence_after_stop=testing,
     # )
 
-    # tts = WavesHttpTTSService(
-    #     api_key=os.getenv("WAVES_API_KEY"),
-    #     voice_id="deepika",
-    # )
-
-    tts = WavesSSETTSService(
+    tts = WavesHttpTTSService(
         api_key=os.getenv("WAVES_API_KEY"),
-        voice_id="nyah",
+        voice_id="deepika",
     )
+
+    # tts = WavesSSETTSService(
+    #     api_key=os.getenv("WAVES_API_KEY"),
+    #     voice_id="nyah",
+    # )
 
     agent_flow_processor = await initialize_conversational_agent(
         agent_id="680c74afa49c52c0f832821d",
@@ -128,15 +128,6 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     )
 
     turn_tracking_observer = TurnTrackingObserver()
-
-    @turn_tracking_observer.event_handler("on_turn_started")
-    async def on_turn_started(observer, turn_count):
-        logger.info(f"Turn {turn_count} started")
-
-    @turn_tracking_observer.event_handler("on_turn_ended")
-    async def on_turn_ended(observer, turn_count, duration, was_interrupted):
-        logger.info(f"Turn {turn_count} ended (interrupted: {was_interrupted})")
-
     agent_action_processor = AgentActionProcessor(turn_tracking_observer=turn_tracking_observer)
 
     messages = [
