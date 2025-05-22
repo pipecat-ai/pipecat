@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `SarvamTTSService`, which implements Sarvam AI's TTS API:
+  https://docs.sarvam.ai/api-reference-docs/text-to-speech/convert.
+
 - Added `PipelineTask.add_observer()` and `PipelineTask.remove_observer()` to
   allow mangaging observers at runtime. This is useful for cases where the task
   is passed around to other code components that might want to observe the
@@ -126,8 +129,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
-- Added foundation example `07y-minimax-http.py` to show how to use the
-  `MiniMaxHttpTTSService`.
+- Added foundation examples `07y-interruptible-minimax.py` and
+  `07z-interruptible-sarvam.py`to show how to use the `MiniMaxHttpTTSService`
+  and `SarvamTTSService`, respectively.
 
 - Added an `open-telemetry-tracing` example, showing how to setup tracing. The
   example also includes Jaeger as an open source OpenTelemetry client to review
