@@ -3,6 +3,12 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
+"""simple_dialout.py.
+
+Simple Dial-out Bot.
+"""
+
 import argparse
 import asyncio
 import json
@@ -30,16 +36,47 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
-async def main(
+async def run_bot(
     room_url: str,
     token: str,
     body: dict,
-):
-    # ------------ CONFIGURATION AND SETUP ------------
+) -> None:
+    """Run the voice bot with the given parameters.
 
+    Args:
+        room_url: The Daily room URL
+        token: The Daily room token
+        body: Body passed to the bot from the webhook
+
+    """
+    # ------------ CONFIGURATION AND SETUP ------------
+    logger.info(f"Starting bot with room: {room_url}")
+    logger.info(f"Token: {token}")
+    logger.info(f"Body: {body}")
+    # Parse the body to get the dial-in settings
     body_data = json.loads(body)
 
+    # Check if the body contains dial-in settings
+    logger.debug(f"Body data: {body_data}")
+
+    if not body_data.get("dialout_settings"):
+        logger.error("Dial-out settings not found in the body data")
+        return
+
     dialout_settings = body_data["dialout_settings"]
+
+    if not dialout_settings.get("phone_number"):
+        logger.error("Dial-out phone number not found in the dial-out settings")
+        return
+
+    # Extract dial-out phone number
+    phone_number = dialout_settings["phone_number"]
+    caller_id = dialout_settings.get("caller_id")  # Use .get() to handle optional field
+
+    if caller_id:
+        logger.info(f"Dial-out caller ID specified: {caller_id}")
+    else:
+        logger.info("Dial-out caller ID not specified; proceeding without it")
 
     # ------------ TRANSPORT SETUP ------------
 
@@ -108,9 +145,17 @@ async def main(
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
-        # Start dialout if needed
-        logger.debug("Dialout settings detected; starting dialout")
-        await transport.start_dialout(transport, dialout_settings)
+        # Start dialout with conditional caller_id
+        logger.debug(f"Dialout settings detected; starting dialout to number: {phone_number}")
+
+        # Build dialout parameters conditionally
+        dialout_params = {"phoneNumber": phone_number}
+        if caller_id:
+            dialout_params["callerId"] = caller_id
+            logger.debug(f"Including caller ID in dialout: {caller_id}")
+
+        logger.debug(f"Dialout parameters: {dialout_params}")
+        await transport.start_dialout(dialout_params)
 
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
@@ -138,7 +183,8 @@ async def main(
     await runner.run(task)
 
 
-if __name__ == "__main__":
+async def main():
+    """Parse command line arguments and run the bot."""
     parser = argparse.ArgumentParser(description="Simple Dial-out Bot")
     parser.add_argument("-u", "--url", type=str, help="Room URL")
     parser.add_argument("-t", "--token", type=str, help="Room Token")
@@ -146,9 +192,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Log the arguments for debugging
-    logger.info(f"Room URL: {args.url}")
-    logger.info(f"Token: {args.token}")
-    logger.info(f"Body provided: {bool(args.body)}")
+    logger.debug(f"url: {args.url}")
+    logger.debug(f"token: {args.token}")
+    logger.debug(f"body: {args.body}")
+    if not all([args.url, args.token, args.body]):
+        logger.error("All arguments (-u, -t, -b) are required")
+        parser.print_help()
+        sys.exit(1)
 
-    asyncio.run(main(args.url, args.token, args.body))
+    await run_bot(args.url, args.token, args.body)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
