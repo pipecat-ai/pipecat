@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     TTSSpeakFrame,
 )
+from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -37,6 +38,7 @@ from pipecat.services.atoms.atoms_agent import (
     CallData,
     initialize_conversational_agent,
 )
+from pipecat.services.atoms.manager import AgentActionProcessor
 from pipecat.services.atoms.prompts import FT_RESPONSE_MODEL_SYSTEM_PROMPT
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -113,7 +115,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         voice_id="nyah",
     )
 
-    agent = await initialize_conversational_agent(
+    agent_flow_processor = await initialize_conversational_agent(
         agent_id="680c74afa49c52c0f832821d",
         call_id="CALL-1746008459293-112543",
         call_data=CallData(
@@ -124,6 +126,18 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             }
         ),
     )
+
+    turn_tracking_observer = TurnTrackingObserver()
+
+    @turn_tracking_observer.event_handler("on_turn_started")
+    async def on_turn_started(observer, turn_count):
+        logger.info(f"Turn {turn_count} started")
+
+    @turn_tracking_observer.event_handler("on_turn_ended")
+    async def on_turn_ended(observer, turn_count, duration, was_interrupted):
+        logger.info(f"Turn {turn_count} ended (interrupted: {was_interrupted})")
+
+    agent_action_processor = AgentActionProcessor(turn_tracking_observer=turn_tracking_observer)
 
     messages = [
         {
@@ -139,7 +153,9 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
     initial_context = AtomsAgentContext.upgrade_to_atoms_agent(context)
-    chunks = [chunk async for chunk in (await agent.get_response(context=initial_context))]
+    chunks = [
+        chunk async for chunk in (await agent_flow_processor.get_response(context=initial_context))
+    ]
     initial_agent_response = "".join(chunks)
 
     logger.info(f"Initial agent response: {initial_agent_response}")
@@ -153,8 +169,8 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             transport.input(),  # Websocket input from client
             stt,  # Speech-To-Text
             context_aggregator.user(),
-            # llm,  # LLM
-            agent,
+            agent_flow_processor,
+            agent_action_processor,
             tts,
             transport.output(),
             audiobuffer,  # Used to buffer the audio in the pipeline
@@ -164,6 +180,8 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     task = PipelineTask(
         pipeline,
+        observers=[turn_tracking_observer],
+        enable_turn_tracking=False,
         params=PipelineParams(
             audio_in_sample_rate=8000,
             audio_out_sample_rate=8000,

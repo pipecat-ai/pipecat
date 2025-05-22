@@ -795,6 +795,37 @@ class EndFrame(ControlFrame):
 
 
 @dataclass
+class BaseTelephonyControlFrame(ControlFrame):
+    """Base class for telephony control frames."""
+
+    conversation_id: str
+
+
+@dataclass
+class LastTurnFrame(BaseTelephonyControlFrame):
+    """Indicates that the last turn has been reached."""
+
+    is_last_turn: bool = True
+
+    def __str__(self):
+        """Return a string representation of the frame."""
+        return f"{self.name}, is_last_turn: {self.is_last_turn}"
+
+
+@dataclass
+class TransferCallFrame(BaseTelephonyControlFrame):
+    """Indicates that the call should be transferred."""
+
+    transfer_call_number: str
+    conversation_id: str
+    reason: Optional[str] = None
+
+    def __str__(self):
+        """Return a string representation of the frame."""
+        return f"{self.name}, transfer_call_number: {self.transfer_call_number}, conversation_id: {self.conversation_id}, reason: {self.reason}"
+
+
+@dataclass
 class StopFrame(ControlFrame):
     """Indicates that a pipeline should be stopped but that the pipeline
     processors should be kept in a running state. This is normally queued from

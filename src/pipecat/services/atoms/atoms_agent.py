@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from pipecat.frames.frames import (
     Frame,
+    LastTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -165,12 +166,12 @@ class AtomsAgentContext(OpenAILLMContext):
             # check if the previous role is "user" as well then we have to add assistant message with content "None"
             if self.messages and self.messages[-1]["role"] == "user":
                 self.messages.append(
-                    ChatCompletionAssistantMessageParam(role="assistant", content="None")
+                    ChatCompletionAssistantMessageParam(role="assistant", content="")
                 )
         if message["role"] == "assistant":
             # check if the previous role is "assistant" as well then we have to add user message with content "None"
             if self.messages and self.messages[-1]["role"] == "assistant":
-                self.messages.append(ChatCompletionUserMessageParam(role="user", content="None"))
+                self.messages.append(ChatCompletionUserMessageParam(role="user", content=""))
         super().add_message(message=message)
 
     # convert a message in atoms agent format into one or more messages in OpenAI format
@@ -874,9 +875,7 @@ class FlowGraphManager(FrameProcessor):
         """Process the context and update the flow model client."""
         response = await self.get_response(context=context)
         async for chunk in response:
-            # logger.debug(
-            #     f"{self.__class__.__name__} generated text: {chunk} for message: {context.get_current_user_transcript()}"
-            # )
+            logger.debug(f"chunk: {chunk}")
             await self.push_frame(LLMTextFrame(text=chunk))
 
     def _get_transcript_from_context(self, context: AtomsAgentContext) -> str:
@@ -1019,7 +1018,7 @@ class FlowGraphManager(FrameProcessor):
                 f"getting response from response model client, messages: {response_model_context}"
             )
             async for chunk in await self.response_model_client.get_response(
-                response_model_context, stream=True
+                response_model_context, stream=True, stop=[self._end_call_tag]
             ):
                 if chunk.choices:
                     content = chunk.choices[0].delta.content
@@ -1031,8 +1030,8 @@ class FlowGraphManager(FrameProcessor):
                         and hasattr(chunk.choices[0], "stop_reason")
                         and chunk.choices[0].stop_reason == self._end_call_tag
                     ):
-                        # TODO: Handle end call tag
-                        pass
+                        logger.debug("last turn chunk detected")
+                        await self.push_frame(LastTurnFrame(conversation_id="123"))
         except Exception as e:
             logger.error(f"Error handling dynamic response: {e}")
 
