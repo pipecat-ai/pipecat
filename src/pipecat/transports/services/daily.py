@@ -44,11 +44,11 @@ try:
         AudioData,
         CallClient,
         CustomAudioSource,
+        CustomAudioTrack,
         Daily,
         EventHandler,
         VideoFrame,
         VirtualCameraDevice,
-        VirtualMicrophoneDevice,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -242,6 +242,12 @@ def completion_callback(future):
     return _callback
 
 
+@dataclass
+class DailyAudioTrack:
+    source: CustomAudioSource
+    track: CustomAudioTrack
+
+
 class DailyTransportClient(EventHandler):
     """Core client for interacting with Daily's API.
 
@@ -319,14 +325,11 @@ class DailyTransportClient(EventHandler):
         self._out_sample_rate = 0
 
         self._camera: Optional[VirtualCameraDevice] = None
-        self._mic: Optional[VirtualMicrophoneDevice] = None
-        self._audio_sources: Dict[str, CustomAudioSource] = {}
+        self._microphone_track: Optional[DailyAudioTrack] = None
+        self._custom_audio_tracks: Dict[str, DailyAudioTrack] = {}
 
     def _camera_name(self):
         return f"camera-{self}"
-
-    def _mic_name(self):
-        return f"mic-{self}"
 
     @property
     def room_url(self) -> str:
@@ -359,19 +362,25 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def register_audio_destination(self, destination: str):
-        self._audio_sources[destination] = await self.add_custom_audio_track(destination)
+        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
     async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         future = self._get_event_loop().create_future()
-        if not destination and self._mic:
-            self._mic.write_frames(frames, completion=completion_callback(future))
-        elif destination and destination in self._audio_sources:
-            source = self._audio_sources[destination]
-            source.write_frames(frames, completion=completion_callback(future))
+
+        audio_source: Optional[CustomAudioSource] = None
+        if not destination and self._microphone_track:
+            audio_source = self._microphone_track.source
+        elif destination and destination in self._custom_audio_tracks:
+            track = self._custom_audio_tracks[destination]
+            audio_source = track.source
+
+        if audio_source:
+            audio_source.write_frames(frames, completion=completion_callback(future))
         else:
             logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
             future.set_result(None)
+
         await future
 
     async def write_raw_video_frame(
@@ -410,13 +419,10 @@ class DailyTransportClient(EventHandler):
                 color_format=self._params.video_out_color_format,
             )
 
-        if self._params.audio_out_enabled and not self._mic:
-            self._mic = Daily.create_microphone_device(
-                self._mic_name(),
-                sample_rate=self._out_sample_rate,
-                channels=self._params.audio_out_channels,
-                non_blocking=True,
-            )
+        if self._params.audio_out_enabled and not self._microphone_track:
+            audio_source = CustomAudioSource(self._out_sample_rate, self._params.audio_out_channels)
+            audio_track = CustomAudioTrack(audio_source)
+            self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
     async def join(self):
         # Transport already joined or joining, ignore.
@@ -501,12 +507,11 @@ class DailyTransportClient(EventHandler):
                     "microphone": {
                         "isEnabled": microphone_enabled,
                         "settings": {
-                            "deviceId": self._mic_name(),
-                            "customConstraints": {
-                                "autoGainControl": {"exact": False},
-                                "echoCancellation": {"exact": False},
-                                "noiseSuppression": {"exact": False},
-                            },
+                            "customTrack": {
+                                "id": self._microphone_track.track.id
+                                if self._microphone_track
+                                else "no-microphone-track"
+                            }
                         },
                     },
                 },
@@ -553,7 +558,7 @@ class DailyTransportClient(EventHandler):
             await self._stop_transcription()
 
         # Remove any custom tracks, if any.
-        for track_name, _ in self._audio_sources.items():
+        for track_name, _ in self._custom_audio_tracks.items():
             await self.remove_custom_audio_track(track_name)
 
         try:
@@ -703,19 +708,24 @@ class DailyTransportClient(EventHandler):
             color_format=color_format,
         )
 
-    async def add_custom_audio_track(self, track_name: str) -> CustomAudioSource:
+    async def add_custom_audio_track(self, track_name: str) -> DailyAudioTrack:
         future = self._get_event_loop().create_future()
 
         audio_source = CustomAudioSource(self._out_sample_rate, 1)
+
+        audio_track = CustomAudioTrack(audio_source)
+
         self._client.add_custom_audio_track(
             track_name=track_name,
-            audio_source=audio_source,
+            audio_track=audio_track,
             completion=completion_callback(future),
         )
 
         await future
 
-        return audio_source
+        track = DailyAudioTrack(source=audio_source, track=audio_track)
+
+        return track
 
     async def remove_custom_audio_track(self, track_name: str):
         future = self._get_event_loop().create_future()
