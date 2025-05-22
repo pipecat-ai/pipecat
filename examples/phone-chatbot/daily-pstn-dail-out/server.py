@@ -78,7 +78,7 @@ async def handle_incoming_daily_webhook(request: Request) -> JSONResponse:
 
         body_json = json.dumps(data)
 
-        bot_cmd = f"python3 -m simple_dialout -u {room_url} -t {token} -b {shlex.quote(body_json)}"
+        bot_cmd = f"python3 -m bot -u {room_url} -t {token} -b {shlex.quote(body_json)}"
 
         try:
             # CHANGE: Keep stdout/stderr for debugging

@@ -39,9 +39,28 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+def extract_phone_from_sip_uri(sip_uri):
+    """Extract phone number from SIP URI.
+
+    Args:
+        sip_uri: SIP URI in format "sip:+17868748498@daily-twilio-integration.sip.twilio.com"
+
+    Returns:
+        Phone number string (e.g., "+17868748498") or None if invalid format
+    """
+    if not sip_uri or not isinstance(sip_uri, str):
+        return None
+
+    if sip_uri.startswith("sip:") and "@" in sip_uri:
+        phone_part = sip_uri[4:]  # Remove 'sip:' prefix
+        caller_phone = phone_part.split("@")[0]  # Get everything before '@'
+        return caller_phone
+    return None
+
+
 @app.post("/start")
 async def handle_incoming_daily_webhook(request: Request) -> JSONResponse:
-    """Handle incoming Daily call webhook."""
+    """Handle dial-out request."""
     print("Received webhook from Daily")
 
     # Get the dial-in properties from the request
@@ -51,14 +70,19 @@ async def handle_incoming_daily_webhook(request: Request) -> JSONResponse:
             # Pass through any webhook checks
             return JSONResponse({"test": True})
 
-        if not all(key in data for key in ["From", "To", "callId", "callDomain"]):
+        if not data["dialout_settings"]:
             raise HTTPException(
-                status_code=400, detail="Missing properties 'From', 'To', 'callId', 'callDomain'"
+                status_code=400, detail="Missing 'dialout_settings' in the request body"
             )
 
-        # Extract the caller's phone number
-        caller_phone = str(data.get("From"))
-        print(f"Processing call from {caller_phone}")
+        if not data["dialout_settings"].get("sip_uri"):
+            raise HTTPException(status_code=400, detail="Missing 'sip_uri' in dialout_settings")
+
+        # Extract the phone number we want to dial out to
+        sip_uri = str(data["dialout_settings"]["sip_uri"])
+        caller_phone = extract_phone_from_sip_uri(sip_uri)
+        print(f"SIP URI: {sip_uri}")
+        print(f"Processing sip call to {caller_phone}")
 
         # Create a Daily room with dial-in capabilities
         try:
