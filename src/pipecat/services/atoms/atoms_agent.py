@@ -1,13 +1,14 @@
 import asyncio
-import copy
 import json
 import os
 import re
 import traceback
+from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Text, Tuple
 
 import httpx
+import pytz
 from loguru import logger
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -29,14 +30,20 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-from .llm_client import AzureOpenAIClient, OpenAIClient
+from .llm_client import AzureOpenAIClient, BaseClient, OpenAIClient
 from .pathways import ConversationalPathway, Node, NodeType, Pathway
 from .prompts import (
     FT_FLOW_MODEL_SYSTEM_PROMPT,
     VARIABLE_EXTRACTION_PROMPT,
 )
-from .utils import convert_old_to_new_format, get_abbreviations, get_unallowed_variable_names
+from .utils import (
+    convert_old_to_new_format,
+    get_abbreviations,
+    get_unallowed_variable_names,
+    replace_variables,
+)
 
 
 class AtomsLLMModels(Enum):
@@ -63,45 +70,6 @@ class CallType(Enum):
     TELEPHONY_OUTBOUND = "telephony_outbound"
     WEBCALL = "webcall"
     CHAT = "chat"
-
-
-from datetime import datetime
-from typing import AsyncGenerator, Text
-
-import pytz
-
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-from .llm_client import BaseClient
-
-
-def replace_variables(input_string: Any, variables: Dict[str, Any]) -> Any:
-    """Replace variable placeholders in a string with their values.
-
-    Args:
-        input_string: String potentially containing variable placeholders
-        variables: Dictionary of variable names and values
-
-    Returns:
-        String with variables replaced
-    """
-    pattern = r"\{\{(\w+)\}\}"
-
-    def replace_func(match):
-        variable_name = match.group(1) if match.group(1) else match.group(2)
-
-        if variable_name in variables:
-            return str(variables[variable_name])
-        else:
-            logger.error(
-                f"Variable replacement failed for '{variable_name} in text `{input_string}`'"
-            )
-            return match.group(0)
-
-    if isinstance(input_string, str):
-        return re.sub(pattern, replace_func, input_string)
-    else:
-        return input_string
 
 
 class AtomsAgentContext(OpenAILLMContext):
@@ -485,13 +453,15 @@ class BackgroundTaskManager:
     def __init__(self):
         self.tasks: List[asyncio.Task] = []
 
-    def run_task(self, task: Callable, *args, **kwargs):
-        task: asyncio.Task = asyncio.create_task(task(*args, **kwargs))
+    def add_task(self, func: Callable, *args, **kwargs):
+        """Add a task to the background task manager."""
+        task: asyncio.Task = asyncio.create_task(func(*args, **kwargs))
         self.tasks.append(task)
         task.add_done_callback(lambda _: self.tasks.remove(task))
         return task
 
-    async def wait(self):
+    async def wait_to_complete(self):
+        """Wait for all tasks to complete."""
         await asyncio.gather(*self.tasks)
 
 
@@ -504,6 +474,79 @@ class FlowGraphManager(FrameProcessor):
     Args:
         conversation_pathway: The conversation pathway to manage.
     """
+
+    class APICallNodeHandler:
+        """This class is responsible for handling the API call node."""
+
+        def __init__(self, flow_graph_manager: "FlowGraphManager"):
+            self.flow_graph_manager: "FlowGraphManager" = flow_graph_manager
+
+        async def process_node(self, node: Node):
+            """Process the node."""
+            pass
+
+        def _make_api_request(self, node: Node) -> Dict[str, Any]:
+            """Handle API node by making request and determining next node based on pathways.
+
+            Args:
+                node: The API call node to process
+
+            Returns:
+                Response data
+
+            Raises:
+                AgentError: If node processing fails
+            """
+            # Extract variables if configured
+            if node.variables and node.variables.is_enabled:
+                extracted_vars = self._extract_variables()
+                self._log(f"Extracted variables: {extracted_vars}")
+
+            # Make API request
+            try:
+                response_data = self._make_api_request_from_node(node)
+                api_success = True
+            except AgentError as e:
+                logger.error(
+                    f"API request failed: {str(e)}",
+                    extra={
+                        "call_id": self.call_id,
+                        "category": "user",
+                        "error_message": "API node failure",
+                    },
+                )
+                response_data = {"error": str(e)}
+                api_success = False
+
+            # Extract data from response if configured
+            if api_success and node.response_data and node.response_data.is_enabled:
+                self._extract_response_data(response_data, node.response_data)
+
+            # Process pathways based on the response
+            pathway_id_or_response = self._process_api_node_pathways(
+                node, response_data, api_success
+            )
+
+            if isinstance(pathway_id_or_response, dict):
+                return pathway_id_or_response
+            elif isinstance(pathway_id_or_response, str):
+                self._hop(pathway_id_or_response)
+                return self.get_response(
+                    f"api output = {json.dumps(response_data, indent=2, ensure_ascii=False)}"
+                )
+            else:
+                self.add_event(
+                    EventType.ERROR,
+                    {
+                        "error_message": "API request completed but no branch was determined",
+                        "response_data": response_data,
+                    },
+                )
+
+                raise AgentError(
+                    "API request completed but no pathway was determined. Response: "
+                    f"{json.dumps(response_data, indent=2, ensure_ascii=False)}. Output: {pathway_id_or_response}"
+                )
 
     def __init__(
         self,

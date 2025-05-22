@@ -1,9 +1,11 @@
-from typing import Dict, List
+import re
+from typing import Any, Dict, List
+
+from loguru import logger
 
 
 def convert_old_to_new_format(old_format_data: Dict) -> List:
-    """
-    Convert the old workflow graph format to the new format.
+    """Convert the old workflow graph format to the new format.
 
     Args:
         old_format_data (dict): Original workflow graph data
@@ -260,3 +262,32 @@ def get_abbreviations() -> set:
 
 def get_unallowed_variable_names() -> list:
     return ["call_id", "user_number", "agent_number"]
+
+
+def replace_variables(input_string: Any, variables: Dict[str, Any]) -> Any:
+    """Replace variable placeholders in a string with their values.
+
+    Args:
+        input_string: String potentially containing variable placeholders
+        variables: Dictionary of variable names and values
+
+    Returns:
+        String with variables replaced
+    """
+    pattern = r"\{\{(\w+)\}\}"
+
+    def replace_func(match):
+        variable_name = match.group(1) if match.group(1) else match.group(2)
+
+        if variable_name in variables:
+            return str(variables[variable_name])
+        else:
+            logger.error(
+                f"Variable replacement failed for '{variable_name} in text `{input_string}`'"
+            )
+            return match.group(0)
+
+    if isinstance(input_string, str):
+        return re.sub(pattern, replace_func, input_string)
+    else:
+        return input_string
