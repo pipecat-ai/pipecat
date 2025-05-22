@@ -866,6 +866,10 @@ class FlowGraphManager(FrameProcessor):
             delta = json.dumps(delta, indent=2, ensure_ascii=False)
             context._update_last_user_context("delta", delta)
 
+        if self.current_node.type == NodeType.END_CALL:
+            logger.debug("end call node detected")
+            await self.push_frame(LastTurnFrame(conversation_id="123"))
+
         if self.current_node.static_text:
             return self._handle_static_response(context=context)
         else:
