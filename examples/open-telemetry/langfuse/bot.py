@@ -6,6 +6,7 @@
 
 import argparse
 import os
+import sys
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -151,6 +152,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
     from run import main
 
     main()
