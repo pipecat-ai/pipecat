@@ -1,5 +1,6 @@
 import asyncio
 import time
+import json
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -273,7 +274,7 @@ class CompletenessCheck(FrameProcessor):
     idle timeout is reached.
     """
 
-    wait_time = 2.0
+    wait_time = 10.0
 
     def __init__(self, notifier: BaseNotifier, audio_accumulator: AudioAccumulator, **kwargs):
         super().__init__()
@@ -367,6 +368,8 @@ def get_message_text(message: object) -> str:
 
     # Try direct content field
     content = get_message_field(message, "content")
+    
+    logger.debug(f"Found content: {content}, type: {type(content)}")     
     # logger.debug(f"Found content: {content}")
 
     if isinstance(content, str):
@@ -425,6 +428,7 @@ class StatementJudgeContextFilter(FrameProcessor):
 
             user_text_messages = []
             last_assistant_message = None
+            print(f"Found {len(messages)} in context: {messages}")
             for message in reversed(messages):
                 role = get_message_field(message, "role")
                 logger.debug(f"Processing message with role: {role}")
