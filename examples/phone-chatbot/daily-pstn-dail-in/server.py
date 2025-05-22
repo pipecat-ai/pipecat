@@ -76,9 +76,6 @@ async def handle_incoming_daily_webhook(request: Request) -> JSONResponse:
         bot_cmd = f"python3 -m simple_dialin -u {room_url} -t {token} -b {shlex.quote(body_json)}"
 
         try:
-            # Use shlex to properly split the command for subprocess
-            cmd_parts = shlex.split(bot_cmd)
-
             # CHANGE: Keep stdout/stderr for debugging
             # Start the bot in the background but capture output
             subprocess.Popen(
