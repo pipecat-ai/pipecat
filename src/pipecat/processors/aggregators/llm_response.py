@@ -565,12 +565,14 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         # Run inference if the function call result requires it.
         if frame.result:
             run_llm = False
-
             if properties and properties.run_llm is not None:
-                # If the tool call result has a run_llm property, use it
+                # If the tool call result has a run_llm property, use it.
                 run_llm = properties.run_llm
+            elif frame.run_llm is not None:
+                # If the frame is indicating we should run the LLM, do it.
+                run_llm = frame.run_llm
             else:
-                # Default behavior is to run the LLM if there are no function calls in progress
+                # If this is the last function call in progress, run the LLM.
                 run_llm = not bool(self._function_calls_in_progress)
 
             if run_llm:

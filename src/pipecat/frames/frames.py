@@ -677,6 +677,7 @@ class FunctionCallResultFrame(SystemFrame):
     tool_call_id: str
     arguments: Any
     result: Any
+    run_llm: Optional[bool] = None
     properties: Optional[FunctionCallResultProperties] = None
 
 
