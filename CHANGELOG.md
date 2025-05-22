@@ -79,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the default model for `AnthropicLLMService` to
   `claude-sonnet-4-20250514`.
 
+- Updated the default model for `GeminiMultimodalLiveLLMService` to
+  `models/gemini-2.5-flash-preview-native-audio-dialog`.
+
 - `BaseTextFilter` methods `filter()`, `update_settings()`,
   `handle_interruption()` and `reset_interruption()` are now async.
 
