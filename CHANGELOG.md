@@ -73,6 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated the default model for `AnthropicLLMService` to
+  `claude-sonnet-4-20250514`.
+
 - `BaseTextFilter` methods `filter()`, `update_settings()`,
   `handle_interruption()` and `reset_interruption()` are now async.
 
