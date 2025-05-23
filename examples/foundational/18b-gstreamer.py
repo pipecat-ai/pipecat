@@ -9,7 +9,15 @@ import argparse
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
+from pipecat.frames.frames import (
+    EndFrame,
+    Frame,
+    TextFrame,
+    TTSTextFrame,
+    UserImageRequestFrame,
+    UserStartedSpeakingFrame,
+)
+from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -17,6 +25,8 @@ from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAg
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.gstreamer.pipeline_source import GStreamerPipelineSource
 from pipecat.services.moondream.vision import MoondreamService
+from pipecat.transports.base_input import BaseInputTransport
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -84,7 +94,17 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(
+        pipeline,
+        observers=[
+            DebugLogObserver(
+                frame_types={
+                    TextFrame: None,
+                    EndFrame: None,
+                }
+            ),
+        ],
+    )
 
     runner = PipelineRunner(handle_sigint=False)
 
