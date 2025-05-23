@@ -44,11 +44,16 @@ class AgentActionProcessor(FrameProcessor):
             """Handle the frame."""
             self._set_end_call(frame.is_last_turn)
 
+        def _reset(self):
+            self._is_last_turn = False
+
         async def end_of_turn_event_listener(
             self, turn_count: int, duration: float, was_interrupted: bool
         ):
             """End of turn event listener."""
-            if self._is_last_turn:
+            if was_interrupted:
+                self._reset()
+            elif self._is_last_turn:
                 await self._handle_end_call()
 
     class TransferCallActionManager(AbstractActionManager):
