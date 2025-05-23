@@ -210,21 +210,23 @@ class GoogleHttpTTSService(TTSService):
         emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
         language: Optional[Language] = Language.EN
         gender: Optional[Literal["male", "female", "neutral"]] = None
-        google_style: Optional[Literal["apologetic", "calm", "empathetic", "firm", "lively"]] = None
+        google_style: Optional[
+            Literal["apologetic", "calm", "empathetic", "firm", "lively"]
+        ] = None
 
     def __init__(
         self,
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        voice_id: str = "en-US-Neural2-A",
+        voice_id: str = "en-US-Chirp3-HD-Charon",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        params = params or GoogleTTSService.InputParams()
+        params = params or GoogleHttpTTSService.InputParams()
 
         self._settings = {
             "pitch": params.pitch,
@@ -253,10 +255,14 @@ class GoogleHttpTTSService(TTSService):
         if credentials:
             # Use provided credentials JSON string
             json_account_info = json.loads(credentials)
-            creds = service_account.Credentials.from_service_account_info(json_account_info)
+            creds = service_account.Credentials.from_service_account_info(
+                json_account_info
+            )
         elif credentials_path:
             # Use service account JSON file if provided
-            creds = service_account.Credentials.from_service_account_file(credentials_path)
+            creds = service_account.Credentials.from_service_account_file(
+                credentials_path
+            )
         else:
             try:
                 creds, project_id = default(
@@ -371,7 +377,6 @@ class GoogleHttpTTSService(TTSService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                 yield frame
-                await asyncio.sleep(0)  # Allow other tasks to run
 
             yield TTSStoppedFrame()
 
@@ -382,14 +387,37 @@ class GoogleHttpTTSService(TTSService):
 
 
 class GoogleTTSService(TTSService):
+    """Text-to-Speech service using Google Cloud Text-to-Speech API.
+
+    Converts text to speech using Google's TTS models with streaming synthesis
+    for low latency. Supports multiple languages and voices.
+
+    Args:
+        credentials: JSON string containing Google Cloud service account credentials.
+        credentials_path: Path to Google Cloud service account JSON file.
+        voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
+        sample_rate: Audio sample rate in Hz.
+        params: Language only.
+
+    Notes:
+        Requires Google Cloud credentials via service account JSON, file path, or
+        default application credentials (GOOGLE_APPLICATION_CREDENTIALS env var).
+        Only Chirp 3 HD and Journey voices are supported. Use GoogleHttpTTSService for other voices.
+
+    Example:
+        ```python
+        tts = GoogleTTSService(
+            credentials_path="/path/to/service-account.json",
+            voice_id="en-US-Chirp3-HD-Charon",
+            params=GoogleTTSService.InputParams(
+                language=Language.EN_US,
+            )
+        )
+        ```
+    """
+
     class InputParams(BaseModel):
-        pitch: Optional[str] = None
-        rate: Optional[str] = None
-        volume: Optional[str] = None
-        emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
         language: Optional[Language] = Language.EN
-        gender: Optional[Literal["male", "female", "neutral"]] = None
-        google_style: Optional[Literal["apologetic", "calm", "empathetic", "firm", "lively"]] = None
 
     def __init__(
         self,
@@ -403,16 +431,12 @@ class GoogleTTSService(TTSService):
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        params = params or GoogleTTSService.InputParams()
+
         self._settings = {
-            "pitch": params.pitch,
-            "rate": params.rate,
-            "volume": params.volume,
-            "emphasis": params.emphasis,
             "language": self.language_to_service_language(params.language)
             if params.language
             else "en-US",
-            "gender": params.gender,
-            "google_style": params.google_style,
         }
         self.set_voice(voice_id)
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
@@ -430,10 +454,14 @@ class GoogleTTSService(TTSService):
         if credentials:
             # Use provided credentials JSON string
             json_account_info = json.loads(credentials)
-            creds = service_account.Credentials.from_service_account_info(json_account_info)
+            creds = service_account.Credentials.from_service_account_info(
+                json_account_info
+            )
         elif credentials_path:
             # Use service account JSON file if provided
-            creds = service_account.Credentials.from_service_account_file(credentials_path)
+            creds = service_account.Credentials.from_service_account_file(
+                credentials_path
+            )
         else:
             try:
                 creds, project_id = default(
@@ -455,7 +483,6 @@ class GoogleTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        # Chirp3 and Journey voices only. Does not support SSML.
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
@@ -470,19 +497,21 @@ class GoogleTTSService(TTSService):
                 streaming_audio_config=texttospeech_v1.StreamingAudioConfig(
                     audio_encoding=texttospeech_v1.AudioEncoding.PCM,
                     sample_rate_hertz=self.sample_rate,
-                    #speaking_rate=self._settings["rate"],
                 ),
             )
             config_request = texttospeech_v1.StreamingSynthesizeRequest(
                 streaming_config=streaming_config
             )
+
             async def request_generator():
                 yield config_request
                 yield texttospeech_v1.StreamingSynthesizeRequest(
                     input=texttospeech_v1.StreamingSynthesisInput(text=text)
                 )
 
-            streaming_responses = await self._client.streaming_synthesize(request_generator())
+            streaming_responses = await self._client.streaming_synthesize(
+                request_generator()
+            )
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
@@ -505,18 +534,9 @@ class GoogleTTSService(TTSService):
                     piece = audio_buffer[:CHUNK_SIZE]
                     audio_buffer = audio_buffer[CHUNK_SIZE:]
                     yield TTSAudioRawFrame(piece, self.sample_rate, 1)
-                    await asyncio.sleep(0)
 
             if audio_buffer:
                 yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1)
-                await asyncio.sleep(0)
-
-            # Add 1 second pause between sentences
-            silence = b"\x00" * self.sample_rate
-            yield TTSAudioRawFrame(
-                audio=silence, sample_rate=self.sample_rate, num_channels=1
-            )
-            await asyncio.sleep(0)
 
             yield TTSStoppedFrame()
 
