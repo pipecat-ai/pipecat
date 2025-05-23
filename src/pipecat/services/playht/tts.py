@@ -110,7 +110,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         voice_engine: str = "Play3.0-mini",
         sample_rate: Optional[int] = None,
         output_format: str = "wav",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
@@ -118,6 +118,8 @@ class PlayHTTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or PlayHTTTSService.InputParams()
 
         self._api_key = api_key
         self._user_id = user_id
@@ -328,10 +330,12 @@ class PlayHTHttpTTSService(TTSService):
         voice_engine: str = "Play3.0-mini",
         protocol: str = "http",  # Options: http, ws
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or PlayHTHttpTTSService.InputParams()
 
         self._user_id = user_id
         self._api_key = api_key

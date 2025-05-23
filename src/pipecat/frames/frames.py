@@ -288,6 +288,7 @@ class TranscriptionMessage:
 
     role: Literal["user", "assistant"]
     content: str
+    user_id: Optional[str] = None
     timestamp: Optional[str] = None
 
 

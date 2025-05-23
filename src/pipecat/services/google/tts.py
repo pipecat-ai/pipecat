@@ -219,10 +219,12 @@ class GoogleTTSService(TTSService):
         credentials_path: Optional[str] = None,
         voice_id: str = "en-US-Neural2-A",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or GoogleTTSService.InputParams()
 
         self._settings = {
             "pitch": params.pitch,

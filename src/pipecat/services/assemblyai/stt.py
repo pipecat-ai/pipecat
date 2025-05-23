@@ -58,7 +58,7 @@ class AssemblyAISTTService(STTService):
         self._connection_params = connection_params
 
         super().__init__(sample_rate=self._connection_params.sample_rate, **kwargs)
-
+        
         self._websocket = None
         self._termination_event = asyncio.Event()
         self._received_termination = False

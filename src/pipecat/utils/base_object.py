@@ -59,6 +59,11 @@ class BaseObject(ABC):
         self._event_handlers[event_name] = []
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
+        # If we haven't registered an event handler, we don't need to do
+        # anything.
+        if not self._event_handlers.get(event_name):
+            return
+
         # Create the task.
         task = asyncio.create_task(self._run_task(event_name, *args, **kwargs))
 

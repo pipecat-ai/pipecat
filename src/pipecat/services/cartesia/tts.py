@@ -7,10 +7,11 @@
 import base64
 import json
 import uuid
+import warnings
 from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -83,13 +84,13 @@ class CartesiaTTSService(AudioContextWordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        cartesia_version: str = "2024-06-10",
+        cartesia_version: str = "2025-04-16",
         url: str = "wss://api.cartesia.ai/tts/websocket",
         model: str = "sonic-2",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
@@ -111,6 +112,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
             text_aggregator=text_aggregator or SkipTagsAggregator([("<spell>", "</spell>")]),
             **kwargs,
         )
+
+        params = params or CartesiaTTSService.InputParams()
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
@@ -151,10 +154,13 @@ class CartesiaTTSService(AudioContextWordTTSService):
         voice_config["mode"] = "id"
         voice_config["id"] = self._voice_id
 
-        if self._settings["speed"] or self._settings["emotion"]:
+        if self._settings["emotion"]:
+            warnings.warn(
+                "The 'emotion' parameter in __experimental_controls is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             voice_config["__experimental_controls"] = {}
-            if self._settings["speed"]:
-                voice_config["__experimental_controls"]["speed"] = self._settings["speed"]
             if self._settings["emotion"]:
                 voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
 
@@ -169,6 +175,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "add_timestamps": add_timestamps,
             "use_original_timestamps": False if self.model_name == "sonic" else True,
         }
+
+        if self._settings["speed"]:
+            msg["speed"] = self._settings["speed"]
+
         return json.dumps(msg)
 
     async def start(self, frame: StartFrame):
@@ -309,7 +319,7 @@ class CartesiaHttpTTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
-        emotion: Optional[List[str]] = []
+        emotion: Optional[List[str]] = Field(default_factory=list)
 
     def __init__(
         self,
@@ -318,15 +328,20 @@ class CartesiaHttpTTSService(TTSService):
         voice_id: str,
         model: str = "sonic-2",
         base_url: str = "https://api.cartesia.ai",
+        cartesia_version: str = "2024-11-13",
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        params = params or CartesiaHttpTTSService.InputParams()
+
         self._api_key = api_key
+        self._base_url = base_url
+        self._cartesia_version = cartesia_version
         self._settings = {
             "output_format": {
                 "container": container,
@@ -342,7 +357,10 @@ class CartesiaHttpTTSService(TTSService):
         self.set_voice(voice_id)
         self.set_model_name(model)
 
-        self._client = AsyncCartesia(api_key=api_key, base_url=base_url)
+        self._client = AsyncCartesia(
+            api_key=api_key,
+            base_url=base_url,
+        )
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -367,37 +385,63 @@ class CartesiaHttpTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            voice_controls = None
-            if self._settings["speed"] or self._settings["emotion"]:
-                voice_controls = {}
-                if self._settings["speed"]:
-                    voice_controls["speed"] = self._settings["speed"]
-                if self._settings["emotion"]:
-                    voice_controls["emotion"] = self._settings["emotion"]
+            voice_config = {"mode": "id", "id": self._voice_id}
+
+            if self._settings["emotion"]:
+                warnings.warn(
+                    "The 'emotion' parameter in voice.__experimental_controls is deprecated and will be removed in a future version.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                voice_config["__experimental_controls"] = {"emotion": self._settings["emotion"]}
 
             await self.start_ttfb_metrics()
 
-            output = await self._client.tts.sse(
-                model_id=self._model_name,
-                transcript=text,
-                voice_id=self._voice_id,
-                output_format=self._settings["output_format"],
-                language=self._settings["language"],
-                stream=False,
-                _experimental_voice_controls=voice_controls,
-            )
+            payload = {
+                "model_id": self._model_name,
+                "transcript": text,
+                "voice": voice_config,
+                "output_format": self._settings["output_format"],
+                "language": self._settings["language"],
+            }
 
-            await self.start_tts_usage_metrics(text)
+            if self._settings["speed"]:
+                payload["speed"] = self._settings["speed"]
 
             yield TTSStartedFrame()
 
+            session = await self._client._get_session()
+
+            headers = {
+                "Cartesia-Version": self._cartesia_version,
+                "X-API-Key": self._api_key,
+                "Content-Type": "application/json",
+            }
+
+            url = f"{self._base_url}/tts/bytes"
+
+            async with session.post(url, json=payload, headers=headers) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logger.error(f"Cartesia API error: {error_text}")
+                    await self.push_error(ErrorFrame(f"Cartesia API error: {error_text}"))
+                    raise Exception(f"Cartesia API returned status {response.status}: {error_text}")
+
+                audio_data = await response.read()
+
+            await self.start_tts_usage_metrics(text)
+
             frame = TTSAudioRawFrame(
-                audio=output["audio"], sample_rate=self.sample_rate, num_channels=1
+                audio=audio_data,
+                sample_rate=self.sample_rate,
+                num_channels=1,
             )
 
             yield frame
+
         except Exception as e:
             logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()

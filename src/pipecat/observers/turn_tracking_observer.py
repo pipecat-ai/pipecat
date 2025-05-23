@@ -30,7 +30,7 @@ class TurnTrackingObserver(BaseObserver):
     """
 
     def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):
-        super().__init__()
+        super().__init__(**kwargs)
         self._turn_count = 0
         self._is_turn_active = False
         self._is_bot_speaking = False
@@ -154,32 +154,3 @@ class TurnTrackingObserver(BaseObserver):
         status = "interrupted" if was_interrupted else "completed"
         logger.trace(f"Turn {self._turn_count} {status} after {duration:.2f}s")
         await self._call_event_handler("on_turn_ended", self._turn_count, duration, was_interrupted)
-
-    def _register_event_handler(self, event_name):
-        """Register an event handler."""
-        if not hasattr(self, "_event_handlers"):
-            self._event_handlers = {}
-        if event_name not in self._event_handlers:
-            self._event_handlers[event_name] = []
-
-    async def _call_event_handler(self, event_name, *args, **kwargs):
-        """Call registered event handlers."""
-        if not hasattr(self, "_event_handlers"):
-            return
-
-        if event_name in self._event_handlers:
-            for handler in self._event_handlers[event_name]:
-                await handler(self, *args, **kwargs)
-
-    def event_handler(self, event_name):
-        """Decorator for registering event handlers."""
-
-        def decorator(func):
-            if not hasattr(self, "_event_handlers"):
-                self._event_handlers = {}
-            if event_name not in self._event_handlers:
-                self._event_handlers[event_name] = []
-            self._event_handlers[event_name].append(func)
-            return func
-
-        return decorator
