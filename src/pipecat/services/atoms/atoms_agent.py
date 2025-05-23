@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    TransferCallFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -1118,9 +1119,6 @@ class FlowGraphManager(FrameProcessor):
         # validate the messages to ensure the roles alternate and the content is in the correct format else openai will throw an error
         await self._handle_hopping(context=context)
 
-        # # after hopping we have to update the node data in the context
-        # context._update_last_user_context("node_data", self.current_node.model_dump_json())
-
         # format the messages for the response model
         context._update_last_user_context(
             "response_model_context",
@@ -1130,20 +1128,59 @@ class FlowGraphManager(FrameProcessor):
         )
 
         # after hopping we have to update the delta in the context
-        # we will only get delta after updating the current reponse model context because the delta is calculated based on the current response model context and the previous user message
         delta = context.get_user_context_delta()
         if delta:
             delta = json.dumps(delta, indent=2, ensure_ascii=False)
             context._update_last_user_context("delta", delta)
 
-        if self.current_node.static_text:
-            return self._handle_static_response(context=context)
-        else:
-            return self._handle_dynamic_response(context=context)
+        if self.current_node.type == NodeType.DEFAULT:
+            if self.current_node.static_text:
+                for chunk in self._handle_static_response(context=context):
+                    yield chunk
+            else:
+                async for chunk in self._handle_dynamic_response(context=context):
+                    yield chunk
+        elif self.current_node.type == NodeType.END_CALL:
+            if self.current_node.static_text:
+                for chunk in self._handle_static_response(context=context):
+                    yield chunk
+                await self.push_frame(LastTurnFrame(conversation_id="123"))
+            else:
+                async for chunk in self._handle_dynamic_response(context=context):
+                    yield chunk
+                await self.push_frame(LastTurnFrame(conversation_id="123"))
+        elif self.current_node.type == NodeType.TRANSFER_CALL:
+            if self.current_node.static_text:
+                for chunk in self._handle_static_response(context=context):
+                    yield chunk
+                await self.push_frame(
+                    TransferCallFrame(
+                        conversation_id="123",
+                        transfer_call_number="123",
+                        reason="transfer_call",
+                    )
+                )
+            else:
+                async for chunk in self._handle_dynamic_response(context=context):
+                    yield chunk
+                await self.push_frame(
+                    TransferCallFrame(
+                        conversation_id="123",
+                        transfer_call_number="123",
+                        reason="transfer_call",
+                    )
+                )
+        elif self.current_node.type == NodeType.API_CALL:
+            if self.current_node.static_text:
+                for chunk in self._handle_static_response(context=context):
+                    yield chunk
+            else:
+                async for chunk in self._handle_dynamic_response(context=context):
+                    yield chunk
 
     async def _process_context(self, context: AtomsAgentContext) -> None:
         """Process the context and update the flow model client."""
-        response = await self.get_response(context=context)
+        response = self.get_response(context=context)
         if isgenerator(response):
             for chunk in response:
                 logger.debug(f"chunk: {chunk}")
@@ -1208,43 +1245,6 @@ class FlowGraphManager(FrameProcessor):
 
         # Return full state if no delta or node changed
         return json.dumps(current_state, indent=2, ensure_ascii=False)
-
-    # async def _handle_response(
-    #     self,
-    #     context: OpenAILLMContext,
-    #     add_variables: bool = False,
-    #     add_agent_persona: bool = False,
-    # ) -> None:
-    #     """Handle the response from the response model client."""
-    #     self.current_node.action = self._replace_variables(self.current_node.action, self.variables)
-    #     transcript = self._get_transcript_from_context(context)
-
-    #     if (
-    #         self.current_node.loop_condition
-    #         and isinstance(self.current_node.loop_condition, str)
-    #         and self.current_node.loop_condition.strip()
-    #     ):
-    #         self.current_node.loop_condition = self._replace_variables(
-    #             self.current_node.loop_condition, self.variables
-    #         )
-
-    #     # Do language switching if turned on
-    #     if self.language_switching and transcript:
-    #         self.language_now = self._detect_language(transcript)
-
-    #     custom_instructions = custom_instructions or []
-    #     custom_instructions.append(self._get_language_switch_inst())
-
-    #     # Get current state of conversation
-    #     current_state = self._format_current_state_as_json(
-    #         user_response=transcript,
-    #         custom_instructions=custom_instructions,
-    #         add_variables=add_variables,
-    #         add_agent_persona=add_agent_persona,
-    #     )
-
-    #     # Use static text or not
-    #     use_static_text = self.current_node.static_text
 
     def _handle_static_response(self, context: AtomsAgentContext) -> Generator[str, None, None]:
         """Handle the static response from the response model client."""
