@@ -5,30 +5,18 @@
 #
 
 import argparse
-import asyncio
-import io
 import os
-import re
-import shutil
-import sys
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
-from PIL import Image
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    Frame,
-    FunctionCallResultFrame,
     LLMMessagesAppendFrame,
-    URLImageRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import (
     ActionResult,
     RTVIAction,
@@ -38,6 +26,7 @@ from pipecat.processors.frameworks.rtvi import (
     RTVIProcessor,
     RTVIServerMessageFrame,
 )
+from pipecat.services.openai import OpenAIContextAggregatorPair
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -45,9 +34,41 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
 
+
 # This is an example of a text-only chatbot using small webrtc tranport.
 # It uses the small webrtc transport prebuilt web UI.
 # https://github.com/pipecat-ai/small-webrtc-prebuilt
+
+
+def create_action_llm_append_to_messages(context_aggregator: OpenAIContextAggregatorPair):
+    async def action_llm_append_to_messages_handler(
+        rtvi: RTVIProcessor, service: str, arguments: dict[str, any]
+    ) -> ActionResult:
+        run_immediately = arguments["run_immediately"] if "run_immediately" in arguments else True
+        logger.info(f"run_immediately: {run_immediately}")
+        if run_immediately:
+            await rtvi.interrupt_bot()
+            # We just interrupted the bot so it should be fine to use the
+            # context directly instead of through frame.
+            if "messages" in arguments and arguments["messages"]:
+                frame = LLMMessagesAppendFrame(messages=arguments["messages"])
+                await rtvi.push_frame(frame)
+
+            frame = context_aggregator.user().get_context_frame()
+            await rtvi.push_frame(frame)
+        return True
+
+    action_llm_append_to_messages = RTVIAction(
+        service="llm",
+        action="append_to_messages",
+        result="bool",
+        arguments=[
+            RTVIActionArgument(name="messages", type="array"),
+            RTVIActionArgument(name="run_immediately", type="bool"),
+        ],
+        handler=action_llm_append_to_messages_handler,
+    )
+    return action_llm_append_to_messages
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
@@ -58,111 +79,76 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         params=TransportParams(),
     )
 
-    # Create an HTTP session for API calls
-    async with aiohttp.ClientSession() as session:
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Respond to what the user said in a creative and helpful way.",
-            },
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
+
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    action_llm_append_to_messages = create_action_llm_append_to_messages(context_aggregator)
+    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+    rtvi.register_action(action_llm_append_to_messages)
+
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            rtvi,
+            context_aggregator.user(),
+            llm,
+            transport.output(),
+            context_aggregator.assistant(),
         ]
+    )
 
-        context = OpenAILLMContext(messages)
-        context_aggregator = llm.create_context_aggregator(context)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+        ),
+        observers=[RTVIObserver(rtvi)],
+    )
 
-        async def action_llm_append_to_messages_handler(
-            rtvi: RTVIProcessor, service: str, arguments: dict[str, any]
-        ) -> ActionResult:
-            run_immediately = (
-                arguments["run_immediately"] if "run_immediately" in arguments else True
-            )
+    @rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        logger.info("Pipecat client ready.")
+        await rtvi.set_bot_ready()
 
-            if run_immediately:
-                await rtvi.interrupt_bot()
+        # This block is frontend UI specific
+        # These messages are intended for small webrtc UI to only handle text
+        # https://github.com/pipecat-ai/small-webrtc-prebuilt
+        messages = {
+            "show_text_container": True,
+            "show_video_container": False,
+            "show_debug_container": False,
+        }
+        rtvi_frame = RTVIServerMessageFrame(data=messages)
+        await task.queue_frames([rtvi_frame])
 
-                # We just interrupted the bot so it should be fine to use the
-                # context directly instead of through frame.
-                if "messages" in arguments and arguments["messages"]:
-                    mess = arguments["messages"]
-                    frame = LLMMessagesAppendFrame(messages=arguments["messages"])
-                    await rtvi.push_frame(frame)
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected: {client}")
+        # Kick off the conversation.
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-            if run_immediately:
-                frame = context_aggregator.user().get_context_frame()
-                await rtvi.push_frame(frame)
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
 
-            return True
+    @transport.event_handler("on_client_closed")
+    async def on_client_closed(transport, client):
+        logger.info(f"Client closed connection")
+        await task.cancel()
 
-        action_llm_append_to_messages = RTVIAction(
-            service="llm",
-            action="append_to_messages",
-            result="bool",
-            arguments=[
-                RTVIActionArgument(name="messages", type="array"),
-                RTVIActionArgument(name="run_immediately", type="bool"),
-            ],
-            handler=action_llm_append_to_messages_handler,
-        )
+    runner = PipelineRunner(handle_sigint=False)
 
-        rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
-        rtvi.register_action(action_llm_append_to_messages)
-
-        pipeline = Pipeline(
-            [
-                transport.input(),
-                rtvi,
-                context_aggregator.user(),
-                llm,
-                transport.output(),
-                context_aggregator.assistant(),
-            ]
-        )
-
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-            ),
-            observers=[RTVIObserver(rtvi)],
-        )
-
-        @rtvi.event_handler("on_client_ready")
-        async def on_client_ready(rtvi):
-            logger.info("Pipecat client ready.")
-            await rtvi.set_bot_ready()
-
-            # This block is frontend UI specific
-            # These messages are intended for small webrtc UI to only handle text
-            # https://github.com/pipecat-ai/small-webrtc-prebuilt
-            messages = {
-                "show_text_container": True,
-                "show_video_container": False,
-                "show_debug_container": False,
-            }
-            rtvi_frame = RTVIServerMessageFrame(data=messages)
-            await task.queue_frames([rtvi_frame])
-
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected: {client}")
-            # Kick off the conversation.
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
-
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-
-        @transport.event_handler("on_client_closed")
-        async def on_client_closed(transport, client):
-            logger.info(f"Client closed connection")
-            await task.cancel()
-
-        runner = PipelineRunner(handle_sigint=False)
-
-        await runner.run(task)
+    await runner.run(task)
 
 
 if __name__ == "__main__":
