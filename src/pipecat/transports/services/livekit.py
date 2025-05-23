@@ -17,13 +17,13 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
     EndFrame,
-    InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    UserAudioRawFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -411,7 +411,8 @@ class LiveKitInputTransport(BaseInputTransport):
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
                     audio_frame_event
                 )
-                input_audio_frame = InputAudioRawFrame(
+                input_audio_frame = UserAudioRawFrame(
+                    user_id=participant_id,
                     audio=pipecat_audio_frame.audio,
                     sample_rate=pipecat_audio_frame.sample_rate,
                     num_channels=pipecat_audio_frame.num_channels,
