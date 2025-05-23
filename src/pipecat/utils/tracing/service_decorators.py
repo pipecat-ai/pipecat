@@ -34,6 +34,7 @@ from pipecat.utils.tracing.turn_context_provider import get_current_turn_context
 if is_tracing_available():
     from opentelemetry import context as context_api
     from opentelemetry import trace
+    from pipecat.frames.frames import LLMTextFrame
 
 T = TypeVar("T")
 R = TypeVar("R")
@@ -330,6 +331,25 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Replace the method temporarily
                             self.start_llm_usage_metrics = wrapped_start_llm_usage_metrics
 
+                        # For text aggregation
+                        original_push_frame = None
+                        aggregated_text = []
+                        if hasattr(self, "push_frame"):
+                            original_push_frame = self.push_frame
+
+                            # Override the method to capture and aggregate LLMTextFrames
+                            @functools.wraps(original_push_frame)
+                            async def wrapped_push_frame(frame, direction=None):
+                                # Call the original push_frame method
+                                await original_push_frame(frame, direction)
+                                
+                                # Capture and aggregate LLMTextFrames
+                                if isinstance(frame, LLMTextFrame):
+                                    aggregated_text.append(frame.text)
+                            
+                            # Replace push_frame temporarily
+                            self.push_frame = wrapped_push_frame
+
                         try:
                             # Detect if we're using Google's service
                             is_google_service = "google" in service_class_name.lower()
@@ -423,6 +443,19 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             and original_start_llm_usage_metrics
                         ):
                             self.start_llm_usage_metrics = original_start_llm_usage_metrics
+
+                        # Restore original push_frame method and set the aggregated content
+                        if (
+                            "original_push_frame" in locals()
+                            and original_push_frame
+                        ):
+                            self.push_frame = original_push_frame
+                            # Add aggregated text to span if collected
+                            
+                            if aggregated_text:
+                                current_span.set_attribute(
+                                    "completion", "".join(aggregated_text)
+                                )
 
                         # Update TTFB metric
                         ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
