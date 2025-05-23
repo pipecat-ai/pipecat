@@ -179,9 +179,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
     initial_context = AtomsAgentContext.upgrade_to_atoms_agent(context)
-    chunks = [
-        chunk async for chunk in (await agent_flow_processor.get_response(context=initial_context))
-    ]
+    chunks = [chunk async for chunk in (agent_flow_processor.get_response(context=initial_context))]
     initial_agent_response = "".join(chunks)
 
     logger.info(f"Initial agent response: {initial_agent_response}")

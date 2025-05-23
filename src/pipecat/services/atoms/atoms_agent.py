@@ -10,6 +10,8 @@ from typing import Any, AsyncGenerator, Callable, Dict, Generator, List, Optiona
 
 import httpx
 import pytz
+import requests
+from jsonpath_ng import parse
 from loguru import logger
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
@@ -45,6 +47,7 @@ from .utils import (
     get_abbreviations,
     get_unallowed_variable_names,
     replace_variables,
+    replace_variables_recursive,
 )
 
 
@@ -504,10 +507,6 @@ class FlowGraphManager(FrameProcessor):
         def __init__(self, flow_graph_manager: "FlowGraphManager"):
             self.flow_graph_manager: "FlowGraphManager" = flow_graph_manager
 
-        async def process_node(self, node: Node):
-            """Process the node."""
-            pass
-
         def _extract_response_data(
             self, response_data: Union[Dict[str, Any], str], config: ResponseDataConfig
         ) -> None:
@@ -536,17 +535,16 @@ class FlowGraphManager(FrameProcessor):
                         # Extract the first matching value
                         value = matches[0].value
                         extracted[mapping.variable_name] = value
-                        self._log(f"Extracted {mapping.variable_name}: {value}")
                     else:
-                        self._log(f"No match found for JSON path: {mapping.json_path}")
+                        logger.error(f"No match found for JSON path: {mapping.json_path}")
 
                 except Exception as e:
-                    self._log(f"Error extracting data with path '{mapping.json_path}': {str(e)}")
+                    logger.error(f"Error extracting data with path '{mapping.json_path}': {str(e)}")
 
             # Update variables with extracted data
             if extracted:
-                self.variables.update(extracted)
-                self._log(f"Updated variables with response data: {extracted}")
+                self.flow_graph_manager.variables.update(extracted)
+                logger.info(f"Updated variables with response data: {extracted}")
 
         def _make_api_request_from_node(self, node: Node) -> Union[Dict[str, Any], str]:
             """Make an API request based on node configuration.
@@ -569,12 +567,14 @@ class FlowGraphManager(FrameProcessor):
             headers = {}
             if http_request.headers and http_request.headers.is_enabled:
                 for key, value in http_request.headers.data.items():
-                    headers[key] = self._replace_variables(value, self.variables)
+                    headers[key] = replace_variables(value, self.variables)
 
             # Process authorization if enabled
             if http_request.authorization and http_request.authorization.is_enabled:
                 auth_data = http_request.authorization.data
                 if auth_data and auth_data.token:
+                    # TODO: we are currently using bearer token for all the api calls
+                    # we need to add support for other types of authorization
                     headers["Authorization"] = f"Bearer {auth_data.token}"
 
             # Process body with variable substitution
@@ -586,15 +586,18 @@ class FlowGraphManager(FrameProcessor):
                         body_dict = http_request.body.data
                     else:
                         body_dict = json.loads(http_request.body.data)
-                    body = self._replace_variables_recursive(body_dict, self.variables)
+                    body = replace_variables_recursive(body_dict, self.variables)
                 except json.JSONDecodeError:
                     # If not JSON, treat as string with variable substitution
-                    body = self._replace_variables(http_request.body.data, self.variables)
+                    body = replace_variables(http_request.body.data, self.variables)
+                except Exception as e:
+                    logger.error(f"Error processing body: {str(e)}")
+                    raise Exception(f"Error processing body: {str(e)}")
 
             # Make the actual request
             result = self._make_api_request(
                 api_request_type=http_request.method.value,
-                api_link=self._replace_variables(http_request.url, self.variables),
+                api_link=replace_variables(http_request.url, self.variables),
                 api_headers=headers,
                 api_body=body,
                 api_timeout_sec=http_request.timeout,
@@ -602,7 +605,7 @@ class FlowGraphManager(FrameProcessor):
 
             return result
 
-        def _handle_api_call_node(self, node: Node) -> Dict[str, Any]:
+        def process(self, node: Node) -> Dict[str, Any]:
             """Handle API node by making request and determining next node based on pathways.
 
             Args:
@@ -614,16 +617,12 @@ class FlowGraphManager(FrameProcessor):
             Raises:
                 AgentError: If node processing fails
             """
-            # Extract variables if configured
-            if node.variables and node.variables.is_enabled:
-                extracted_vars = self.flow_graph_manager._extract_variables(node)
-                self._log(f"Extracted variables: {extracted_vars}")
-
             # Make API request
             try:
                 response_data = self._make_api_request_from_node(node)
                 api_success = True
             except Exception as e:
+                logger.error(f"API request failed: {str(e)}")
                 response_data = {"error": str(e)}
                 api_success = False
 
@@ -708,62 +707,86 @@ class FlowGraphManager(FrameProcessor):
                 self._log(f"No conditional edge matched, using fallback edge: {fallback_edge[0]}")
                 return fallback_edge[0]
 
-            # If we got here, there are no valid pathways
-            self.add_event(
-                EventType.ERROR,
-                {
-                    "error_message": f"No valid branch found for API node '{node.name}'",
-                    "response_data": response_data,
-                },
-            )
-            raise AgentError(f"No valid pathways found for API node {node.id}")
-
-        def _make_api_request(self, node: Node) -> Dict[str, Any]:
-            """Handle API node by making request and determining next node based on pathways.
+        def _make_api_request(
+            self,
+            api_request_type: str,
+            api_link: str,
+            api_headers: Optional[dict] = None,
+            api_body: Optional[Union[dict, str]] = None,
+            api_timeout_sec: int = 30,
+        ) -> Union[Dict[str, Any], str]:
+            """Make an API request with the specified parameters.
 
             Args:
-                node: The API call node to process
+                api_request_type: HTTP method (GET, POST, etc.)
+                api_link: URL for the API request
+                api_headers: Headers to include in the request
+                api_body: Body content for POST/PUT requests
+                api_timeout_sec: Timeout in seconds
 
             Returns:
-                Response data
+                Response data as dictionary or string
 
             Raises:
-                AgentError: If node processing fails
+                AgentError: If the request fails
             """
-            # Extract variables if configured
-            if node.variables and node.variables.is_enabled:
-                extracted_vars = self._extract_variables()
-                self._log(f"Extracted variables: {extracted_vars}")
-
-            # Make API request
             try:
-                response_data = self._make_api_request_from_node(node)
-                api_success = True
-            except Exception as e:
-                response_data = {"error": str(e)}
-                api_success = False
+                # Map the request type to the appropriate requests method
+                request_method = {
+                    "GET": requests.get,
+                    "POST": requests.post,
+                    "PUT": requests.put,
+                    "DELETE": requests.delete,
+                    "PATCH": requests.patch,
+                }.get(api_request_type.upper())
 
-            # Extract data from response if configured
-            if api_success and node.response_data and node.response_data.is_enabled:
-                self._extract_response_data(response_data, node.response_data)
+                if not request_method:
+                    raise Exception(f"Invalid API request type: {api_request_type}")
 
-            # Process pathways based on the response
-            pathway_id_or_response = self.flow_graph_manager._extract_variables(
-                node, response_data, api_success
-            )
+                # Make the request with appropriate parameters based on method type
+                if api_request_type.upper() in ["GET", "DELETE"]:
+                    response = request_method(
+                        url=api_link,
+                        headers=api_headers,
+                        params=api_body if isinstance(api_body, dict) else None,
+                        timeout=api_timeout_sec,
+                    )
+                else:
+                    if isinstance(api_body, dict):
+                        response = request_method(
+                            url=api_link,
+                            headers=api_headers,
+                            json=api_body,
+                            timeout=api_timeout_sec,
+                        )
+                    else:
+                        response = request_method(
+                            url=api_link,
+                            headers=api_headers,
+                            data=api_body,
+                            timeout=api_timeout_sec,
+                        )
 
-            if isinstance(pathway_id_or_response, dict):
-                return pathway_id_or_response
-            elif isinstance(pathway_id_or_response, str):
-                self._hop(pathway_id_or_response)
-                return self.get_response(
-                    f"api output = {json.dumps(response_data, indent=2, ensure_ascii=False)}"
-                )
-            else:
+                # Raise an exception if the response was unsuccessful
+                response.raise_for_status()
+
+                # Return the JSON response or text
+                try:
+                    return response.json()
+                except requests.exceptions.JSONDecodeError:
+                    if response.text.strip():
+                        return response.text
+                    else:
+                        return ""
+
+            except requests.exceptions.HTTPError as e:
+                # This captures the errors raised by raise_for_status()
                 raise Exception(
-                    "API request completed but no pathway was determined. Response: "
-                    f"{json.dumps(response_data, indent=2, ensure_ascii=False)}. Output: {pathway_id_or_response}"
+                    f"API Request failed with status code {e.response.status_code}: {str(e)}"
                 )
+            except requests.exceptions.RequestException as e:
+                # This captures other request-related errors (connection, timeout, etc.)
+                raise Exception(f"API Request failed: {str(e)}")
 
     def __init__(
         self,
@@ -787,6 +810,7 @@ class FlowGraphManager(FrameProcessor):
         self._end_call_tag = "<end_call>"
         self.agent_persona = agent_persona
         self._background_task_manager = background_task_manager
+        self.api_node_handler = self.APICallNodeHandler(self)
 
     def _get_initial_user_message(self) -> str:
         """Get the initial user message for the conversation."""
@@ -889,13 +913,11 @@ class FlowGraphManager(FrameProcessor):
                 conditional_edges.append((pathway_id, pathway))
         return conditional_edges
 
-    async def _hop_conditional_edges(
-        self, conditional_edges: List[Tuple[str, Pathway]], context: AtomsAgentContext
-    ) -> bool:
+    async def _hop_conditional_edges(self, conditional_edges: List[Tuple[str, Pathway]]) -> bool:
         for pathway_id, pathway in conditional_edges:
             logger.debug(f"evaluating conditional edge: {pathway.condition}")
             if self._evaluate_conditional_edge(pathway.condition):
-                await self._hop(pathway_id, context=context)
+                await self._hop(pathway_id)
                 return True
         return False
 
@@ -914,9 +936,7 @@ class FlowGraphManager(FrameProcessor):
         logger.debug(f"conditional edges: {conditional_edges}")
         # If we have conditional edges, evaluate them first
         if conditional_edges:
-            is_conditional_edge_matched = await self._hop_conditional_edges(
-                conditional_edges, context=context
-            )
+            is_conditional_edge_matched = await self._hop_conditional_edges(conditional_edges)
             if is_conditional_edge_matched:
                 return True
 
@@ -937,17 +957,61 @@ class FlowGraphManager(FrameProcessor):
             return False
 
         try:
-            await self._hop(pathway_id=selected_pathway_id, context=context)
+            await self._hop(pathway_id=selected_pathway_id)
             return True
         except Exception:
             return False
+        # normal_edges = []
+        # conditional_edges = []
+        # fallback_edge = None
 
-    async def _hop(self, pathway_id: str, context: AtomsAgentContext) -> None:
+        # for pathway_id, pathway in self.current_node.pathways.items():
+        #     if pathway.is_fallback_edge:
+        #         fallback_edge = (pathway_id, pathway)
+        #     elif pathway.is_conditional_edge:
+        #         conditional_edges.append((pathway_id, pathway))
+        #     else:
+        #         normal_edges.append((pathway_id, pathway))
+
+        # # TODO: For now we dont have have fallback edges, when we have it we will move hopping logic to nodeHandler class
+        # # Handle API failure case first - use fallback edge if available
+        # # if not api_success:
+        # #     if fallback_edge:
+        # #         self._log(f"API request failed, using fallback edge: {fallback_edge[0]}")
+        # #         return fallback_edge[0]
+        # #     else:
+        # #         raise AgentError(
+        # #             f"API request failed and no fallback edge defined for node {node.id}"
+        # #         )
+
+        # # Check conditional edges if API was successful
+        # # Try to evaluate conditional edges using variables stored in self.variables
+        # for pathway_id, pathway in conditional_edges:
+        #     condition = pathway.condition
+        #     if self._evaluate_conditional_edge(condition):
+        #         self._log(f"Conditional edge matched: {pathway_id} with condition {condition}")
+        #         return pathway_id
+
+        # # If no conditional edge matched, let LLM decide from normal edges
+        # if normal_edges:
+        #     pathways_for_llm = [(pathway_id, pathway) for pathway_id, pathway in normal_edges]
+
+        #     # Add fallback as an option if no conditional edges matched
+        #     if fallback_edge:
+        #         pathways_for_llm.append(fallback_edge)
+
+        #     # Let LLM decide which pathway to take
+        #     return self._let_llm_decide_pathway(response_data, pathways_for_llm)
+        # elif fallback_edge:
+        #     # Use fallback if no normal edges and no conditional edge matched
+        #     self._log(f"No conditional edge matched, using fallback edge: {fallback_edge[0]}")
+        #     return fallback_edge[0]
+
+    async def _hop(self, pathway_id: str) -> None:
         """Transition to a new node via the specified pathway.
 
         Args:
             pathway_id: ID of the pathway to follow
-            context: OpenAILLMContext
 
         Raises:
             Exception: If pathway_id not found in current node
@@ -957,11 +1021,10 @@ class FlowGraphManager(FrameProcessor):
                 f"Pathway '{pathway_id}' not found in current node '{self.current_node.name}'"
             )
 
-        await self._extract_variables(context=context)
         self.previous_node = self.current_node
         self.current_node = self.current_node.pathways[pathway_id].target_node
 
-    async def _extract_variables(self, context: AtomsAgentContext) -> Dict[str, Any]:
+    async def _extract_variables(self, context: AtomsAgentContext) -> bool:
         """Extract variables from conversation context using LLM.
 
         Returns:
@@ -970,13 +1033,14 @@ class FlowGraphManager(FrameProcessor):
         Raises:
             Exception: If extraction fails or required variables are missing
         """
-        if not self.current_node.variables or not self.current_node.variables.is_enabled:
-            return {}
+        if (
+            not self.current_node.variables
+            or not self.current_node.variables.is_enabled
+            and self.current_node.variables.data
+        ):
+            return False
 
         variable_schema = self.current_node.variables.data
-
-        if not variable_schema:
-            return {}
 
         # Format variable schema for prompt
         formatted_variable_schema = json.dumps(
@@ -1010,10 +1074,14 @@ class FlowGraphManager(FrameProcessor):
 
             # Update and return
             self.variables.update(extracted_variables)
-            return extracted_variables
+            return True
 
         except json.JSONDecodeError as e:
-            raise Exception(f"Failed to parse variable extraction response: {str(e)}")
+            logger.error(f"Failed to parse variable extraction response: {str(e)}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to extract variables: {str(e)}")
+            return False
 
     def _clean_json(self, text: str) -> str:
         """Clean JSON string from language model output."""
@@ -1118,6 +1186,10 @@ class FlowGraphManager(FrameProcessor):
         """Get the response from the response model client."""
         # validate the messages to ensure the roles alternate and the content is in the correct format else openai will throw an error
         await self._handle_hopping(context=context)
+
+        # after hopping we are on latest node and we need to extract variables
+        if self.current_node.variables and self.current_node.variables.is_enabled:
+            await self._extract_variables(context=context)
 
         # format the messages for the response model
         context._update_last_user_context(

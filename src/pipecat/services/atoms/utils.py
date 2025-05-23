@@ -291,3 +291,23 @@ def replace_variables(input_string: Any, variables: Dict[str, Any]) -> Any:
         return re.sub(pattern, replace_func, input_string)
     else:
         return input_string
+
+
+def replace_variables_recursive(data: Any, variables: dict) -> Any:
+    """Replace variables in nested data structures (dicts, lists, strings).
+
+    Args:
+        data: Object potentially containing variable placeholders
+        variables: Dictionary of variable names and values
+
+    Returns:
+        Object with variables replaced
+    """
+    if isinstance(data, str):
+        return replace_variables(data, variables)
+    elif isinstance(data, dict):
+        return {k: replace_variables_recursive(v, variables) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [replace_variables_recursive(item, variables) for item in data]
+    else:
+        return data
