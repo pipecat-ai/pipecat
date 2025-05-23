@@ -21,16 +21,20 @@ Requirements:
 """
 
 import argparse
+import asyncio
+import datetime
+import json
 import os
 import subprocess
 from contextlib import asynccontextmanager
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import aiohttp
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
 
@@ -42,6 +46,14 @@ MAX_BOTS_PER_ROOM = 1
 
 # Dictionary to track bot processes: {pid: (process, room_url)}
 bot_procs = {}
+
+# Global dictionaries to store session data
+session_recordings = {}
+session_timestamps = {}
+
+# Create directories
+os.makedirs("recordings", exist_ok=True)
+os.makedirs("session_data", exist_ok=True)
 
 # Store Daily API helpers
 daily_helpers = {}
@@ -59,6 +71,14 @@ def cleanup():
 
 
 def get_bot_file():
+    """Get the bot implementation file name based on environment configuration.
+
+    Returns:
+        str: The bot implementation file name (e.g., 'bot-openai' or 'bot-gemini')
+
+    Raises:
+        ValueError: If BOT_IMPLEMENTATION env var has an invalid value
+    """
     bot_implementation = os.getenv("BOT_IMPLEMENTATION", "openai").lower().strip()
     # If blank or None, default to openai
     if not bot_implementation:
@@ -78,6 +98,9 @@ async def lifespan(app: FastAPI):
     - Initializes Daily API helper
     - Cleans up resources on shutdown
     """
+    # Load session data on startup
+    load_session_data()
+
     aiohttp_session = aiohttp.ClientSession()
     daily_helpers["rest"] = DailyRESTHelper(
         daily_api_key=os.getenv("DAILY_API_KEY", ""),
@@ -100,6 +123,53 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve recordings directory
+app.mount("/recordings", StaticFiles(directory="recordings"), name="recordings")
+
+
+# API endpoint to get latest session
+@app.get("/api/latest-session")
+async def get_latest_session():
+    """Get the most recent session ID from available sessions.
+
+    Returns:
+        dict: Contains either session_id or error message
+    """
+    print(f"API call: get_latest_session, available sessions: {list(session_timestamps.keys())}")
+    if not session_timestamps:
+        return {"error": "No sessions found yet. Please complete a call first."}
+
+    # Get the most recent session ID by timestamp
+    latest_session_id = max(session_timestamps.items(), key=lambda x: x[1])[0]
+    print(f"Latest session ID: {latest_session_id}")
+    return {"session_id": latest_session_id}
+
+
+# API endpoint to get session recordings
+@app.get("/api/recordings/{session_id}")
+async def get_recordings(session_id: str):
+    """Get recording files associated with a specific session.
+
+    Args:
+        session_id (str): The ID of the session to fetch recordings for
+
+    Returns:
+        dict: Contains recording file paths or error message
+    """
+    print(f"API call: get_recordings for session: {session_id}")
+    print(f"Available sessions: {list(session_recordings.keys())}")
+    if session_id in session_recordings:
+        return session_recordings[session_id]
+    return {"error": "Session not found"}
+
+
+# API endpoint to manually save session data (can be called by bot)
+@app.post("/api/sessions/{session_id}/recordings")
+async def add_recording(session_id: str, speaker_type: str, filename: str):
+    """Add a recording to a session. Called by the bot process."""
+    update_session_data(session_id, speaker_type, filename)
+    return {"status": "success"}
 
 
 async def create_room_and_token() -> tuple[str, str]:
@@ -221,6 +291,66 @@ def get_status(pid: int):
     # Check the status of the subprocess
     status = "running" if proc[0].poll() is None else "finished"
     return JSONResponse({"bot_id": pid, "status": status})
+
+
+# Session data management functions
+def save_session_data():
+    """Save session data to disk."""
+    try:
+        # Save session timestamps
+        with open("session_data/session_timestamps.json", "w") as f:
+            timestamps_dict = {k: v.isoformat() for k, v in session_timestamps.items()}
+            json.dump(timestamps_dict, f)
+
+        # Save session recordings
+        with open("session_data/session_recordings.json", "w") as f:
+            json.dump(session_recordings, f)
+
+        print(f"Session data saved to disk. Sessions: {list(session_timestamps.keys())}")
+    except Exception as e:
+        print(f"Error saving session data: {e}")
+
+
+def load_session_data():
+    """Load session data from disk."""
+    global session_timestamps, session_recordings
+
+    try:
+        # Load session timestamps
+        if os.path.exists("session_data/session_timestamps.json"):
+            with open("session_data/session_timestamps.json", "r") as f:
+                timestamps_dict = json.load(f)
+                session_timestamps = {
+                    k: datetime.datetime.fromisoformat(v) for k, v in timestamps_dict.items()
+                }
+
+        # Load session recordings
+        if os.path.exists("session_data/session_recordings.json"):
+            with open("session_data/session_recordings.json", "r") as f:
+                session_recordings = json.load(f)
+
+        print(f"Session data loaded from disk. Sessions: {list(session_timestamps.keys())}")
+    except Exception as e:
+        print(f"Error loading session data: {e}")
+        session_timestamps = {}
+        session_recordings = {}
+
+
+# Function to update session data (called by bot)
+def update_session_data(session_id: str, speaker_type: str, filename: str):
+    """Update session recordings data. Called by the bot process."""
+    global session_recordings, session_timestamps
+
+    # Initialize session if it doesn't exist
+    if session_id not in session_recordings:
+        session_recordings[session_id] = {"user": [], "bot": [], "full": []}
+        session_timestamps[session_id] = datetime.datetime.now()
+
+    # Add the filename to the appropriate category
+    session_recordings[session_id][speaker_type].append(filename)
+
+    # Save to disk immediately
+    save_session_data()
 
 
 if __name__ == "__main__":
