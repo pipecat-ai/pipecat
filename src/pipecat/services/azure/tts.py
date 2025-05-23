@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.tts_service import TTSService
@@ -198,6 +199,44 @@ class AzureTTSService(AzureBaseTTSService):
 
     async def flush_audio(self):
         logger.trace(f"{self}: flushing audio")
+    
+    async def _push_tts_frames(self, text: str):
+        # Remove leading newlines only
+        text = text.lstrip("\n")
+
+        # Don't send only whitespace. This causes problems for some TTS models. But also don't
+        # strip all whitespace, as whitespace can influence prosody.
+        if not text.strip():
+            return
+
+        # This is just a flag that indicates if we sent something to the TTS
+        # service. It will be cleared if we sent text because of a TTSSpeakFrame
+        # or when we received an LLMFullResponseEndFrame
+        self._processing_text = True
+
+        await self.start_processing_metrics()
+
+        # Process all filter.
+        for filter in self._text_filters:
+            filter.reset_interruption()
+            text = filter.filter(text)
+        
+        # Clear the audio queue in case there's still audio in it, causing the next audio response
+        # to be cut off by the 'None' element returned at the end of the previous audio synthesis.
+        # Empty the audio queue before processing the new text
+        while not self._audio_queue.empty():
+            self._audio_queue.get_nowait()
+            self._audio_queue.task_done()
+
+        if text:
+            await self.process_generator(self.run_tts(text))
+
+        await self.stop_processing_metrics()
+
+        if self._push_text_frames:
+            # We send the original text after the audio. This way, if we are
+            # interrupted, the text is not added to the assistant context.
+            await self.push_frame(TTSTextFrame(text))
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
