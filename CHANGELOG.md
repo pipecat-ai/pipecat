@@ -136,6 +136,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- `DailyTransport`: process audio, video and events in separate tasks.
+
 - Don't create event handler tasks if no user event handlers have been
   registered.
 
