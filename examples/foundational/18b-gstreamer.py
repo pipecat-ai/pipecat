@@ -9,15 +9,41 @@ import argparse
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.gstreamer.pipeline_source import GStreamerPipelineSource
+from pipecat.services.moondream.vision import MoondreamService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
+
+
+class UserImageRequester(FrameProcessor):
+    def __init__(self):
+        super().__init__()
+        self.participant_id = None
+
+    def set_participant_id(self, participant_id: str):
+        self.participant_id = participant_id
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if self.participant_id and isinstance(frame, TextFrame):
+            await self.push_frame(
+                UserImageRequestFrame(self.participant_id), FrameDirection.UPSTREAM
+            )
+            await self.push_frame(
+                TextFrame("Are there people in the image? Only answer with YES or NO.")
+            )
+        else:
+            await self.push_frame(frame, direction)
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Namespace):
@@ -42,9 +68,18 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
         ),
     )
 
+    # If you run into weird description, try with use_cpu=True
+    moondream = MoondreamService()
+
+    ir = UserImageRequester()
+    va = VisionImageFrameAggregator()
+
     pipeline = Pipeline(
         [
             gst,  # GStreamer file source
+            ir,
+            va,
+            moondream,
             transport.output(),  # Transport bot output
         ]
     )
