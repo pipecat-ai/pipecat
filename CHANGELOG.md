@@ -9,8 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `SarvamTTSService`, which implements Sarvam AI's TTS API:
+  https://docs.sarvam.ai/api-reference-docs/text-to-speech/convert.
+
+- Added `PipelineTask.add_observer()` and `PipelineTask.remove_observer()` to
+  allow mangaging observers at runtime. This is useful for cases where the task
+  is passed around to other code components that might want to observe the
+  pipeline dynamically.
+
+- Added `user_id` field to `TranscriptionMessage`. This allows identifying the
+  user in a multi-user scenario. Note that this requires that
+  `TranscriptionFrame` has the `user_id` properly set.
+
+- Added new `PipelineTask` event handlers `on_pipeline_started`,
+  `on_pipeline_stopped`, `on_pipeline_ended` and `on_pipeline_cancelled`, which
+  correspond to the `StartFrame`, `StopFrame`, `EndFrame` and `CancelFrame`
+  respectively.
+
 - Added additional languages to `LmntTTSService`. Languages include: `hi`, `id`,
-  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`. 
+  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
 
 - Added a `model` parameter to the `LmntTTSService` constructor, allowing
   switching between LMNT models.
@@ -59,11 +76,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated the default model for `AnthropicLLMService` to
+  `claude-sonnet-4-20250514`.
+
+- Updated the default model for `GeminiMultimodalLiveLLMService` to
+  `models/gemini-2.5-flash-preview-native-audio-dialog`.
+
+- `BaseTextFilter` methods `filter()`, `update_settings()`,
+  `handle_interruption()` and `reset_interruption()` are now async.
+
+- `BaseTextAggregator` methods `aggregate()`, `handle_interruption()` and
+  `reset()` are now async.
+
+- The API version for `CartesiaTTSService` and `CartesiaHttpTTSService` has
+  been updated. Also, the `cartesia` dependency has been updated to 2.x.
+
+- `CartesiaTTSService` and `CartesiaHttpTTSService` now support Cartesia's new
+  `speed` parameter which accepts values of `slow`, `normal`, and `fast`.
+
 - `GeminiMultimodalLiveLLMService` now uses the user transcription and usage
   metrics provided by Gemini Live.
 
 - `GoogleLLMService` has been updated to use `google-genai` instead of the
   deprecated `google-generativeai`.
+
+### Deprecated
+
+- In `CartesiaTTSService` and `CartesiaHttpTTSService`, `emotion` has been
+  deprecated by Cartesia. Pipecat is following suit and deprecating `emotion`
+  as well.
 
 ### Removed
 
@@ -76,12 +117,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed an issue with `CartesiaTTSService` where `TTSTextFrame` messages weren't being emitted when the model was set to `sonic`. This resulted in the assistant context not being updated with assistant messages.
+- Fixed an issue with `ElevenLabsTTSService` where changing the model or voice
+  while the service is running wasn't working.
+
+- Fixed an issue that would cause multiple instances of the same class to behave
+  incorrectly if any of the given constructor arguments defaulted to a mutable
+  value (e.g. lists, dictionaries, objects).
+
+- Fixed an issue with `CartesiaTTSService` where `TTSTextFrame` messages weren't
+  being emitted when the model was set to `sonic`. This resulted in the
+  assistant context not being updated with assistant messages.
+
+### Performance
+
+- Don't create event handler tasks if no user event handlers have been
+  registered.
 
 ### Other
 
-- Added foundation example `07y-minimax-http.py` to show how to use the
-  `MiniMaxHttpTTSService`.
+- Added foundation examples `07y-interruptible-minimax.py` and
+  `07z-interruptible-sarvam.py`to show how to use the `MiniMaxHttpTTSService`
+  and `SarvamTTSService`, respectively.
 
 - Added an `open-telemetry-tracing` example, showing how to setup tracing. The
   example also includes Jaeger as an open source OpenTelemetry client to review

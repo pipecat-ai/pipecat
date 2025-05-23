@@ -144,7 +144,26 @@ class PipelineTask(BaseTask):
     `LLMFullResponseEndFrame` are received within `idle_timeout_secs`.
 
        @task.event_handler("on_idle_timeout")
-       async def on_idle_timeout(task):
+       async def on_pipeline_idle_timeout(task):
+           ...
+
+    There are also events to know if a pipeline has been started, stopped, ended
+    or cancelled.
+
+       @task.event_handler("on_pipeline_started")
+       async def on_pipeline_started(task, frame: StartFrame):
+           ...
+
+       @task.event_handler("on_pipeline_stopped")
+       async def on_pipeline_stopped(task, frame: StopFrame):
+           ...
+
+       @task.event_handler("on_pipeline_ended")
+       async def on_pipeline_ended(task, frame: EndFrame):
+           ...
+
+       @task.event_handler("on_pipeline_cancelled")
+       async def on_pipeline_cancelled(task, frame: CancelFrame):
            ...
 
     Args:
@@ -169,9 +188,9 @@ class PipelineTask(BaseTask):
         self,
         pipeline: BasePipeline,
         *,
-        params: PipelineParams = PipelineParams(),
-        observers: List[BaseObserver] = [],
-        clock: BaseClock = SystemClock(),
+        params: Optional[PipelineParams] = None,
+        observers: Optional[List[BaseObserver]] = None,
+        clock: Optional[BaseClock] = None,
         task_manager: Optional[BaseTaskManager] = None,
         check_dangling_tasks: bool = True,
         idle_timeout_secs: Optional[float] = 300,
@@ -186,8 +205,8 @@ class PipelineTask(BaseTask):
     ):
         super().__init__()
         self._pipeline = pipeline
-        self._clock = clock
-        self._params = params
+        self._clock = clock or SystemClock()
+        self._params = params or PipelineParams()
         self._check_dangling_tasks = check_dangling_tasks
         self._idle_timeout_secs = idle_timeout_secs
         self._idle_timeout_frames = idle_timeout_frames
@@ -205,14 +224,17 @@ class PipelineTask(BaseTask):
                     DeprecationWarning,
                 )
             observers = self._params.observers
+        observers = observers or []
+        self._turn_tracking_observer: Optional[TurnTrackingObserver] = None
+        self._turn_trace_observer: Optional[TurnTraceObserver] = None
         if self._enable_turn_tracking:
             self._turn_tracking_observer = TurnTrackingObserver()
-            observers = [self._turn_tracking_observer] + list(observers)
-        if self._enable_turn_tracking and self._enable_tracing:
+            observers.append(self._turn_tracking_observer)
+        if self._enable_tracing and self._turn_tracking_observer:
             self._turn_trace_observer = TurnTraceObserver(
                 self._turn_tracking_observer, conversation_id=self._conversation_id
             )
-            observers = [self._turn_trace_observer] + list(observers)
+            observers.append(self._turn_trace_observer)
         self._finished = False
 
         # This queue receives frames coming from the pipeline upstream.
@@ -264,6 +286,10 @@ class PipelineTask(BaseTask):
         self._register_event_handler("on_frame_reached_upstream")
         self._register_event_handler("on_frame_reached_downstream")
         self._register_event_handler("on_idle_timeout")
+        self._register_event_handler("on_pipeline_started")
+        self._register_event_handler("on_pipeline_stopped")
+        self._register_event_handler("on_pipeline_ended")
+        self._register_event_handler("on_pipeline_cancelled")
 
     @property
     def params(self) -> PipelineParams:
@@ -273,12 +299,18 @@ class PipelineTask(BaseTask):
     @property
     def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
         """Return the turn tracking observer if enabled."""
-        return getattr(self, "_turn_tracking_observer", None)
+        return self._turn_tracking_observer
 
     @property
     def turn_trace_observer(self) -> Optional[TurnTraceObserver]:
         """Return the turn trace observer if enabled."""
-        return getattr(self, "_turn_trace_observer", None)
+        return self._turn_trace_observer
+
+    async def add_observer(self, observer: BaseObserver):
+        await self._observer.add_observer(observer)
+
+    async def remove_observer(self, observer: BaseObserver):
+        await self._observer.remove_observer(observer)
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self._task_manager.set_event_loop(loop)
@@ -552,8 +584,16 @@ class PipelineTask(BaseTask):
             if isinstance(frame, self._reached_downstream_types):
                 await self._call_event_handler("on_frame_reached_downstream", frame)
 
-            if isinstance(frame, (EndFrame, StopFrame)):
+            if isinstance(frame, StartFrame):
+                await self._call_event_handler("on_pipeline_started", frame)
+            elif isinstance(frame, EndFrame):
+                await self._call_event_handler("on_pipeline_ended", frame)
                 self._pipeline_end_event.set()
+            elif isinstance(frame, StopFrame):
+                await self._call_event_handler("on_pipeline_stopped", frame)
+                self._pipeline_end_event.set()
+            elif isinstance(frame, CancelFrame):
+                await self._call_event_handler("on_pipeline_cancelled", frame)
             elif isinstance(frame, HeartbeatFrame):
                 await self._heartbeat_queue.put(frame)
             self._down_queue.task_done()

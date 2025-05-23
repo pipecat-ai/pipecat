@@ -499,7 +499,7 @@ class LiveKitTransport(BaseTransport):
         url: str,
         token: str,
         room_name: str,
-        params: LiveKitParams = LiveKitParams(),
+        params: Optional[LiveKitParams] = None,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ):
@@ -515,7 +515,7 @@ class LiveKitTransport(BaseTransport):
             on_data_received=self._on_data_received,
             on_first_participant_joined=self._on_first_participant_joined,
         )
-        self._params = params
+        self._params = params or LiveKitParams()
 
         self._client = LiveKitTransportClient(
             url, token, room_name, self._params, callbacks, self.name

@@ -30,7 +30,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
             Some inline code here
         """
 
-        result = self.filter.filter(input_text)
+        result = await self.filter.filter(input_text)
         self.assertEqual(result.strip(), expected_text.strip())
 
     async def test_space_preservation(self):
@@ -45,7 +45,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         ]
 
         for text in input_text:
-            result = self.filter.filter(text)
+            result = await self.filter.filter(text)
             self.assertEqual(
                 len(result), len(text), f"Space preservation failed for: '{text}'\nGot: '{result}'"
             )
@@ -71,7 +71,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         }
 
         for input_text, expected in test_cases.items():
-            result = self.filter.filter(input_text)
+            result = await self.filter.filter(input_text)
             self.assertEqual(
                 result,
                 expected,
@@ -88,7 +88,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         2. Second item
         3. Third item with bold"""
 
-        result = self.filter.filter(input_text)
+        result = await self.filter.filter(input_text)
         self.assertEqual(
             result.strip(),
             expected.strip(),
@@ -106,7 +106,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         }
 
         for input_text, expected in test_cases.items():
-            result = self.filter.filter(input_text)
+            result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"HTML entity conversion failed for: '{input_text}'")
 
     async def test_asterisk_removal(self):
@@ -120,7 +120,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         }
 
         for input_text, expected in test_cases.items():
-            result = self.filter.filter(input_text)
+            result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"Asterisk removal failed for: '{input_text}'")
 
     async def test_newline_handling(self):
@@ -132,10 +132,22 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         }
 
         for input_text, expected in test_cases.items():
-            result = self.filter.filter(input_text)
+            result = await self.filter.filter(input_text)
             self.assertEqual(
                 result, expected, f"Newline handling failed for:\n{input_text}\nGot:\n{result}"
             )
+
+    async def test_links_cleaning(self):
+        """Test cleaning of links and URLs, i.e. https?:// is removed."""
+        test_cases = {
+            "Please check http://example.com": "Please check example.com",
+            "Visit https://www.google.com for more": "Visit www.google.com for more",
+            "No link here": "No link here",  # No link to clean
+        }
+
+        for input_text, expected in test_cases.items():
+            result = await self.filter.filter(input_text)
+            self.assertEqual(result, expected, f"Link cleaning failed for: '{input_text}'")
 
     async def test_numbered_list_marker_handling(self):
         """Test handling of numbered lists with the special §NUM§ marker."""
@@ -148,7 +160,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         }
 
         for input_text, expected in test_cases.items():
-            result = self.filter.filter(input_text)
+            result = await self.filter.filter(input_text)
             self.assertEqual(
                 result,
                 expected,
@@ -166,7 +178,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         }
 
         for input_text, expected in test_cases.items():
-            result = self.filter.filter(input_text)
+            result = await self.filter.filter(input_text)
             self.assertEqual(result, expected, f"Inline code handling failed for: '{input_text}'")
 
     async def test_simple_table_removal(self):
@@ -177,7 +189,7 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
 
         expected = ""
 
-        result = filter.filter(input_text)
+        result = await filter.filter(input_text)
         self.assertEqual(
             result.strip(),
             expected.strip(),
@@ -198,15 +210,15 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
         # Test with text filtering disabled
         text_with_markdown = "**bold** and *italic* with `code`"
         self.assertEqual(
-            filter.filter(text_with_markdown),
+            await filter.filter(text_with_markdown),
             text_with_markdown,
             "Disabled filter should not modify text",
         )
 
         # Enable just text filtering
-        filter.update_settings({"enable_text_filter": True})
+        await filter.update_settings({"enable_text_filter": True})
         self.assertEqual(
-            filter.filter(text_with_markdown),
+            await filter.filter(text_with_markdown),
             "bold and italic with code",
             "Enabled filter should remove markdown",
         )
@@ -217,14 +229,18 @@ class TestMarkdownTextFilter(unittest.IsolatedAsyncioTestCase):
 
         # Initial state - formatting should be removed
         input_text = "**bold** and *italic*"
-        self.assertEqual(filter.filter(input_text), "bold and italic")
+        self.assertEqual(await filter.filter(input_text), "bold and italic")
 
         # Disable text filtering
-        filter.update_settings({"enable_text_filter": False})
-        self.assertEqual(filter.filter(input_text), input_text, "Text filtering should be disabled")
+        await filter.update_settings({"enable_text_filter": False})
+        self.assertEqual(
+            await filter.filter(input_text), input_text, "Text filtering should be disabled"
+        )
 
         # Re-enable text filtering
-        filter.update_settings({"enable_text_filter": True})
+        await filter.update_settings({"enable_text_filter": True})
         self.assertEqual(
-            filter.filter(input_text), "bold and italic", "Text filtering should be re-enabled"
+            await filter.filter(input_text),
+            "bold and italic",
+            "Text filtering should be re-enabled",
         )

@@ -250,11 +250,11 @@ class WebsocketClientTransport(BaseTransport):
     def __init__(
         self,
         uri: str,
-        params: WebsocketClientParams = WebsocketClientParams(),
+        params: Optional[WebsocketClientParams] = None,
     ):
         super().__init__()
 
-        self._params = params
+        self._params = params or WebsocketClientParams()
 
         callbacks = WebsocketClientCallbacks(
             on_connected=self._on_connected,
@@ -262,7 +262,7 @@ class WebsocketClientTransport(BaseTransport):
             on_message=self._on_message,
         )
 
-        self._session = WebsocketClientSession(uri, params, callbacks, self.name)
+        self._session = WebsocketClientSession(uri, self._params, callbacks, self.name)
         self._input: Optional[WebsocketClientInputTransport] = None
         self._output: Optional[WebsocketClientOutputTransport] = None
 
