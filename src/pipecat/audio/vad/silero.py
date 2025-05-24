@@ -138,7 +138,9 @@ class SileroVADAnalyzer(VADAnalyzer):
 
     def set_sample_rate(self, sample_rate: int):
         if sample_rate != 16000 and sample_rate != 8000:
-            raise ValueError("Silero VAD sample rate needs to be 16000 or 8000")
+            raise ValueError(
+                f"Silero VAD sample rate needs to be 16000 or 8000 (sample rate: {sample_rate})"
+            )
 
         super().set_sample_rate(sample_rate)
 

@@ -254,14 +254,16 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
     async def set_model(self, model: str):
         await super().set_model(model)
         logger.info(f"Switching TTS model to: [{model}]")
-        # No need to disconnect/reconnect for model changes with multi-context API
+        await self._disconnect()
+        await self._connect()
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         prev_voice = self._voice_id
         await super()._update_settings(settings)
-        # If voice changes, we don't need to reconnect, just use a new context
         if not prev_voice == self._voice_id:
             logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+            await self._disconnect()
+            await self._connect()
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
