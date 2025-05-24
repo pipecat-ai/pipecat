@@ -210,9 +210,7 @@ class GoogleHttpTTSService(TTSService):
         emphasis: Optional[Literal["strong", "moderate", "reduced", "none"]] = None
         language: Optional[Language] = Language.EN
         gender: Optional[Literal["male", "female", "neutral"]] = None
-        google_style: Optional[
-            Literal["apologetic", "calm", "empathetic", "firm", "lively"]
-        ] = None
+        google_style: Optional[Literal["apologetic", "calm", "empathetic", "firm", "lively"]] = None
 
     def __init__(
         self,
@@ -255,14 +253,10 @@ class GoogleHttpTTSService(TTSService):
         if credentials:
             # Use provided credentials JSON string
             json_account_info = json.loads(credentials)
-            creds = service_account.Credentials.from_service_account_info(
-                json_account_info
-            )
+            creds = service_account.Credentials.from_service_account_info(json_account_info)
         elif credentials_path:
             # Use service account JSON file if provided
-            creds = service_account.Credentials.from_service_account_file(
-                credentials_path
-            )
+            creds = service_account.Credentials.from_service_account_file(credentials_path)
         else:
             try:
                 creds, project_id = default(
@@ -424,7 +418,7 @@ class GoogleTTSService(TTSService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        voice_id: str = "en-US-Neural2-A",
+        voice_id: str = "en-US-Chirp3-HD-Charon",
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
@@ -454,14 +448,10 @@ class GoogleTTSService(TTSService):
         if credentials:
             # Use provided credentials JSON string
             json_account_info = json.loads(credentials)
-            creds = service_account.Credentials.from_service_account_info(
-                json_account_info
-            )
+            creds = service_account.Credentials.from_service_account_info(json_account_info)
         elif credentials_path:
             # Use service account JSON file if provided
-            creds = service_account.Credentials.from_service_account_file(
-                credentials_path
-            )
+            creds = service_account.Credentials.from_service_account_file(credentials_path)
         else:
             try:
                 creds, project_id = default(
@@ -509,9 +499,7 @@ class GoogleTTSService(TTSService):
                     input=texttospeech_v1.StreamingSynthesisInput(text=text)
                 )
 
-            streaming_responses = await self._client.streaming_synthesize(
-                request_generator()
-            )
+            streaming_responses = await self._client.streaming_synthesize(request_generator())
             await self.start_tts_usage_metrics(text)
 
             yield TTSStartedFrame()
