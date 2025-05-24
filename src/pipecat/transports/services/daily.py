@@ -429,7 +429,7 @@ class DailyTransportClient(EventHandler):
                 height=self._params.video_out_height,
                 color_format=self._params.video_out_color_format,
             )
-            self._audio_task = self._task_manager.create_task(
+            self._video_task = self._task_manager.create_task(
                 self._callback_task_handler(self._video_queue),
                 f"{self}::video_callback_task",
             )
