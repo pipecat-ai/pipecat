@@ -91,11 +91,8 @@ class TavusVideoService(AIService):
             persona_id=self._persona_id,
             session=self._session,
             params=TavusParams(
-                audio_out_enabled=True,
-                microphone_out_enabled=False,
                 audio_in_enabled=True,
                 video_in_enabled=True,
-                video_out_enabled=True,
             ),
         )
         await self._client.setup(setup)
