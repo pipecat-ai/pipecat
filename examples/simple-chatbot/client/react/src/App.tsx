@@ -4,18 +4,20 @@ import {
   RTVIClientVideo,
   useRTVIClientTransportState,
   useRTVIClientEvent,
+  useRTVIClient,
 } from '@pipecat-ai/client-react';
 import {
   RTVIEvent,
-  Participant,
 } from '@pipecat-ai/client-js';
 import { RTVIProvider } from './providers/RTVIProvider';
 import { ConnectButton } from './components/ConnectButton';
 import { StatusDisplay } from './components/StatusDisplay';
 import { DebugDisplay } from './components/DebugDisplay';
+import { ClientMetricsDisplay } from './components/ClientMetricsDisplay';
 import CallRecording from './components/CallRecording';
 import { fetchLatestSession } from './services/recordingService';
 import './App.css';
+import { useLatencyMetrics } from './hooks/useLatencyMetrics';
 
 // Recording state interface
 interface RecordingState {
@@ -54,11 +56,13 @@ function AppContent() {
   const [wasConnected, setWasConnected] = useState<boolean>(false);
 
   const transportState = useRTVIClientTransportState();
+  const client = useRTVIClient();
 
   // Step 3 & 4: Fetch session ID when bot disconnects (let CallRecording handle the retry logic)
-  const fetchSessionData = useCallback(async () => {
-    console.log('🔍 Step 3: Fetching latest session data...');
-    
+  const [sessionId, setSessionId] = useState<string>('');
+  const { logEvent, computedMetrics, sendMetricsOnDisconnect, startNewSession, endSession } = useLatencyMetrics(sessionId);
+
+  const fetchSessionData = useCallback(async () => {    
     setRecordingState(prev => ({
       ...prev,
       isLoadingRecording: true,
@@ -66,13 +70,9 @@ function AppContent() {
     }));
 
     try {
-      // Step 3: Get session ID
       const sessionResponse = await fetchLatestSession();
       
       if (sessionResponse && sessionResponse.session_id) {
-        console.log('✅ Step 3: Session ID fetched:', sessionResponse.session_id);
-        
-        // Set session ID and let CallRecording component handle the retry logic for full recording
         setRecordingState(prev => ({
           ...prev,
           sessionId: sessionResponse?.session_id || null,
@@ -81,9 +81,15 @@ function AppContent() {
           recordingUrl: null,
           recordingError: null
         }));
+        setSessionId(sessionResponse.session_id);
+        
+        // Send metrics after session ID is set
+        console.log("🚀 Session ID fetched, now sending metrics");
+        setTimeout(() => {
+          sendMetricsOnDisconnect();
+        }, 100);
       } else {
         const errorMsg = sessionResponse?.error || 'No session ID returned';
-        console.log('❌ Step 3: Failed to get session ID:', errorMsg);
         
         setRecordingState(prev => ({
           ...prev,
@@ -92,37 +98,32 @@ function AppContent() {
         }));
       }
     } catch (error) {
-      console.error('❌ Step 3: Error fetching session:', error);
-      
       setRecordingState(prev => ({
         ...prev,
         recordingError: `API Error: ${error}`,
         isLoadingRecording: false
       }));
     }
-  }, []);
+  }, [sendMetricsOnDisconnect]);
 
   // Step 2: Detect when bot disconnects
   useRTVIClientEvent(
     RTVIEvent.BotDisconnected,
-    useCallback((participant?: Participant) => {
-      console.log('🤖❌ Bot Disconnected Event:', participant);
+    useCallback(() => {
+      console.log("🔌 Bot disconnected");
       setBotDisconnected(true);
-      
-      // Step 3: Fetch session ID (CallRecording will handle waiting for full recording)
+      endSession();
       fetchSessionData();
-    }, [fetchSessionData])
+    }, [fetchSessionData, endSession])
   );
 
   // Step 2: Track when bot connects (to know when a session was active)
   useRTVIClientEvent(
     RTVIEvent.BotConnected,
-    useCallback((participant?: Participant) => {
-      console.log('🤖✅ Bot Connected Event:', participant);
+    useCallback(() => {
       setWasConnected(true);
       setBotDisconnected(false);
       
-      // Reset recording state when starting new session
       setRecordingState({
         hasRecording: false,
         recordingUrl: null,
@@ -130,29 +131,93 @@ function AppContent() {
         recordingError: null,
         sessionId: null
       });
-    }, [])
+      
+      startNewSession();
+    }, [startNewSession])
   );
 
-  // Log state changes for testing
+  // Also detect disconnection via transport state as backup
   useEffect(() => {
-    console.log('📊 Recording State Updated:', recordingState);
-  }, [recordingState]);
-
-  // Log transport state changes
-  useEffect(() => {
-    console.log('🔌 Transport State Updated:', transportState);
-    
-    // Also detect disconnection via transport state as backup
     if (transportState === 'disconnected' && wasConnected && !botDisconnected) {
-      console.log('🔌❌ Transport Disconnected (was previously connected)');
+      console.log("🔌 Transport disconnected");
       setBotDisconnected(true);
-      fetchSessionData();
+      fetchSessionData(); // This will now send metrics after getting session ID
     }
   }, [transportState, wasConnected, botDisconnected, fetchSessionData]);
 
+  // Add latency event tracking to RTVI events
   useEffect(() => {
-    console.log('🤖 Bot Disconnection State:', { botDisconnected, wasConnected, transportState });
-  }, [botDisconnected, wasConnected, transportState]);
+    if (!client) return;
+
+    const handleUserStartedSpeaking = () => {
+      logEvent('user_started_speaking');
+    };
+
+    const handleUserStoppedSpeaking = () => {
+      logEvent('user_stopped_speaking');
+    };
+
+    const handleBotStartedSpeaking = () => {
+      logEvent('bot_started_speaking');
+    };
+
+    const handleBotStoppedSpeaking = () => {
+      logEvent('bot_stopped_speaking');
+    };
+
+    const handleParticipantConnected = (participant: any) => {
+      console.log("Participant connected:", participant);
+      if (participant.session_id) {
+        // Set session ID and let CallRecording component handle the retry logic for full recording
+        setRecordingState(prev => ({
+          ...prev,
+          sessionId: participant.session_id,
+          hasRecording: true,
+          isLoadingRecording: false,
+          recordingUrl: null,
+          recordingError: null
+        }));
+        setSessionId(participant.session_id);
+      }
+    };
+
+    const handleParticipantLeft = () => {
+      console.log("🔌 Participant left");
+      fetchSessionData(); // This will send metrics after getting session ID
+    };
+
+    // Add connection state handlers
+    const handleDisconnected = () => {
+      console.log("🔌 Client disconnected");
+      fetchSessionData(); // This will send metrics after getting session ID
+    };
+
+    const handleError = (error: unknown) => {
+      console.log("❌ Client error", error);
+      fetchSessionData(); // This will send metrics after getting session ID
+    };
+
+    // Register RTVI event listeners
+    client.on("userStartedSpeaking", handleUserStartedSpeaking);
+    client.on("userStoppedSpeaking", handleUserStoppedSpeaking);
+    client.on("botStartedSpeaking", handleBotStartedSpeaking);
+    client.on("botStoppedSpeaking", handleBotStoppedSpeaking);
+    client.on("participantConnected", handleParticipantConnected);
+    client.on("participantLeft", handleParticipantLeft);
+    client.on("disconnected", handleDisconnected);
+    client.on("error", handleError);
+
+    return () => {
+      client.off("userStartedSpeaking", handleUserStartedSpeaking);
+      client.off("userStoppedSpeaking", handleUserStoppedSpeaking);
+      client.off("botStartedSpeaking", handleBotStartedSpeaking);
+      client.off("botStoppedSpeaking", handleBotStoppedSpeaking);
+      client.off("participantConnected", handleParticipantConnected);
+      client.off("participantLeft", handleParticipantLeft);
+      client.off("disconnected", handleDisconnected);
+      client.off("error", handleError);
+    };
+  }, [client, logEvent]);
 
   return (
     <div className="app">
@@ -205,6 +270,10 @@ function AppContent() {
         )}
       </div>
 
+      <ClientMetricsDisplay 
+        computedMetrics={computedMetrics} 
+        showMetrics={true}
+      />
       <DebugDisplay />
       <RTVIClientAudio />
     </div>

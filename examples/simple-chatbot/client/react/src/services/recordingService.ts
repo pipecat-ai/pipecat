@@ -20,24 +20,16 @@ export interface RecordingData {
 // Fetch the latest session ID
 export const fetchLatestSession = async (): Promise<SessionResponse | null> => {
   try {
-    console.log('Fetching latest session...');
     const response = await fetch(`${API_BASE_URL}/api/latest-session`);
-    
-    // Log raw response for debugging
     const text = await response.text();
-    console.log('Raw API response:', text);
     
-    // Try to parse as JSON
     try {
       const data = JSON.parse(text);
-      console.log('Parsed session data:', data);
       return data;
     } catch (parseError) {
-      console.error('Failed to parse response as JSON:', parseError);
       return null;
     }
   } catch (error) {
-    console.error('Error fetching session:', error);
     return null;
   }
 };
@@ -47,24 +39,16 @@ export const fetchSessionRecordings = async (sessionId: string): Promise<Recordi
   if (!sessionId) return null;
   
   try {
-    console.log(`Fetching recordings for session: ${sessionId}`);
     const response = await fetch(`${API_BASE_URL}/api/recordings/${sessionId}`);
-    
-    // Log raw response for debugging
     const text = await response.text();
-    console.log('Raw recordings API response:', text);
     
-    // Try to parse as JSON
     try {
       const data = JSON.parse(text);
-      console.log('Parsed recordings data:', data);
       return data;
     } catch (parseError) {
-      console.error('Failed to parse recordings response as JSON:', parseError);
       return null;
     }
   } catch (error) {
-    console.error('Error fetching recordings:', error);
     return null;
   }
 };
@@ -85,12 +69,11 @@ export const pollForSessionId = async (
         return true;
       }
     } catch (error) {
-      console.error('Error polling for session ID:', error);
+      // Error handling
     }
     
     attempts++;
     if (attempts >= maxAttempts) {
-      console.error('Max polling attempts reached');
       return false;
     }
     

@@ -27,7 +27,7 @@ import json
 import os
 import subprocess
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 from dotenv import load_dotenv
@@ -35,6 +35,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper, DailyRoomParams
 
@@ -57,6 +58,24 @@ os.makedirs("session_data", exist_ok=True)
 
 # Store Daily API helpers
 daily_helpers = {}
+
+
+# Latency metrics models
+class LatencyMetric(BaseModel):
+    """Model for representing a single latency measurement with type and value."""
+
+    type: str
+    value: float
+    timestamp: str
+    sessionId: Optional[str] = None
+    details: Dict[str, Any] = {}
+
+
+class LatencyMetricsRequest(BaseModel):
+    """Request model for submitting a batch of latency metrics for a session."""
+
+    session_id: str
+    metrics: List[LatencyMetric]
 
 
 def cleanup():
@@ -136,7 +155,7 @@ async def get_latest_session():
     Returns:
         dict: Contains either session_id or error message
     """
-    print(f"API call: get_latest_session, available sessions: {list(session_timestamps.keys())}")
+    # print(f"API call: get_latest_session, available sessions: {list(session_timestamps.keys())}")
     if not session_timestamps:
         return {"error": "No sessions found yet. Please complete a call first."}
 
@@ -158,7 +177,7 @@ async def get_recordings(session_id: str):
         dict: Contains recording file paths or error message
     """
     print(f"API call: get_recordings for session: {session_id}")
-    print(f"Available sessions: {list(session_recordings.keys())}")
+    # print(f"Available sessions: {list(session_recordings.keys())}")
     if session_id in session_recordings:
         return session_recordings[session_id]
     return {"error": "Session not found"}
@@ -306,7 +325,6 @@ def save_session_data():
         with open("session_data/session_recordings.json", "w") as f:
             json.dump(session_recordings, f)
 
-        print(f"Session data saved to disk. Sessions: {list(session_timestamps.keys())}")
     except Exception as e:
         print(f"Error saving session data: {e}")
 
@@ -329,7 +347,7 @@ def load_session_data():
             with open("session_data/session_recordings.json", "r") as f:
                 session_recordings = json.load(f)
 
-        print(f"Session data loaded from disk. Sessions: {list(session_timestamps.keys())}")
+        # print(f"Session data loaded from disk. Sessions: {list(session_timestamps.keys())}")
     except Exception as e:
         print(f"Error loading session data: {e}")
         session_timestamps = {}
@@ -351,6 +369,240 @@ def update_session_data(session_id: str, speaker_type: str, filename: str):
 
     # Save to disk immediately
     save_session_data()
+
+
+def save_metrics(session_id: str, metrics: Dict[str, Any]) -> str:
+    """Save server-side metrics, filtering to only response latency."""
+    os.makedirs("session_data", exist_ok=True)
+    filename = f"session_data/{session_id}_server_metrics.json"
+
+    # Check if metrics is a list (new format) or dict (old format)
+    if isinstance(metrics, list):
+        # New format: list of metric objects
+        return save_metrics_from_list(session_id, metrics, filename)
+    else:
+        # Old format: dict with llm_response_time
+        return save_metrics_from_dict(session_id, metrics, filename)
+
+
+def save_metrics_from_list(session_id: str, metrics_list: List[Dict], filename: str) -> str:
+    """Process pipecat metrics list and calculate response latency."""
+    # Extract relevant metrics and convert to milliseconds
+    openai_ttfb = 0
+    openai_processing = 0
+    elevenlabs_ttfb = 0
+
+    for metric in metrics_list:
+        if metric.get("processor", "").startswith("OpenAILLMService"):
+            if metric.get("metric_type") == "ttfb":
+                openai_ttfb = metric.get("value", 0) * 1000  # Convert to ms
+            elif metric.get("metric_type") == "processing_time":
+                openai_processing = metric.get("value", 0) * 1000  # Convert to ms
+
+        elif metric.get("processor", "").startswith("ElevenLabsTTSService"):
+            if metric.get("metric_type") == "ttfb":
+                elevenlabs_ttfb = metric.get("value", 0) * 1000  # Convert to ms
+
+    # Calculate total response latency
+    total_response_latency = openai_ttfb + openai_processing + elevenlabs_ttfb
+
+    # Only save if we have meaningful data
+    if total_response_latency > 0:
+        filtered_metrics = {
+            "session_id": session_id,
+            "timestamp": datetime.now().isoformat(),
+            "response_latency_ms": round(total_response_latency, 2),
+            "breakdown": {
+                "openai_ttfb_ms": round(openai_ttfb, 2),
+                "openai_processing_ms": round(openai_processing, 2),
+                "elevenlabs_ttfb_ms": round(elevenlabs_ttfb, 2),
+            },
+        }
+
+        with open(filename, "w") as f:
+            json.dump(filtered_metrics, f, indent=2)
+
+        print(f"💾 Saved server response latency ({total_response_latency:.0f}ms) to {filename}")
+        print(
+            f"   Breakdown: OpenAI={openai_ttfb + openai_processing:.0f}ms, ElevenLabs={elevenlabs_ttfb:.0f}ms"
+        )
+        return filename
+    else:
+        print(f"⚠️  No response latency metrics found in server metrics")
+        return ""
+
+
+def save_metrics_from_dict(session_id: str, metrics: Dict[str, Any], filename: str) -> str:
+    """Handle old format dict metrics."""
+    filtered_metrics = {}
+
+    for key, value in metrics.items():
+        if key == "llm_response_time":
+            if isinstance(value, (int, float)):
+                filtered_metrics["response_latency_ms"] = value * 1000
+            else:
+                filtered_metrics["response_latency_ms"] = value
+        elif key == "session_id":
+            filtered_metrics[key] = value
+        elif key == "timestamp":
+            filtered_metrics[key] = value
+
+    if "response_latency_ms" in filtered_metrics:
+        with open(filename, "w") as f:
+            json.dump(filtered_metrics, f, indent=2)
+
+        print(
+            f"💾 Saved server response latency ({filtered_metrics['response_latency_ms']:.0f}ms) to {filename}"
+        )
+        return filename
+    else:
+        print(f"⚠️  No response latency metric found in server metrics")
+        return ""
+
+
+def save_latency_metrics(session_id: str, metrics: List[LatencyMetric]) -> str:
+    """Save client-side latency metrics."""
+    os.makedirs("session_data", exist_ok=True)
+    filename = f"session_data/{session_id}_client_metrics.json"
+
+    # Convert metrics to dict format, ensuring values are in milliseconds
+    metrics_data = []
+    for metric in metrics:
+        metric_dict = {
+            "type": metric.type,
+            "value_ms": float(metric.value),  # Already in ms from client
+            "timestamp": metric.timestamp,
+            "sessionId": metric.sessionId,
+            "details": metric.details,
+        }
+        metrics_data.append(metric_dict)
+
+    data = {
+        "session_id": session_id,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "metrics": metrics_data,
+    }
+
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=2)
+
+    print(f"💾 Saved {len(metrics)} client latency metrics to {filename}")
+    return filename
+
+
+# API endpoint to receive latency metrics from client
+@app.post("/api/sessions/{session_id}/latency-metrics")
+async def receive_latency_metrics(session_id: str, request: LatencyMetricsRequest):
+    """Receive and save client-side latency metrics."""
+    try:
+        filename = save_latency_metrics(session_id, request.metrics)
+
+        # Calculate summary stats
+        response_latencies = [m.value for m in request.metrics if m.type == "response_latency"]
+        interruption_latencies = [
+            m.value for m in request.metrics if m.type == "interruption_latency"
+        ]
+
+        summary = {
+            "session_id": session_id,
+            "total_metrics": len(request.metrics),
+            "response_latency": {
+                "count": len(response_latencies),
+                "avg_ms": sum(response_latencies) / len(response_latencies)
+                if response_latencies
+                else 0,
+                "min_ms": min(response_latencies) if response_latencies else 0,
+                "max_ms": max(response_latencies) if response_latencies else 0,
+            },
+            "interruption_latency": {
+                "count": len(interruption_latencies),
+                "avg_ms": sum(interruption_latencies) / len(interruption_latencies)
+                if interruption_latencies
+                else 0,
+                "min_ms": min(interruption_latencies) if interruption_latencies else 0,
+                "max_ms": max(interruption_latencies) if interruption_latencies else 0,
+            },
+            "filename": filename,
+        }
+
+        print(f"📊 Latency Summary for {session_id}:")
+        print(
+            f"   Response Latency: {summary['response_latency']['avg_ms']:.0f}ms avg ({summary['response_latency']['count']} samples)"
+        )
+        print(
+            f"   Interruption Latency: {summary['interruption_latency']['avg_ms']:.0f}ms avg ({summary['interruption_latency']['count']} samples)"
+        )
+
+        return summary
+
+    except Exception as e:
+        print(f"Error saving latency metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# API endpoint to get latency metrics for a session
+@app.get("/api/sessions/{session_id}/latency-metrics")
+async def get_latency_metrics(session_id: str):
+    """Get saved latency metrics for a session."""
+    try:
+        filename = f"session_data/{session_id}_latency_metrics.json"
+
+        if not os.path.exists(filename):
+            return {"error": "No latency metrics found for this session", "session_id": session_id}
+
+        with open(filename, "r") as f:
+            metrics_data = json.load(f)
+
+        return {
+            "session_id": session_id,
+            "metrics": metrics_data,
+            "total_metrics": len(metrics_data),
+        }
+
+    except Exception as e:
+        print(f"Error retrieving latency metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# API endpoint to get all session data (existing + latency metrics)
+@app.get("/api/sessions/{session_id}/all-metrics")
+async def get_all_session_metrics(session_id: str):
+    """Get both server-side metrics and client-side latency metrics for a session."""
+    try:
+        result = {"session_id": session_id, "server_metrics": None, "latency_metrics": None}
+
+        # Get server-side metrics
+        server_metrics_file = f"session_data/{session_id}_server_metrics.json"
+        if os.path.exists(server_metrics_file):
+            with open(server_metrics_file, "r") as f:
+                result["server_metrics"] = json.load(f)
+
+        # Get client-side latency metrics
+        latency_metrics_file = f"session_data/{session_id}_client_metrics.json"
+        if os.path.exists(latency_metrics_file):
+            with open(latency_metrics_file, "r") as f:
+                result["latency_metrics"] = json.load(f)
+
+        return result
+
+    except Exception as e:
+        print(f"Error retrieving all metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# API endpoint to update session metrics
+@app.post("/api/sessions/{session_id}/metrics")
+async def save_session_metrics(session_id: str, metrics: dict):
+    """Save server-side metrics for a session and return confirmation message."""
+    try:
+        filename = save_metrics(session_id, metrics)
+        if filename:
+            return {"message": f"Metrics saved to {filename}", "session_id": session_id}
+        else:
+            return {"message": "No response latency metric to save", "session_id": session_id}
+    except Exception as e:
+        print(f"Error saving metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

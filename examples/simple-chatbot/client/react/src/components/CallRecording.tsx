@@ -3,6 +3,7 @@ import { fetchSessionRecordings, RecordingData } from '../services/recordingServ
 
 interface CallRecordingProps {
   sessionId: string;
+  autoStart?: boolean;  // Optional prop to auto-start recording
 }
 
 // Simple styling
@@ -40,7 +41,6 @@ const CallRecording: React.FC<CallRecordingProps> = ({ sessionId }) => {
 
     const getRecordings = async () => {
       try {
-        console.log(`🎵 CallRecording: Fetching recordings for session: ${sessionId} (attempt ${retryCount + 1})`);
         const data = await fetchSessionRecordings(sessionId);
         
         if (data && !data.error) {
@@ -48,12 +48,9 @@ const CallRecording: React.FC<CallRecordingProps> = ({ sessionId }) => {
           const hasFullRecording = data.full && data.full.length > 0;
           
           if (hasFullRecording) {
-            console.log('✅ CallRecording: Full recording found!', data);
             setRecordings(data);
             setLoading(false);
           } else {
-            console.log('⏳ CallRecording: Full recording not ready yet, retrying...', data);
-            
             // Retry up to 10 times with increasing delays
             if (retryCount < 10) {
               setTimeout(() => {
@@ -66,12 +63,10 @@ const CallRecording: React.FC<CallRecordingProps> = ({ sessionId }) => {
           }
         } else {
           const errorMsg = data?.error || 'Failed to load recordings';
-          console.log('❌ CallRecording: API error:', errorMsg);
           setError(errorMsg);
           setLoading(false);
         }
       } catch (err) {
-        console.error('❌ CallRecording: Network error:', err);
         setError('Error loading recordings');
         setLoading(false);
       }
@@ -102,8 +97,6 @@ const CallRecording: React.FC<CallRecordingProps> = ({ sessionId }) => {
   // Extract filename and construct full URL
   const recordingPath = recordings.full[0];
   const audioUrl = `${API_BASE_URL}/${recordingPath}`;
-
-  console.log('🎵 Audio URL constructed:', audioUrl);
 
   // Clean UI - just the audio player
   return (

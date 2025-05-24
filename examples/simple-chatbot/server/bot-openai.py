@@ -21,6 +21,7 @@ import asyncio
 import datetime
 import io
 import json
+import logging
 import os
 import sys
 import uuid
@@ -30,6 +31,7 @@ import aiofiles
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+from metrics_logger import MetricsLogger
 from PIL import Image
 from runner import configure
 
@@ -55,6 +57,11 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 load_dotenv(override=True)
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
+
+# Near the top, add this to capture metrics in logs
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 sprites = []
 script_dir = os.path.dirname(__file__)
@@ -237,6 +244,9 @@ async def main(room_url, token):
         # Create an audio buffer processor instance
         audiobuffer = AudioBufferProcessor(enable_turn_audio=True)
 
+        # Initialize metrics logger (without session_id initially)
+        metrics_logger = MetricsLogger()
+
         pipeline = Pipeline(
             [
                 transport.input(),
@@ -245,41 +255,34 @@ async def main(room_url, token):
                 llm,
                 tts,
                 ta,
+                metrics_logger,  # Add metrics logger to pipeline
+                context_aggregator.assistant(),
                 transport.output(),
                 audiobuffer,
-                context_aggregator.assistant(),
             ]
         )
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                allow_interruptions=True,
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            observers=[RTVIObserver(rtvi)],
-        )
-        await task.queue_frame(quiet_frame)
+        # When session starts, set session_id on existing metrics logger
+        @transport.event_handler("on_participant_joined")
+        async def on_participant_joined(transport, participant):
+            print(f"📊 Participant {participant['id']} joined. Session: {transport.session_id}")
 
-        @rtvi.event_handler("on_client_ready")
-        async def on_client_ready(rtvi):
-            await rtvi.set_bot_ready()
+            # Set session ID on existing metrics logger
+            metrics_logger.session_id = transport.session_id
+            print(f"🔧 Metrics logging initialized for session: {transport.session_id}")
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            print("Participant joined: ", participant)
-            session_id = str(uuid.uuid4())
-            transport.session_id = session_id
-            await audiobuffer.start_recording()
-            print(f"Created session ID: {session_id}")
-            await transport.capture_participant_transcription(participant["id"])
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
-
+        # When session ends, save metrics
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
+            print(f"📊 Participant {participant['id']} left")
+
+            # Save metrics data
+            if metrics_logger and metrics_logger.session_id:
+                metrics_logger.save_session_metrics()
+                print(f"📊 Session metrics saved for: {transport.session_id}")
+
             try:
-                print(f"Participant left: {participant}")
+                # print(f"Participant left: {participant}")
 
                 if hasattr(transport, "session_id"):
                     session_id = transport.session_id
@@ -301,7 +304,7 @@ async def main(room_url, token):
                             ) as response:
                                 if response.status == 200:
                                     data = await response.json()
-                                    print(f"Final session data: {data}")
+                                    # print(f"Final session data: {data}")
                                 else:
                                     print(
                                         f"Warning: Could not verify session data. Status: {response.status}"
@@ -333,6 +336,31 @@ async def main(room_url, token):
                 await save_audio(transport.session_id, "bot", audio, sample_rate, num_channels)
 
         runner = PipelineRunner()
+        task = PipelineTask(
+            pipeline,
+            params=PipelineParams(
+                allow_interruptions=True,
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
+            observers=[RTVIObserver(rtvi)],
+        )
+        await task.queue_frame(quiet_frame)
+
+        @rtvi.event_handler("on_client_ready")
+        async def on_client_ready(rtvi):
+            await rtvi.set_bot_ready()
+
+        @transport.event_handler("on_first_participant_joined")
+        async def on_first_participant_joined(transport, participant):
+            print("Participant joined: ", participant)
+            session_id = str(uuid.uuid4())
+            transport.session_id = session_id
+            await audiobuffer.start_recording()
+            print(f"Created session ID: {session_id}")
+            await transport.capture_participant_transcription(participant["id"])
+            await task.queue_frames([context_aggregator.user().get_context_frame()])
+
         await runner.run(task)
 
 
