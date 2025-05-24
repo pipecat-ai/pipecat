@@ -5,14 +5,13 @@
 #
 
 import asyncio
-from typing import Optional
 
 from pipecat.frames.frames import (
-    CancelFrame,
     EndFrame,
     Frame,
     InputDTMFFrame,
     KeypadEntry,
+    StartFrame,
     StartInterruptionFrame,
     TranscriptionFrame,
 )
@@ -57,26 +56,30 @@ class DTMFAggregator(FrameProcessor):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, InputDTMFFrame):
+        if isinstance(frame, StartFrame):
+            # Start the aggregation task when the pipeline starts
+            await self._start_aggregation_task(direction)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, InputDTMFFrame):
+            # Push the DTMF frame first, then handle aggregation
+            await self.push_frame(frame, direction)
             await self._handle_dtmf_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame):
             # Flush on interruption
             if self._aggregation:
                 await self._flush_aggregation(direction)
-        elif isinstance(frame, (EndFrame, CancelFrame)):
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, EndFrame):
             # Flush any pending aggregation
             if self._aggregation:
                 await self._flush_aggregation(direction)
             await self._stop_aggregation_task()
-
-        # Push frame
-        await self.push_frame(frame, direction)
+            await self.push_frame(frame, direction)
+        else:
+            # Push all other frames
+            await self.push_frame(frame, direction)
 
     async def _handle_dtmf_frame(self, frame: InputDTMFFrame, direction: FrameDirection):
-        # Start aggregation task if not running
-        if self._aggregation_task is None:
-            self._aggregation_task = self.create_task(self._aggregation_task_handler(direction))
-
         # Add digit to aggregation
         digit_value = frame.button.value
         self._aggregation += digit_value
@@ -87,6 +90,11 @@ class DTMFAggregator(FrameProcessor):
         else:
             # Signal new digit received
             self._digit_event.set()
+
+    async def _start_aggregation_task(self, direction: FrameDirection):
+        """Start the aggregation task."""
+        if not self._aggregation_task:
+            self._aggregation_task = self.create_task(self._aggregation_task_handler(direction))
 
     async def _aggregation_task_handler(self, direction: FrameDirection):
         """Background task that handles timeout-based flushing."""
@@ -119,10 +127,12 @@ class DTMFAggregator(FrameProcessor):
         self._aggregation = ""
 
     async def _stop_aggregation_task(self):
+        """Stop the aggregation task."""
         if self._aggregation_task:
             await self.cancel_task(self._aggregation_task)
             self._aggregation_task = None
 
     async def cleanup(self) -> None:
+        """Cleanup resources."""
         await super().cleanup()
         await self._stop_aggregation_task()
