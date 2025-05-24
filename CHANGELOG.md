@@ -127,6 +127,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `DailyTransport` issue that would cause images needing resize to block
+  the event loop.
+
 - Fixed an issue with `ElevenLabsTTSService` where changing the model or voice
   while the service is running wasn't working.
 
