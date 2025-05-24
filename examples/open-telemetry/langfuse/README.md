@@ -43,6 +43,8 @@ OPENAI_API_KEY=your_key_here
 pip install -r requirements.txt
 ```
 
+> Install only the http exporter. If you have a conflict, uninstall the grpc exporter.
+
 ### 4. Run the Demo
 
 ```bash
