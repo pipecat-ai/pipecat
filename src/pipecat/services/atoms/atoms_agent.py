@@ -152,6 +152,7 @@ class AtomsAgentContext(OpenAILLMContext):
         return ""
 
     def add_message(self, message: ChatCompletionMessageParam):
+        """Add a message to the context."""
         if message["role"] == "user":
             # if the previous role is "user" aggregate it with the current user message
             # now are using user content in the form of json like this
@@ -170,7 +171,12 @@ class AtomsAgentContext(OpenAILLMContext):
                 )
                 self.messages[-1]["content"] = json.dumps(previous_user_message_content)
             else:
-                self.messages.append(json.dumps({"transcript": message["content"]}))
+                # self.messages.append(json.dumps({"transcript": message["content"]}))
+                self.messages.append(
+                    ChatCompletionUserMessageParam(
+                        role="user", content=json.dumps({"transcript": message["content"]})
+                    ),
+                )
         elif message["role"] == "assistant":
             # if the previous role is "assistant" aggregate it with the current assistant message
             if self.messages and self.messages[-1]["role"] == "assistant":
@@ -329,27 +335,30 @@ class AtomsAgentContext(OpenAILLMContext):
         """This function will restructure the openai user context messages which are in the default string format and convert them to the atoms agent context messages."""
         messages = []
 
-        for message in self.messages:
-            if message["role"] == "user":
-                try:
-                    json.loads(message["content"])
-                    # if the content is json than it is already in the atoms agent format no need to convert it
-                    messages.append(message)
-                except json.JSONDecodeError:
-                    # if json conversion fails than it is a user message and we need to convert it to the atoms agent format
-                    messages.append(
-                        ChatCompletionUserMessageParam(
-                            role="user", content=json.dumps({"transcript": message["content"]})
-                        )
-                    )
-                except Exception as e:
-                    logger.error(f"Error parsing user message: {message}")
-                    messages.append(message)
-            else:
-                messages.append(message)
+        # for message in self.messages:
+        #     if message["role"] == "user":
+        #         try:
+        #             json.loads(message["content"])
+        #             # if the content is json than it is already in the atoms agent format no need to convert it
+        #             messages.append(message)
+        #         except json.JSONDecodeError:
+        #             # if json conversion fails than it is a user message and we need to convert it to the atoms agent format
+        #             messages.append(
+        #                 ChatCompletionUserMessageParam(
+        #                     role="user", content=json.dumps({"transcript": message["content"]})
+        #                 )
+        #             )
+        #         except Exception as e:
+        #             logger.error(f"Error parsing user message: {message}")
+        #             messages.append(message)
+        #     else:
+        #         messages.append(message)
 
-        self.messages.clear()
-        self.messages.extend(messages)
+        # self.messages.clear()
+        # self.messages.extend(messages)
+
+        # NOTE: We have commented out the above code because we are using the atomsAgentContext when creating pipeline and we are converting the messages to the atoms agent context format when adding messages to the context
+        pass
 
     def get_response_model_context(self):
         """Get the response model context from the messages."""
@@ -679,7 +688,7 @@ class FlowGraphManager(FrameProcessor):
             # Make the actual request
             result = self._make_api_request(
                 api_request_type=http_request.method.value,
-                api_link=replace_variables(http_request.url, self.variables),
+                api_link=replace_variables(http_request.url, variables),
                 api_headers=headers,
                 api_body=body,
                 api_timeout_sec=http_request.timeout,
@@ -687,7 +696,7 @@ class FlowGraphManager(FrameProcessor):
 
             return result
 
-        def process(
+        async def process(
             self, context: AtomsAgentContext, node: Node, variables: Dict[str, Any]
         ) -> bool:
             """Handle API node by making request and determining next node based on pathways.
@@ -705,7 +714,7 @@ class FlowGraphManager(FrameProcessor):
                 context._update_last_user_context(
                     "api_node_response", json.dumps(response_data, indent=2, ensure_ascii=False)
                 )
-                self.flow_graph_manager._process_context(context=context)
+                await self.flow_graph_manager._process_context(context=context)
                 return True
             except Exception as e:
                 logger.error(f"API request failed: {str(e)}")
@@ -1345,8 +1354,6 @@ class FlowGraphManager(FrameProcessor):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context = AtomsAgentContext.upgrade_to_atoms_agent(frame.context)
-        elif isinstance(frame, LLMMessagesFrame):
-            context = AtomsAgentContext.from_messages(frame.messages)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
