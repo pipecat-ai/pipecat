@@ -80,3 +80,73 @@ button:disabled {
   background-color: #f44336;
   color: white;
 }
+
+/* Add these styles for the comparison component */
+.comparison-main {
+  font-size: 1.2em;
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.comparison-variance {
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+.comparison-details {
+  margin-top: 8px;
+  font-size: 0.85em;
+}
+
+.comparison-row {
+  display: flex;
+  justify-content: space-between;
+  margin: 2px 0;
+}
+
+.comparison-row .label {
+  opacity: 0.7;
+}
+
+.comparison-row .value {
+  font-weight: 500;
+}
+
+.metric-value.analyzing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.metric-value.error {
+  color: #ef4444;
+  font-size: 0.9em;
+}
+
+.retry-button {
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8em;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.retry-button:hover {
+  background: #e5e7eb;
+}
+
+.retry-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

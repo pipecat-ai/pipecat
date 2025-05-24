@@ -7,7 +7,7 @@ interface LatencyEvent {
 }
 
 interface LatencyMetric {
-  type: 'response_latency' | 'interruption_latency';
+  type: 'response_latency' | 'interruption_latency' | 'user_latency';
   value: number;
   timestamp: string;
   sessionId?: string; // Make optional initially
@@ -27,13 +27,20 @@ interface ComputedMetrics {
     average: number;
     last: number;
   };
+  user_latency: {
+    count: number;
+    total: number;
+    average: number;
+    last: number;
+  };
 }
 
-export const useLatencyMetrics = (sessionId: string) => {
+export const useLatencyMetrics = (sessionId: string, onClearComparison?: () => void) => {
   const [latencyMetrics, setLatencyMetrics] = useState<LatencyMetric[]>([]);
   const [computedMetrics, setComputedMetrics] = useState<ComputedMetrics>({
     response_latency: { count: 0, total: 0, average: 0, last: 0 },
-    interruption_latency: { count: 0, total: 0, average: 0, last: 0 }
+    interruption_latency: { count: 0, total: 0, average: 0, last: 0 },
+    user_latency: { count: 0, total: 0, average: 0, last: 0 }
   });
   
   const eventsRef = useRef<LatencyEvent[]>([]);
@@ -46,9 +53,11 @@ export const useLatencyMetrics = (sessionId: string) => {
   useEffect(() => {
     const responseMetrics = latencyMetrics.filter(m => m.type === 'response_latency');
     const interruptionMetrics = latencyMetrics.filter(m => m.type === 'interruption_latency');
+    const userMetrics = latencyMetrics.filter(m => m.type === 'user_latency');
     
     const responseTotal = responseMetrics.reduce((sum, m) => sum + m.value, 0);
     const interruptionTotal = interruptionMetrics.reduce((sum, m) => sum + m.value, 0);
+    const userTotal = userMetrics.reduce((sum, m) => sum + m.value, 0);
     
     setComputedMetrics({
       response_latency: {
@@ -62,6 +71,12 @@ export const useLatencyMetrics = (sessionId: string) => {
         total: interruptionTotal,
         average: interruptionMetrics.length > 0 ? Math.round(interruptionTotal / interruptionMetrics.length) : 0,
         last: interruptionMetrics.length > 0 ? interruptionMetrics[interruptionMetrics.length - 1].value : 0
+      },
+      user_latency: {
+        count: userMetrics.length,
+        total: userTotal,
+        average: userMetrics.length > 0 ? Math.round(userTotal / userMetrics.length) : 0,
+        last: userMetrics.length > 0 ? userMetrics[userMetrics.length - 1].value : 0
       }
     });
   }, [latencyMetrics]);
@@ -95,7 +110,12 @@ export const useLatencyMetrics = (sessionId: string) => {
     eventsRef.current = [];
     metricsSentRef.current = false;
     isActiveSessionRef.current = true;
-  }, []);
+    
+    // Clear comparison data in ClientMetricsDisplay
+    if (onClearComparison) {
+      onClearComparison();
+    }
+  }, [onClearComparison]);
   
   // Function to mark session as ended (preserve metrics)
   const endSession = useCallback(() => {
@@ -190,6 +210,28 @@ export const useLatencyMetrics = (sessionId: string) => {
       }
     }
     
+    if (newEvent.event === 'user_started_speaking') {
+      // Check if this is user latency (user_started_speaking right after bot_stopped_speaking)
+      const lastEvent = events[events.length - 2]; // Get previous event (current event is already pushed)
+      
+      if (lastEvent && lastEvent.event === 'bot_stopped_speaking') {
+        // This is a user latency
+        const userLatency = newEvent.timestamp - lastEvent.timestamp;
+        const metric: LatencyMetric = {
+          type: 'user_latency',
+          value: userLatency,
+          timestamp: new Date().toISOString(),
+          sessionId: currentSessionId || undefined,
+          details: {
+            botStopTime: lastEvent.timestamp,
+            userStartTime: newEvent.timestamp
+          }
+        };
+        
+        setLatencyMetrics(prev => [...prev, metric]);
+      }
+    }
+    
     if (newEvent.event === 'bot_stopped_speaking') {
       // Check if this is ending an interruption
       // We need to find the most recent bot_started_speaking and check if there was a user_started_speaking after it
@@ -254,11 +296,18 @@ export const useLatencyMetrics = (sessionId: string) => {
       setLatencyMetrics([]);
       setComputedMetrics({
         response_latency: { count: 0, total: 0, average: 0, last: 0 },
-        interruption_latency: { count: 0, total: 0, average: 0, last: 0 }
+        interruption_latency: { count: 0, total: 0, average: 0, last: 0 },
+        user_latency: { count: 0, total: 0, average: 0, last: 0 }
       });
       eventsRef.current = [];
       metricsSentRef.current = false;
       isActiveSessionRef.current = false;
-    }
+      
+      // Clear comparison data in ClientMetricsDisplay
+      if (onClearComparison) {
+        onClearComparison();
+      }
+    },
+    isSessionActive: isActiveSessionRef.current
   };
 };

@@ -60,7 +60,10 @@ function AppContent() {
 
   // Step 3 & 4: Fetch session ID when bot disconnects (let CallRecording handle the retry logic)
   const [sessionId, setSessionId] = useState<string>('');
-  const { logEvent, computedMetrics, sendMetricsOnDisconnect, startNewSession, endSession } = useLatencyMetrics(sessionId);
+  const { logEvent, computedMetrics, sendMetricsOnDisconnect, startNewSession, endSession, isSessionActive } = useLatencyMetrics(sessionId);
+
+  // Add a new state to track when we should trigger analysis
+  const [shouldTriggerAnalysis, setShouldTriggerAnalysis] = useState<string | null>(null);
 
   const fetchSessionData = useCallback(async () => {    
     setRecordingState(prev => ({
@@ -88,6 +91,11 @@ function AppContent() {
         setTimeout(() => {
           sendMetricsOnDisconnect();
         }, 100);
+
+        // NEW: Trigger audio analysis after session data is fetched
+        console.log("🎵 Scheduling audio analysis for session:", sessionResponse.session_id);
+        setShouldTriggerAnalysis(sessionResponse.session_id);
+        
       } else {
         const errorMsg = sessionResponse?.error || 'No session ID returned';
         
@@ -219,6 +227,19 @@ function AppContent() {
     };
   }, [client, logEvent]);
 
+  // Add this debugging near where isSessionActive is defined:
+  useEffect(() => {
+    console.log('🔍 App.tsx - isSessionActive changed:', isSessionActive);
+    console.log('🔍 App.tsx - transport state:', transportState);
+    console.log('🔍 App.tsx - sessionId:', sessionId);
+  }, [isSessionActive, transportState, sessionId]);
+
+  // Add callback to clear the trigger
+  const handleAnalysisTriggered = useCallback(() => {
+    console.log("🧹 Clearing analysis trigger");
+    setShouldTriggerAnalysis(null);
+  }, []);
+
   return (
     <div className="app">
       <div className="status-bar">
@@ -273,6 +294,10 @@ function AppContent() {
       <ClientMetricsDisplay 
         computedMetrics={computedMetrics} 
         showMetrics={true}
+        sessionId={sessionId}
+        isActive={isSessionActive}
+        shouldTriggerAnalysis={shouldTriggerAnalysis}
+        onAnalysisTriggered={handleAnalysisTriggered}
       />
       <DebugDisplay />
       <RTVIClientAudio />

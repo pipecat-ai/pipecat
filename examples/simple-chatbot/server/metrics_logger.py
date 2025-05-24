@@ -111,68 +111,6 @@ class MetricsLogger(FrameProcessor):
 
         await self.push_frame(frame, direction)
 
-    def save_server_latency_metrics(self):
-        """Create filtered server metrics file with only response latency."""
-        if not self.session_id or not self.metrics_data:
-            return None
-
-        filename = f"session_data/{self.session_id}_server_metrics.json"
-
-        # Extract relevant metrics and convert to milliseconds
-        openai_ttfb = 0
-        openai_processing = 0
-        elevenlabs_ttfb = 0
-
-        for metric in self.metrics_data:
-            processor = metric.get("processor", "")
-            metric_type = metric.get("metric_type", "")
-            value = metric.get("value", 0)
-
-            if processor.startswith("OpenAILLMService"):
-                if metric_type == "ttfb":
-                    openai_ttfb = value * 1000  # Convert to ms
-                elif metric_type == "processing_time":
-                    openai_processing = value * 1000  # Convert to ms
-
-            elif processor.startswith("ElevenLabsTTSService"):
-                if metric_type == "ttfb":
-                    elevenlabs_ttfb = value * 1000  # Convert to ms
-                elif metric_type == "processing_time":
-                    elevenlabs_processing = value * 1000  # Convert to ms
-
-        # Calculate total response latency
-        total_response_latency = (
-            openai_ttfb + openai_processing + elevenlabs_ttfb + elevenlabs_processing
-        )
-
-        # Only save if we have meaningful data
-        if total_response_latency > 0:
-            filtered_metrics = {
-                "session_id": self.session_id,
-                "timestamp": datetime.now().isoformat(),
-                "response_latency_ms": round(total_response_latency, 2),
-                "breakdown": {
-                    "openai_ttfb_ms": round(openai_ttfb, 2),
-                    "openai_processing_ms": round(openai_processing, 2),
-                    "elevenlabs_ttfb_ms": round(elevenlabs_ttfb, 2),
-                    "elevenlabs_processing_ms": round(elevenlabs_processing, 2),
-                },
-            }
-
-            with open(filename, "w") as f:
-                json.dump(filtered_metrics, f, indent=2)
-
-            print(
-                f"💾 Saved server response latency ({total_response_latency:.0f}ms) to {filename}"
-            )
-            print(
-                f"   Breakdown: OpenAI={openai_ttfb + openai_processing:.0f}ms, ElevenLabs={elevenlabs_ttfb:.0f}ms"
-            )
-            return filename
-        else:
-            print(f"⚠️  No response latency metrics found in server metrics")
-            return None
-
     def save_session_metrics(self):
         """Save current session metrics to a file and return the filename."""
         if self.session_id and self.metrics_data:
@@ -183,9 +121,6 @@ class MetricsLogger(FrameProcessor):
                 json.dump(self.metrics_data, f, indent=2)
 
             print(f"💾 Saved {len(self.metrics_data)} metrics to {filename}")
-
-            # Save filtered server latency metrics
-            self.save_server_latency_metrics()
 
             return filename
         else:

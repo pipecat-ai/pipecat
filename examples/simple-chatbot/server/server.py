@@ -30,6 +30,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
 
 import aiohttp
+from audio_analyzer import analyze_session_audio, compare_session_latencies
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -371,95 +372,6 @@ def update_session_data(session_id: str, speaker_type: str, filename: str):
     save_session_data()
 
 
-def save_metrics(session_id: str, metrics: Dict[str, Any]) -> str:
-    """Save server-side metrics, filtering to only response latency."""
-    os.makedirs("session_data", exist_ok=True)
-    filename = f"session_data/{session_id}_server_metrics.json"
-
-    # Check if metrics is a list (new format) or dict (old format)
-    if isinstance(metrics, list):
-        # New format: list of metric objects
-        return save_metrics_from_list(session_id, metrics, filename)
-    else:
-        # Old format: dict with llm_response_time
-        return save_metrics_from_dict(session_id, metrics, filename)
-
-
-def save_metrics_from_list(session_id: str, metrics_list: List[Dict], filename: str) -> str:
-    """Process pipecat metrics list and calculate response latency."""
-    # Extract relevant metrics and convert to milliseconds
-    openai_ttfb = 0
-    openai_processing = 0
-    elevenlabs_ttfb = 0
-
-    for metric in metrics_list:
-        if metric.get("processor", "").startswith("OpenAILLMService"):
-            if metric.get("metric_type") == "ttfb":
-                openai_ttfb = metric.get("value", 0) * 1000  # Convert to ms
-            elif metric.get("metric_type") == "processing_time":
-                openai_processing = metric.get("value", 0) * 1000  # Convert to ms
-
-        elif metric.get("processor", "").startswith("ElevenLabsTTSService"):
-            if metric.get("metric_type") == "ttfb":
-                elevenlabs_ttfb = metric.get("value", 0) * 1000  # Convert to ms
-
-    # Calculate total response latency
-    total_response_latency = openai_ttfb + openai_processing + elevenlabs_ttfb
-
-    # Only save if we have meaningful data
-    if total_response_latency > 0:
-        filtered_metrics = {
-            "session_id": session_id,
-            "timestamp": datetime.now().isoformat(),
-            "response_latency_ms": round(total_response_latency, 2),
-            "breakdown": {
-                "openai_ttfb_ms": round(openai_ttfb, 2),
-                "openai_processing_ms": round(openai_processing, 2),
-                "elevenlabs_ttfb_ms": round(elevenlabs_ttfb, 2),
-            },
-        }
-
-        with open(filename, "w") as f:
-            json.dump(filtered_metrics, f, indent=2)
-
-        print(f"💾 Saved server response latency ({total_response_latency:.0f}ms) to {filename}")
-        print(
-            f"   Breakdown: OpenAI={openai_ttfb + openai_processing:.0f}ms, ElevenLabs={elevenlabs_ttfb:.0f}ms"
-        )
-        return filename
-    else:
-        print(f"⚠️  No response latency metrics found in server metrics")
-        return ""
-
-
-def save_metrics_from_dict(session_id: str, metrics: Dict[str, Any], filename: str) -> str:
-    """Handle old format dict metrics."""
-    filtered_metrics = {}
-
-    for key, value in metrics.items():
-        if key == "llm_response_time":
-            if isinstance(value, (int, float)):
-                filtered_metrics["response_latency_ms"] = value * 1000
-            else:
-                filtered_metrics["response_latency_ms"] = value
-        elif key == "session_id":
-            filtered_metrics[key] = value
-        elif key == "timestamp":
-            filtered_metrics[key] = value
-
-    if "response_latency_ms" in filtered_metrics:
-        with open(filename, "w") as f:
-            json.dump(filtered_metrics, f, indent=2)
-
-        print(
-            f"💾 Saved server response latency ({filtered_metrics['response_latency_ms']:.0f}ms) to {filename}"
-        )
-        return filename
-    else:
-        print(f"⚠️  No response latency metric found in server metrics")
-        return ""
-
-
 def save_latency_metrics(session_id: str, metrics: List[LatencyMetric]) -> str:
     """Save client-side latency metrics."""
     os.makedirs("session_data", exist_ok=True)
@@ -564,44 +476,130 @@ async def get_latency_metrics(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# API endpoint to get all session data (existing + latency metrics)
-@app.get("/api/sessions/{session_id}/all-metrics")
-async def get_all_session_metrics(session_id: str):
-    """Get both server-side metrics and client-side latency metrics for a session."""
+@app.post("/api/sessions/{session_id}/analyze-audio")
+async def analyze_session_audio_endpoint(session_id: str):
+    """Analyze audio recording for a session to extract actual latency measurements."""
     try:
-        result = {"session_id": session_id, "server_metrics": None, "latency_metrics": None}
+        print(f"🎵 Starting audio analysis for session: {session_id}")
 
-        # Get server-side metrics
-        server_metrics_file = f"session_data/{session_id}_server_metrics.json"
-        if os.path.exists(server_metrics_file):
-            with open(server_metrics_file, "r") as f:
-                result["server_metrics"] = json.load(f)
+        # Perform audio analysis
+        analysis_results = analyze_session_audio(session_id)
 
-        # Get client-side latency metrics
-        latency_metrics_file = f"session_data/{session_id}_client_metrics.json"
-        if os.path.exists(latency_metrics_file):
-            with open(latency_metrics_file, "r") as f:
-                result["latency_metrics"] = json.load(f)
+        # Save analysis results to file
+        os.makedirs("session_data", exist_ok=True)
+        analysis_filename = f"session_data/{session_id}_audio_analysis.json"
 
-        return result
+        with open(analysis_filename, "w") as f:
+            json.dump(analysis_results, f, indent=2)
 
+        print(f"💾 Saved audio analysis results to {analysis_filename}")
+        print(
+            f"📊 Found {analysis_results['analysis_summary']['response_latency_count']} response latencies in audio"
+        )
+
+        return {
+            "session_id": session_id,
+            "status": "success",
+            "analysis_file": analysis_filename,
+            "summary": analysis_results["analysis_summary"],
+            "audio_file": analysis_results["audio_file"],
+            "audio_duration_seconds": analysis_results["audio_duration_seconds"],
+        }
+
+    except FileNotFoundError as e:
+        print(f"❌ File not found for session {session_id}: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"Error retrieving all metrics: {e}")
+        print(f"❌ Error analyzing audio for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# API endpoint to update session metrics
-@app.post("/api/sessions/{session_id}/metrics")
-async def save_session_metrics(session_id: str, metrics: dict):
-    """Save server-side metrics for a session and return confirmation message."""
+@app.get("/api/sessions/{session_id}/latency-comparison")
+async def get_latency_comparison(session_id: str):
+    """Get comparison between event-based and audio-based latency metrics."""
     try:
-        filename = save_metrics(session_id, metrics)
-        if filename:
-            return {"message": f"Metrics saved to {filename}", "session_id": session_id}
-        else:
-            return {"message": "No response latency metric to save", "session_id": session_id}
+        print(f"📊 Generating latency comparison for session: {session_id}")
+
+        # Perform comparison
+        comparisons = compare_session_latencies(session_id)
+
+        if not comparisons:
+            return {
+                "session_id": session_id,
+                "status": "no_data",
+                "message": "No comparable latency data found",
+                "comparisons": [],
+            }
+
+        # Save comparison results
+        os.makedirs("session_data", exist_ok=True)
+        comparison_filename = f"session_data/{session_id}_latency_comparison.json"
+
+        comparison_data = {
+            "session_id": session_id,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "comparisons": [
+                {
+                    "session_id": comp.session_id,
+                    "event_based_ms": comp.event_based_ms,
+                    "audio_based_ms": comp.audio_based_ms,
+                    "variance_ms": comp.variance_ms,
+                    "variance_percent": comp.variance_percent,
+                    "status": comp.status,
+                }
+                for comp in comparisons
+            ],
+        }
+
+        with open(comparison_filename, "w") as f:
+            json.dump(comparison_data, f, indent=2)
+
+        print(f"💾 Saved latency comparison to {comparison_filename}")
+
+        # Print comparison summary
+        for comp in comparisons:
+            print(f"📈 Latency Comparison for {session_id}:")
+            print(f"   Event-based: {comp.event_based_ms:.1f}ms")
+            print(f"   Audio-based: {comp.audio_based_ms:.1f}ms")
+            print(f"   Variance: {comp.variance_ms:.1f}ms ({comp.variance_percent:.1f}%)")
+            print(f"   Status: {comp.status}")
+
+        return {
+            "session_id": session_id,
+            "status": "success",
+            "comparison_file": comparison_filename,
+            "comparisons": comparison_data["comparisons"],
+        }
+
+    except FileNotFoundError as e:
+        print(f"❌ Required files not found for session {session_id}: {e}")
+        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        print(f"Error saving metrics: {e}")
+        print(f"❌ Error generating comparison for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/sessions/{session_id}/audio-analysis")
+async def get_audio_analysis(session_id: str):
+    """Get existing audio analysis results for a session."""
+    try:
+        analysis_filename = f"session_data/{session_id}_audio_analysis.json"
+
+        if not os.path.exists(analysis_filename):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No audio analysis found for session {session_id}. Run analysis first.",
+            )
+
+        with open(analysis_filename, "r") as f:
+            analysis_data = json.load(f)
+
+        return analysis_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error retrieving audio analysis for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
