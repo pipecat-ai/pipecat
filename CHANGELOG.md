@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GoogleHttpTTSService` which uses Google's HTTP TTS API.
+
 - Added `TavusTransport`, a new transport implementation compatible with any 
   Pipecat pipeline. When using the `TavusTransport`the Pipecat bot will 
   connect in the same room as the Tavus Avatar and the user.
@@ -83,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow passing observers to `run_test()` while running unit tests.
 
 ### Changed
+
+- Updated `GoogleTTSService` to use Google's streaming TTS API. The default voice also updated to `en-US-Chirp3-HD-Charon`.
 
 - ⚠️Refactored the `TavusVideoService`, so it acts like a proxy, sending audio to 
   Tavus and receiving both audio and video. This will make `TavusVideoService` usable
