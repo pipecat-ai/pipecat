@@ -9,8 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `TavusTransport`, a new transport implementation compatible with any 
-  Pipecat pipeline. When using the `TavusTransport`the Pipecat bot will 
+- Added `DTMFAggregator`, which aggregates keypad presses into
+  `TranscriptionFrame`s. Aggregation occurs after a timeout, termination key
+  press, or user interruption. You can specify the prefix of the
+  `TranscriptionFrame`.
+
+- Added `TavusTransport`, a new transport implementation compatible with any
+  Pipecat pipeline. When using the `TavusTransport`the Pipecat bot will
   connect in the same room as the Tavus Avatar and the user.
 
 - Added `UserBotLatencyLogObserver`. This is an observer that logs the latency
@@ -84,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- ⚠️Refactored the `TavusVideoService`, so it acts like a proxy, sending audio to 
+- ⚠️Refactored the `TavusVideoService`, so it acts like a proxy, sending audio to
   Tavus and receiving both audio and video. This will make `TavusVideoService` usable
   with any Pipecat pipeline and with any transport. This is a **breaking change**,
   check the `examples/foundational/21a-tavus-layer-small-webrtc.py` to see how to
