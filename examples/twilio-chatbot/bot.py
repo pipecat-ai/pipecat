@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import wave
+from pathlib import Path
 
 import aiofiles
 from dotenv import load_dotenv
@@ -112,9 +113,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             vad_analyzer=SileroVADAnalyzer(),
             serializer=serializer,
             audio_in_filter=KrispFilter(
-                model_path=os.path.join(
-                    os.path.dirname(__file__), "krisp_sdk_model/models/inb.bvc.hs.c6.w.s.23cdb3.kef"
-                ),
+                model_path=os.getenv("KRISP_MODEL_PATH"),
                 suppression_level=90,
             ),
         ),
@@ -151,8 +150,8 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     # )
 
     agent_flow_processor = await initialize_conversational_agent(
-        agent_id="680c74afa49c52c0f832821d",
-        call_id="CALL-1746008459293-112543",
+        agent_id="68186085cffd8fb97d1f84ad",
+        call_id="CALL-1747224604782-94a54d",
         call_data=CallData(
             variables={
                 "call_id": "CALL-1747224604782-94a54d",
@@ -172,14 +171,15 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         },
         {
             "role": "user",
-            "content": "",
+            "content": json.dumps({"transcript": ""}),
         },
     ]
 
-    context = OpenAILLMContext(messages)
+    # context = OpenAILLMContext(messages)
+    context = AtomsAgentContext(messages=messages)
     context_aggregator = llm.create_context_aggregator(context)
-    initial_context = AtomsAgentContext.upgrade_to_atoms_agent(context)
-    chunks = [chunk async for chunk in (agent_flow_processor.get_response(context=initial_context))]
+    # initial_context = AtomsAgentContext.upgrade_to_atoms_agent(context)
+    chunks = [chunk async for chunk in (agent_flow_processor.get_response(context=context))]
     initial_agent_response = "".join(chunks)
 
     logger.info(f"Initial agent response: {initial_agent_response}")
