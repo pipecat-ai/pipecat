@@ -422,26 +422,29 @@ class DailyTransportClient(EventHandler):
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
-        if self._params.video_out_enabled and not self._camera and self._task_manager:
+        if self._params.audio_in_enabled and not self._audio_task and self._task_manager:
+            self._audio_task = self._task_manager.create_task(
+                self._callback_task_handler(self._audio_queue),
+                f"{self}::audio_callback_task",
+            )
+
+        if self._params.video_in_enabled and not self._video_task and self._task_manager:
+            self._video_task = self._task_manager.create_task(
+                self._callback_task_handler(self._video_queue),
+                f"{self}::video_callback_task",
+            )
+        if self._params.video_out_enabled and not self._camera:
             self._camera = Daily.create_camera_device(
                 self._camera_name(),
                 width=self._params.video_out_width,
                 height=self._params.video_out_height,
                 color_format=self._params.video_out_color_format,
             )
-            self._video_task = self._task_manager.create_task(
-                self._callback_task_handler(self._video_queue),
-                f"{self}::video_callback_task",
-            )
 
-        if self._params.audio_out_enabled and not self._microphone_track and self._task_manager:
+        if self._params.audio_out_enabled and not self._microphone_track:
             audio_source = CustomAudioSource(self._out_sample_rate, self._params.audio_out_channels)
             audio_track = CustomAudioTrack(audio_source)
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
-            self._audio_task = self._task_manager.create_task(
-                self._callback_task_handler(self._audio_queue),
-                f"{self}::audio_callback_task",
-            )
 
     async def join(self):
         # Transport already joined or joining, ignore.
