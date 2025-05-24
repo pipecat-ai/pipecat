@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GoogleHttpTTSService` which uses Google's HTTP TTS API.
+
 - Added `PipelineTask.add_observer()` and `PipelineTask.remove_observer()` to
   allow mangaging observers at runtime. This is useful for cases where the task
   is passed around to other code components that might want to observe the
@@ -72,6 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow passing observers to `run_test()` while running unit tests.
 
 ### Changed
+
+- Updated `GoogleTTSService` to use Google's streaming TTS API. The default voice also updated to `en-US-Chirp3-HD-Charon`.
 
 - `BaseTextFilter` methods `filter()`, `update_settings()`,
   `handle_interruption()` and `reset_interruption()` are now async.
