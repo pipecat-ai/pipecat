@@ -282,6 +282,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     - Tool configurations
     - Token usage metrics
     - Performance metrics like TTFB
+    - Aggregated output text
 
     Args:
         func: The LLM method to trace.
@@ -313,6 +314,26 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     span_name, context=parent_context
                 ) as current_span:
                     try:
+                        # Store original method and output aggregator
+                        original_push_frame = self.push_frame
+                        output_text = ""  # Simple string accumulation
+
+                        async def traced_push_frame(frame, direction=None):
+                            nonlocal output_text
+                            # Check for LLMTextFrame
+                            if (
+                                hasattr(frame, "__class__")
+                                and frame.__class__.__name__ == "LLMTextFrame"
+                                and hasattr(frame, "text")
+                            ):
+                                output_text += frame.text
+
+                            # Call original
+                            if direction is not None:
+                                return await original_push_frame(frame, direction)
+                            else:
+                                return await original_push_frame(frame)
+
                         # For token usage monitoring
                         original_start_llm_usage_metrics = None
                         if hasattr(self, "start_llm_usage_metrics"):
@@ -331,6 +352,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.start_llm_usage_metrics = wrapped_start_llm_usage_metrics
 
                         try:
+                            # Replace push_frame to capture output
+                            self.push_frame = traced_push_frame
+
                             # Detect if we're using Google's service
                             is_google_service = "google" in service_class_name.lower()
 
@@ -411,13 +435,23 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                             # Add all gathered attributes to the span
                             add_llm_span_attributes(span=current_span, **attribute_kwargs)
+
+                            # Call the original function
+                            result = await f(self, context, *args, **kwargs)
+
+                            # Add output if we captured any
+                            if output_text:
+                                current_span.set_attribute("output", output_text)
+
+                            return result
+
                         except Exception as e:
                             logging.warning(f"Error adding initial LLM attributes: {e}")
-
-                        # Call the original function
-                        return await f(self, context, *args, **kwargs)
+                            raise
                     finally:
-                        # Restore the original methods if we overrode them
+                        # Always restore the original methods
+                        self.push_frame = original_push_frame
+
                         if (
                             "original_start_llm_usage_metrics" in locals()
                             and original_start_llm_usage_metrics
