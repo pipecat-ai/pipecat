@@ -8,6 +8,8 @@ from enum import Enum
 from inspect import isasyncgen, isasyncgenfunction, isgenerator, isgeneratorfunction
 from typing import Any, AsyncGenerator, Callable, Dict, Generator, List, Optional, Text, Tuple
 
+import aiohttp
+import aiohttp.client_exceptions
 import httpx
 import pytz
 import requests
@@ -635,7 +637,7 @@ class FlowGraphManager(FrameProcessor):
                 self.flow_graph_manager.variables.update(extracted)
                 logger.info(f"Updated variables with response data: {extracted}")
 
-        def _make_api_request_from_node(
+        async def _make_api_request_from_node(
             self, node: Node, variables: Dict[str, Any]
         ) -> Union[Dict[str, Any], str]:
             """Make an API request based on node configuration.
@@ -686,7 +688,7 @@ class FlowGraphManager(FrameProcessor):
                     raise Exception(f"Error processing body: {str(e)}")
 
             # Make the actual request
-            result = self._make_api_request(
+            result = await self._make_api_request(
                 api_request_type=http_request.method.value,
                 api_link=replace_variables(http_request.url, variables),
                 api_headers=headers,
@@ -710,7 +712,7 @@ class FlowGraphManager(FrameProcessor):
             """
             # Make API request
             try:
-                response_data = self._make_api_request_from_node(node, variables)
+                response_data = await self._make_api_request_from_node(node, variables)
                 context._update_last_user_context(
                     "api_node_response", json.dumps(response_data, indent=2, ensure_ascii=False)
                 )
@@ -720,7 +722,7 @@ class FlowGraphManager(FrameProcessor):
                 logger.error(f"API request failed: {str(e)}")
                 return False
 
-        def _make_api_request(
+        async def _make_api_request(
             self,
             api_request_type: str,
             api_link: str,
@@ -744,62 +746,26 @@ class FlowGraphManager(FrameProcessor):
                 AgentError: If the request fails
             """
             try:
-                # Map the request type to the appropriate requests method
-                request_method = {
-                    "GET": requests.get,
-                    "POST": requests.post,
-                    "PUT": requests.put,
-                    "DELETE": requests.delete,
-                    "PATCH": requests.patch,
-                }.get(api_request_type.upper())
-
-                if not request_method:
-                    raise Exception(f"Invalid API request type: {api_request_type}")
-
-                # Make the request with appropriate parameters based on method type
-                if api_request_type.upper() in ["GET", "DELETE"]:
-                    response = request_method(
-                        url=api_link,
+                async with aiohttp.ClientSession() as session:
+                    async with session.request(
+                        api_request_type,
+                        api_link,
+                        data=api_body,
                         headers=api_headers,
-                        params=api_body if isinstance(api_body, dict) else None,
                         timeout=api_timeout_sec,
-                    )
-                else:
-                    if isinstance(api_body, dict):
-                        response = request_method(
-                            url=api_link,
-                            headers=api_headers,
-                            json=api_body,
-                            timeout=api_timeout_sec,
-                        )
-                    else:
-                        response = request_method(
-                            url=api_link,
-                            headers=api_headers,
-                            data=api_body,
-                            timeout=api_timeout_sec,
-                        )
-
-                # Raise an exception if the response was unsuccessful
-                response.raise_for_status()
-
-                # Return the JSON response or text
-                try:
-                    return response.json()
-                except requests.exceptions.JSONDecodeError:
-                    if response.text.strip():
-                        return response.text
-                    else:
-                        return ""
-
-            except requests.exceptions.HTTPError as e:
-                # This captures the errors raised by raise_for_status()
-                raise Exception(
-                    f"API Request failed with status code {e.response.status_code}: {str(e)}"
-                )
-            except requests.exceptions.RequestException as e:
-                # This captures other request-related errors (connection, timeout, etc.)
-                raise Exception(f"API Request failed: {str(e)}")
+                    ) as response:
+                        response.raise_for_status()
+                        try:
+                            response.raise_for_status()
+                            return await response.json()
+                        except aiohttp.client_exceptions.ContentTypeError:
+                            return await response.text()
+                        except Exception as e:
+                            logger.error(f"Error parsing response: {str(e)}")
+                            return ""
+            except Exception as e:
+                logger.error(f"Error making API request: {str(e)}")
+                return ""
 
     def __init__(
         self,
@@ -961,13 +927,17 @@ class FlowGraphManager(FrameProcessor):
         selected_pathway_id = self._cleanup_think_tokens(
             await self.flow_model_client.get_response(flow_history)
         )
-        if selected_pathway_id == "null":
+        if selected_pathway_id == "null" or not isinstance(selected_pathway_id, str):
             return False
 
         try:
-            await self._hop(pathway_id=selected_pathway_id)
+            logger.debug(
+                f"hopping to {selected_pathway_id} for node_type: {self.current_node.type} node_name: {self.current_node.name}"
+            )
+            self._hop(pathway_id=selected_pathway_id)
             return True
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error hopping: {str(e)}")
             return False
 
     def _hop(self, pathway_id: str) -> None:
@@ -1148,6 +1118,11 @@ class FlowGraphManager(FrameProcessor):
     async def get_response(self, context: AtomsAgentContext):
         """Get the response from the response model client."""
         # Before hopping we need to extract variables from the current node and user response
+
+        logger.debug(
+            f"getting response for node_type: {self.current_node.type} node_name: {self.current_node.name}"
+        )
+
         if self.current_node.variables and self.current_node.variables.is_enabled:
             if self.current_node.type == NodeType.API_CALL:
                 logger.debug("extracting variables from api call node")
@@ -1156,8 +1131,24 @@ class FlowGraphManager(FrameProcessor):
                 logger.debug("extracting variables from current node")
                 await self._extract_variables(context=context)
 
+        logger.debug(
+            f"now comes the hopping for node_type: {self.current_node.type} node_name: {self.current_node.name}"
+        )
+
         # After extracting variables we need to hop to the next node
-        await self._handle_hopping(context=context)
+        # If hopping fails for api call node, then we do not proceed with the flow else we will be in infinite loop just let user know that something went wrong and cut the call
+        hopped = await self._handle_hopping(context=context)
+        if not hopped and self.current_node.type == NodeType.API_CALL:
+            logger.debug(
+                f"hopping failed for node: {self.current_node.name} {self.current_node.type} {self.current_node.id}"
+            )
+            yield "Something went wrong, please try again later."
+            await self.push_frame(LastTurnFrame(conversation_id="123"))
+            return
+
+        logger.debug(
+            f"hopped: {hopped} for node_type: {self.current_node.type} node_name: {self.current_node.name}"
+        )
 
         # format the messages for the response model
         context._update_last_user_context(
@@ -1167,19 +1158,30 @@ class FlowGraphManager(FrameProcessor):
             ),
         )
 
+        logger.debug(
+            f"now comes the response model for node_type: {self.current_node.type} node_name: {self.current_node.name}"
+        )
+
         # after hopping we have to update the delta in the context
         delta = context.get_user_context_delta()
         if delta:
             delta = json.dumps(delta, indent=2, ensure_ascii=False)
             context._update_last_user_context("delta", delta)
 
+            logger.debug(
+                f"delta: {delta} for node_type: {self.current_node.type} node_name: {self.current_node.name}"
+            )
+
         if self.current_node.type == NodeType.DEFAULT:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
+                    logger.debug(f"yielding chunk: {chunk} from default node")
                     yield chunk
             else:
                 async for chunk in self._handle_dynamic_response(context=context):
+                    logger.debug(f"yielding chunk: {chunk} from default node")
                     yield chunk
+                return
         elif self.current_node.type == NodeType.END_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
@@ -1189,6 +1191,7 @@ class FlowGraphManager(FrameProcessor):
                 async for chunk in self._handle_dynamic_response(context=context):
                     yield chunk
                 await self.push_frame(LastTurnFrame(conversation_id="123"))
+                return
         elif self.current_node.type == NodeType.TRANSFER_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
@@ -1210,16 +1213,23 @@ class FlowGraphManager(FrameProcessor):
                         reason="transfer_call",
                     )
                 )
+                return
         elif self.current_node.type == NodeType.API_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
+                    logger.debug(f"yielding chunk: {chunk} from api call node")
                     yield chunk
             else:
                 async for chunk in self._handle_dynamic_response(context=context):
+                    logger.debug(f"yielding chunk: {chunk} from api call node")
                     yield chunk
+            # Wait for the response to complete before processing API call
             await self.api_node_handler.process(
                 context=context, node=self.current_node, variables=self.variables
             )
+            return
+        else:
+            raise Exception(f"Unknown node type: {self.current_node.type}")
 
     async def _process_context(self, context: AtomsAgentContext) -> None:
         """Process the context and update the flow model client."""

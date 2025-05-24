@@ -229,26 +229,26 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             transport.input(),  # Websocket input from client
             stt,  # Speech-To-Text
             context_aggregator.user(),  # Aggregates user input into context
-            ParallelPipeline(
-                [
-                    # Branch 1: Main flow continuation (blocks original UserStoppedSpeaking)
-                    FunctionFilter(filter=block_user_stopped_speaking),
-                ],
-                [
-                    # Branch 2: Statement LLM for end-of-turn detection
-                    statement_judge_context_filter,  # Prepares input for statement_llm
-                    statement_llm,  # Google LLM for "YES"/"NO"
-                    completeness_check,  # Processes "YES"/"NO", may output UserStoppedSpeakingFrame
-                ],
-                [
-                    # Branch 3: Main conversational LLM and TTS (gated)
-                    FunctionFilter(
-                        filter=pass_only_llm_trigger_frames
-                    ),  # Ensure only relevant frames go to main LLM
-                    llm,  # Main LLM (OpenAI)
-                    bot_output_gate,  # Gates the output of the main LLM
-                ],
-            ),
+            # ParallelPipeline(
+            #     [
+            #         # Branch 1: Main flow continuation (blocks original UserStoppedSpeaking)
+            #         FunctionFilter(filter=block_user_stopped_speaking),
+            #     ],
+            #     [
+            #         # Branch 2: Statement LLM for end-of-turn detection
+            #         statement_judge_context_filter,  # Prepares input for statement_llm
+            #         statement_llm,  # Google LLM for "YES"/"NO"
+            #         completeness_check,  # Processes "YES"/"NO", may output UserStoppedSpeakingFrame
+            #     ],
+            #     [
+            #         # Branch 3: Main conversational LLM and TTS (gated)
+            #         FunctionFilter(
+            #             filter=pass_only_llm_trigger_frames
+            #         ),  # Ensure only relevant frames go to main LLM
+            #         llm,  # Main LLM (OpenAI)
+            #         bot_output_gate,  # Gates the output of the main LLM
+            #     ],
+            # ),
             agent_flow_processor,
             agent_action_processor,
             audiobuffer,
