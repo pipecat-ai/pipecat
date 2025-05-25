@@ -25,6 +25,7 @@ from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
 from pipecat.frames.frames import (
+    EndFrame,
     Frame,
     LastTurnFrame,
     LLMFullResponseEndFrame,
@@ -667,7 +668,8 @@ class FlowGraphManager(FrameProcessor):
                 f"hopping failed for node: {self.current_node.name} {self.current_node.type} {self.current_node.id}"
             )
             yield "Something went wrong, please try again later."
-            await self.push_frame(LastTurnFrame(conversation_id="123"))
+            await self.push_frame(EndFrame())
+            # await self.push_frame(LastTurnFrame(conversation_id="123"))
             return
 
         logger.debug(
@@ -699,11 +701,9 @@ class FlowGraphManager(FrameProcessor):
         if self.current_node.type == NodeType.DEFAULT:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
-                    logger.debug(f"yielding chunk: {chunk} from default node")
                     yield chunk
             else:
                 async for chunk in self._handle_dynamic_response(context=context):
-                    logger.debug(f"yielding chunk: {chunk} from default node")
                     yield chunk
                 return
         elif self.current_node.type == NodeType.END_CALL:
@@ -741,11 +741,9 @@ class FlowGraphManager(FrameProcessor):
         elif self.current_node.type == NodeType.API_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
-                    logger.debug(f"yielding chunk: {chunk} from api call node")
                     yield chunk
             else:
                 async for chunk in self._handle_dynamic_response(context=context):
-                    logger.debug(f"yielding chunk: {chunk} from api call node")
                     yield chunk
             # Wait for the response to complete before processing API call
             await self.api_node_handler.process(
