@@ -89,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Don't raise an exception if event handler is not registered.
+
 - Updated `GoogleTTSService` to use Google's streaming TTS API. The default
   voice also updated to `en-US-Chirp3-HD-Charon`.
 
