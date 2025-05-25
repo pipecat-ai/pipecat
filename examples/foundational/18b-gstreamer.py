@@ -123,6 +123,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
             DebugLogObserver(
                 frame_types={
                     # TextFrame: None,
+                    TextFrame: (MoondreamService, FrameEndpoint.DESTINATION),
                     # InputImageRawFrame: None,
                     EndFrame: None,
                 }
