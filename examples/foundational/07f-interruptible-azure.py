@@ -19,6 +19,7 @@ from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.azure.stt import AzureSTTService
 from pipecat.services.azure.tts import AzureTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
@@ -28,6 +29,11 @@ load_dotenv(override=True)
 # selected.
 transport_params = {
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),

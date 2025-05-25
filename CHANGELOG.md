@@ -180,6 +180,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- It is now possible to run all (or most) foundational example with multiple
+  transports. By default, they run with P2P (Peer-To-Peer) WebRTC so you can try
+  everything locally. You can also run them with Daily or even with a Twilio
+  phone number.
+
 - Added foundation examples `07y-interruptible-minimax.py` and
   `07z-interruptible-sarvam.py`to show how to use the `MiniMaxHttpTTSService`
   and `SarvamTTSService`, respectively.

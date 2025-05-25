@@ -19,6 +19,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.whisper.stt import MLXModel, WhisperSTTServiceMLX
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
@@ -56,6 +57,10 @@ class TranscriptionLogger(FrameProcessor):
 # selected.
 transport_params = {
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS)),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=STOP_SECS)),
     ),
