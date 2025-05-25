@@ -6,19 +6,26 @@
 
 import argparse
 import asyncio
+import json
+import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Any, Callable, Dict, Mapping, Optional
 
 import aiohttp
 import uvicorn
-from daily_runner import configure
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import BackgroundTasks, FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 
+from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import (
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
+)
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -50,6 +57,8 @@ def run_example_daily(
     params: DailyParams,
 ):
     logger.info("Running example with DailyTransport...")
+
+    from daily_runner import configure
 
     async def run():
         async with aiohttp.ClientSession() as session:
@@ -130,6 +139,65 @@ def run_example_webrtc(
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+def run_example_twilio(
+    run_example: Callable,
+    args: argparse.Namespace,
+    params: FastAPIWebsocketParams,
+):
+    logger.info("Running example with FastAPIWebsocketTransport (Twilio)...")
+
+    app = FastAPI()
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins for testing
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.post("/")
+    async def start_call():
+        logger.debug("POST TwiML")
+
+        xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://{args.proxy}/ws"></Stream>
+  </Connect>
+  <Pause length="40"/>
+</Response>
+        """
+        return HTMLResponse(content=xml_content, media_type="application/xml")
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        await websocket.accept()
+
+        logger.debug("WebSocket connection accepted")
+
+        # Reading Twilio data.
+        start_data = websocket.iter_text()
+        await start_data.__anext__()
+        call_data = json.loads(await start_data.__anext__())
+        print(call_data, flush=True)
+        stream_sid = call_data["start"]["streamSid"]
+        call_sid = call_data["start"]["callSid"]
+
+        # Create websocket transport and update params.
+        params.add_wav_header = False
+        params.serializer = TwilioFrameSerializer(
+            stream_sid=stream_sid,
+            call_sid=call_sid,
+            account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
+            auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+        )
+        transport = FastAPIWebsocketTransport(websocket=websocket, params=params)
+        await run_example(transport, args)
+
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
 def run_main(
     run_example: Callable,
     args: argparse.Namespace,
@@ -145,6 +213,8 @@ def run_main(
             run_example_daily(run_example, args, params)
         case "webrtc":
             run_example_webrtc(run_example, args, params)
+        case "twilio":
+            run_example_twilio(run_example, args, params)
 
 
 def main(
@@ -156,18 +226,21 @@ def main(
     if not parser:
         parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
     parser.add_argument(
-        "--host", default="localhost", help="Host for WebRTC HTTP server (default: localhost)"
+        "--host", default="localhost", help="Host for HTTP server (default: localhost)"
     )
     parser.add_argument(
-        "--port", type=int, default=7860, help="Port for WebRTC HTTP server (default: 7860)"
+        "--port", type=int, default=7860, help="Port for HTTP server (default: 7860)"
     )
     parser.add_argument(
         "--transport",
         "-t",
         type=str,
-        choices=["daily", "webrtc"],
+        choices=["daily", "webrtc", "twilio"],
         default="webrtc",
         help="The transport this example should use",
+    )
+    parser.add_argument(
+        "--proxy", "-x", help="A public proxy host name (no protocol, e.g. proxy.example.com)"
     )
     parser.add_argument("--verbose", "-v", action="count", default=0)
     args = parser.parse_args()

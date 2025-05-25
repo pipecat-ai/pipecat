@@ -23,6 +23,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService, LLMSearchResponseFrame
 from pipecat.services.llm_service import LLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -71,6 +72,11 @@ class LLMSearchLoggerObserver(BaseObserver):
 # selected.
 transport_params = {
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
