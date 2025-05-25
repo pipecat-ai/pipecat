@@ -23,9 +23,8 @@ from pipecat.services.gladia.config import (
 )
 from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.transcriptions.language import Language
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -40,13 +39,17 @@ class TranscriptionLogger(FrameProcessor):
             print(f"Translation ({frame.language}): {frame.text}")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting bot")
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(audio_in_enabled=True),
+    "webrtc": lambda: TransportParams(audio_in_enabled=True),
+}
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(audio_in_enabled=True),
-    )
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
     stt = GladiaSTTService(
         api_key=os.getenv("GLADIA_API_KEY"),
@@ -74,6 +77,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
+        await task.cancel()
 
     @transport.event_handler("on_client_closed")
     async def on_client_closed(transport, client):
@@ -88,4 +92,4 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 if __name__ == "__main__":
     from run import main
 
-    main()
+    main(run_example, transport_params=transport_params)
