@@ -58,9 +58,8 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.mem0.memory import Mem0MemoryService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -123,7 +122,24 @@ async def get_initial_greeting(
         return "Hello! How can I help you today?"
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
+
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace):
     """Main bot execution function.
 
     Sets up and runs the bot pipeline including:
@@ -137,15 +153,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     USER_ID = "pipecat-demo-user"
 
     logger.info(f"Starting bot")
-
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -272,6 +279,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
+        await task.cancel()
 
     @transport.event_handler("on_client_closed")
     async def on_client_closed(transport, client):
@@ -285,4 +293,4 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 if __name__ == "__main__":
     from run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

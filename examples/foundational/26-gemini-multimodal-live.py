@@ -17,29 +17,36 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 
 # Load environment variables
 load_dotenv(override=True)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting bot")
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+}
 
-    # Initialize the SmallWebRTCTransport with the connection
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            video_in_enabled=False,
-            # set stop_secs to something roughly similar to the internal setting
-            # of the Multimodal Live api, just to align events.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
-        ),
-    )
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace):
+    logger.info(f"Starting bot")
 
     # Create the Gemini Multimodal Live LLM service
     system_instruction = f"""
@@ -96,6 +103,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
+        await task.cancel()
 
     @transport.event_handler("on_client_closed")
     async def on_client_closed(transport, client):
@@ -110,4 +118,4 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 if __name__ == "__main__":
     from run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

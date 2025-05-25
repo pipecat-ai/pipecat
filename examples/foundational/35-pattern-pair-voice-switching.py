@@ -59,9 +59,8 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
 
 load_dotenv(override=True)
@@ -74,18 +73,25 @@ VOICE_IDS = {
     "male": "7cf0e2b1-8daf-4fe4-89ad-f6039398f359",  # Male character voice
 }
 
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace):
     logger.info(f"Starting bot")
-
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
 
     # Create pattern pair aggregator for voice switching
     pattern_aggregator = PatternPairAggregator()
@@ -215,6 +221,7 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
+        await task.cancel()
 
     @transport.event_handler("on_client_closed")
     async def on_client_closed(transport, client):
@@ -228,4 +235,4 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
 if __name__ == "__main__":
     from run import main
 
-    main()
+    main(run_example, transport_params=transport_params)
