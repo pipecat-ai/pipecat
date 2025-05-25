@@ -5,6 +5,7 @@
 #
 
 import argparse
+from typing import Optional
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -12,6 +13,8 @@ from loguru import logger
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
+    InputImageRawFrame,
+    OutputImageRawFrame,
     TextFrame,
     TTSTextFrame,
     UserImageRequestFrame,
@@ -34,26 +37,41 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-class UserImageRequester(FrameProcessor):
+class DebugProcessor(FrameProcessor):
     def __init__(self):
         super().__init__()
-        self.participant_id = None
-
-    def set_participant_id(self, participant_id: str):
-        self.participant_id = participant_id
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if self.participant_id and isinstance(frame, TextFrame):
-            await self.push_frame(
-                UserImageRequestFrame(self.participant_id), FrameDirection.UPSTREAM
+        if isinstance(frame, TextFrame):
+            logger.info(f"DebugProcessor received text: {frame.text}")
+        elif isinstance(frame, EndFrame):
+            logger.info("DebugProcessor received end frame")
+
+        await self.push_frame(frame, direction)
+
+
+class UserImageRequester(FrameProcessor):
+    def __init__(self, participant_id: Optional[str] = None):
+        super().__init__()
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, OutputImageRawFrame):
+            await self.push_frame(frame)
+            # logger.info(f"UserImageRequester received image frame with size: {frame.size}")
+            text_frame = TextFrame(
+                "Are there people in the bottom right corner of the image? Only answer with YES or NO."
             )
-            await self.push_frame(
-                TextFrame(
-                    "Is there a person wearing a blue shirt in this image? Only answer with YES or NO."
-                )
+            await self.push_frame(text_frame)
+            input_frame = InputImageRawFrame(
+                image=frame.image,
+                size=frame.size,
+                format=frame.format,
             )
+            await self.push_frame(input_frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -85,11 +103,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
 
     ir = UserImageRequester()
     va = VisionImageFrameAggregator()
+    debug = DebugProcessor()
 
     pipeline = Pipeline(
         [
             gst,  # GStreamer file source
             ir,
+            # debug,
             va,
             moondream,
             # alert_processor, # Send an email alert or something if the door is open
@@ -102,12 +122,25 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
         observers=[
             DebugLogObserver(
                 frame_types={
-                    TextFrame: None,
+                    # TextFrame: None,
+                    # InputImageRawFrame: None,
                     EndFrame: None,
                 }
             ),
         ],
     )
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected: {client}")
+
+        await task.queue_frames(
+            [
+                TextFrame(
+                    "Are there people in the bottom right corner of the image? Only answer with YES or NO."
+                )
+            ]
+        )
 
     runner = PipelineRunner(handle_sigint=False)
 
