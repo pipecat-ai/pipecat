@@ -54,7 +54,7 @@ from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
-from pipecat.services.atoms.atoms_agent import (
+from pipecat.services.atoms.agent import (
     AtomsAgentContext,
     CallData,
     initialize_conversational_agent,
