@@ -81,6 +81,5 @@ class MoondreamService(VisionService):
             return description
 
         description = await asyncio.to_thread(get_image_description, frame)
-        logger.info(f"Image description: {description}")
 
         yield TextFrame(text=description)

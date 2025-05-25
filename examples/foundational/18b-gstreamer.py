@@ -37,7 +37,7 @@ from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 load_dotenv(override=True)
 
 
-class DebugProcessor(FrameProcessor):
+class AlertProcessor(FrameProcessor):
     def __init__(self):
         super().__init__()
 
@@ -45,9 +45,12 @@ class DebugProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TextFrame):
-            logger.info(f"DebugProcessor received text: {frame.text}")
-        elif isinstance(frame, EndFrame):
-            logger.info("DebugProcessor received end frame")
+            logger.info(f"Alert Processor received text: {frame.text}")
+            text = frame.text.strip().upper()
+            if text == "YES":
+                logger.info("Alert: YES")
+            else:
+                logger.info("Alert: NO")
 
         await self.push_frame(frame, direction)
 
@@ -103,7 +106,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
 
     ir = UserImageRequester()
     va = VisionImageFrameAggregator()
-    debug = DebugProcessor()
+    alert = AlertProcessor()
 
     pipeline = Pipeline(
         [
@@ -112,7 +115,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
             # debug,
             va,
             moondream,
-            # alert_processor, # Send an email alert or something if the door is open
+            alert,  # Send an email alert or something if the door is open
             transport.output(),  # Transport bot output
         ]
     )
@@ -123,7 +126,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
             DebugLogObserver(
                 frame_types={
                     # TextFrame: None,
-                    TextFrame: (MoondreamService, FrameEndpoint.DESTINATION),
+                    TextFrame: (MoondreamService, FrameEndpoint.SOURCE),
                     # InputImageRawFrame: None,
                     EndFrame: None,
                 }
