@@ -695,7 +695,9 @@ class DailyTransportClient(EventHandler):
 
         self._audio_renderers.setdefault(participant_id, {})[audio_source] = callback
 
-        logger.info(f"Starting to capture [{audio_source}] audio from participant {participant_id}")
+        logger.debug(
+            f"Starting to capture [{audio_source}] audio from participant {participant_id}"
+        )
 
         self._client.set_audio_renderer(
             participant_id,
@@ -722,6 +724,10 @@ class DailyTransportClient(EventHandler):
         await self.update_subscriptions(participant_settings={participant_id: media})
 
         self._video_renderers.setdefault(participant_id, {})[video_source] = callback
+
+        logger.debug(
+            f"Starting to capture [{video_source}] video from participant {participant_id}"
+        )
 
         self._client.set_video_renderer(
             participant_id,
@@ -1106,7 +1112,7 @@ class DailyInputTransport(BaseInputTransport):
             next_time = prev_time + 1 / framerate
             render_frame = (next_time - curr_time) < 0.1
 
-        elif self._video_renderers[participant_id][video_source]["render_next_frame"]:
+        if self._video_renderers[participant_id][video_source]["render_next_frame"]:
             request_frame = self._video_renderers[participant_id][video_source][
                 "render_next_frame"
             ].pop(0)
