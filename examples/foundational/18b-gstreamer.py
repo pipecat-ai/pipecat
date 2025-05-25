@@ -48,6 +48,7 @@ class AlertProcessor(FrameProcessor):
             logger.info(f"Alert Processor received text: {frame.text}")
             text = frame.text.strip().upper()
             if text == "YES":
+                # SEND AN EMAIL HERE
                 logger.info("Alert: YES")
             else:
                 logger.info("Alert: NO")
