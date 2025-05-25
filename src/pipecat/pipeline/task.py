@@ -236,6 +236,7 @@ class PipelineTask(BaseTask):
             )
             observers.append(self._turn_trace_observer)
         self._finished = False
+        self._cancelled = False
 
         # This queue receives frames coming from the pipeline upstream.
         self._up_queue = asyncio.Queue()
@@ -346,7 +347,6 @@ class PipelineTask(BaseTask):
 
     async def cancel(self):
         """Stops the running pipeline immediately."""
-        logger.debug(f"Canceling pipeline task {self}")
         await self._cancel()
 
     async def run(self):
@@ -406,12 +406,15 @@ class PipelineTask(BaseTask):
                 await self.queue_frame(frame)
 
     async def _cancel(self):
-        # Make sure everything is cleaned up downstream. This is sent
-        # out-of-band from the main streaming task which is what we want since
-        # we want to cancel right away.
-        await self._source.push_frame(CancelFrame())
-        # Only cancel the push task. Everything else will be cancelled in run().
-        await self._task_manager.cancel_task(self._process_push_task)
+        if not self._cancelled:
+            logger.debug(f"Canceling pipeline task {self}")
+            self._cancelled = True
+            # Make sure everything is cleaned up downstream. This is sent
+            # out-of-band from the main streaming task which is what we want since
+            # we want to cancel right away.
+            await self._source.push_frame(CancelFrame())
+            # Only cancel the push task. Everything else will be cancelled in run().
+            await self._task_manager.cancel_task(self._process_push_task)
 
     async def _create_tasks(self):
         self._process_up_task = self._task_manager.create_task(

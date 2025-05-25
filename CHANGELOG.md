@@ -89,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Check if `PipelineTask` has already been cancelled.
+
 - Don't raise an exception if event handler is not registered.
 
 - Upgraded `deepgram-sdk` to 4.1.0.
