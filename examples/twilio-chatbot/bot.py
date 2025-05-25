@@ -112,10 +112,10 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
             serializer=serializer,
-            audio_in_filter=KrispFilter(
-                model_path=os.getenv("KRISP_MODEL_PATH"),
-                suppression_level=90,
-            ),
+            # audio_in_filter=KrispFilter(
+            #     model_path=os.getenv("KRISP_MODEL_PATH"),
+            #     suppression_level=90,
+            # ),
         ),
     )
 
@@ -229,28 +229,30 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             transport.input(),  # Websocket input from client
             stt,  # Speech-To-Text
             context_aggregator.user(),  # Aggregates user input into context
-            # ParallelPipeline(
-            #     [
-            #         # Branch 1: Main flow continuation (blocks original UserStoppedSpeaking)
-            #         FunctionFilter(filter=block_user_stopped_speaking),
-            #     ],
-            #     [
-            #         # Branch 2: Statement LLM for end-of-turn detection
-            #         statement_judge_context_filter,  # Prepares input for statement_llm
-            #         statement_llm,  # Google LLM for "YES"/"NO"
-            #         completeness_check,  # Processes "YES"/"NO", may output UserStoppedSpeakingFrame
-            #     ],
-            #     [
-            #         # Branch 3: Main conversational LLM and TTS (gated)
-            #         FunctionFilter(
-            #             filter=pass_only_llm_trigger_frames
-            #         ),  # Ensure only relevant frames go to main LLM
-            #         llm,  # Main LLM (OpenAI)
-            #         bot_output_gate,  # Gates the output of the main LLM
-            #     ],
-            # ),
-            agent_flow_processor,
-            agent_action_processor,
+            ParallelPipeline(
+                [
+                    # Branch 1: Main flow continuation (blocks original UserStoppedSpeaking)
+                    FunctionFilter(filter=block_user_stopped_speaking),
+                ],
+                [
+                    # Branch 2: Statement LLM for end-of-turn detection
+                    statement_judge_context_filter,  # Prepares input for statement_llm
+                    statement_llm,  # Google LLM for "YES"/"NO"
+                    completeness_check,  # Processes "YES"/"NO", may output UserStoppedSpeakingFrame
+                ],
+                [
+                    # Branch 3: Main conversational LLM and TTS (gated)
+                    FunctionFilter(
+                        filter=pass_only_llm_trigger_frames
+                    ),  # Ensure only relevant frames go to main LLM
+                    # llm,  # Main LLM (OpenAI)
+                    agent_flow_processor,
+                    agent_action_processor,
+                    bot_output_gate,  # Gates the output of the main LLM
+                ],
+            ),
+            # agent_flow_processor,
+            # agent_action_processor,
             audiobuffer,
             tts,  # Text-To-Speech (receives from gated main LLM)
             user_idle,
