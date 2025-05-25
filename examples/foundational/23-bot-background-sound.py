@@ -22,6 +22,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
@@ -35,6 +36,16 @@ OFFICE_SOUND_FILE = os.path.join(
 # selected.
 transport_params = {
     "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        audio_out_mixer=SoundfileMixer(
+            sound_files={"office": OFFICE_SOUND_FILE},
+            default_sound="office",
+            volume=2.0,
+        ),
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         audio_out_mixer=SoundfileMixer(

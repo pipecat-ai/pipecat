@@ -59,6 +59,11 @@ transport_params = {
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
     ),
+    "twilio": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,

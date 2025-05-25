@@ -16,6 +16,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.services.riva.tts import FastPitchTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
@@ -26,6 +27,7 @@ load_dotenv(override=True)
 # selected.
 transport_params = {
     "daily": lambda: DailyParams(audio_out_enabled=True),
+    "twilio": lambda: FastAPIWebsocketParams(audio_out_enabled=True),
     "webrtc": lambda: TransportParams(audio_out_enabled=True),
 }
 
