@@ -52,7 +52,6 @@ class AlertProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TextFrame):
-            logger.info(f"Alert Processor received text: {frame.text}")
             text = frame.text.strip().upper()
             message_frame = RTVIServerMessageFrame(data=text)
             await self.push_frame(message_frame)
