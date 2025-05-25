@@ -50,7 +50,9 @@ class UserImageRequester(FrameProcessor):
                 UserImageRequestFrame(self.participant_id), FrameDirection.UPSTREAM
             )
             await self.push_frame(
-                TextFrame("Are there people in the image? Only answer with YES or NO.")
+                TextFrame(
+                    "Is there a person wearing a blue shirt in this image? Only answer with YES or NO."
+                )
             )
         else:
             await self.push_frame(frame, direction)
@@ -90,6 +92,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, args: argparse.Names
             ir,
             va,
             moondream,
+            # alert_processor, # Send an email alert or something if the door is open
             transport.output(),  # Transport bot output
         ]
     )
