@@ -3,7 +3,6 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-
 import datetime
 import io
 import json
@@ -16,6 +15,7 @@ import aiofiles
 from dotenv import load_dotenv
 from fastapi import WebSocket
 from loguru import logger
+from openai.types.chat import ChatCompletionAssistantMessageParam
 from smart_endpointing import (
     CLASSIFIER_MODEL,
     AudioAccumulator,
@@ -118,10 +118,10 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
             serializer=serializer,
-            # audio_in_filter=KrispFilter(
-            #     model_path=os.getenv("KRISP_MODEL_PATH"),
-            #     suppression_level=90,
-            # ),
+            audio_in_filter=KrispFilter(
+                model_path=os.getenv("KRISP_MODEL_PATH"),
+                suppression_level=90,
+            ),
         ),
     )
 
@@ -157,11 +157,11 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     transport_input_filter = TransportInputFilter()
     agent_flow_processor = await initialize_conversational_agent(
-        agent_id="682ed47ca6bbe1e9097776f8",
+        agent_id="6834620651876e6afe20256a",
         call_id="CALL-1748080011312-b252f8",
         call_data=CallData(
             variables={
-                "call_id": "CALL-1747224604782-94a54d",
+                "call_id": "CALL-1748263569023-2029e3",
                 "user_number": "+918815141212",
                 "agent_number": "+918815141212",
             }
@@ -191,7 +191,9 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     )
     chunks = [chunk async for chunk in (agent_flow_processor.get_response(context=context))]
     initial_agent_response = "".join(chunks)
-
+    context.add_message(
+        ChatCompletionAssistantMessageParam(role="assistant", content=initial_agent_response)
+    )
     logger.info(f"Initial agent response: {initial_agent_response}")
 
     # NOTE: Watch out! This will save all the conversation in memory. You can
@@ -247,30 +249,30 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             stt,  # Speech-To-Text
             stt_mute_filter,
             context_aggregator.user(),  # Aggregates user input into context
-            ParallelPipeline(
-                [
-                    # Branch 1: Main flow continuation (blocks original UserStoppedSpeaking)
-                    FunctionFilter(filter=block_user_stopped_speaking),
-                ],
-                [
-                    # Branch 2: Statement LLM for end-of-turn detection
-                    statement_judge_context_filter,  # Prepares input for statement_llm
-                    statement_llm,  # Google LLM for "YES"/"NO"
-                    completeness_check,  # Processes "YES"/"NO", may output UserStoppedSpeakingFrame
-                ],
-                [
-                    # Branch 3: Main conversational LLM and TTS (gated)
-                    FunctionFilter(
-                        filter=pass_only_llm_trigger_frames
-                    ),  # Ensure only relevant frames go to main LLM
-                    # llm,  # Main LLM (OpenAI)
-                    agent_flow_processor,
-                    agent_action_processor,
-                    bot_output_gate,  # Gates the output of the main LLM
-                ],
-            ),
-            # agent_flow_processor,
-            # agent_action_processor,
+            # ParallelPipeline(
+            #     [
+            #         # Branch 1: Main flow continuation (blocks original UserStoppedSpeaking)
+            #         FunctionFilter(filter=block_user_stopped_speaking),
+            #     ],
+            #     [
+            #         # Branch 2: Statement LLM for end-of-turn detection
+            #         statement_judge_context_filter,  # Prepares input for statement_llm
+            #         statement_llm,  # Google LLM for "YES"/"NO"
+            #         completeness_check,  # Processes "YES"/"NO", may output UserStoppedSpeakingFrame
+            #     ],
+            #     [
+            #         # Branch 3: Main conversational LLM and TTS (gated)
+            #         FunctionFilter(
+            #             filter=pass_only_llm_trigger_frames
+            #         ),  # Ensure only relevant frames go to main LLM
+            #         # llm,  # Main LLM (OpenAI)
+            #         agent_flow_processor,
+            #         agent_action_processor,
+            #         bot_output_gate,  # Gates the output of the main LLM
+            #     ],
+            # ),
+            agent_flow_processor,
+            agent_action_processor,
             # llm,
             audiobuffer,
             tts,  # Text-To-Speech (receives from gated main LLM)

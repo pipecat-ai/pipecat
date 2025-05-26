@@ -475,6 +475,9 @@ class AtomsAgentContext(OpenAILLMContext):
                         current_node_index
                     ]["content"]
 
+                    user_content_deserialized = json.loads(user_content)
+                    transcript = user_content_deserialized["transcript"]
+
                     flow_navigation_history += [
                         {
                             "role": "assistant",
@@ -483,7 +486,7 @@ class AtomsAgentContext(OpenAILLMContext):
                         {
                             "role": "user",
                             "content": json.dumps(
-                                {"assistant": assistant_content, "user": user_content},
+                                {"assistant": assistant_content, "user": transcript},
                                 indent=2,
                                 ensure_ascii=False,
                             ),

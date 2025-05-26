@@ -274,7 +274,7 @@ class CompletenessCheck(FrameProcessor):
     idle timeout is reached.
     """
 
-    wait_time = 10.0
+    wait_time = 3.0
 
     def __init__(self, notifier: BaseNotifier, audio_accumulator: AudioAccumulator, **kwargs):
         super().__init__()
