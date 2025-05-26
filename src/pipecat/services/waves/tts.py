@@ -1,6 +1,7 @@
 import base64
 import json
 import uuid
+from enum import Enum
 from typing import AsyncGenerator, List, Optional, Union
 
 import aiohttp
@@ -26,9 +27,23 @@ from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
+class WavesHTTPModel(Enum):
+    """Supported models for the Waves API."""
+
+    LIGHTNING = "lightning"
+    LIGHTNING_LARGE = "lightning-large"
+    LIGHTNING_V2 = "lightning-v2"
+
+
+class WavesSSEModel(Enum):
+    """Supported models for the Waves API."""
+
+    LIGHTNING_LARGE = "lightning-large"
+
+
 class WavesHttpTTSService(TTSService):
     class InputParams(BaseModel):
-        language: str = "hi"
+        language: str = "en"
         speed: float = 1.2
         transliterate: bool = True
         remove_extra_silence: bool = True
@@ -43,7 +58,7 @@ class WavesHttpTTSService(TTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "lightning",
+        model: WavesHTTPModel = WavesHTTPModel.LIGHTNING,
         base_url: str = "https://waves-api.smallest.ai",
         aiohttp_sesssion: Optional[aiohttp.ClientSession] = None,
         sample_rate: Optional[int] = None,
@@ -55,9 +70,10 @@ class WavesHttpTTSService(TTSService):
         self._api_key = api_key
         self._sample_rate = sample_rate
         self.set_voice(voice_id)
-        self.set_model_name(model)
+        self.set_model_name(model.value)
         self.base_url = base_url
         self.aiohttp_sesssion = aiohttp_sesssion or aiohttp.ClientSession()
+        self._model_url = self._get_model_url()
         self._settings = {
             "language": params.language,
             "speed": params.speed,
@@ -69,6 +85,16 @@ class WavesHttpTTSService(TTSService):
             "remove_extra_silence": params.remove_extra_silence,
             "add_wav_header": params.add_wav_header,
         }
+
+    def _get_model_url(self) -> str:
+        if self._model_name == WavesHTTPModel.LIGHTNING.value:
+            return f"{self.base_url}/api/v1/lightning/get_speech_long_text"
+        elif self._model_name == WavesHTTPModel.LIGHTNING_LARGE.value:
+            return f"{self.base_url}/api/v1/lightning-large/get_speech_long_text"
+        elif self._model_name == WavesHTTPModel.LIGHTNING_V2.value:
+            return f"{self.base_url}/api/v1/lightning-v2/get-speech"
+        else:
+            raise ValueError(f"Invalid model name: {self._model_name}")
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -97,8 +123,9 @@ class WavesHttpTTSService(TTSService):
                 "Content-Type": "application/json",
             }
 
-            url = f"{self.base_url}/api/v1/lightning/get_speech_long_text"
-            async with self.aiohttp_sesssion.post(url, json=payload, headers=headers) as response:
+            async with self.aiohttp_sesssion.post(
+                self._model_url, json=payload, headers=headers
+            ) as response:
                 result = await response.read()
 
             return result
@@ -131,7 +158,7 @@ class WavesHttpTTSService(TTSService):
 
 class WavesSSETTSService(TTSService):
     class InputParams(BaseModel):
-        language: str = "hi"
+        language: str = "en"
         speed: float = 1.2
         transliterate: bool = True
         remove_extra_silence: bool = True
@@ -146,7 +173,7 @@ class WavesSSETTSService(TTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "lightning-large",
+        model: WavesSSEModel = WavesSSEModel.LIGHTNING_LARGE,
         base_url: str = "https://waves-api.smallest.ai",
         aiohttp_sesssion: Optional[aiohttp.ClientSession] = None,
         sample_rate: Optional[int] = None,
@@ -158,7 +185,7 @@ class WavesSSETTSService(TTSService):
         self._api_key = api_key
         self._sample_rate = sample_rate
         self.set_voice(voice_id)
-        self.set_model_name(model)
+        self.set_model_name(model.value)
         self.base_url = base_url
         self.aiohttp_sesssion = aiohttp_sesssion or aiohttp.ClientSession()
         self._settings = {
@@ -169,6 +196,7 @@ class WavesSSETTSService(TTSService):
             "remove_extra_silence": params.remove_extra_silence,
             "add_wav_header": params.add_wav_header,
         }
+        self._model_url = self._get_model_url()
 
         if params.consistency is not None:
             self._settings["transliterate"] = params.transliterate
@@ -180,6 +208,12 @@ class WavesSSETTSService(TTSService):
             self._settings["enhancement"] = params.enhancement
 
         self._is_first_chunk = True
+
+    def _get_model_url(self) -> str:
+        if self._model_name == WavesSSEModel.LIGHTNING_LARGE.value:
+            return f"{self.base_url}/api/v1/lightning-large/stream"
+        else:
+            raise ValueError(f"Invalid model name: {self._model_name}")
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -210,8 +244,9 @@ class WavesSSETTSService(TTSService):
             }
 
             await self.start_ttfb_metrics()
-            url = f"{self.base_url}/api/v1/lightning-large/stream"
-            async with self.aiohttp_sesssion.post(url, json=payload, headers=headers) as response:
+            async with self.aiohttp_sesssion.post(
+                self._model_url, json=payload, headers=headers
+            ) as response:
                 response.raise_for_status()
                 async for line in response.content:
                     line = line.strip()
