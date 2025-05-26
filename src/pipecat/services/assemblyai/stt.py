@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 
 from loguru import logger
 
+from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -108,9 +109,13 @@ class AssemblyAISTTService(STTService):
     async def _connect(self):
         try:
             ws_url = self._build_ws_url()
+            headers = {
+                "Authorization": self._api_key,
+                "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version})",
+            }
             self._websocket = await websockets.connect(
                 ws_url,
-                extra_headers={"Authorization": self._api_key},
+                extra_headers=headers,
             )
             self._connected = True
             self._receive_task = asyncio.create_task(self._receive_task_handler())
