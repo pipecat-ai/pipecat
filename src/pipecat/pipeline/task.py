@@ -9,7 +9,7 @@ import time
 from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
@@ -69,10 +69,10 @@ class PipelineParams(BaseModel):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     heartbeats_period_secs: float = HEARTBEAT_SECONDS
-    observers: List[BaseObserver] = []
+    observers: List[BaseObserver] = Field(default_factory=list)
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
-    start_metadata: Dict[str, Any] = {}
+    start_metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PipelineTaskSource(FrameProcessor):
