@@ -440,7 +440,7 @@ class AtomsAgentContext(OpenAILLMContext):
         node_data = {
             "name": current_node.name,
             "type": current_node.type.name,
-            "action": current_node.action,
+            "action": replace_variables(current_node.action, variables),
         }
 
         # Add loop condition if it exists
