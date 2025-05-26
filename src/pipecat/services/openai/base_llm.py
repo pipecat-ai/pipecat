@@ -77,11 +77,14 @@ class BaseOpenAILLMService(LLMService):
         base_url=None,
         organization=None,
         project=None,
-        default_headers: Mapping[str, str] | None = None,
-        params: InputParams = InputParams(),
+        default_headers: Optional[Mapping[str, str]] = None,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        params = params or BaseOpenAILLMService.InputParams()
+
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
             "presence_penalty": params.presence_penalty,

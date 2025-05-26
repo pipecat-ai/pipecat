@@ -69,7 +69,7 @@ class TwilioFrameSerializer(FrameSerializer):
         call_sid: Optional[str] = None,
         account_sid: Optional[str] = None,
         auth_token: Optional[str] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
     ):
         """Initialize the TwilioFrameSerializer.
 
@@ -84,7 +84,7 @@ class TwilioFrameSerializer(FrameSerializer):
         self._call_sid = call_sid
         self._account_sid = account_sid
         self._auth_token = auth_token
-        self._params = params
+        self._params = params or TwilioFrameSerializer.InputParams()
 
         self._twilio_sample_rate = self._params.twilio_sample_rate
         self._sample_rate = 0  # Pipeline input rate

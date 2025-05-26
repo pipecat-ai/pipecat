@@ -6,7 +6,7 @@
 
 import asyncio
 import inspect
-from typing import List
+from typing import Dict, List, Optional
 
 from attr import dataclass
 
@@ -39,10 +39,32 @@ class TaskObserver(BaseObserver):
 
     """
 
-    def __init__(self, *, observers: List[BaseObserver] = [], task_manager: BaseTaskManager):
-        self._observers = observers
+    def __init__(
+        self,
+        *,
+        observers: Optional[List[BaseObserver]] = None,
+        task_manager: BaseTaskManager,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self._observers = observers or []
         self._task_manager = task_manager
-        self._proxies: List[Proxy] = []
+        self._proxies: Dict[BaseObserver, Proxy] = {}
+
+    async def add_observer(self, observer: BaseObserver):
+        proxy = self._create_proxy(observer)
+        self._proxies[observer] = proxy
+        self._observers.append(observer)
+
+    async def remove_observer(self, observer: BaseObserver):
+        if observer in self._proxies:
+            proxy = self._proxies[observer]
+            # Remove the proxy so it doesn't get called anymore.
+            del self._proxies[observer]
+            # Cancel the proxy task right away.
+            await self._task_manager.cancel_task(proxy.task)
+            # Remove the observer.
+            self._observers.remove(observer)
 
     async def start(self):
         """Starts all proxy observer tasks."""
@@ -50,23 +72,27 @@ class TaskObserver(BaseObserver):
 
     async def stop(self):
         """Stops all proxy observer tasks."""
-        for proxy in self._proxies:
+        for proxy in self._proxies.values():
             await self._task_manager.cancel_task(proxy.task)
 
     async def on_push_frame(self, data: FramePushed):
-        for proxy in self._proxies:
+        for proxy in self._proxies.values():
             await proxy.queue.put(data)
 
-    def _create_proxies(self, observers) -> List[Proxy]:
-        proxies = []
+    def _create_proxy(self, observer: BaseObserver) -> Proxy:
+        queue = asyncio.Queue()
+        task = self._task_manager.create_task(
+            self._proxy_task_handler(queue, observer),
+            f"TaskObserver::{observer}::_proxy_task_handler",
+        )
+        proxy = Proxy(queue=queue, task=task, observer=observer)
+        return proxy
+
+    def _create_proxies(self, observers: List[BaseObserver]) -> Dict[BaseObserver, Proxy]:
+        proxies = {}
         for observer in observers:
-            queue = asyncio.Queue()
-            task = self._task_manager.create_task(
-                self._proxy_task_handler(queue, observer),
-                f"TaskObserver::{observer.__class__.__name__}::_proxy_task_handler",
-            )
-            proxy = Proxy(queue=queue, task=task, observer=observer)
-            proxies.append(proxy)
+            proxy = self._create_proxy(observer)
+            proxies[observer] = proxy
         return proxies
 
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):

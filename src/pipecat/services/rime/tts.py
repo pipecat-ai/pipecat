@@ -80,7 +80,7 @@ class RimeTTSService(AudioContextWordTTSService):
         url: str = "wss://users.rime.ai/ws2",
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
@@ -104,6 +104,8 @@ class RimeTTSService(AudioContextWordTTSService):
             text_aggregator=text_aggregator or SkipTagsAggregator([("spell(", ")")]),
             **kwargs,
         )
+
+        params = params or RimeTTSService.InputParams()
 
         # Store service configuration
         self._api_key = api_key
@@ -364,10 +366,12 @@ class RimeHttpTTSService(TTSService):
         aiohttp_session: aiohttp.ClientSession,
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or RimeHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._session = aiohttp_session

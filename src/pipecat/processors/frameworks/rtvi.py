@@ -437,10 +437,12 @@ class RTVIObserver(BaseObserver):
         params (RTVIObserverParams): Settings to enable/disable specific messages.
     """
 
-    def __init__(self, rtvi: "RTVIProcessor", *, params: RTVIObserverParams = RTVIObserverParams()):
-        super().__init__()
+    def __init__(
+        self, rtvi: "RTVIProcessor", *, params: Optional[RTVIObserverParams] = None, **kwargs
+    ):
+        super().__init__(**kwargs)
         self._rtvi = rtvi
-        self._params = params
+        self._params = params or RTVIObserverParams()
         self._bot_transcription = ""
         self._frames_seen = set()
         rtvi.set_errors_enabled(self._params.errors_enabled)
@@ -632,12 +634,12 @@ class RTVIProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        config: RTVIConfig = RTVIConfig(config=[]),
+        config: Optional[RTVIConfig] = None,
         transport: Optional[BaseTransport] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._config = config
+        self._config = config or RTVIConfig(config=[])
 
         self._bot_ready = False
         self._client_ready = False

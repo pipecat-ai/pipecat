@@ -5,7 +5,7 @@
 #
 
 import re
-from typing import Callable, Optional, Tuple
+from typing import Awaitable, Callable, Optional, Tuple
 
 from loguru import logger
 
@@ -106,7 +106,7 @@ class PatternPairAggregator(BaseTextAggregator):
         return self
 
     def on_pattern_match(
-        self, pattern_id: str, handler: Callable[[PatternMatch], None]
+        self, pattern_id: str, handler: Callable[[PatternMatch], Awaitable[None]]
     ) -> "PatternPairAggregator":
         """Register a handler for when a pattern pair is matched.
 
@@ -124,7 +124,7 @@ class PatternPairAggregator(BaseTextAggregator):
         self._handlers[pattern_id] = handler
         return self
 
-    def _process_complete_patterns(self, text: str) -> Tuple[str, bool]:
+    async def _process_complete_patterns(self, text: str) -> Tuple[str, bool]:
         """Process all complete pattern pairs in the text.
 
         Searches for all complete pattern pairs in the text, calls the
@@ -167,7 +167,7 @@ class PatternPairAggregator(BaseTextAggregator):
                 # Call the appropriate handler if registered
                 if pattern_id in self._handlers:
                     try:
-                        self._handlers[pattern_id](pattern_match)
+                        await self._handlers[pattern_id](pattern_match)
                     except Exception as e:
                         logger.error(f"Error in pattern handler for {pattern_id}: {e}")
 
@@ -204,7 +204,7 @@ class PatternPairAggregator(BaseTextAggregator):
 
         return False
 
-    def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[str]:
         """Aggregate text and process pattern pairs.
 
         This method adds the new text to the buffer, processes any complete pattern
@@ -223,7 +223,7 @@ class PatternPairAggregator(BaseTextAggregator):
         self._text += text
 
         # Process any complete patterns in the buffer
-        processed_text, modified = self._process_complete_patterns(self._text)
+        processed_text, modified = await self._process_complete_patterns(self._text)
 
         # Only update the buffer if modifications were made
         if modified:
@@ -245,7 +245,7 @@ class PatternPairAggregator(BaseTextAggregator):
         # No complete sentence found yet
         return None
 
-    def handle_interruption(self):
+    async def handle_interruption(self):
         """Handle interruptions by clearing the buffer.
 
         Called when an interruption occurs in the processing pipeline,
@@ -253,7 +253,7 @@ class PatternPairAggregator(BaseTextAggregator):
         """
         self._text = ""
 
-    def reset(self):
+    async def reset(self):
         """Clear the internally aggregated text.
 
         Resets the aggregator to its initial state, discarding any
