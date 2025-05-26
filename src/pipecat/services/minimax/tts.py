@@ -114,10 +114,12 @@ class MiniMaxHttpTTSService(TTSService):
         voice_id: str = "Calm_Woman",
         aiohttp_session: aiohttp.ClientSession,
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or MiniMaxHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._group_id = group_id

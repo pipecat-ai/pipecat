@@ -44,7 +44,7 @@ class RivaTTSService(TTSService):
     def __init__(
         self,
         *,
-        api_key: str = None,
+        api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "Magpie-Multilingual.EN-US.Ray",
         sample_rate: Optional[int] = None,
@@ -52,10 +52,13 @@ class RivaTTSService(TTSService):
             "function_id": "877104f7-e885-42b9-8de8-f6e4c6303969",
             "model_name": "magpie-tts-multilingual",
         },
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or RivaTTSService.InputParams()
+
         self._api_key = api_key
         self._voice_id = voice_id
         self._language_code = params.language
@@ -136,14 +139,10 @@ class RivaTTSService(TTSService):
 
 
 class FastPitchTTSService(RivaTTSService):
-    class InputParams(BaseModel):
-        language: Optional[Language] = Language.EN_US
-        quality: Optional[int] = 20
-
     def __init__(
         self,
         *,
-        api_key: str = None,
+        api_key: str,
         server: str = "grpc.nvcf.nvidia.com:443",
         voice_id: str = "English-US.Female-1",
         sample_rate: Optional[int] = None,
@@ -151,11 +150,12 @@ class FastPitchTTSService(RivaTTSService):
             "function_id": "0149dedb-2be8-4195-b9a0-e57e0e14f972",
             "model_name": "fastpitch-hifigan-tts",
         },
-        params: InputParams = InputParams(),
+        params: Optional[RivaTTSService.InputParams] = None,
         **kwargs,
     ):
         super().__init__(
             api_key=api_key,
+            server=server,
             voice_id=voice_id,
             sample_rate=sample_rate,
             model_function_map=model_function_map,

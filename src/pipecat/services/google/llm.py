@@ -467,13 +467,16 @@ class GoogleLLMService(LLMService):
         *,
         api_key: str,
         model: str = "gemini-2.0-flash",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        params = params or GoogleLLMService.InputParams()
+
         self.set_model_name(model)
         self._api_key = api_key
         self._system_instruction = system_instruction

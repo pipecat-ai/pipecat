@@ -335,17 +335,20 @@ class GeminiMultimodalLiveLLMService(LLMService):
         *,
         api_key: str,
         base_url: str = "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
-        model="models/gemini-2.0-flash-live-001",
+        model="models/gemini-2.5-flash-preview-native-audio-dialog",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
         system_instruction: Optional[str] = None,
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         inference_on_context_initialization: bool = True,
         **kwargs,
     ):
         super().__init__(base_url=base_url, **kwargs)
+
+        params = params or InputParams()
+
         self._last_sent_time = 0
         self._api_key = api_key
         self._base_url = base_url
@@ -960,11 +963,17 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         usage = evt.usageMetadata
 
+        # Ensure we have valid integers for all token counts
+        prompt_tokens = usage.promptTokenCount or 0
+        completion_tokens = usage.responseTokenCount or 0
+        total_tokens = usage.totalTokenCount or (prompt_tokens + completion_tokens)
+
         tokens = LLMTokenUsage(
-            prompt_tokens=usage.promptTokenCount,
-            completion_tokens=usage.responseTokenCount,
-            total_tokens=usage.totalTokenCount,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
         )
+
         await self.start_llm_usage_metrics(tokens)
 
     def create_context_aggregator(

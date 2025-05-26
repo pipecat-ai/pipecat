@@ -34,8 +34,10 @@ class TurnTraceObserver(BaseObserver):
     conversation span that encapsulates the entire session.
     """
 
-    def __init__(self, turn_tracker: TurnTrackingObserver, conversation_id: Optional[str] = None):
-        super().__init__()
+    def __init__(
+        self, turn_tracker: TurnTrackingObserver, conversation_id: Optional[str] = None, **kwargs
+    ):
+        super().__init__(**kwargs)
         self._turn_tracker = turn_tracker
         self._current_span: Optional["Span"] = None
         self._current_turn_number: int = 0
@@ -82,7 +84,7 @@ class TurnTraceObserver(BaseObserver):
         self._conversation_id = conversation_id
 
         # Create a new span for this conversation
-        self._conversation_span = self._tracer.start_span(f"conversation-{conversation_id}")
+        self._conversation_span = self._tracer.start_span("conversation")
 
         # Set span attributes
         self._conversation_span.set_attribute("conversation.id", conversation_id)
@@ -143,7 +145,7 @@ class TurnTraceObserver(BaseObserver):
             parent_context = context_provider.get_current_conversation_context()
 
         # Create a new span for this turn
-        self._current_span = self._tracer.start_span(f"turn-{turn_number}", context=parent_context)
+        self._current_span = self._tracer.start_span("turn", context=parent_context)
         self._current_turn_number = turn_number
 
         # Set span attributes
