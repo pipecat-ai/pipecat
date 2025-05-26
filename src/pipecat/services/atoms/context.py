@@ -343,7 +343,16 @@ class AtomsAgentContext(OpenAILLMContext):
 
                         if delta:
                             messages.append(
-                                ChatCompletionUserMessageParam(role="user", content=delta)
+                                ChatCompletionUserMessageParam(
+                                    role="user",
+                                    content=json.dumps(
+                                        {
+                                            "delta": json.loads(delta),
+                                        },
+                                        indent=2,
+                                        ensure_ascii=False,
+                                    ),
+                                )
                             )
                         else:
                             messages.append(
@@ -410,7 +419,7 @@ class AtomsAgentContext(OpenAILLMContext):
 
         # Find the most recent node message
         current_node_index = None
-        for idx, msg in enumerate(reversed(self.messages[1:])):
+        for idx, msg in enumerate(self.messages[1:]):
             if msg["role"] == "user":
                 try:
                     content = json.loads(msg["content"])
@@ -420,7 +429,7 @@ class AtomsAgentContext(OpenAILLMContext):
                             "id" in repsonse_model_context
                             and repsonse_model_context["id"] == current_node.id
                         ):
-                            current_node_index = len(self.messages) - 1 - idx
+                            current_node_index = idx + 1
                             break
                 except (json.JSONDecodeError, TypeError):
                     pass
