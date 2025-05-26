@@ -49,6 +49,7 @@ from .prompts import (
 from .utils import (
     convert_old_to_new_format,
     get_abbreviations,
+    get_language_switch_inst,
     get_unallowed_variable_names,
     replace_variables,
     replace_variables_recursive,
@@ -291,6 +292,16 @@ class FlowGraphManager(FrameProcessor):
                 logger.error(f"Error making API request: {str(e)}")
                 return ""
 
+    class AgentInputParams(BaseModel):
+        """This class is responsible for passing the input parameters to the agent."""
+
+        current_language: str = "en"
+        agent_persona: Optional[Union[str, Dict[str, Any]]] = None
+        end_call_tag: str = "<end_call>"
+        initial_variables: Optional[Dict[str, Any]] = None
+        is_language_switching_enabled: bool = False
+        custom_instructions: Optional[List[str]] = []
+
     def __init__(
         self,
         flow_model_client: BaseClient,
@@ -298,36 +309,29 @@ class FlowGraphManager(FrameProcessor):
         response_model_client: BaseClient,
         conversation_pathway: ConversationalPathway,
         transport_input_filter: TransportInputFilter,
-        initial_variables: Optional[Dict[str, Any]] = None,
-        agent_persona: Optional[str] = None,
+        agent_input_params: AgentInputParams,
     ):
         super().__init__()
         self.flow_model_client: BaseClient = flow_model_client
         self.variable_extraction_client: BaseClient = variable_extraction_client
         self.response_model_client: BaseClient = response_model_client
         self.conv_pathway: ConversationalPathway = conversation_pathway
-        self.variables = self._initialize_variables(initial_variables)
+        self.variables = self._initialize_variables(agent_input_params.initial_variables)
         self.current_node: Node = self._find_root()
         self._process_pre_call_api_nodes()
         self.conv_pathway.start_node = self.current_node
-        self._end_call_tag = "<end_call>"
-        self.agent_persona = agent_persona
+        self._end_call_tag = agent_input_params.end_call_tag
+        self.agent_persona = agent_input_params.agent_persona
         self.api_node_handler = self.APICallNodeHandler(self)
         self._event_handlers: Dict[str, List[Callable[..., None]]] = {}
         self.transport_input_filter: TransportInputFilter = transport_input_filter
+        self.current_language: str = agent_input_params.current_language
+        self._is_language_switching_enabled: bool = agent_input_params.is_language_switching_enabled
+        self.custom_instructions: List[str] = agent_input_params.custom_instructions
+        self._register_node_event_handlers()
 
-        # self._node_event_handlers: Dict[NodeType, Dict[str, str]] = {
-        #     NodeType.API_CALL: {
-        #         "start": "on_api_call_node_started",
-        #         "end": "on_api_call_node_ended",
-        #     },
-        #     NodeType.PRE_CALL_API: {},
-        #     NodeType.POST_CALL_API: {},
-        #     NodeType.DEFAULT: {},
-        #     NodeType.END_CALL: {},
-        #     NodeType.TRANSFER_CALL: {},
-        # }
-
+    def _register_node_event_handlers(self) -> None:
+        """Register event handlers for the node types."""
         self._register_event_handler("on_api_call_node_started")
         self._register_event_handler("on_api_call_node_ended")
 
@@ -357,9 +361,47 @@ class FlowGraphManager(FrameProcessor):
             else:
                 handler(*args, **kwargs)
 
-    def _get_initial_user_message(self) -> str:
-        """Get the initial user message for the conversation."""
-        return self._get_current_state_as_json()
+    def _detect_language(self, text: str) -> str:
+        """Detect language (English or Hindi) based on character analysis.
+
+        Args:
+            text: Text to analyze for language detection
+            default_language: Default language to return if detection fails or words are less than 3
+
+        Returns:
+            Language code ('en' or 'hi')
+        """
+        HINDI_RANGE = (0x0900, 0x097F)
+
+        try:
+            # Split into words and check minimum word requirement
+            words = text.strip().split()
+            if len(words) < 3:
+                return self.current_language
+
+            # Remove whitespace for character counting
+            text_no_space = "".join(text.split())
+            total_chars = len(text_no_space)
+
+            if total_chars == 0:
+                return self.current_language
+
+            # Count only Hindi characters
+            hindi_chars = 0
+            for char in text_no_space:
+                char_code = ord(char)
+                if HINDI_RANGE[0] <= char_code <= HINDI_RANGE[1]:
+                    hindi_chars += 1
+
+            # Return Hindi if more than 50% characters are Hindi
+            return "hi" if (hindi_chars / total_chars) > 0.5 else "en"
+
+        except Exception as e:
+            logger.error(
+                f"Error processing text for language detection: {e}",
+                extra={"call_id": self.call_id},
+            )
+            return self.current_language
 
     def _initialize_variables(
         self, initial_variables: Optional[Dict[str, Any]] = None
@@ -700,25 +742,21 @@ class FlowGraphManager(FrameProcessor):
             case NodeType.TRANSFER_CALL:
                 self.transport_input_filter.mute()
 
+    def _get_custom_instructions(self) -> str:
+        """Get the custom instructions for the response model."""
+        return [*self.custom_instructions, get_language_switch_inst(self.current_language)]
+
     async def get_response(self, context: AtomsAgentContext):
         """Get the response from the response model client."""
         # Before hopping we need to extract variables from the current node and user response
-
-        logger.debug(
-            f"getting response for node_type: {self.current_node.type} node_name: {self.current_node.name}"
-        )
+        if self._is_language_switching_enabled:
+            self.current_language = self._detect_language(context.get_current_user_transcript())
 
         if self.current_node.variables and self.current_node.variables.is_enabled:
             if self.current_node.type == NodeType.API_CALL:
-                logger.debug("extracting variables from api call node")
                 self.api_node_handler._extract_variables(context=context, node=self.current_node)
             else:
-                logger.debug("extracting variables from current node")
                 await self._extract_variables(context=context)
-
-        logger.debug(
-            f"now comes the hopping for node_type: {self.current_node.type} node_name: {self.current_node.name}"
-        )
 
         # After extracting variables we need to hop to the next node
         # If hopping fails for api call node, then we do not proceed with the flow else we will be in infinite loop just let user know that something went wrong and cut the call
@@ -732,20 +770,13 @@ class FlowGraphManager(FrameProcessor):
 
         self._handle_stt_mute()
 
-        logger.debug(
-            f"hopped: {hopped} for node_type: {self.current_node.type} node_name: {self.current_node.name}"
-        )
-
         # format the messages for the response model
         context._update_last_user_context(
             "response_model_context",
             self._get_current_state_as_json(
                 user_response=context.get_current_user_transcript(),
+                custom_instructions=self._get_custom_instructions(),
             ),
-        )
-
-        logger.debug(
-            f"now comes the response model for node_type: {self.current_node.type} node_name: {self.current_node.name}"
         )
 
         # after hopping we have to update the delta in the context
@@ -753,10 +784,6 @@ class FlowGraphManager(FrameProcessor):
         if delta:
             delta = json.dumps(delta, indent=2, ensure_ascii=False)
             context._update_last_user_context("delta", delta)
-
-            logger.debug(
-                f"delta: {delta} for node_type: {self.current_node.type} node_name: {self.current_node.name}"
-            )
 
         if self.current_node.type == NodeType.DEFAULT:
             if self.current_node.static_text:
@@ -832,8 +859,7 @@ class FlowGraphManager(FrameProcessor):
         self,
         user_response: Optional[str] = None,
         custom_instructions: Optional[list] = None,
-        add_variables: bool = False,
-        add_agent_persona: bool = False,
+        add_default_variables: bool = False,
     ) -> str:
         """Convert current state and user response to JSON string.
 
@@ -853,19 +879,18 @@ class FlowGraphManager(FrameProcessor):
             "action": replace_variables(self.current_node.action, self.variables),
             "loop_condition": replace_variables(self.current_node.loop_condition, self.variables),
             "user_response": user_response,
+            "agent_persona": self.agent_persona,
         }
 
         if self.current_node.knowledge_base and self.current_node.knowledge_base.strip():
             current_state["knowledge_base"] = self.current_node.knowledge_base
-        if add_variables:
+        if add_default_variables:
             current_state["variables"] = {
                 "current_date": self.curr_date,
                 "current_day": self.curr_day,
                 "current_time": self.curr_time,
             }
 
-        if add_agent_persona and self.agent_persona:
-            current_state["agent_persona"] = self.agent_persona
         if custom_instructions:
             current_state["custom_instructions"] = custom_instructions
         if current_state.get("loop_condition") is None or (
@@ -1011,9 +1036,10 @@ async def initialize_conversational_agent(
         model_name = agent_config.get("model_name", AtomsLLMModels.ELECTRON.value)
         agent_gender = agent_config.get("synthesizer_args", {}).get("gender", "female")
         language_switching = agent_config.get("language_switching", False)
-        default_language = agent_config.get("default_language", "en")
+        agent_language = agent_config.get("default_language", "en")
         global_prompt = agent_config.get("global_prompt")
         global_kb_id = agent_config.get("global_knowledge_base_id")
+        agent_persona = {"gender": agent_gender} if agent_gender else None
 
         assert model_name in [model.value for model in AtomsLLMModels], (
             f"Unknown model name '{model_name}'"
@@ -1045,8 +1071,13 @@ async def initialize_conversational_agent(
             flow_model_client=flow_model_client,
             variable_extraction_client=variable_extraction_client,
             conversation_pathway=conv_pathway,
-            initial_variables=initial_variables,
             transport_input_filter=transport_input_filter,
+            agent_input_params=FlowGraphManager.AgentInputParams(
+                initial_variables=initial_variables,
+                agent_persona=agent_persona,
+                current_language=agent_language,
+                is_language_switching_enabled=language_switching,
+            ),
         )
 
     except Exception as e:
@@ -1100,6 +1131,8 @@ async def get_conv_pathway_graph(agent_id, call_id) -> tuple[str, dict]:
                 "synthesizer_enhancement": agent_config.get("synthesizerEnhancement", None),
                 "synthesizer_samplerate": agent_config.get("synthesizerSampleRate", None),
             }
+
+            agent_gender = agent_config.get("synthesizer_args", {}).get("gender", "female")
 
             workflow_graph = data.get("workflowGraph") or data.get("workflow", {}).get(
                 "workflowGraph"

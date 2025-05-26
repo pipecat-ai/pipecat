@@ -311,3 +311,21 @@ def replace_variables_recursive(data: Any, variables: dict) -> Any:
         return [replace_variables_recursive(item, variables) for item in data]
     else:
         return data
+
+
+def get_language_switch_inst(language: str) -> str:
+    """Get language switching instruction based on current language.
+
+    Returns:
+        Instruction for language switching
+    """
+    if language not in {"en", "hi"}:
+        raise ValueError(f"Unsupported language: {language}")
+
+    base_template = "Respond in {}"
+
+    if language == "en":
+        return base_template.format("English")
+
+    elif language == "hi":
+        return base_template.format("Hindi")
