@@ -38,7 +38,7 @@ try:
     import websockets
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use AssemblyAI, you need to `pip install websockets`.")
+    logger.error('In order to use AssemblyAI, you need to `pip install "pipecat-ai[assemblyai]"`.')
     raise Exception(f"Missing module: {e}")
 
 
