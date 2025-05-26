@@ -46,12 +46,18 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
 )
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
+from pipecat.processors.filters.custom_mute_filter import TransportInputFilter
 from pipecat.processors.filters.function_filter import FunctionFilter
+from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.atoms.agent import (
@@ -149,6 +155,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     #     voice_id="nyah",
     # )
 
+    transport_input_filter = TransportInputFilter()
     agent_flow_processor = await initialize_conversational_agent(
         agent_id="682ed47ca6bbe1e9097776f8",
         call_id="CALL-1748080011312-b252f8",
@@ -159,6 +166,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
                 "agent_number": "+918815141212",
             }
         ),
+        transport_input_filter=transport_input_filter,
     )
 
     turn_tracking_observer = TurnTrackingObserver()
@@ -175,10 +183,12 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         },
     ]
 
-    # context = OpenAILLMContext(messages)
     context = AtomsAgentContext(messages=messages)
-    context_aggregator = llm.create_context_aggregator(context)
-    # initial_context = AtomsAgentContext.upgrade_to_atoms_agent(context)
+    context_aggregator = llm.create_context_aggregator(
+        context,
+        user_params=LLMUserAggregatorParams(aggregation_timeout=0.0),
+        assistant_params=LLMAssistantAggregatorParams(expect_stripped_words=False),
+    )
     chunks = [chunk async for chunk in (agent_flow_processor.get_response(context=context))]
     initial_agent_response = "".join(chunks)
 
@@ -193,6 +203,13 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     statement_judge_context_filter = StatementJudgeContextFilter(notifier=notifier)
     completeness_check = CompletenessCheck(notifier=notifier, audio_accumulator=audio_accumulator)
     bot_output_gate = OutputGate(notifier=notifier, start_open=True)
+
+    stt_mute_filter = STTMuteFilter(
+        config=STTMuteConfig(
+            strategies={STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE, STTMuteStrategy.CUSTOM},
+            should_mute_callback=transport_input_filter.should_mute,
+        )
+    )
 
     async def user_idle_notifier(frame):
         await notifier.notify()
@@ -228,6 +245,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         [
             transport.input(),  # Websocket input from client
             stt,  # Speech-To-Text
+            stt_mute_filter,
             context_aggregator.user(),  # Aggregates user input into context
             ParallelPipeline(
                 [
@@ -253,6 +271,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             ),
             # agent_flow_processor,
             # agent_action_processor,
+            # llm,
             audiobuffer,
             tts,  # Text-To-Speech (receives from gated main LLM)
             user_idle,

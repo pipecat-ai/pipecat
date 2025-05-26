@@ -13,8 +13,8 @@ import re
 import traceback
 from datetime import datetime
 from enum import Enum
-from inspect import isasyncgen, isgenerator
-from typing import Any, AsyncGenerator, Dict, Generator, List, Optional, Tuple
+from inspect import isasyncgen, iscoroutinefunction, isgenerator
+from typing import Any, AsyncGenerator, Callable, Dict, Generator, List, Optional, Tuple
 
 import aiohttp
 import aiohttp.client_exceptions
@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
+from pipecat.processors.filters.custom_mute_filter import TransportInputFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 from .context import AtomsAgentContext
@@ -296,6 +297,7 @@ class FlowGraphManager(FrameProcessor):
         variable_extraction_client: BaseClient,
         response_model_client: BaseClient,
         conversation_pathway: ConversationalPathway,
+        transport_input_filter: TransportInputFilter,
         initial_variables: Optional[Dict[str, Any]] = None,
         agent_persona: Optional[str] = None,
     ):
@@ -311,6 +313,49 @@ class FlowGraphManager(FrameProcessor):
         self._end_call_tag = "<end_call>"
         self.agent_persona = agent_persona
         self.api_node_handler = self.APICallNodeHandler(self)
+        self._event_handlers: Dict[str, List[Callable[..., None]]] = {}
+        self.transport_input_filter: TransportInputFilter = transport_input_filter
+
+        # self._node_event_handlers: Dict[NodeType, Dict[str, str]] = {
+        #     NodeType.API_CALL: {
+        #         "start": "on_api_call_node_started",
+        #         "end": "on_api_call_node_ended",
+        #     },
+        #     NodeType.PRE_CALL_API: {},
+        #     NodeType.POST_CALL_API: {},
+        #     NodeType.DEFAULT: {},
+        #     NodeType.END_CALL: {},
+        #     NodeType.TRANSFER_CALL: {},
+        # }
+
+        self._register_event_handler("on_api_call_node_started")
+        self._register_event_handler("on_api_call_node_ended")
+
+    def _register_event_handler(self, event_name: str) -> None:
+        """Register an event handler for the given event name."""
+        if event_name not in self._event_handlers:
+            self._event_handlers[event_name] = []
+
+    def event_handler(self, event_name):
+        """Decorator for registering event handlers."""
+
+        def decorator(func):
+            if event_name not in self._event_handlers:
+                self._register_event_handler(event_name)
+            self._event_handlers[event_name].append(func)
+            return func
+
+        return decorator
+
+    async def _call_event_handler(self, event_name: str, *args, **kwargs):
+        """Call the event handler for the given event name."""
+        if event_name not in self._event_handlers:
+            return
+        for handler in self._event_handlers[event_name]:
+            if iscoroutinefunction(handler):
+                await handler(*args, **kwargs)
+            else:
+                handler(*args, **kwargs)
 
     def _get_initial_user_message(self) -> str:
         """Get the initial user message for the conversation."""
@@ -640,6 +685,21 @@ class FlowGraphManager(FrameProcessor):
         except Exception as e:
             return False
 
+    def _handle_stt_mute(self):
+        match self.current_node.type:
+            case NodeType.PRE_CALL_API:
+                self.transport_input_filter.mute()
+            case NodeType.POST_CALL_API:
+                self.transport_input_filter.mute()
+            case NodeType.DEFAULT:
+                self.transport_input_filter.unmute()
+            case NodeType.API_CALL:
+                self.transport_input_filter.mute()
+            case NodeType.END_CALL:
+                self.transport_input_filter.mute()
+            case NodeType.TRANSFER_CALL:
+                self.transport_input_filter.mute()
+
     async def get_response(self, context: AtomsAgentContext):
         """Get the response from the response model client."""
         # Before hopping we need to extract variables from the current node and user response
@@ -663,14 +723,14 @@ class FlowGraphManager(FrameProcessor):
         # After extracting variables we need to hop to the next node
         # If hopping fails for api call node, then we do not proceed with the flow else we will be in infinite loop just let user know that something went wrong and cut the call
         hopped = await self._handle_hopping(context=context)
-        if not hopped and self.current_node.type == NodeType.API_CALL:
-            logger.debug(
-                f"hopping failed for node: {self.current_node.name} {self.current_node.type} {self.current_node.id}"
-            )
-            yield "Something went wrong, please try again later."
-            await self.push_frame(EndFrame())
-            # await self.push_frame(LastTurnFrame(conversation_id="123"))
-            return
+        if self.current_node.type == NodeType.API_CALL:
+            if not hopped:
+                yield "Something went wrong, please try again later."
+                await self.push_frame(EndFrame())
+                logger.debug(f"hopping failed for api call node")
+                return
+
+        self._handle_stt_mute()
 
         logger.debug(
             f"hopped: {hopped} for node_type: {self.current_node.type} node_name: {self.current_node.name}"
@@ -705,7 +765,6 @@ class FlowGraphManager(FrameProcessor):
             else:
                 async for chunk in self._handle_dynamic_response(context=context):
                     yield chunk
-                return
         elif self.current_node.type == NodeType.END_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
@@ -715,7 +774,6 @@ class FlowGraphManager(FrameProcessor):
                 async for chunk in self._handle_dynamic_response(context=context):
                     yield chunk
                 await self.push_frame(LastTurnFrame(conversation_id="123"))
-                return
         elif self.current_node.type == NodeType.TRANSFER_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
@@ -737,7 +795,6 @@ class FlowGraphManager(FrameProcessor):
                         reason="transfer_call",
                     )
                 )
-                return
         elif self.current_node.type == NodeType.API_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
@@ -749,20 +806,19 @@ class FlowGraphManager(FrameProcessor):
             await self.api_node_handler.process(
                 context=context, node=self.current_node, variables=self.variables
             )
-            return
         else:
             raise Exception(f"Unknown node type: {self.current_node.type}")
+
+        self.transport_input_filter.unmute()
 
     async def _process_context(self, context: AtomsAgentContext) -> None:
         """Process the context and update the flow model client."""
         response = self.get_response(context=context)
         if isgenerator(response):
             for chunk in response:
-                logger.debug(f"chunk: {chunk}")
                 await self.push_frame(LLMTextFrame(text=chunk))
         elif isasyncgen(response):
             async for chunk in response:
-                logger.debug(f"chunk: {chunk}")
                 await self.push_frame(LLMTextFrame(text=chunk))
 
     def _get_transcript_from_context(self, context: AtomsAgentContext) -> str:
@@ -902,13 +958,14 @@ class FlowGraphManager(FrameProcessor):
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
 
+                # TODO: This is a not a good way to but the same event handlers can be called multiple times for the same node
+                # why did we did this? -> because FlowGraphManager can be interrupted and it end might not be called
+                # we need the better way to handle this
+                await self._call_event_handler("on_api_call_node_ended")
+
 
 async def initialize_conversational_agent(
-    *,
-    agent_id: str,
-    call_id: str,
-    call_data: CallData,
-    initialize_first_message: bool = True,
+    *, agent_id: str, call_id: str, call_data: CallData, transport_input_filter: Any
 ) -> FlowGraphManager:
     """Initialize a conversational agent with the specified configuration.
 
@@ -989,6 +1046,7 @@ async def initialize_conversational_agent(
             variable_extraction_client=variable_extraction_client,
             conversation_pathway=conv_pathway,
             initial_variables=initial_variables,
+            transport_input_filter=transport_input_filter,
         )
 
     except Exception as e:

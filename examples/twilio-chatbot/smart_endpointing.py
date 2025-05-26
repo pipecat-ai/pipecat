@@ -1,8 +1,9 @@
 import asyncio
-import time
 import json
+import time
 
 from dotenv import load_dotenv
+from google.genai.types import Content, Part
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -11,6 +12,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InputAudioRawFrame,
     LLMMessagesFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -19,14 +21,12 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    InputAudioRawFrame
 )
-
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.atoms.agent import AtomsAgentContext
 from pipecat.services.google.llm import GoogleLLMContext
 from pipecat.sync.base_notifier import BaseNotifier
-from google.genai.types import Content, Part
 
 load_dotenv(override=True)
 
@@ -331,6 +331,7 @@ class CompletenessCheck(FrameProcessor):
             self._wakeup_time = 0
             self._idle_task = None
 
+
 def get_message_field(message: object, field: str) -> any:
     """
     Retrieve a field from a message.
@@ -368,8 +369,8 @@ def get_message_text(message: object) -> str:
 
     # Try direct content field
     content = get_message_field(message, "content")
-    
-    logger.debug(f"Found content: {content}, type: {type(content)}")     
+
+    logger.debug(f"Found content: {content}, type: {type(content)}")
     # logger.debug(f"Found content: {content}")
 
     if isinstance(content, str):
@@ -424,6 +425,8 @@ class StatementJudgeContextFilter(FrameProcessor):
         if isinstance(frame, OpenAILLMContextFrame):
             # Take text content from the most recent user messages.
             messages = frame.context.messages
+            if isinstance(frame.context, AtomsAgentContext):
+                messages = frame.context.get_openai_restructure_messages()
             logger.debug(f"Processing context messages: {messages}")
 
             user_text_messages = []
@@ -448,12 +451,12 @@ class StatementJudgeContextFilter(FrameProcessor):
             if user_text_messages:
                 user_message = " ".join(reversed(user_text_messages))
                 logger.debug(f"Final user message: {user_message}")
-                
+
                 # Create messages using the correct Google Content objects
                 messages = [
                     self.Content(role="user", parts=[self.Part(text=classifier_system_instruction)])
                 ]
-                
+
                 if last_assistant_message:
                     assistant_text = get_message_text(last_assistant_message)
                     logger.debug(f"Assistant message text: {assistant_text}")
@@ -461,11 +464,9 @@ class StatementJudgeContextFilter(FrameProcessor):
                         messages.append(
                             self.Content(role="model", parts=[self.Part(text=assistant_text)])
                         )
-                
-                messages.append(
-                    self.Content(role="user", parts=[self.Part(text=user_message)])
-                )
-                
+
+                messages.append(self.Content(role="user", parts=[self.Part(text=user_message)]))
+
                 await self.push_frame(LLMMessagesFrame(messages))
             return
 

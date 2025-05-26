@@ -274,8 +274,8 @@ class AtomsAgentContext(OpenAILLMContext):
         """validate messages to ensure the roles alternate and the content is in the correct format."""
         pass
 
-    def _restructure_from_atoms_agent_messages(self):
-        """restructure the open ai context from the atoms agent context."""
+    def get_openai_restructure_messages(self):
+        """Get the messages in the openai format."""
         messages = []
 
         for message in self.messages:
@@ -291,6 +291,12 @@ class AtomsAgentContext(OpenAILLMContext):
                     )
             else:
                 messages.append(message)
+
+        return messages
+
+    def _restructure_from_atoms_agent_messages(self):
+        """restructure the open ai context from the atoms agent context."""
+        messages = self.get_openai_restructure_messages()
 
         self.messages.clear()
         self.messages.extend(messages)
