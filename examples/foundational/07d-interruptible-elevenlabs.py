@@ -17,7 +17,10 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.gladia.config import GladiaInputParams, LanguageConfig
+from pipecat.services.gladia.stt import GladiaSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
@@ -37,11 +40,20 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         ),
     )
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # STT Service
+    stt = GladiaSTTService(
+        api_key=os.getenv("GLADIA_API_KEY"),
+        params=GladiaInputParams(
+            language_config=LanguageConfig(
+                languages=[Language.TL],
+            ),
+        ),
+    )
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+        voice_id="NEqPvTuKWuvwUMAEPBPR",
+        model="eleven_multilingual_v2",
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -49,7 +61,12 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": """
+            You are a helpful assistant that speaks Tagalog working at 
+            Phillipine Airlines. Answer questions about the user's flight, such 
+            as flight status, check-in procedures, baggage policies, and other 
+            travel-related inquiries. Always respond in Tagalog. 
+            """,
         },
     ]
 
