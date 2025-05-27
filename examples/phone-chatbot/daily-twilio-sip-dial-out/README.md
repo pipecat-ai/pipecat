@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Daily + Twilio SIP dial-out Voice Bot
 
 This project demonstrates how to create a voice bot that can make phone calls via Twilio and use Daily's SIP capabilities to enable voice conversations.
@@ -134,6 +136,10 @@ properties = DailyRoomProperties(
 - Check that your meeting token is an owner token (The bot does this for you automatically)
 - Check that the SIP URI is correct
 - Check that the phone number you are trying to ring is correct
+
+### I'm stuck setting up my Twilio account
+
+- You can reference this [Notion doc](https://dailyco.notion.site/PUBLIC-Doc-Integration-Twilio-PSTN-Daily-s-SIP-Dialout-1cfdaed630f5458d9d4fc0e3f29ec559) to find more information on how to set up Twilio, as well as use webhooks instead of TwiML Bins
 
 ### Call connects but no bot is heard
 
