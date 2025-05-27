@@ -45,7 +45,7 @@ daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 class SessionManager:
     """Centralized management of session IDs and state for all call participants."""
 
-    def __init__(self):
+    def __init__(self, call_flow_state=None):
         # Track session IDs of different participant types
         self.session_ids = {
             "operator": None,
@@ -62,8 +62,8 @@ class SessionManager:
             # Add other participant types as needed
         }
 
-        # State object for call flow
-        self.call_flow_state = CallFlowState()
+        # Use the provided call_flow_state or create a new one
+        self.call_flow_state = call_flow_state if call_flow_state is not None else CallFlowState()
 
     def set_session_id(self, participant_type, session_id):
         """Set the session ID for a specific participant type.
@@ -266,7 +266,7 @@ async def run_bot(
 
     # Initialize the session manager
     call_flow_state = CallFlowState()
-    session_manager = SessionManager()
+    session_manager = SessionManager(call_flow_state)
 
     # Operator dialout number
     operator_number = os.getenv("OPERATOR_NUMBER", None)
@@ -409,10 +409,7 @@ async def run_bot(
 
     # Define function to determine if bot should speak
     async def should_speak(self) -> bool:
-        result = (
-            not session_manager.call_flow_state.operator_connected
-            or not session_manager.call_flow_state.summary_finished
-        )
+        result = not call_flow_state.operator_connected or not call_flow_state.summary_finished
         return result
 
     # Build pipeline
