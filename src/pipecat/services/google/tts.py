@@ -8,6 +8,8 @@ import asyncio
 import json
 import os
 
+from pipecat.utils.tracing.service_decorators import traced_tts
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -200,7 +202,7 @@ def language_to_google_tts_language(language: Language) -> Optional[str]:
     return language_map.get(language)
 
 
-class GoogleTTSService(TTSService):
+class GoogleHttpTTSService(TTSService):
     class InputParams(BaseModel):
         pitch: Optional[str] = None
         rate: Optional[str] = None
@@ -215,12 +217,14 @@ class GoogleTTSService(TTSService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        voice_id: str = "en-US-Neural2-A",
+        voice_id: str = "en-US-Chirp3-HD-Charon",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or GoogleHttpTTSService.InputParams()
 
         self._settings = {
             "pitch": params.pitch,
@@ -318,6 +322,7 @@ class GoogleTTSService(TTSService):
 
         return ssml
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -366,7 +371,160 @@ class GoogleTTSService(TTSService):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
                 yield frame
-                await asyncio.sleep(0)  # Allow other tasks to run
+
+            yield TTSStoppedFrame()
+
+        except Exception as e:
+            logger.exception(f"{self} error generating TTS: {e}")
+            error_message = f"TTS generation error: {str(e)}"
+            yield ErrorFrame(error=error_message)
+
+
+class GoogleTTSService(TTSService):
+    """Text-to-Speech service using Google Cloud Text-to-Speech API.
+
+    Converts text to speech using Google's TTS models with streaming synthesis
+    for low latency. Supports multiple languages and voices.
+
+    Args:
+        credentials: JSON string containing Google Cloud service account credentials.
+        credentials_path: Path to Google Cloud service account JSON file.
+        voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
+        sample_rate: Audio sample rate in Hz.
+        params: Language only.
+
+    Notes:
+        Requires Google Cloud credentials via service account JSON, file path, or
+        default application credentials (GOOGLE_APPLICATION_CREDENTIALS env var).
+        Only Chirp 3 HD and Journey voices are supported. Use GoogleHttpTTSService for other voices.
+
+    Example:
+        ```python
+        tts = GoogleTTSService(
+            credentials_path="/path/to/service-account.json",
+            voice_id="en-US-Chirp3-HD-Charon",
+            params=GoogleTTSService.InputParams(
+                language=Language.EN_US,
+            )
+        )
+        ```
+    """
+
+    class InputParams(BaseModel):
+        language: Optional[Language] = Language.EN
+
+    def __init__(
+        self,
+        *,
+        credentials: Optional[str] = None,
+        credentials_path: Optional[str] = None,
+        voice_id: str = "en-US-Chirp3-HD-Charon",
+        sample_rate: Optional[int] = None,
+        params: InputParams = InputParams(),
+        **kwargs,
+    ):
+        super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or GoogleTTSService.InputParams()
+
+        self._settings = {
+            "language": self.language_to_service_language(params.language)
+            if params.language
+            else "en-US",
+        }
+        self.set_voice(voice_id)
+        self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
+            credentials, credentials_path
+        )
+
+    def _create_client(
+        self, credentials: Optional[str], credentials_path: Optional[str]
+    ) -> texttospeech_v1.TextToSpeechAsyncClient:
+        creds: Optional[service_account.Credentials] = None
+
+        # Create a Google Cloud service account for the Cloud Text-to-Speech API
+        # Using either the provided credentials JSON string or the path to a service account JSON
+        # file, create a Google Cloud service account and use it to authenticate with the API.
+        if credentials:
+            # Use provided credentials JSON string
+            json_account_info = json.loads(credentials)
+            creds = service_account.Credentials.from_service_account_info(json_account_info)
+        elif credentials_path:
+            # Use service account JSON file if provided
+            creds = service_account.Credentials.from_service_account_file(credentials_path)
+        else:
+            try:
+                creds, project_id = default(
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                )
+            except GoogleAuthError:
+                pass
+
+        if not creds:
+            raise ValueError("No valid credentials provided.")
+
+        return texttospeech_v1.TextToSpeechAsyncClient(credentials=creds)
+
+    def can_generate_metrics(self) -> bool:
+        return True
+
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        return language_to_google_tts_language(language)
+
+    @traced_tts
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        logger.debug(f"{self}: Generating TTS [{text}]")
+
+        try:
+            await self.start_ttfb_metrics()
+
+            voice = texttospeech_v1.VoiceSelectionParams(
+                language_code=self._settings["language"], name=self._voice_id
+            )
+
+            streaming_config = texttospeech_v1.StreamingSynthesizeConfig(
+                voice=voice,
+                streaming_audio_config=texttospeech_v1.StreamingAudioConfig(
+                    audio_encoding=texttospeech_v1.AudioEncoding.PCM,
+                    sample_rate_hertz=self.sample_rate,
+                ),
+            )
+            config_request = texttospeech_v1.StreamingSynthesizeRequest(
+                streaming_config=streaming_config
+            )
+
+            async def request_generator():
+                yield config_request
+                yield texttospeech_v1.StreamingSynthesizeRequest(
+                    input=texttospeech_v1.StreamingSynthesisInput(text=text)
+                )
+
+            streaming_responses = await self._client.streaming_synthesize(request_generator())
+            await self.start_tts_usage_metrics(text)
+
+            yield TTSStartedFrame()
+
+            audio_buffer = b""
+            CHUNK_SIZE = 1024
+            first_chunk_for_ttfb = False
+
+            async for response in streaming_responses:
+                chunk = response.audio_content
+                if not chunk:
+                    continue
+
+                if not first_chunk_for_ttfb:
+                    await self.stop_ttfb_metrics()
+                    first_chunk_for_ttfb = True
+
+                audio_buffer += chunk
+                while len(audio_buffer) >= CHUNK_SIZE:
+                    piece = audio_buffer[:CHUNK_SIZE]
+                    audio_buffer = audio_buffer[CHUNK_SIZE:]
+                    yield TTSAudioRawFrame(piece, self.sample_rate, 1)
+
+            if audio_buffer:
+                yield TTSAudioRawFrame(audio_buffer, self.sample_rate, 1)
 
             yield TTSStoppedFrame()
 

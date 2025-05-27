@@ -55,7 +55,7 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.observers.base_observer import BaseObserver
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -110,7 +110,7 @@ class RTVIActionArgument(BaseModel):
 class RTVIAction(BaseModel):
     service: str
     action: str
-    arguments: List[RTVIActionArgument] = []
+    arguments: List[RTVIActionArgument] = Field(default_factory=list)
     result: Literal["bool", "number", "string", "array", "object"]
     handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[ActionResult]] = Field(
         exclude=True
@@ -254,7 +254,7 @@ class RTVIBotReady(BaseModel):
 class RTVILLMFunctionCallMessageData(BaseModel):
     function_name: str
     tool_call_id: str
-    arguments: Mapping[str, Any]
+    args: Mapping[str, Any]
 
 
 class RTVILLMFunctionCallMessage(BaseModel):
@@ -437,22 +437,17 @@ class RTVIObserver(BaseObserver):
         params (RTVIObserverParams): Settings to enable/disable specific messages.
     """
 
-    def __init__(self, rtvi: "RTVIProcessor", *, params: RTVIObserverParams = RTVIObserverParams()):
-        super().__init__()
+    def __init__(
+        self, rtvi: "RTVIProcessor", *, params: Optional[RTVIObserverParams] = None, **kwargs
+    ):
+        super().__init__(**kwargs)
         self._rtvi = rtvi
-        self._params = params
+        self._params = params or RTVIObserverParams()
         self._bot_transcription = ""
         self._frames_seen = set()
         rtvi.set_errors_enabled(self._params.errors_enabled)
 
-    async def on_push_frame(
-        self,
-        src: FrameProcessor,
-        dst: FrameProcessor,
-        frame: Frame,
-        direction: FrameDirection,
-        timestamp: int,
-    ):
+    async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
 
         Args:
@@ -462,6 +457,10 @@ class RTVIObserver(BaseObserver):
             direction: Direction of frame flow in pipeline
             timestamp: Time when frame was pushed
         """
+        src = data.source
+        frame = data.frame
+        direction = data.direction
+
         # If we have already seen this frame, let's skip it.
         if frame.id in self._frames_seen:
             return
@@ -635,14 +634,12 @@ class RTVIProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        config: RTVIConfig = RTVIConfig(config=[]),
+        config: Optional[RTVIConfig] = None,
         transport: Optional[BaseTransport] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._config = config
-
-        self._pipeline: Optional[FrameProcessor] = None
+        self._config = config or RTVIConfig(config=[])
 
         self._bot_ready = False
         self._client_ready = False
@@ -703,7 +700,7 @@ class RTVIProcessor(FrameProcessor):
         fn = RTVILLMFunctionCallMessageData(
             function_name=params.function_name,
             tool_call_id=params.tool_call_id,
-            arguments=params.arguments,
+            args=params.arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
         await self._push_transport_message(message, exclude_none=False)
@@ -756,11 +753,6 @@ class RTVIProcessor(FrameProcessor):
         # Other frames
         else:
             await self.push_frame(frame, direction)
-
-    async def cleanup(self):
-        await super().cleanup()
-        if self._pipeline:
-            await self._pipeline.cleanup()
 
     async def _start(self, frame: StartFrame):
         if not self._action_task:
@@ -851,7 +843,7 @@ class RTVIProcessor(FrameProcessor):
     async def _handle_client_ready(self, request_id: str):
         logger.debug("Received client-ready")
         if self._input_transport:
-            self._input_transport.start_audio_in_streaming()
+            await self._input_transport.start_audio_in_streaming()
 
         self._client_ready_id = request_id
         await self.set_client_ready()

@@ -17,13 +17,13 @@ from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
     EndFrame,
-    InputAudioRawFrame,
     OutputAudioRawFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
+    UserAudioRawFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -100,20 +100,27 @@ class LiveKitTransportClient:
             raise Exception(f"{self}: missing room object (pipeline not started?)")
         return self._room
 
-    async def setup(self, frame: StartFrame):
-        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
-        if not self._task_manager:
-            self._task_manager = frame.task_manager
-            self._room = rtc.Room(loop=self._task_manager.get_event_loop())
+    async def setup(self, setup: FrameProcessorSetup):
+        if self._task_manager:
+            return
 
-            # Set up room event handlers
-            self.room.on("participant_connected")(self._on_participant_connected_wrapper)
-            self.room.on("participant_disconnected")(self._on_participant_disconnected_wrapper)
-            self.room.on("track_subscribed")(self._on_track_subscribed_wrapper)
-            self.room.on("track_unsubscribed")(self._on_track_unsubscribed_wrapper)
-            self.room.on("data_received")(self._on_data_received_wrapper)
-            self.room.on("connected")(self._on_connected_wrapper)
-            self.room.on("disconnected")(self._on_disconnected_wrapper)
+        self._task_manager = setup.task_manager
+        self._room = rtc.Room(loop=self._task_manager.get_event_loop())
+
+        # Set up room event handlers
+        self.room.on("participant_connected")(self._on_participant_connected_wrapper)
+        self.room.on("participant_disconnected")(self._on_participant_disconnected_wrapper)
+        self.room.on("track_subscribed")(self._on_track_subscribed_wrapper)
+        self.room.on("track_unsubscribed")(self._on_track_unsubscribed_wrapper)
+        self.room.on("data_received")(self._on_data_received_wrapper)
+        self.room.on("connected")(self._on_connected_wrapper)
+        self.room.on("disconnected")(self._on_disconnected_wrapper)
+
+    async def cleanup(self):
+        await self.disconnect()
+
+    async def start(self, frame: StartFrame):
+        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def connect(self):
@@ -333,9 +340,6 @@ class LiveKitTransportClient:
             else:
                 logger.warning(f"Received unexpected event type: {type(event)}")
 
-    async def cleanup(self):
-        await self.disconnect()
-
     async def get_next_audio_frame(self):
         frame, participant_id = await self._audio_queue.get()
         return frame, participant_id
@@ -366,10 +370,11 @@ class LiveKitInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._client.setup(frame)
+        await self._client.start(frame)
         await self._client.connect()
         if not self._audio_in_task and self._params.audio_in_enabled:
             self._audio_in_task = self.create_task(self._audio_in_task_handler())
+        await self.set_transport_ready(frame)
         logger.info("LiveKitInputTransport started")
 
     async def stop(self, frame: EndFrame):
@@ -384,6 +389,10 @@ class LiveKitInputTransport(BaseInputTransport):
         await self._client.disconnect()
         if self._audio_in_task and self._params.audio_in_enabled:
             await self.cancel_task(self._audio_in_task)
+
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._client.setup(setup)
 
     async def cleanup(self):
         await super().cleanup()
@@ -402,7 +411,8 @@ class LiveKitInputTransport(BaseInputTransport):
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
                     audio_frame_event
                 )
-                input_audio_frame = InputAudioRawFrame(
+                input_audio_frame = UserAudioRawFrame(
+                    user_id=participant_id,
                     audio=pipecat_audio_frame.audio,
                     sample_rate=pipecat_audio_frame.sample_rate,
                     num_channels=pipecat_audio_frame.num_channels,
@@ -439,8 +449,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._client.setup(frame)
+        await self._client.start(frame)
         await self._client.connect()
+        await self.set_transport_ready(frame)
         logger.info("LiveKitOutputTransport started")
 
     async def stop(self, frame: EndFrame):
@@ -451,6 +462,10 @@ class LiveKitOutputTransport(BaseOutputTransport):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._client.disconnect()
+
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._client.setup(setup)
 
     async def cleanup(self):
         await super().cleanup()
@@ -485,7 +500,7 @@ class LiveKitTransport(BaseTransport):
         url: str,
         token: str,
         room_name: str,
-        params: LiveKitParams = LiveKitParams(),
+        params: Optional[LiveKitParams] = None,
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ):
@@ -501,7 +516,7 @@ class LiveKitTransport(BaseTransport):
             on_data_received=self._on_data_received,
             on_first_participant_joined=self._on_first_participant_joined,
         )
-        self._params = params
+        self._params = params or LiveKitParams()
 
         self._client = LiveKitTransportClient(
             url, token, room_name, self._params, callbacks, self.name

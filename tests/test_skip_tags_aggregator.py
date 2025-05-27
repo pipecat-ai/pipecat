@@ -14,41 +14,41 @@ class TestSkipTagsAggregator(unittest.IsolatedAsyncioTestCase):
         self.aggregator = SkipTagsAggregator([("<spell>", "</spell>")])
 
     async def test_no_tags(self):
-        self.aggregator.reset()
+        await self.aggregator.reset()
 
         # No tags involved, aggregate at end of sentence.
-        result = self.aggregator.aggregate("Hello Pipecat!")
+        result = await self.aggregator.aggregate("Hello Pipecat!")
         self.assertEqual(result, "Hello Pipecat!")
         self.assertEqual(self.aggregator.text, "")
 
     async def test_basic_tags(self):
-        self.aggregator.reset()
+        await self.aggregator.reset()
 
         # Tags involved, avoid aggregation during tags.
-        result = self.aggregator.aggregate("My email is <spell>foo@pipecat.ai</spell>.")
+        result = await self.aggregator.aggregate("My email is <spell>foo@pipecat.ai</spell>.")
         self.assertEqual(result, "My email is <spell>foo@pipecat.ai</spell>.")
         self.assertEqual(self.aggregator.text, "")
 
     async def test_streaming_tags(self):
-        self.aggregator.reset()
+        await self.aggregator.reset()
 
         # Tags involved, stream small chunk of texts.
-        result = self.aggregator.aggregate("My email is <sp")
+        result = await self.aggregator.aggregate("My email is <sp")
         self.assertIsNone(result)
         self.assertEqual(self.aggregator.text, "My email is <sp")
 
-        result = self.aggregator.aggregate("ell>foo.")
+        result = await self.aggregator.aggregate("ell>foo.")
         self.assertIsNone(result)
         self.assertEqual(self.aggregator.text, "My email is <spell>foo.")
 
-        result = self.aggregator.aggregate("bar@pipecat.")
+        result = await self.aggregator.aggregate("bar@pipecat.")
         self.assertIsNone(result)
         self.assertEqual(self.aggregator.text, "My email is <spell>foo.bar@pipecat.")
 
-        result = self.aggregator.aggregate("ai</spe")
+        result = await self.aggregator.aggregate("ai</spe")
         self.assertIsNone(result)
         self.assertEqual(self.aggregator.text, "My email is <spell>foo.bar@pipecat.ai</spe")
 
-        result = self.aggregator.aggregate("ll>.")
+        result = await self.aggregator.aggregate("ll>.")
         self.assertEqual(result, "My email is <spell>foo.bar@pipecat.ai</spell>.")
         self.assertEqual(self.aggregator.text, "")

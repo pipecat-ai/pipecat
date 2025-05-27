@@ -155,8 +155,7 @@ class MCPClient(BaseObject):
             error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
             logger.error(error_msg)
 
-        response = "Sorry, could not call the mcp tool"
-        image_url = None
+        response = ""
         if results:
             if hasattr(results, "content") and results.content:
                 for i, content in enumerate(results.content):
@@ -171,7 +170,8 @@ class MCPClient(BaseObject):
             else:
                 logger.error(f"Error getting content from {function_name} results.")
 
-        await result_callback(response)
+        final_response = response if len(response) else "Sorry, could not call the mcp tool"
+        await result_callback(final_response)
 
     async def _list_tools(self, session, mcp_tool_wrapper, llm):
         available_tools = await session.list_tools()

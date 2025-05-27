@@ -20,8 +20,7 @@ from bot_runner_helpers import (
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
-from twilio.twiml.voice_response import VoiceResponse
+from fastapi.responses import JSONResponse
 
 from pipecat.transports.services.helpers.daily_rest import (
     DailyRESTHelper,
@@ -125,32 +124,6 @@ async def start_bot(room_details: Dict[str, str], body: Dict[str, Any], example:
         raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
 
 
-async def start_twilio_bot(room_details: Dict[str, str], call_id: str) -> bool:
-    """Start a Twilio bot process with the given configuration.
-
-    Args:
-        room_details: Room URL, token, and SIP endpoint
-        call_id: Twilio call ID (CallSid)
-
-    Returns:
-        Boolean indicating success
-    """
-    room_url = room_details["room"]
-    token = room_details["token"]
-    sip_endpoint = room_details["sip_endpoint"]
-
-    # Format command for Twilio bot
-    bot_proc = f"python3 -m bot_twilio -u {room_url} -t {token} -i {call_id} -s {sip_endpoint}"
-    print(f"Starting Twilio bot. Room: {room_url}")
-
-    try:
-        command_parts = shlex.split(bot_proc)
-        subprocess.Popen(command_parts, bufsize=1, cwd=os.path.dirname(os.path.abspath(__file__)))
-        return True
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to start subprocess: {e}")
-
-
 # ----------------- API Setup ----------------- #
 
 
@@ -180,47 +153,6 @@ app.add_middleware(
 # ----------------- API Endpoints ----------------- #
 
 
-@app.post("/twilio_start_bot", response_class=PlainTextResponse)
-async def twilio_start_bot(request: Request):
-    """Handle incoming Twilio webhook calls and start a Twilio bot.
-
-    This endpoint is called directly by Twilio as a webhook when a call is received.
-    It puts the call on hold with music and starts a bot that will handle the call.
-    """
-    print("POST /twilio_start_bot")
-
-    # Get form data from Twilio webhook
-    try:
-        form_data = await request.form()
-        data = dict(form_data)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse Twilio form data: {str(e)}")
-
-    # Get default room URL from environment
-    room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
-
-    # Extract call ID from Twilio data
-    call_id = data.get("CallSid")
-    if not call_id:
-        raise HTTPException(status_code=400, detail="Missing 'CallSid' in request")
-
-    print(f"CallId: {call_id}")
-
-    # Create Daily room for the Twilio call
-    room_details = await create_daily_room(room_url, None)  # No special config for Twilio rooms
-
-    # Start the Twilio bot
-    await start_twilio_bot(room_details, call_id)
-
-    # Put the call on hold until the bot is ready to handle it
-    # The bot will update the call with the SIP URI when it's ready
-    resp = VoiceResponse()
-    resp.play(
-        url="http://com.twilio.sounds.music.s3.amazonaws.com/MARKOVICHAMP-Borghestral.mp3", loop=10
-    )
-    return str(resp)
-
-
 @app.post("/start")
 async def handle_start_request(request: Request) -> JSONResponse:
     """Unified endpoint to handle bot configuration for different scenarios."""
@@ -228,21 +160,7 @@ async def handle_start_request(request: Request) -> JSONResponse:
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL", None)
 
     try:
-        # Check if this is form data (from Twilio) or JSON
-        content_type = request.headers.get("content-type", "").lower()
-
-        if "application/x-www-form-urlencoded" in content_type:
-            # Handle form data from Twilio
-            form_data = await request.form()
-            data = dict(form_data)
-
-            # Check for CallSid which indicates this is a Twilio webhook
-            if "CallSid" in data:
-                # Redirect to Twilio handler for backward compatibility
-                return await twilio_start_bot(request)
-        else:
-            # Parse JSON request data
-            data = await request.json()
+        data = await request.json()
 
         # Handle webhook test
         if "test" in data:
@@ -298,14 +216,6 @@ async def handle_start_request(request: Request) -> JSONResponse:
         return JSONResponse(response)
 
     except json.JSONDecodeError:
-        # Check if this might be form data from Twilio
-        try:
-            content_type = request.headers.get("content-type", "").lower()
-            if "application/x-www-form-urlencoded" in content_type:
-                return await twilio_start_bot(request)
-        except Exception:
-            pass
-
         raise HTTPException(status_code=400, detail="Invalid JSON in request body")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Request processing error: {str(e)}")

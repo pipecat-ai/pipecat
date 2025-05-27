@@ -7,7 +7,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
-    TYPE_CHECKING,
     Any,
     Awaitable,
     Callable,
@@ -20,15 +19,10 @@ from typing import (
 )
 
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.clocks.base_clock import BaseClock
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
-
-if TYPE_CHECKING:
-    from pipecat.observers.base_observer import BaseObserver
 
 
 class KeypadEntry(str, Enum):
@@ -294,6 +288,7 @@ class TranscriptionMessage:
 
     role: Literal["user", "assistant"]
     content: str
+    user_id: Optional[str] = None
     timestamp: Optional[str] = None
 
 
@@ -447,14 +442,11 @@ class OutputDTMFFrame(DTMFFrame):
 class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
-    clock: BaseClock
-    task_manager: BaseTaskManager
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
-    observer: Optional["BaseObserver"] = None
     report_only_initial_ttfb: bool = False
 
 
@@ -715,9 +707,10 @@ class UserImageRequestFrame(SystemFrame):
     context: Optional[Any] = None
     function_name: Optional[str] = None
     tool_call_id: Optional[str] = None
+    video_source: Optional[str] = None
 
     def __str__(self):
-        return f"{self.name}(user: {self.user_id}, function: {self.function_name}, request: {self.tool_call_id})"
+        return f"{self.name}(user: {self.user_id}, video_source: {self.video_source}, function: {self.function_name}, request: {self.tool_call_id})"
 
 
 @dataclass

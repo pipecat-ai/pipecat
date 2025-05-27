@@ -8,6 +8,7 @@ import base64
 import json
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 from loguru import logger
 
@@ -89,17 +90,20 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         api_key: str,
         model: str = "gpt-4o-realtime-preview-2024-12-17",
         base_url: str = "wss://api.openai.com/v1/realtime",
-        session_properties: events.SessionProperties = events.SessionProperties(),
+        session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
     ):
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
+
         self.api_key = api_key
         self.base_url = full_url
 
-        self._session_properties: events.SessionProperties = session_properties
+        self._session_properties: events.SessionProperties = (
+            session_properties or events.SessionProperties()
+        )
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
         self._websocket = None
@@ -577,15 +581,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             arguments = json.loads(item.arguments)
             if self.has_function(function_name):
                 run_llm = index == total_items - 1
-                if function_name in self._functions.keys():
-                    await self.call_function(
-                        context=self._context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
-                        arguments=arguments,
-                        run_llm=run_llm,
-                    )
-                elif None in self._functions.keys():
+                if function_name in self._functions.keys() or None in self._functions.keys():
                     await self.call_function(
                         context=self._context,
                         tool_call_id=tool_id,

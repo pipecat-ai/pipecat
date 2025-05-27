@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import ormsgpack
@@ -51,7 +52,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         model: str,  # This is the reference_id
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
@@ -60,6 +61,8 @@ class FishAudioTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or FishAudioTTSService.InputParams()
 
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
@@ -186,6 +189,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             except Exception as e:
                 logger.error(f"Error processing message: {e}")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating Fish TTS: [{text}]")
         try:

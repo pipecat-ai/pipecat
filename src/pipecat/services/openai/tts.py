@@ -18,6 +18,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.services.tts_service import TTSService
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 ValidVoice = Literal[
     "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer", "verse"
@@ -94,6 +95,7 @@ class OpenAITTSService(TTSService):
                 f"Current rate of {self.sample_rate}Hz may cause issues."
             )
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:

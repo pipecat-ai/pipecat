@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from pyht.async_client import AsyncClient
@@ -109,7 +110,7 @@ class PlayHTTTSService(InterruptibleTTSService):
         voice_engine: str = "Play3.0-mini",
         sample_rate: Optional[int] = None,
         output_format: str = "wav",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
@@ -117,6 +118,8 @@ class PlayHTTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or PlayHTTTSService.InputParams()
 
         self._api_key = api_key
         self._user_id = user_id
@@ -268,6 +271,7 @@ class PlayHTTTSService(InterruptibleTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -326,10 +330,12 @@ class PlayHTHttpTTSService(TTSService):
         voice_engine: str = "Play3.0-mini",
         protocol: str = "http",  # Options: http, ws
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or PlayHTHttpTTSService.InputParams()
 
         self._user_id = user_id
         self._api_key = api_key
@@ -391,6 +397,7 @@ class PlayHTHttpTTSService(TTSService):
     def language_to_service_language(self, language: Language) -> Optional[str]:
         return language_to_playht_language(language)
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

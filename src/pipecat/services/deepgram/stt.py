@@ -22,6 +22,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from deepgram import (
@@ -187,6 +188,13 @@ class DeepgramSTTService(STTService):
     async def _on_utterance_end(self, *args, **kwargs):
         await self._call_event_handler("on_utterance_end", *args, **kwargs)
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
         if len(result.channel.alternatives) == 0:
@@ -203,8 +211,10 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
+                await self._handle_transcription(transcript, is_final, language)
                 await self.stop_processing_metrics()
             else:
+                # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
                     InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )

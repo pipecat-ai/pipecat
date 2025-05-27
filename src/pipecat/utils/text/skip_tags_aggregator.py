@@ -43,7 +43,7 @@ class SkipTagsAggregator(BaseTextAggregator):
         """
         return self._text
 
-    def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[str]:
         """Aggregate text and process pattern pairs.
 
         This method adds the new text to the buffer, processes any complete pattern
@@ -77,7 +77,7 @@ class SkipTagsAggregator(BaseTextAggregator):
         # No complete sentence found yet
         return None
 
-    def handle_interruption(self):
+    async def handle_interruption(self):
         """Handle interruptions by clearing the buffer.
 
         Called when an interruption occurs in the processing pipeline,
@@ -85,7 +85,7 @@ class SkipTagsAggregator(BaseTextAggregator):
         """
         self._text = ""
 
-    def reset(self):
+    async def reset(self):
         """Clear the internally aggregated text.
 
         Resets the aggregator to its initial state, discarding any

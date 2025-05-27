@@ -46,6 +46,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
@@ -89,12 +90,13 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-3-7-sonnet-20250219",
-        params: InputParams = InputParams(),
+        model: str = "claude-sonnet-4-20250514",
+        params: Optional[InputParams] = None,
         client=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        params = params or AnthropicLLMService.InputParams()
         self._client = client or AsyncAnthropic(
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
@@ -147,6 +149,7 @@ class AnthropicLLMService(LLMService):
         assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text
@@ -250,14 +253,24 @@ class AnthropicLLMService(LLMService):
                         if hasattr(event.message.usage, "output_tokens")
                         else 0
                     )
-                    if hasattr(event.message.usage, "cache_creation_input_tokens"):
-                        cache_creation_input_tokens += (
-                            event.message.usage.cache_creation_input_tokens
+                    cache_creation_input_tokens += (
+                        event.message.usage.cache_creation_input_tokens
+                        if (
+                            hasattr(event.message.usage, "cache_creation_input_tokens")
+                            and event.message.usage.cache_creation_input_tokens is not None
                         )
-                        logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
-                    if hasattr(event.message.usage, "cache_read_input_tokens"):
-                        cache_read_input_tokens += event.message.usage.cache_read_input_tokens
-                        logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
+                        else 0
+                    )
+                    logger.debug(f"Cache creation input tokens: {cache_creation_input_tokens}")
+                    cache_read_input_tokens += (
+                        event.message.usage.cache_read_input_tokens
+                        if (
+                            hasattr(event.message.usage, "cache_read_input_tokens")
+                            and event.message.usage.cache_read_input_tokens is not None
+                        )
+                        else 0
+                    )
+                    logger.debug(f"Cache read input tokens: {cache_read_input_tokens}")
                     total_input_tokens = (
                         prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
                     )

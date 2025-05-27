@@ -8,6 +8,8 @@ import sys
 
 from pipecat.services import DeprecatedModuleProxy
 
+from .llm import *
+from .stt import *
 from .tts import *
 
-sys.modules[__name__] = DeprecatedModuleProxy(globals(), "aws", "aws.tts")
+sys.modules[__name__] = DeprecatedModuleProxy(globals(), "aws", "aws.[llm,stt,tts]")

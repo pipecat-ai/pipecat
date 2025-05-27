@@ -5,6 +5,245 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `GoogleHttpTTSService` which uses Google's HTTP TTS API.
+
+- Added `TavusTransport`, a new transport implementation compatible with any
+  Pipecat pipeline. When using the `TavusTransport`the Pipecat bot will
+  connect in the same room as the Tavus Avatar and the user.
+
+- Added `PlivoFrameSerializer` to support Plivo calls. A full running example
+  has also been added to `examples/plivo-chatbot`.
+
+- Added `UserBotLatencyLogObserver`. This is an observer that logs the latency
+  between when the user stops speaking and when the bot starts speaking. This
+  gives you an initial idea on how quickly the AI services respond.
+
+- Added `SarvamTTSService`, which implements Sarvam AI's TTS API:
+  https://docs.sarvam.ai/api-reference-docs/text-to-speech/convert.
+
+- Added `PipelineTask.add_observer()` and `PipelineTask.remove_observer()` to
+  allow mangaging observers at runtime. This is useful for cases where the task
+  is passed around to other code components that might want to observe the
+  pipeline dynamically.
+
+- Added `user_id` field to `TranscriptionMessage`. This allows identifying the
+  user in a multi-user scenario. Note that this requires that
+  `TranscriptionFrame` has the `user_id` properly set.
+
+- Added new `PipelineTask` event handlers `on_pipeline_started`,
+  `on_pipeline_stopped`, `on_pipeline_ended` and `on_pipeline_cancelled`, which
+  correspond to the `StartFrame`, `StopFrame`, `EndFrame` and `CancelFrame`
+  respectively.
+
+- Added additional languages to `LmntTTSService`. Languages include: `hi`,
+  `id`, `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
+
+- Added a `model` parameter to the `LmntTTSService` constructor, allowing
+  switching between LMNT models.
+
+- Added `MiniMaxHttpTTSService`, which implements MiniMax's T2A API for TTS.
+  Learn more: https://www.minimax.io/platform_overview
+
+- A new function `FrameProcessor.setup()` has been added to allow setting up
+  frame processors before receiving a `StartFrame`. This is what's happening
+  internally: `FrameProcessor.setup()` is called, `StartFrame` is pushed from
+  the beginning of the pipeline, your regular pipeline operations, `EndFrame`
+  or `CancelFrame` are pushed from the beginning of the pipeline and finally
+  `FrameProcessor.cleanup()` is called.
+
+- Added support for OpenTelemetry tracing in Pipecat. This initial
+  implementation includes:
+
+  - A `setup_tracing` method where you can specify your OpenTelemetry exporter
+  - Service decorators for STT (`@traced_stt`), LLM (`@traced_llm`), and TTS
+    (`@traced_tts`) which trace the execution and collect properties and
+    metrics (TTFB, token usage, character counts, etc.)
+  - Class decorators that provide execution tracking; these are generic and can
+    be used for service tracking as needed
+  - Spans that help track traces on a per conversations and turn basis:
+
+  ```
+  conversation-uuid
+  ├── turn-1
+  │   ├── stt_deepgramsttservice
+  │   ├── llm_openaillmservice
+  │   └── tts_cartesiattsservice
+  ...
+  └── turn-n
+      └── ...
+  ```
+
+  By default, Pipecat has implemented service decorators to trace execution of
+  STT, LLM, and TTS services. You can enable tracing by setting
+  `enable_tracing` to `True` in the PipelineTask.
+
+- Added `TurnTrackingObserver`, which tracks the start and end of a user/bot
+  turn pair and emits events `on_turn_started` and `on_turn_stopped`
+  corresponding to the start and end of a turn, respectively.
+
+- Allow passing observers to `run_test()` while running unit tests.
+
+### Changed
+
+- Updated `GoogleTTSService` to use Google's streaming TTS API. The default
+  voice also updated to `en-US-Chirp3-HD-Charon`.
+
+- ⚠️ Refactored the `TavusVideoService`, so it acts like a proxy, sending audio
+  to Tavus and receiving both audio and video. This will make
+  `TavusVideoService` usable with any Pipecat pipeline and with any transport.
+  This is a **breaking change**, check the
+  `examples/foundational/21a-tavus-layer-small-webrtc.py` to see how to use it.
+
+- `DailyTransport` now uses custom microphone audio tracks instead of virtual
+  microphones. Now, multiple Daily transports can be used in the same process.
+
+- `DailyTransport` now captures audio from individual participants instead of
+  the whole room. This allows identifying audio frames per participant.
+
+- Updated the default model for `AnthropicLLMService` to
+  `claude-sonnet-4-20250514`.
+
+- Updated the default model for `GeminiMultimodalLiveLLMService` to
+  `models/gemini-2.5-flash-preview-native-audio-dialog`.
+
+- `BaseTextFilter` methods `filter()`, `update_settings()`,
+  `handle_interruption()` and `reset_interruption()` are now async.
+
+- `BaseTextAggregator` methods `aggregate()`, `handle_interruption()` and
+  `reset()` are now async.
+
+- The API version for `CartesiaTTSService` and `CartesiaHttpTTSService` has
+  been updated. Also, the `cartesia` dependency has been updated to 2.x.
+
+- `CartesiaTTSService` and `CartesiaHttpTTSService` now support Cartesia's new
+  `speed` parameter which accepts values of `slow`, `normal`, and `fast`.
+
+- `GeminiMultimodalLiveLLMService` now uses the user transcription and usage
+  metrics provided by Gemini Live.
+
+- `GoogleLLMService` has been updated to use `google-genai` instead of the
+  deprecated `google-generativeai`.
+
+### Deprecated
+
+- In `CartesiaTTSService` and `CartesiaHttpTTSService`, `emotion` has been
+  deprecated by Cartesia. Pipecat is following suit and deprecating `emotion`
+  as well.
+
+### Removed
+
+- Since `GeminiMultimodalLiveLLMService` now transcribes it's own audio, the
+  `transcribe_user_audio` arg has been removed. Audio is now transcribed
+  automatically.
+
+- Removed `SileroVAD` frame processor, just use `SileroVADAnalyzer`
+  instead. Also removed, `07a-interruptible-vad.py` example.
+
+### Fixed
+
+- Fixed a `DailyTransport` issue that would cause images needing resize to block
+  the event loop.
+
+- Fixed an issue with `ElevenLabsTTSService` where changing the model or voice
+  while the service is running wasn't working.
+
+- Fixed an issue that would cause multiple instances of the same class to behave
+  incorrectly if any of the given constructor arguments defaulted to a mutable
+  value (e.g. lists, dictionaries, objects).
+
+- Fixed an issue with `CartesiaTTSService` where `TTSTextFrame` messages weren't
+  being emitted when the model was set to `sonic`. This resulted in the
+  assistant context not being updated with assistant messages.
+
+### Performance
+
+- `DailyTransport`: process audio, video and events in separate tasks.
+
+- Don't create event handler tasks if no user event handlers have been
+  registered.
+
+### Other
+
+- Added foundation examples `07y-interruptible-minimax.py` and
+  `07z-interruptible-sarvam.py`to show how to use the `MiniMaxHttpTTSService`
+  and `SarvamTTSService`, respectively.
+
+- Added an `open-telemetry-tracing` example, showing how to setup tracing. The
+  example also includes Jaeger as an open source OpenTelemetry client to review
+  traces from the example runs.
+
+- Added foundational example `29-turn-tracking-observer.py` to show how to use
+  the `TurnTrackingObserver`.
+
+## [0.0.67] - 2025-05-07
+
+### Added
+
+- Added `DebugLogObserver` for detailed frame logging with configurable
+  filtering by frame type and endpoint. This observer automatically extracts
+  and formats all frame data fields for debug logging.
+
+- `UserImageRequestFrame.video_source` field has been added to request an image
+  from the desired video source.
+
+- Added support for the AWS Nova Sonic speech-to-speech model with the new
+  `AWSNovaSonicLLMService`.
+  See https://docs.aws.amazon.com/nova/latest/userguide/speech.html.
+  Note that it requires Python >= 3.12 and `pip install pipecat-ai[aws-nova-sonic]`.
+
+- Added new AWS services `AWSBedrockLLMService` and `AWSTranscribeSTTService`.
+
+- Added `on_active_speaker_changed` event handler to the `DailyTransport` class.
+
+- Added `enable_ssml_parsing` and `enable_logging` to `InputParams` in
+  `ElevenLabsTTSService`.
+
+- Added support to `RimeHttpTTSService` for the `arcana` model.
+
+### Changed
+
+- Updated `ElevenLabsTTSService` to use the beta websocket API
+  (multi-stream-input). This new API supports context_ids and cancelling those
+  contexts, which greatly improves interruption handling.
+
+- Observers `on_push_frame()` now take a single argument `FramePushed` instead
+  of multiple arguments.
+
+- Updated the default voice for `DeepgramTTSService` to `aura-2-helena-en`.
+
+### Deprecated
+
+- `PollyTTSService` is now deprecated, use `AWSPollyTTSService` instead.
+
+- Observer `on_push_frame(src, dst, frame, direction, timestamp)` is now
+  deprecated, use `on_push_frame(data: FramePushed)` instead.
+
+### Fixed
+
+- Fixed a `DailyTransport` issue that was causing issues when multiple audio or
+  video sources where being captured.
+
+- Fixed a `UltravoxSTTService` issue that would cause the service to generate
+  all tokens as one word.
+
+- Fixed a `PipelineTask` issue that would cause tasks to not be cancelled if
+  task was cancelled from outside of Pipecat.
+
+- Fixed a `TaskManager` that was causing dangling tasks to be reported.
+
+- Fixed an issue that could cause data to be sent to the transports when they
+  were still not ready.
+
+- Remove custom audio tracks from `DailyTransport` before leaving.
+
+### Removed
+
+- Removed `CanonicalMetricsService` as it's no longer maintained.
+
 ## [0.0.66] - 2025-05-02
 
 ### Added
@@ -120,7 +359,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not a very common case.
 
 - Added `RivaSegmentedSTTService`, which allows Riva offline/batch models, such
-  as  to be "canary-1b-asr" used in Pipecat.
+  as to be "canary-1b-asr" used in Pipecat.
 
 ### Deprecated
 

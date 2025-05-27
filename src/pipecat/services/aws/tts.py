@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import os
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -20,15 +21,14 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import boto3
     from botocore.exceptions import BotoCoreError, ClientError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Deepgram, you need to `pip install pipecat-ai[aws]`. Also, set `AWS_SECRET_ACCESS_KEY`, `AWS_ACCESS_KEY_ID`, and `AWS_REGION` environment variable."
-    )
+    logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
     raise Exception(f"Missing module: {e}")
 
 
@@ -108,7 +108,7 @@ def language_to_aws_language(language: Language) -> Optional[str]:
     return language_map.get(language)
 
 
-class PollyTTSService(TTSService):
+class AWSPollyTTSService(TTSService):
     class InputParams(BaseModel):
         engine: Optional[str] = None
         language: Optional[Language] = Language.EN
@@ -125,10 +125,12 @@ class PollyTTSService(TTSService):
         region: Optional[str] = None,
         voice_id: str = "Joanna",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or AWSPollyTTSService.InputParams()
 
         self._polly_client = boto3.client(
             "polly",
@@ -151,6 +153,24 @@ class PollyTTSService(TTSService):
 
         self.set_voice(voice_id)
 
+        # Get credentials from environment variables if not provided
+        self._credentials = {
+            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
+            "region": region or os.getenv("AWS_REGION", "us-east-1"),
+        }
+
+        # Validate that we have the required credentials
+        if (
+            not self._credentials["aws_access_key_id"]
+            or not self._credentials["aws_secret_access_key"]
+        ):
+            raise ValueError(
+                "AWS credentials not found. Please provide them either through constructor parameters "
+                "or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
+            )
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -165,18 +185,17 @@ class PollyTTSService(TTSService):
 
         prosody_attrs = []
         # Prosody tags are only supported for standard and neural engines
-        if self._settings["engine"] != "generative":
-            if self._settings["rate"]:
-                prosody_attrs.append(f"rate='{self._settings['rate']}'")
+        if self._settings["engine"] == "standard":
             if self._settings["pitch"]:
                 prosody_attrs.append(f"pitch='{self._settings['pitch']}'")
-            if self._settings["volume"]:
-                prosody_attrs.append(f"volume='{self._settings['volume']}'")
 
-            if prosody_attrs:
-                ssml += f"<prosody {' '.join(prosody_attrs)}>"
-        else:
-            logger.warning("Prosody tags are not supported for generative engine. Ignoring.")
+        if self._settings["rate"]:
+            prosody_attrs.append(f"rate='{self._settings['rate']}'")
+        if self._settings["volume"]:
+            prosody_attrs.append(f"volume='{self._settings['volume']}'")
+
+        if prosody_attrs:
+            ssml += f"<prosody {' '.join(prosody_attrs)}>"
 
         ssml += text
 
@@ -187,8 +206,11 @@ class PollyTTSService(TTSService):
 
         ssml += "</speak>"
 
+        logger.trace(f"{self} SSML: {ssml}")
+
         return ssml
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_data(**args):
             response = self._polly_client.synthesize_speech(**args)
@@ -248,3 +270,17 @@ class PollyTTSService(TTSService):
 
         finally:
             yield TTSStoppedFrame()
+
+
+class PollyTTSService(AWSPollyTTSService):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "'PollyTTSService' is deprecated, use 'AWSPollyTTSService' instead.",
+                DeprecationWarning,
+            )

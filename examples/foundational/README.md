@@ -95,7 +95,7 @@ Depending on what you're trying to build, these learning paths will guide you th
 
 - **[18-gstreamer-filesrc.py](./18-gstreamer-filesrc.py)**: GStreamer video streaming (Video processing)
 - **[19-openai-realtime-beta.py](./19-openai-realtime-beta.py)**: OpenAI Speech-to-Speech (Direct S2S, Function calls)
-- **[21-tavus-layer.py](./21-tavus-layer.py)**: Tavus digital twin (Avatar integration)
+- **[21-tavus-layer-tavus-transport.py](./21-tavus-layer-tavus-transport.py)**: Tavus digital twin (Avatar integration)
 - **[27-simli-layer.py](./27-simli-layer.py)**: Simli avatar integration (Video synchronization)
 
 ### Performance & Optimization

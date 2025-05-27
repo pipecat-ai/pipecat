@@ -51,7 +51,6 @@ async def main():
             api_key=os.getenv("GOOGLE_API_KEY"),
             voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
             # system_instruction="Talk like a pirate."
-            transcribe_user_audio=True,
             # inference_on_context_initialization=False,
         )
 

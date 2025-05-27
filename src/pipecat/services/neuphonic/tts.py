@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import websockets
@@ -79,7 +80,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         url: str = "wss://api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
@@ -90,6 +91,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or NeuphonicTTSService.InputParams()
 
         self._api_key = api_key
         self._url = url
@@ -239,6 +242,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             logger.debug(f"Sending text to websocket: {msg}")
             await self._websocket.send(json.dumps(msg))
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"Generating TTS: [{text}]")
 
@@ -291,10 +295,12 @@ class NeuphonicHttpTTSService(TTSService):
         url: str = "https://api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or NeuphonicHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._url = url
@@ -315,6 +321,7 @@ class NeuphonicHttpTTSService(TTSService):
     async def flush_audio(self):
         pass
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Neuphonic streaming API.
 

@@ -30,7 +30,7 @@ from loguru import logger
 from pipecatcloud.agent import DailySessionArguments
 from word_list import generate_game_words
 
-from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
+from pipecat.audio.utils import create_default_resampler
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
@@ -188,7 +188,7 @@ class HostResponseTextFilter(BaseTextFilter):
         # No settings to update for this filter
         pass
 
-    def filter(self, text: str) -> str:
+    async def filter(self, text: str) -> str:
         # Remove case and whitespace for comparison
         clean_text = text.strip().upper()
 
@@ -198,10 +198,10 @@ class HostResponseTextFilter(BaseTextFilter):
 
         return text
 
-    def handle_interruption(self):
+    async def handle_interruption(self):
         self._interrupted = True
 
-    def reset_interruption(self):
+    async def reset_interruption(self):
         self._interrupted = False
 
 
@@ -524,7 +524,7 @@ async def tts_audio_raw_frame_filter(frame: Frame):
 
 
 # Create a resampler instance once
-resampler = SOXRAudioResampler()
+resampler = create_default_resampler()
 
 
 async def tts_to_input_audio_transformer(frame: Frame):
@@ -568,6 +568,7 @@ async def main(room_url: str, token: str):
         token,
         "Word Wrangler Bot",
         DailyParams(
+            audio_in_enabled=True,
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         ),
@@ -689,8 +690,6 @@ Important guidelines:
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.info("First participant joined: {}", participant["id"])
-        # Capture the participant's transcription
-        await transport.capture_participant_transcription(participant["id"])
         # Kick off the conversation
         await task.queue_frames([context_aggregator.user().get_context_frame()])
         # Start the game timer
