@@ -115,6 +115,16 @@ class AtomsAgentContext(OpenAILLMContext):
         )
         return ""
 
+    @classmethod
+    def upgrade_user_message_to_atoms_agent_message(
+        cls, content: ChatCompletionUserMessageParam
+    ) -> ChatCompletionUserMessageParam:
+        """Update the user message to the atoms agent message."""
+        return ChatCompletionUserMessageParam(
+            role="user",
+            content=json.dumps({"transcript": content["content"]}),
+        )
+
     def add_message(self, message: ChatCompletionMessageParam):
         """Add a message to the context."""
         if message["role"] == "user":
@@ -135,12 +145,7 @@ class AtomsAgentContext(OpenAILLMContext):
                 )
                 self.messages[-1]["content"] = json.dumps(previous_user_message_content)
             else:
-                # self.messages.append(json.dumps({"transcript": message["content"]}))
-                self.messages.append(
-                    ChatCompletionUserMessageParam(
-                        role="user", content=json.dumps({"transcript": message["content"]})
-                    ),
-                )
+                self.messages.append(self.upgrade_user_message_to_atoms_agent_message(message))
         elif message["role"] == "assistant":
             # if the previous role is "assistant" aggregate it with the current assistant message
             if self.messages and self.messages[-1]["role"] == "assistant":

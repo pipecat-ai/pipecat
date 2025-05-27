@@ -15,7 +15,11 @@ import aiofiles
 from dotenv import load_dotenv
 from fastapi import WebSocket
 from loguru import logger
-from openai.types.chat import ChatCompletionAssistantMessageParam
+from openai.types.chat import (
+    ChatCompletionAssistantMessageParam,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+)
 from smart_endpointing import (
     CLASSIFIER_MODEL,
     AudioAccumulator,
@@ -152,7 +156,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     # )
 
     transport_input_filter = TransportInputFilter()
-    agent_flow_processor = await initialize_conversational_agent(
+    agent_flow_processor, agent_config = await initialize_conversational_agent(
         agent_id="6834620651876e6afe20256a",
         call_id="CALL-1748080011312-b252f8",
         call_data=CallData(
@@ -167,15 +171,22 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     turn_tracking_observer = TurnTrackingObserver()
     agent_action_processor = AgentActionProcessor(turn_tracking_observer)
+    # messages = [
+    #     {
+    #         "role": "system",
+    #         "content": agent_config["system_prompt"],
+    #     },
+    #     {
+    #         "role": "user",
+    #         "content": json.dumps({"transcript": ""}),
+    #     },
+    # ]
+
     messages = [
-        {
-            "role": "system",
-            "content": FT_RESPONSE_MODEL_SYSTEM_PROMPT,
-        },
-        {
-            "role": "user",
-            "content": json.dumps({"transcript": ""}),
-        },
+        ChatCompletionSystemMessageParam(role="system", content=agent_config["system_prompt"]),
+        AtomsAgentContext.upgrade_user_message_to_atoms_agent_message(
+            ChatCompletionUserMessageParam(role="user", content="")
+        ),
     ]
 
     context = AtomsAgentContext(messages=messages)
