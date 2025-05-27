@@ -128,12 +128,16 @@ async def run_bot(
 
     **IMMEDIATELY after the call connects, LISTEN CAREFULLY for the *very first thing* you hear.**
 
-    **Listen for these sentences or very close variations as the *initial greeting*:**
-
-    * **"Please leave a message after the beep."**
-    * **"No one is available to take your call."**
-    * **"Record your message after the tone."**
-    * **"You have reached voicemail for..."** (or similar voicemail identification)
+    If you hear any of these phrases (or very similar ones):
+    - "Please leave a message after the beep"
+    - "No one is available to take your call"
+    - "Record your message after the tone"
+    - "You have reached voicemail for..."
+    - "You have reached [phone number]"
+    - "[phone number] is unavailable"
+    - "The person you are trying to reach..."
+    - "The number you have dialed..."
+    - "Your call has been forwarded to an automated voice messaging system"
 
     **If you HEAR one of these sentences (or a very similar greeting) as the *initial response* to the call, IMMEDIATELY assume it is voicemail and proceed to Phase 2.**
 
@@ -158,8 +162,14 @@ async def run_bot(
 
     Keep your responses **short and helpful.**
 
-    If the human is finished, say:
-    "Okay, thank you! Have a great day!"
+    When the person indicates they're done with the conversation by saying something like:
+        - "Goodbye"
+        - "That's all"
+        - "I'm done"
+        - "Thank you, that's all I needed"
+
+    
+    THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function.
 
     **Then, immediately call the function `terminate_call`.**
 
@@ -200,10 +210,7 @@ async def run_bot(
     )
 
     # Create pipeline task
-    task = PipelineTask(
-        pipeline,
-        PipelineParams(allow_interruptions=True),
-    )
+    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
     # ------------ EVENT HANDLERS ------------
 
