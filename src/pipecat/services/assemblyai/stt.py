@@ -51,15 +51,17 @@ class AssemblyAISTTService(STTService):
         language: Language = Language.EN,  # AssemblyAI only supports English
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
         connection_params: AssemblyAIConnectionParams = AssemblyAIConnectionParams(),
+        vad_force_turn_endpoint: bool = False,
         **kwargs,
     ):
         self._api_key = api_key
         self._language = language
         self._api_endpoint_base_url = api_endpoint_base_url
         self._connection_params = connection_params
+        self._vad_force_turn_endpoint = vad_force_turn_endpoint
 
         super().__init__(sample_rate=self._connection_params.sample_rate, **kwargs)
-        
+
         self._websocket = None
         self._termination_event = asyncio.Event()
         self._received_termination = False
@@ -67,11 +69,16 @@ class AssemblyAISTTService(STTService):
 
         self._receive_task = None
 
+        self._audio_buffer = bytearray()
+        self._chunk_size_ms = 50
+        self._chunk_size_bytes = 0
+
     def can_generate_metrics(self) -> bool:
         return True
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+        self._chunk_size_bytes = int(self._chunk_size_ms * self._sample_rate * 2 / 1000)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -83,7 +90,13 @@ class AssemblyAISTTService(STTService):
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        await self._websocket.send(audio)
+        self._audio_buffer.extend(audio)
+
+        while len(self._audio_buffer) >= self._chunk_size_bytes:
+            chunk = bytes(self._audio_buffer[: self._chunk_size_bytes])
+            self._audio_buffer = self._audio_buffer[self._chunk_size_bytes :]
+            await self._websocket.send(chunk)
+
         yield Frame()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -91,7 +104,8 @@ class AssemblyAISTTService(STTService):
         if isinstance(frame, UserStartedSpeakingFrame):
             await self.start_ttfb_metrics()
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            # TODO: if the user opts to use VAD, we should send a ForceEndpoint message
+            if self._vad_force_turn_endpoint:
+                await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
             await self.start_processing_metrics()
 
     def _build_ws_url(self) -> str:
@@ -133,6 +147,10 @@ class AssemblyAISTTService(STTService):
             self._termination_event.clear()
             self._received_termination = False
 
+            if len(self._audio_buffer) > 0:
+                await self._websocket.send(bytes(self._audio_buffer))
+                self._audio_buffer.clear()
+
             try:
                 await self._websocket.send(json.dumps({"type": "Terminate"}))
 
@@ -147,21 +165,22 @@ class AssemblyAISTTService(STTService):
             except Exception as e:
                 logger.warning(f"Error during termination handshake: {e}")
 
-        finally:
-            self._connected = False
-
-            try:
-                if not self._websocket.closed:
-                    await self._websocket.close()
-            except Exception as e:
-                logger.warning(f"Error closing WebSocket: {e}")
-
-            if self._receive_task and not self._receive_task.done():
+            if self._receive_task:
                 self._receive_task.cancel()
                 try:
                     await self._receive_task
-                except (asyncio.CancelledError, Exception) as e:
-                    logger.debug(f"Receive task cancelled: {e}")
+                except asyncio.CancelledError:
+                    pass
+
+            await self._websocket.close()
+
+        except Exception as e:
+            logger.error(f"Error during disconnect: {e}")
+
+        finally:
+            self._websocket = None
+            self._connected = False
+            self._receive_task = None
 
     async def _receive_task_handler(self):
         """Handle incoming WebSocket messages."""
