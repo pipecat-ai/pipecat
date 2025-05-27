@@ -170,15 +170,11 @@ class TavusVideoService(AIService):
             await self._handle_interruptions()
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSStartedFrame):
-            await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
-            self._current_idx_str = str(frame.id)
+            await self._queue.put(frame)
         elif isinstance(frame, TTSAudioRawFrame):
-            await self._queue_audio(frame.audio, frame.sample_rate, done=False)
+            await self._queue.put(frame)
         elif isinstance(frame, TTSStoppedFrame):
-            await self._queue_audio(b"\x00\x00", self._client.in_sample_rate, done=True)
-            await self.stop_ttfb_metrics()
-            await self.stop_processing_metrics()
+            await self._queue.put(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -190,9 +186,6 @@ class TavusVideoService(AIService):
     async def _end_conversation(self):
         await self._client.stop()
         self._other_participant_has_joined = False
-
-    async def _queue_audio(self, audio: bytes, in_rate: int, done: bool):
-        await self._queue.put((audio, in_rate, done))
 
     async def _create_send_task(self):
         if not self._send_task:
@@ -224,35 +217,35 @@ class TavusVideoService(AIService):
         MAX_CHUNK_SIZE = int((sample_rate * 2) / 20)
 
         audio_buffer = bytearray()
-        samples_sent = 0
-        start_time = time.time()
+        current_idx_str = None
+        silence = b"\x00\x00"
 
         while True:
-            (audio, in_rate, done) = await self._queue.get()
-
-            if done:
+            frame = await self._queue.get()
+            if isinstance(frame, TTSStartedFrame):
+                if current_idx_str is not None:
+                    continue
+                current_idx_str = str(frame.id)
+            elif isinstance(frame, TTSStoppedFrame):
                 # Send any remaining audio.
                 if len(audio_buffer) > 0:
                     await self._client.encode_audio_and_send(
-                        bytes(audio_buffer), done, self._current_idx_str
+                        bytes(audio_buffer), True, current_idx_str
                     )
-                await self._client.encode_audio_and_send(audio, done, self._current_idx_str)
+                await self._client.encode_audio_and_send(silence, True, current_idx_str)
                 audio_buffer.clear()
-            else:
-                audio = await self._resampler.resample(audio, in_rate, sample_rate)
+                current_idx_str = None
+            elif isinstance(frame, TTSAudioRawFrame):
+                if current_idx_str is None:
+                    continue
+                audio = await self._resampler.resample(frame.audio, frame.sample_rate, sample_rate)
                 audio_buffer.extend(audio)
                 while len(audio_buffer) >= MAX_CHUNK_SIZE:
                     chunk = audio_buffer[:MAX_CHUNK_SIZE]
                     audio_buffer = audio_buffer[MAX_CHUNK_SIZE:]
 
                     # Compute wait time for synchronization
-                    wait = start_time + (samples_sent / sample_rate) - time.time()
-                    if wait > 0:
-                        await asyncio.sleep(wait)
+                    wait = 1 / 20  # 50ms
+                    await asyncio.sleep(wait)
 
-                    await self._client.encode_audio_and_send(
-                        bytes(chunk), done, self._current_idx_str
-                    )
-
-                    # Update timestamp based on number of samples sent
-                    samples_sent += len(chunk) // 2  # 2 bytes per sample (16-bit)
+                    await self._client.encode_audio_and_send(bytes(chunk), False, current_idx_str)
