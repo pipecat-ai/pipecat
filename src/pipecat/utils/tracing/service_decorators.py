@@ -320,7 +320,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                         async def traced_push_frame(frame, direction=None):
                             nonlocal output_text
-                            # Check for LLMTextFrame
+                            # Capture text from LLMTextFrame during streaming
                             if (
                                 hasattr(frame, "__class__")
                                 and frame.__class__.__name__ == "LLMTextFrame"
@@ -436,18 +436,19 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             # Add all gathered attributes to the span
                             add_llm_span_attributes(span=current_span, **attribute_kwargs)
 
-                            # Call the original function
-                            result = await f(self, context, *args, **kwargs)
-
-                            # Add output if we captured any
-                            if output_text:
-                                current_span.set_attribute("output", output_text)
-
-                            return result
-
                         except Exception as e:
-                            logging.warning(f"Error adding initial LLM attributes: {e}")
-                            raise
+                            logging.warning(f"Error setting up LLM tracing: {e}")
+                            # Don't raise - let the function execute anyway
+
+                        # Run function with modified push_frame to capture the output
+                        result = await f(self, context, *args, **kwargs)
+
+                        # Add aggregated output after function completes, if available
+                        if output_text:
+                            current_span.set_attribute("output", output_text)
+
+                        return result
+
                     finally:
                         # Always restore the original methods
                         self.push_frame = original_push_frame
