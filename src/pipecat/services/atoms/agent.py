@@ -25,8 +25,8 @@ from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
 from pipecat.frames.frames import (
-    EndFrame,
     Frame,
+    LastTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -763,7 +763,7 @@ class FlowGraphManager(FrameProcessor):
         if self.current_node.type == NodeType.API_CALL:
             if not hopped:
                 yield "Something went wrong, please try again later."
-                await self.push_frame(EndFrame())
+                await self.push_frame(LastFrame())
                 logger.debug(f"hopping failed for api call node")
                 return
 
@@ -795,11 +795,11 @@ class FlowGraphManager(FrameProcessor):
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
-                await self.push_frame(EndFrame())
+                await self.push_frame(LastTurnFrame(conversation_id="123"))
             else:
                 async for chunk in self._handle_dynamic_response(context=context):
                     yield chunk
-                await self.push_frame(EndFrame())
+                await self.push_frame(LastTurnFrame(conversation_id="123"))
         elif self.current_node.type == NodeType.TRANSFER_CALL:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
@@ -956,7 +956,7 @@ class FlowGraphManager(FrameProcessor):
                         and chunk.choices[0].stop_reason == self._end_call_tag
                     ):
                         logger.debug("last turn chunk detected")
-                        await self.push_frame(EndFrame())
+                        await self.push_frame(LastTurnFrame(conversation_id="123"))
         except Exception as e:
             logger.error(f"Error handling dynamic response: {e}")
 

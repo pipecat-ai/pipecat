@@ -61,6 +61,7 @@ from pipecat.services.atoms.agent import (
     CallData,
     initialize_conversational_agent,
 )
+from pipecat.services.atoms.manager import AgentActionProcessor
 from pipecat.services.atoms.prompts import FT_RESPONSE_MODEL_SYSTEM_PROMPT
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -165,6 +166,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     )
 
     turn_tracking_observer = TurnTrackingObserver()
+    agent_action_processor = AgentActionProcessor(turn_tracking_observer)
     messages = [
         {
             "role": "system",
@@ -260,6 +262,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
                     ),  # Ensure only relevant frames go to main LLM
                     # llm,  # Main LLM (OpenAI)
                     agent_flow_processor,
+                    agent_action_processor,
                     bot_output_gate,  # Gates the output of the main LLM
                 ],
             ),
