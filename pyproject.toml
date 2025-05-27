@@ -113,7 +113,7 @@ ultravox = ["transformers~=4.48.0", "vllm~=0.7.3"]
 webrtc = ["aiortc~=1.11.0", "opencv-python~=4.11.0.86"]
 websocket = ["websockets~=13.1", "fastapi~=0.115.6"]
 whisper = ["faster-whisper~=1.1.1"]
-documentdb = ["pymongo~=4.11.1"]
+documentdb = ["motor"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

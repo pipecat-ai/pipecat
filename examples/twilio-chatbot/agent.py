@@ -19,6 +19,7 @@ from pipecat.services.atoms.prompts import (
     GENERAL_RESPONSE_MODEL_SYSTEM_PROMPT,
 )
 from pipecat.services.atoms.utils import convert_old_to_new_format
+from pipecat.services.documentdb.rag import DocumentDBVectorStore
 
 
 class CallType(Enum):
@@ -117,6 +118,8 @@ async def initialize_conversational_agent(
             api_key=os.getenv("AZURE_API_KEY"),
         )
 
+        vector_datastore = DocumentDBVectorStore()
+
         if global_prompt and isinstance(global_prompt, str) and global_prompt.strip():
             system_prompt += f"\n\nSpecial Instructions:\n\n{global_prompt}"
 
@@ -137,11 +140,13 @@ async def initialize_conversational_agent(
             variable_extraction_client=variable_extraction_client,
             conversation_pathway=conv_pathway,
             transport_input_filter=transport_input_filter,
+            vector_datastore=vector_datastore,
             agent_input_params=FlowGraphManager.AgentInputParams(
                 initial_variables=initial_variables,
                 agent_persona=agent_persona,
                 current_language=agent_language,
                 is_language_switching_enabled=language_switching,
+                global_kb_id=global_kb_id,
             ),
         )
 

@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 from fastembed import TextEmbedding
 from loguru import logger
-from pymongo.errors import PyMongoError
 
 from pipecat.services.documentdb.client import DocumentDBStore
 
@@ -18,14 +17,10 @@ class DocumentDBVectorStore:
         self.model = TextEmbedding("sentence-transformers/all-MiniLM-L6-v2")
 
         # Initialize DocumentDB vector store
-        self.vector_store = DocumentDBStore("vector_store")
+        self.vector_store: DocumentDBStore = DocumentDBStore("vector_store")
         self.collection_name = "knowledge_base"
-        self.vector_store.create_collection(
-            collection_name=self.collection_name,
-            vector_size=384,
-        )
 
-    def add_vectors(
+    async def add_vectors(
         self,
         collection_name: str,
         knowledge_base_id: str,
@@ -49,15 +44,19 @@ class DocumentDBVectorStore:
         ]
 
         try:
-            self.vector_store.get_collection(collection_name=collection_name).insert_many(documents)
-            logger.info(f"Successfully added {knowledge_base_id} to DocumentDB")
-        except PyMongoError as e:
+            collection = await self.vector_store.get_collection(collection_name=collection_name)
+            if collection is not None:
+                await collection.insert_many(documents)
+                logger.info(f"Successfully added {knowledge_base_id} to DocumentDB")
+            else:
+                logger.error(f"Failed to get collection {collection_name}")
+        except Exception as e:
             logger.error(
                 f"Failed to add vectors to the '{collection_name}' collection: {str(e)}",
                 exc_info=True,
             )
 
-    def _search(
+    async def _search(
         self,
         collection_name: str,
         query_vector: List[float],
@@ -78,29 +77,38 @@ class DocumentDBVectorStore:
         Returns:
             List of documents matching the search criteria
         """
-        pipeline = [
-            {"$match": {"knowledge_base_id": knowledge_base_id}},
-            {
-                "$search": {
-                    "vectorSearch": {
-                        "vector": query_vector,
-                        "path": "vectorEmbedding",
-                        "similarity": "cosine",
-                        "k": (
-                            limit if score_threshold is None else limit * 2
-                        ),  # Request more results for filtering
-                    }
-                }
-            },
-            {"$project": {"_id": 0}},
-        ]
-
         try:
-            results = list(
-                self.vector_store.get_collection(collection_name=collection_name).aggregate(
-                    pipeline
-                )
-            )
+            collection = await self.vector_store.get_collection(collection_name=collection_name)
+            if collection is None:
+                logger.error(f"Collection {collection_name} not found")
+                return []
+
+            pipeline = [
+                {"$match": {"knowledge_base_id": knowledge_base_id}},
+                {
+                    "$search": {
+                        "vectorSearch": {
+                            "vector": query_vector,
+                            "path": "vectorEmbedding",
+                            "similarity": "cosine",
+                            "k": (
+                                limit if score_threshold is None else limit * 2
+                            ),  # Request more results for filtering
+                        }
+                    }
+                },
+                {"$project": {"_id": 0}},
+            ]
+
+            # Execute aggregation and collect results
+            cursor = collection.aggregate(pipeline)
+            results = await cursor.to_list(length=None)
+
+            logger.debug(f"Found {len(results)} results for knowledge_base_id: {knowledge_base_id}")
+
+            if not results:
+                logger.debug(f"No results found for knowledge_base_id: {knowledge_base_id}")
+                return []
 
             # If score threshold is set, calculate scores and filter
             if score_threshold is not None:
@@ -112,11 +120,12 @@ class DocumentDBVectorStore:
                 filtered_results = []
                 for result in results:
                     # Calculate cosine similarity
-                    embedding = result.pop("vectorEmbedding")  # Remove embedding after calculation
-                    score = self._calculate_cosine_similarity(query_vector, embedding)
-                    if score >= score_threshold:
-                        result["score"] = score
-                        filtered_results.append(result)
+                    embedding = result.pop("vectorEmbedding", None)  # Safely remove embedding
+                    if embedding is not None:
+                        score = self._calculate_cosine_similarity(query_vector, embedding)
+                        if score >= score_threshold:
+                            result["score"] = score
+                            filtered_results.append(result)
 
                 # Sort by score and limit results
                 filtered_results.sort(key=lambda x: x["score"], reverse=True)
@@ -124,7 +133,7 @@ class DocumentDBVectorStore:
 
             # If no threshold, just remove the embeddings from results
             for result in results:
-                result.pop("vectorEmbedding")
+                result.pop("vectorEmbedding", None)  # Safely remove embedding
             return results
 
         except Exception as e:
@@ -138,7 +147,7 @@ class DocumentDBVectorStore:
         norm2 = sum(a * a for a in vec2) ** 0.5
         return dot_product / (norm1 * norm2) if norm1 * norm2 != 0 else 0
 
-    def retrieve(
+    async def retrieve(
         self,
         knowledge_base_id: str,
         query: str,
@@ -148,7 +157,7 @@ class DocumentDBVectorStore:
     ) -> List[str]:
         """Retrieve text from the knowledge base."""
         try:
-            results = self._search(
+            results = await self._search(
                 collection_name=self.collection_name,
                 query_vector=list(self.model.embed(query.strip()))[0].tolist(),
                 knowledge_base_id=knowledge_base_id,

@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.filters.custom_mute_filter import TransportInputFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.services.documentdb.rag import DocumentDBVectorStore
 
 from .context import AtomsAgentContext
 from .llm_client import AzureOpenAIClient, BaseClient, OpenAIClient
@@ -252,6 +253,23 @@ class FlowGraphManager(FrameProcessor):
         initial_variables: Optional[Dict[str, Any]] = None
         is_language_switching_enabled: bool = False
         custom_instructions: Optional[List[str]] = []
+        global_kb_id: Optional[str] = None
+
+        @field_validator("global_kb_id")
+        def validate_global_kb_id(cls, v: Optional[str]) -> Optional[str]:
+            if v is not None:
+                return v.strip()
+            return v
+
+        @field_validator("custom_instructions")
+        def validate_custom_instructions(cls, v: Optional[List[str]]) -> List[str]:
+            if v is None:
+                return []
+            return [instruction.strip() for instruction in v if instruction.strip()]
+
+        @field_validator("current_language")
+        def validate_current_language(cls, v: str) -> str:
+            return v.strip().lower()
 
     def __init__(
         self,
@@ -261,6 +279,7 @@ class FlowGraphManager(FrameProcessor):
         conversation_pathway: ConversationalPathway,
         transport_input_filter: TransportInputFilter,
         agent_input_params: AgentInputParams,
+        vector_datastore: DocumentDBVectorStore,
     ):
         super().__init__()
         self.flow_model_client: BaseClient = flow_model_client
@@ -279,7 +298,28 @@ class FlowGraphManager(FrameProcessor):
         self.current_language: str = agent_input_params.current_language
         self._is_language_switching_enabled: bool = agent_input_params.is_language_switching_enabled
         self.custom_instructions: List[str] = agent_input_params.custom_instructions
+        self.vector_datastore: DocumentDBVectorStore = vector_datastore
+        self.global_kb_id: Optional[str] = agent_input_params.global_kb_id
         self._register_node_event_handlers()
+
+    async def _handle_llm_knowledge_base(self, prompt: Optional[str]) -> None:
+        """Process knowledge base if configured in current node.
+
+        Args:
+            prompt: User input to use for knowledge retrieval
+        """
+        if self.current_node.use_global_knowledge_base:
+            logger.debug(f"Using global knowledge base: {self.global_kb_id}")
+            if self.global_kb_id is None or self.global_kb_id.strip() == "":
+                return
+
+            if prompt and len(prompt.split(" ")) > 2:
+                chunks = await self.vector_datastore.retrieve(
+                    knowledge_base_id=self.global_kb_id, query=prompt, limit=4
+                )
+                knowledge_base = "\n\n".join(chunks)
+                self.current_node.knowledge_base = knowledge_base
+                logger.debug(f"Knowledge Base Retrieval: {knowledge_base}")
 
     def _register_node_event_handlers(self) -> None:
         """Register event handlers for the node types."""
@@ -699,8 +739,10 @@ class FlowGraphManager(FrameProcessor):
     async def get_response(self, context: AtomsAgentContext):
         """Get the response from the response model client."""
         # Before hopping we need to extract variables from the current node and user response
+        current_user_transcript = context.get_current_user_transcript()
+        await self._handle_llm_knowledge_base(current_user_transcript)
         if self._is_language_switching_enabled:
-            self.current_language = self._detect_language(context.get_current_user_transcript())
+            self.current_language = self._detect_language(current_user_transcript)
 
         if self.current_node.variables and self.current_node.variables.is_enabled:
             if self.current_node.type == NodeType.API_CALL:
@@ -724,7 +766,7 @@ class FlowGraphManager(FrameProcessor):
         context._update_last_user_context(
             "response_model_context",
             self._get_current_state_as_json(
-                user_response=context.get_current_user_transcript(),
+                user_response=current_user_transcript,
                 custom_instructions=self._get_custom_instructions(),
             ),
         )

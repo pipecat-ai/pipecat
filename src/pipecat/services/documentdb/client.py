@@ -1,28 +1,43 @@
 """This module contains the DocumentDBStore class, which is a vector store implementation for DocumentDB."""
 
 import os
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Union
 
-import pymongo
 from loguru import logger
-from pymongo.collection import Collection as MongoCollection
-from pymongo.errors import PyMongoError
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
 
 
 class DocumentDBStore:
     """DocumentDB implementation of vector store."""
 
     def __init__(self, db_name: str):
+        self.mongodb_url = os.getenv("MONGODB_URL")
+        assert self.mongodb_url, "MONGODB_URL is not set"
+        self.client: Union[None, AsyncIOMotorClient] = None
+        self.db: Union[None, AsyncIOMotorDatabase] = None
+        self.db_name = db_name
+
+    async def ensure_connection(self):
+        """Ensure that the connection to DocumentDB is established."""
         try:
-            mongodb_url = os.getenv("MONGODB_URL")
-            assert mongodb_url, "MONGODB_URL is not set"
-            self.client = pymongo.MongoClient(mongodb_url)
-            self.db = self.client[db_name]
-        except PyMongoError as e:
-            logger.error(f"Failed to connect to DocumentDB: {str(e)}")
+            if self.client is None:
+                logger.debug("Creating new MongoDB client connection")
+                self.client = AsyncIOMotorClient(self.mongodb_url)
+                self.db = self.client[self.db_name]
+                logger.debug(f"Connected to database: {self.db_name}")
+
+            if self.db is None:
+                self.db = self.client[self.db_name]
+
+            # Test the connection
+            await self.db.command("ping")
+            logger.debug("Successfully connected to MongoDB")
+
+        except Exception as e:
+            logger.error(f"Failed to connect to MongoDB: {str(e)}", exc_info=True)
             raise
 
-    def create_collection(
+    async def create_collection(
         self,
         collection_name: str,
         vector_size: int,
@@ -30,7 +45,8 @@ class DocumentDBStore:
         **kwargs,
     ) -> None:
         """Create a new collection in DocumentDB."""
-        if collection_name in self.db.list_collection_names():
+        await self.ensure_connection()
+        if collection_name in await self.db.list_collection_names():
             logger.info(f"Collection '{collection_name}' already exists.")
             return
 
@@ -48,16 +64,21 @@ class DocumentDBStore:
         }
 
         try:
-            self.db[collection_name].create_index("vectorEmbedding", **index_options)
+            await self.db[collection_name].create_index("vectorEmbedding", **index_options)
             logger.info(f"Collection '{collection_name}' created successfully.")
         except Exception as e:
             logger.error(f"Failed to create collection: {str(e)}", exc_info=True)
 
-    def get_collection(self, collection_name: str) -> MongoCollection:
+    async def get_collection(self, collection_name: str) -> AsyncIOMotorCollection:
         """Get a collection from DocumentDB."""
-        return self.db[collection_name]
+        try:
+            await self.ensure_connection()
+            return self.db[collection_name]
+        except Exception as e:
+            logger.error(f"Failed to get collection: {str(e)}", exc_info=True)
+            return None
 
-    def scroll(
+    async def scroll(
         self,
         collection_name: str,
         filter: Mapping[str, Any],
@@ -65,15 +86,18 @@ class DocumentDBStore:
     ) -> List[Dict[str, Any]]:
         """Scroll through the collection."""
         try:
-            return list(self.db[collection_name].find(filter).limit(limit))
+            await self.ensure_connection()
+            cursor = self.db[collection_name].find(filter).limit(limit)
+            return await cursor.to_list(length=limit)
         except Exception as e:
             logger.error(f"Failed to scroll: {str(e)}", exc_info=True)
-            return
+            return []
 
-    def delete_records(self, collection_name: str, filter: Mapping[str, Any]) -> None:
+    async def delete_records(self, collection_name: str, filter: Mapping[str, Any]) -> None:
         """Delete a knowledge base from the collection."""
         try:
-            result = self.db[collection_name].delete_many(filter)
+            await self.ensure_connection()
+            result = await self.db[collection_name].delete_many(filter)
             logger.info(f"Deleted {result.deleted_count} records from '{collection_name}'.")
         except Exception as e:
             logger.error(f"Failed to delete records: {str(e)}", exc_info=True)
