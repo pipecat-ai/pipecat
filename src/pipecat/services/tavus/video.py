@@ -24,8 +24,6 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
