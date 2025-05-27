@@ -89,6 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ⚠️ Updated `SmallWebRTCTransport` to align with how other transports handle 
+  `on_client_disconnected`. Now, when the connection is closed and no reconnection 
+  is attempted, `on_client_disconnected` is called instead of `on_client_close`. The 
+  `on_client_close` callback is no longer used, use `on_client_disconnected` instead.
+
 - Check if `PipelineTask` has already been cancelled.
 
 - Don't raise an exception if event handler is not registered.
