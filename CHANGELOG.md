@@ -147,6 +147,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `DeegramSTTService` connection issue when the user provided their own
+  `LiveOptions`.
+
 - Fixed a `DailyTransport` issue that would cause images needing resize to block
   the event loop.
 
