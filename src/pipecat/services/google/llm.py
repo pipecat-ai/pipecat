@@ -367,7 +367,7 @@ class GoogleLLMContext(OpenAILLMContext):
                     }
                 )
             elif part.function_call:
-                args = type(part.function_call).to_dict(part.function_call).get("args", {})
+                args = part.function_call.args if hasattr(part.function_call, "args") else {}
                 msg["tool_calls"] = [
                     {
                         "id": part.function_call.name,
@@ -382,7 +382,9 @@ class GoogleLLMContext(OpenAILLMContext):
             elif part.function_response:
                 msg["role"] = "tool"
                 resp = (
-                    type(part.function_response).to_dict(part.function_response).get("response", {})
+                    part.function_response.response
+                    if hasattr(part.function_response, "response")
+                    else {}
                 )
                 msg["tool_call_id"] = part.function_response.name
                 msg["content"] = json.dumps(resp)
