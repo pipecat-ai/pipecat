@@ -577,13 +577,6 @@ class FlowGraphManager(FrameProcessor):
             ),
             Exception: If extraction fails or required variables are missing
         """
-        if (
-            not self.current_node.variables
-            or not self.current_node.variables.is_enabled
-            and self.current_node.variables.data
-        ):
-            return False
-
         variable_schema = self.current_node.variables.data
 
         # Format variable schema for prompt
@@ -602,15 +595,21 @@ class FlowGraphManager(FrameProcessor):
             variable_schema=formatted_variable_schema,
         )
 
+        logger.debug(f"variable extraction extraction prompt: {extraction_prompt}")
+
         # Get extraction response from GPT-4o
         raw_extraction = await self.variable_extraction_client.get_response(
             [{"role": "user", "content": extraction_prompt}],
         )
 
+        logger.debug(f"variable extraction raw extraction: {raw_extraction}")
+
         try:
             # Clean and parse LLM response
             cleaned_json = self._clean_json(raw_extraction)
             extracted_variables = json.loads(cleaned_json)
+
+            logger.debug(f"variable extraction cleaned json: {cleaned_json}")
 
             # Validate extracted variables
             if not isinstance(extracted_variables, dict):
@@ -763,7 +762,7 @@ class FlowGraphManager(FrameProcessor):
         if self.current_node.type == NodeType.API_CALL:
             if not hopped:
                 yield "Something went wrong, please try again later."
-                await self.push_frame(LastFrame())
+                await self.push_frame(LastTurnFrame(conversation_id="123"))
                 logger.debug(f"hopping failed for api call node")
                 return
 

@@ -208,7 +208,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     stt_mute_filter = STTMuteFilter(
         config=STTMuteConfig(
-            strategies={STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE, STTMuteStrategy.CUSTOM},
+            strategies={STTMuteStrategy.CUSTOM},
             should_mute_callback=transport_input_filter.should_mute,
         )
     )

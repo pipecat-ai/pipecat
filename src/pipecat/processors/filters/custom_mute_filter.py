@@ -20,8 +20,10 @@ class TransportInputFilter:
 
     def mute(self) -> None:
         """This function will be called when the api call node is started."""
+        logger.debug(f"-----------muting-----------")
         self._is_mute = True
 
     def unmute(self) -> None:
         """This function will be called when the api call node is ended."""
+        logger.debug(f"-----------unmuting-----------")
         self._is_mute = False
