@@ -33,7 +33,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace):
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
 
     # Create an HTTP session
@@ -49,7 +49,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace):
         async def on_client_connected(transport, client):
             await task.queue_frames([TTSSpeakFrame(f"Hello there!"), EndFrame()])
 
-        runner = PipelineRunner(handle_sigint=False)
+        runner = PipelineRunner(handle_sigint=handle_sigint)
 
         await runner.run(task)
 

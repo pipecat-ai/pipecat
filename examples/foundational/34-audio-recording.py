@@ -108,7 +108,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace):
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"), audio_passthrough=True)
@@ -188,7 +188,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace):
         bot_filename = f"recordings/bot_{timestamp}.wav"
         await save_audio_file(bot_audio, bot_filename, sample_rate, 1)
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
     await runner.run(task)
 
 

@@ -103,7 +103,7 @@ async def main():
             logger.info(f"Client disconnected")
             await task.cancel()
 
-        runner = PipelineRunner(handle_sigint=False)
+        runner = PipelineRunner()
 
         await runner.run(task)
 
