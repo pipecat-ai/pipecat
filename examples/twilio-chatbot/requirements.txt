@@ -1,4 +1,5 @@
 pipecat-ai[cartesia,openai,silero,deepgram]
+fastembed
 fastapi
 uvicorn
 python-dotenv

@@ -171,17 +171,6 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     turn_tracking_observer = TurnTrackingObserver()
     agent_action_processor = AgentActionProcessor(turn_tracking_observer)
-    # messages = [
-    #     {
-    #         "role": "system",
-    #         "content": agent_config["system_prompt"],
-    #     },
-    #     {
-    #         "role": "user",
-    #         "content": json.dumps({"transcript": ""}),
-    #     },
-    # ]
-
     messages = [
         ChatCompletionSystemMessageParam(role="system", content=agent_config["system_prompt"]),
         AtomsAgentContext.upgrade_user_message_to_atoms_agent_message(
