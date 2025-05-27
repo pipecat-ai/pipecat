@@ -88,7 +88,7 @@ async def run_bot(
     transport = DailyTransport(
         room_url,
         token,
-        "Simple Dial-out Bot",
+        "Phone Bot",
         transport_params,
     )
 
