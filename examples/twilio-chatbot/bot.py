@@ -12,9 +12,11 @@ import wave
 from pathlib import Path
 
 import aiofiles
+from agent import initialize_conversational_agent
 from dotenv import load_dotenv
 from fastapi import WebSocket
 from loguru import logger
+from models import CallData
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionSystemMessageParam,
@@ -52,7 +54,6 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
     OpenAILLMContextFrame,
 )
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
@@ -67,8 +68,6 @@ from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.atoms.agent import (
     AtomsAgentContext,
-    CallData,
-    initialize_conversational_agent,
 )
 from pipecat.services.atoms.manager import AgentActionProcessor
 from pipecat.services.atoms.prompts import FT_RESPONSE_MODEL_SYSTEM_PROMPT

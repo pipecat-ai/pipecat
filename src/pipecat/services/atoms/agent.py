@@ -14,7 +14,7 @@ import traceback
 from datetime import datetime
 from enum import Enum
 from inspect import isasyncgen, iscoroutinefunction, isgenerator
-from typing import Any, AsyncGenerator, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import aiohttp
 import aiohttp.client_exceptions
@@ -41,61 +41,14 @@ from .context import AtomsAgentContext
 from .llm_client import AzureOpenAIClient, BaseClient, OpenAIClient
 from .pathways import ConversationalPathway, Node, NodeType, Pathway
 from .prompts import (
-    FT_RESPONSE_MODEL_SYSTEM_PROMPT,
-    GENERAL_RESPONSE_MODEL_SYSTEM_PROMPT,
     VARIABLE_EXTRACTION_PROMPT,
 )
 from .utils import (
-    convert_old_to_new_format,
     get_abbreviations,
     get_language_switch_inst,
-    get_unallowed_variable_names,
     replace_variables,
     replace_variables_recursive,
 )
-
-
-class AtomsLLMModels(Enum):
-    ELECTRON = "electron"
-    GPT_4O = "gpt-4o"
-
-
-class CallData(BaseModel):
-    variables: Optional[Dict[str, Any]] = Field(default=None)
-
-    @field_validator("variables")
-    @classmethod
-    def validate_required_variables(cls, v):
-        if v is not None:
-            required_keys = get_unallowed_variable_names()
-            missing_keys = [key for key in required_keys if key not in v]
-            if missing_keys:
-                raise ValueError(f"Missing required keys in variables: {', '.join(missing_keys)}")
-        return v
-
-
-class CallType(Enum):
-    TELEPHONY_INBOUND = "telephony_inbound"
-    TELEPHONY_OUTBOUND = "telephony_outbound"
-    WEBCALL = "webcall"
-    CHAT = "chat"
-
-
-from typing import Union
-
-
-class ResponseDataMapping(BaseModel):
-    """This class is responsible for mapping the response data to the variable name."""
-
-    variable_name: str = Field(alias="variableName")
-    json_path: str = Field(alias="jsonPath")
-
-
-class ResponseDataConfig(BaseModel):
-    """This class is responsible for configuring the response data mapping."""
-
-    is_enabled: bool = False
-    data: List[ResponseDataMapping] = Field(default=[])
 
 
 class FlowGraphManager(FrameProcessor):
@@ -115,7 +68,6 @@ class FlowGraphManager(FrameProcessor):
             self.flow_graph_manager: "FlowGraphManager" = flow_graph_manager
 
         def _extract_variables(
-            # self, response_data: Union[Dict[str, Any], str], config: ResponseDataConfig
             self,
             node: Node,
             context: AtomsAgentContext,
@@ -985,215 +937,3 @@ class FlowGraphManager(FrameProcessor):
                 # why did we did this? -> because FlowGraphManager can be interrupted and it end might not be called
                 # we need the better way to handle this
                 await self._call_event_handler("on_api_call_node_ended")
-
-
-async def initialize_conversational_agent(
-    *, agent_id: str, call_id: str, call_data: CallData, transport_input_filter: Any
-) -> tuple[FlowGraphManager, Dict[str, Any]]:
-    """Initialize a conversational agent with the specified configuration.
-
-    Args:
-        agent_id: ID of the agent to initialize
-        call_id: Call ID for logging
-        call_data: Contains variables and other call-related information
-        initialize_first_message: Whether to initialize first message
-        save_msgs_path: Path to save messages
-
-    Returns:
-        tuple: (initialized agent instance, agent configuration)
-
-    Raises:
-        ValueError: If agent_id is not provided
-        Exception: If initialization fails or variables are not provided
-    """
-    if call_data.variables is None:
-        raise Exception("Variables is required to initialize conversational agent")
-
-    try:
-        # Initialize conversational pathway
-        conv_pathway_data, agent_config = await get_conv_pathway_graph(
-            agent_id=agent_id, call_id=call_id
-        )
-        conv_pathway = ConversationalPathway()
-        conv_pathway.build_from_json(conv_pathway_data)
-
-        # Initialize variables
-        initial_variables = call_data.variables.copy()
-        default_variables = agent_config.get("default_variables", {})
-
-        for unallowed_var_name in get_unallowed_variable_names():
-            if unallowed_var_name in default_variables:
-                raise Exception(
-                    f"Default variable name '{unallowed_var_name}' is reserved and cannot be overridden."
-                )
-
-        for key, value in default_variables.items():
-            initial_variables.setdefault(key, value)
-
-        # Initialize LLM client and agent
-        model_name = agent_config.get("model_name", AtomsLLMModels.ELECTRON.value)
-        agent_gender = agent_config.get("synthesizer_args", {}).get("gender", "female")
-        language_switching = agent_config.get("language_switching", False)
-        agent_language = agent_config.get("default_language", "en")
-        global_prompt = agent_config.get("global_prompt")
-        global_kb_id = agent_config.get("global_knowledge_base_id")
-        agent_persona = {"gender": agent_gender} if agent_gender else None
-
-        assert model_name in [model.value for model in AtomsLLMModels], (
-            f"Unknown model name '{model_name}'"
-        )
-
-        flow_model_client = OpenAIClient(
-            model_id="atoms-flow-navigation",
-            api_key=os.getenv("ATOMS_INFER_API_KEY"),
-            base_url=f"{os.getenv('FLOW_MODEL_ENDPOINT')}/v1",
-            default_response_kwargs={"temperature": 0.0},
-        )
-
-        if model_name == AtomsLLMModels.ELECTRON.value:
-            response_model_client = OpenAIClient(
-                model_id="atoms-responses",
-                api_key=os.getenv("ATOMS_INFER_API_KEY"),
-                base_url=f"{os.getenv('RESPONSE_MODEL_ENDPOINT')}/v1",
-                default_response_kwargs={"temperature": 0.6},
-            )
-            system_prompt = FT_RESPONSE_MODEL_SYSTEM_PROMPT
-        elif model_name == AtomsLLMModels.GPT_4O.value:
-            response_model_client = AzureOpenAIClient(
-                model_id="gpt-4o",
-                api_version="2024-12-01-preview",
-                azure_endpoint=os.getenv("AZURE_ENDPOINT"),
-                api_key=os.getenv("AZURE_API_KEY"),
-            )
-            system_prompt = GENERAL_RESPONSE_MODEL_SYSTEM_PROMPT
-
-        variable_extraction_client = AzureOpenAIClient(
-            model_id="gpt-4o",
-            api_version="2024-12-01-preview",
-            azure_endpoint=os.getenv("AZURE_ENDPOINT"),
-            api_key=os.getenv("AZURE_API_KEY"),
-        )
-
-        if global_prompt and isinstance(global_prompt, str) and global_prompt.strip():
-            system_prompt += f"\n\nSpecial Instructions:\n\n{global_prompt}"
-
-        agent_config = {
-            "model_name": model_name,
-            "agent_gender": agent_gender,
-            "language_switching": language_switching,
-            "agent_language": agent_language,
-            "global_prompt": global_prompt,
-            "global_kb_id": global_kb_id,
-            "agent_persona": agent_persona,
-            "system_prompt": system_prompt,
-        }
-
-        flow_manager = FlowGraphManager(
-            response_model_client=response_model_client,
-            flow_model_client=flow_model_client,
-            variable_extraction_client=variable_extraction_client,
-            conversation_pathway=conv_pathway,
-            transport_input_filter=transport_input_filter,
-            agent_input_params=FlowGraphManager.AgentInputParams(
-                initial_variables=initial_variables,
-                agent_persona=agent_persona,
-                current_language=agent_language,
-                is_language_switching_enabled=language_switching,
-            ),
-        )
-
-        return flow_manager, agent_config
-
-    except Exception as e:
-        traceback.print_exc()
-        raise Exception("Failed to initialize conversational agent")
-
-
-async def get_conv_pathway_graph(agent_id, call_id) -> tuple[str, dict]:
-    """Fetch conversation pathway graph along with config from Admin API.
-
-    Args:
-        agent_id: ID of the agent
-        call_id: Call ID for logging
-
-    Returns:
-        tuple[str, dict]: Processed workflow graph data and agent configuration
-
-    Raises:
-        Exception: If the graph cannot be fetched or is invalid
-    """
-    # Determine which identifier to use
-    headers = {"X-API-Key": os.getenv("ADMIN_API_KEY"), "Content-Type": "application/json"}
-    params = {"agentId": agent_id}
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{os.getenv('ATOMS_BASE_URL')}/api/v1/admin/get-agent-details",
-                headers=headers,
-                params=params,
-            )
-            response.raise_for_status()
-            data: dict = response.json()
-
-            agent_config: dict = data.get("agent", {})
-
-            agent_config = {
-                "language_switching": agent_config.get("languageSwitching", False),
-                "default_language": agent_config.get("defaultLanguage", "en"),
-                "synthesizer_type": agent_config.get("synthesizerType", "waves"),
-                "synthesizer_args": agent_config.get("synthesizerArgs", {}),
-                "synthesizer_speed": agent_config.get("synthesizerSpeed", 1.2),
-                "model_name": agent_config.get("modelName", AtomsLLMModels.ELECTRON.value),
-                "default_variables": agent_config.get("defaultVariables", {}),
-                "allowed_idle_time_seconds": agent_config.get("allowedIdleTimeSeconds", 8),
-                "num_check_human_present_times": agent_config.get("numCheckHumanPresentTimes", 2),
-                "global_prompt": agent_config.get("globalPrompt"),
-                "global_knowledge_base_id": agent_config.get("globalKnowledgeBaseId"),
-                "synthesizer_consistency": agent_config.get("synthesizerConsistency", None),
-                "synthesizer_similarity": agent_config.get("synthesizerSimilarity", None),
-                "synthesizer_enhancement": agent_config.get("synthesizerEnhancement", None),
-                "synthesizer_samplerate": agent_config.get("synthesizerSampleRate", None),
-            }
-
-            agent_gender = agent_config.get("synthesizer_args", {}).get("gender", "female")
-
-            workflow_graph = data.get("workflowGraph") or data.get("workflow", {}).get(
-                "workflowGraph"
-            )
-
-            if not workflow_graph:
-                logger.error(
-                    f"No workflow graph found for agent ID {agent_id}",
-                )
-                raise Exception("Workflow graph not found")
-
-            processed_workflow = process_pathway_data(convert_old_to_new_format(workflow_graph))
-            logger.info(
-                f"Successfully fetched and processed graph for agent ID {agent_id}",
-                extra={"call_id": call_id},
-            )
-            return processed_workflow, agent_config
-
-    except httpx.HTTPError as e:
-        logger.error(
-            f"HTTP error for agent ID {agent_id}: {str(e)}",
-            extra={"call_id": call_id},
-            exc_info=True,
-        )
-        raise Exception("Failed to fetch workflow graph")
-    except Exception as e:
-        logger.error(
-            f"Error processing graph for agent ID {agent_id}: {str(e)}",
-            extra={"call_id": call_id},
-            exc_info=True,
-        )
-        raise Exception("Failed to process workflow graph")
-
-
-def process_pathway_data(pathway_data: list):
-    for node in pathway_data:
-        if node["type"] == "webhook":
-            if node["api_body"] and isinstance(node["api_body"], str):
-                node["api_body"] = json.loads(node["api_body"])
-    return pathway_data
