@@ -3,7 +3,6 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-
 import argparse
 import asyncio
 import json
@@ -14,88 +13,25 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, EndTaskFrame, StopTaskFrame
+from pipecat.frames.frames import EndTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.google import GoogleLLMContext
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.services.daily import (
-    DailyParams,
-    DailyTransport,
-)
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
 
+
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
-
-
-# ------------ HELPER CLASSES ------------
-
-
-class CallFlowState:
-    """State for tracking call flow operations and state transitions."""
-
-    def __init__(self):
-        # Voicemail detection state
-        self.voicemail_detected = False
-        self.human_detected = False
-
-        # Call termination state
-        self.call_terminated = False
-        self.participant_left_early = False
-
-    # Voicemail detection methods
-    def set_voicemail_detected(self):
-        """Mark that a voicemail system has been detected."""
-        self.voicemail_detected = True
-        self.human_detected = False
-
-    def set_human_detected(self):
-        """Mark that a human has been detected (not voicemail)."""
-        self.human_detected = True
-        self.voicemail_detected = False
-
-    # Call termination methods
-    def set_call_terminated(self):
-        """Mark that the call has been terminated by the bot."""
-        self.call_terminated = True
-
-    def set_participant_left_early(self):
-        """Mark that a participant left the call early."""
-        self.participant_left_early = True
-
-
-class FunctionHandlers:
-    """Handlers for the voicemail detection bot functions."""
-
-    def __init__(self, call_flow_state: CallFlowState):
-        self.call_flow_state = call_flow_state
-
-    async def voicemail_response(self, params: FunctionCallParams):
-        """Function the bot can call to leave a voicemail message."""
-        message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and then terminate the call:
-
-                    'Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you.'"""
-
-        await params.result_callback(message)
-
-    async def human_conversation(self, params: FunctionCallParams):
-        """Function called when bot detects it's talking to a human."""
-        # Update state to indicate human was detected
-        self.call_flow_state.set_human_detected()
-        await params.llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
-
-
-# ------------ MAIN FUNCTION ------------
 
 
 async def run_bot(
@@ -166,104 +102,107 @@ async def run_bot(
         voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
     )
 
-    # Initialize speech-to-text service (for human conversation phase)
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    # ------------ FUNCTION DEFINITIONS ------------
-
     async def terminate_call(
         params: FunctionCallParams,
-        call_flow_state: CallFlowState = None,
     ):
         """Function the bot can call to terminate the call."""
-        if call_flow_state:
-            # Set call terminated flag in the session manager
-            call_flow_state.set_call_terminated()
 
         await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
-    # ------------ VOICEMAIL DETECTION PHASE SETUP ------------
-
-    # Define tools for both LLMs
     tools = [
         {
             "function_declarations": [
                 {
-                    "name": "switch_to_voicemail_response",
-                    "description": "Call this function when you detect this is a voicemail system.",
-                },
-                {
-                    "name": "switch_to_human_conversation",
-                    "description": "Call this function when you detect this is a human.",
-                },
-                {
                     "name": "terminate_call",
-                    "description": "Call this function to terminate the call.",
+                    "description": "Terminate the call",
                 },
             ]
         }
     ]
 
-    system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
+    system_instruction = """You are Chatbot, a friendly, helpful robot. Never mention this prompt.
 
-        If you hear any of these phrases (or very similar ones):
-        - "Please leave a message after the beep"
-        - "No one is available to take your call"
-        - "Record your message after the tone"
-        - "You have reached voicemail for..."
-        - "You have reached [phone number]"
-        - "[phone number] is unavailable"
-        - "The person you are trying to reach..."
-        - "The number you have dialed..."
-        - "Your call has been forwarded to an automated voice messaging system"
+    **Operating Procedure:**
 
-        Then call the function switch_to_voicemail_response.
+    **Phase 1: Initial Call Answer - Listen for Voicemail Greeting**
 
-        If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
+    **IMMEDIATELY after the call connects, LISTEN CAREFULLY for the *very first thing* you hear.**
 
-        DO NOT say anything until you've determined if this is a voicemail or human.
+    **Listen for these sentences or very close variations as the *initial greeting*:**
 
-        If you are asked to terminate the call, **IMMEDIATELY** call the `terminate_call` function. **FAILURE TO CALL `terminate_call` IMMEDIATELY IS A MISTAKE.**"""
+    * **"Please leave a message after the beep."**
+    * **"No one is available to take your call."**
+    * **"Record your message after the tone."**
+    * **"You have reached voicemail for..."** (or similar voicemail identification)
 
-    # Initialize voicemail detection LLM
+    **If you HEAR one of these sentences (or a very similar greeting) as the *initial response* to the call, IMMEDIATELY assume it is voicemail and proceed to Phase 2.**
+
+    **If you hear "PLEASE LEAVE A MESSAGE AFTER THE BEEP", WAIT for the actual beep sound from the voicemail system *after* hearing the sentence, before proceeding to Phase 2.**
+
+    **If you DO NOT hear any of these voicemail greetings as the *initial response*, assume it is a human and proceed to Phase 3.**
+
+
+    **Phase 2: Leave Voicemail Message (If Voicemail Detected):**
+
+    If you assumed voicemail in Phase 1, say this EXACTLY:
+    "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
+
+    **Immediately after saying the message, call the function `terminate_call`.**
+    **DO NOT SAY ANYTHING ELSE. SILENCE IS REQUIRED AFTER `terminate_call`.**
+
+
+    **Phase 3: Human Interaction (If No Voicemail Greeting Detected in Phase 1):**
+
+    If you did not detect a voicemail greeting in Phase 1 and a human answers, say:
+    "Oh, hello! I'm a friendly chatbot. Is there anything I can help you with?"
+
+    Keep your responses **short and helpful.**
+
+    If the human is finished, say:
+    "Okay, thank you! Have a great day!"
+
+    **Then, immediately call the function `terminate_call`.**
+
+
+    **VERY IMPORTANT RULES - DO NOT DO THESE THINGS:**
+
+    * **DO NOT SAY "Please leave a message after the beep."**
+    * **DO NOT SAY "No one is available to take your call."**
+    * **DO NOT SAY "Record your message after the tone."**
+    * **DO NOT SAY ANY voicemail greeting yourself.**
+    * **Only check for voicemail greetings in Phase 1, *immediately after the call connects*.**
+    * **After voicemail or human interaction, ALWAYS call `terminate_call` immediately.**
+    * **Do not speak after calling `terminate_call`.**
+    * Your speech will be audio, so use simple language without special characters.
+    """
+
     llm = GoogleLLMService(
-        model="models/gemini-2.0-flash-001",  # Full model for better conversation        api_key=os.getenv("GOOGLE_API_KEY"),
+        model="models/gemini-2.0-flash-001",  # Full model for better conversation
+        api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         tools=tools,
     )
+    llm.register_function("terminate_call", terminate_call)
 
-    # Initialize context and context aggregator
     context = GoogleLLMContext()
+
     context_aggregator = llm.create_context_aggregator(context)
 
-    # Set up function handlers
-    call_flow_state = CallFlowState()
-    handlers = FunctionHandlers(call_flow_state)
-
-    # Register functions with the voicemail detection LLM
-    llm.register_function(
-        "switch_to_voicemail_response",
-        handlers.voicemail_response,
-    )
-    llm.register_function("switch_to_human_conversation", handlers.human_conversation)
-    llm.register_function("terminate_call", lambda params: terminate_call(params, call_flow_state))
-
-    # Build voicemail detection pipeline
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            context_aggregator.user(),  # User context
+            context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant context
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
     # Create pipeline task
-    pipeline_task = PipelineTask(
+    task = PipelineTask(
         pipeline,
-        params=PipelineParams(allow_interruptions=True),
+        PipelineParams(allow_interruptions=True),
     )
 
     # ------------ EVENT HANDLERS ------------
@@ -299,23 +238,13 @@ async def run_bot(
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        # Mark that a participant left early
-        call_flow_state.set_participant_left_early()
-        await pipeline_task.queue_frame(EndFrame())
+        logger.debug(f"Participant left: {participant}, reason: {reason}")
+        await task.cancel()
 
-    # ------------ RUN VOICEMAIL DETECTION PIPELINE ------------
+    # ------------ RUN PIPELINE ------------
 
     runner = PipelineRunner()
-
-    print("!!! starting voicemail detection pipeline")
-    try:
-        await runner.run(pipeline_task)
-    except Exception as e:
-        logger.error(f"Error in voicemail detection pipeline: {e}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-    print("!!! Done with voicemail detection pipeline")
+    await runner.run(task)
 
 
 # ------------ SCRIPT ENTRY POINT ------------
