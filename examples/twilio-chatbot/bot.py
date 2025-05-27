@@ -31,6 +31,7 @@ from smart_endpointing import (
 
 from pipecat.audio.filters.krisp_filter import KrispFilter
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
@@ -57,7 +58,11 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.filters.custom_mute_filter import TransportInputFilter
 from pipecat.processors.filters.function_filter import FunctionFilter
-from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
+from pipecat.processors.filters.stt_mute_filter import (
+    STTMuteConfig,
+    STTMuteFilter,
+    STTMuteStrategy,
+)
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.atoms.agent import (
@@ -145,15 +150,15 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     #     push_silence_after_stop=testing,
     # )
 
-    tts = WavesHttpTTSService(
-        api_key=os.getenv("WAVES_API_KEY"),
-        voice_id="deepika",
-    )
-
-    # tts = WavesSSETTSService(
+    # tts = WavesHttpTTSService(
     #     api_key=os.getenv("WAVES_API_KEY"),
-    #     voice_id="nyah",
+    #     voice_id="deepika",
     # )
+
+    tts = WavesSSETTSService(
+        api_key=os.getenv("WAVES_API_KEY"),
+        voice_id="nyah",
+    )
 
     transport_input_filter = TransportInputFilter()
     agent_flow_processor, agent_config = await initialize_conversational_agent(
@@ -285,6 +290,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             audio_in_sample_rate=8000,
             audio_out_sample_rate=8000,
             allow_interruptions=True,
+            enable_metrics=True,
         ),
     )
 

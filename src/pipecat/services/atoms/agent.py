@@ -33,9 +33,7 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     TransferCallFrame,
 )
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.filters.custom_mute_filter import TransportInputFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -1058,7 +1056,7 @@ async def initialize_conversational_agent(
                 model_id="atoms-responses",
                 api_key=os.getenv("ATOMS_INFER_API_KEY"),
                 base_url=f"{os.getenv('RESPONSE_MODEL_ENDPOINT')}/v1",
-                default_response_kwargs={"temperature": 0.7},
+                default_response_kwargs={"temperature": 0.6},
             )
             system_prompt = FT_RESPONSE_MODEL_SYSTEM_PROMPT
         elif model_name == AtomsLLMModels.GPT_4O.value:
