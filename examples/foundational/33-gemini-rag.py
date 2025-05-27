@@ -52,8 +52,8 @@ import json
 import os
 import time
 
-import google.generativeai as genai
 from dotenv import load_dotenv
+from google import genai
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -70,6 +70,9 @@ from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
 
 load_dotenv(override=True)
+
+# Initialize the client globally
+client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
 
 def get_rag_content():
@@ -105,20 +108,12 @@ Each request will include:
 Here is the knowledge base you have access to:
 {RAG_CONTENT}
 """
-genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 
 async def query_knowledge_base(params: FunctionCallParams):
     """Query the knowledge base for the answer to the question."""
     logger.info(f"Querying knowledge base for question: {params.arguments['question']}")
-    client = genai.GenerativeModel(
-        model_name=RAG_MODEL,
-        system_instruction=RAG_PROMPT,
-        generation_config=genai.types.GenerationConfig(
-            temperature=0.1,
-            max_output_tokens=64,
-        ),
-    )
+
     # for our case, the first two messages are the instructions and the user message
     # so we remove them.
     conversation_turns = params.context.messages[2:]
@@ -143,8 +138,15 @@ async def query_knowledge_base(params: FunctionCallParams):
     logger.info(f"Conversation turns: {messages_json}")
 
     start = time.perf_counter()
-    response = client.generate_content(
-        contents=[messages_json],
+    full_prompt = f"System: {RAG_PROMPT}\n\nConversation History: {messages_json}"
+
+    response = await client.aio.models.generate_content(
+        model=RAG_MODEL,
+        contents=[full_prompt],
+        config={
+            "temperature": 0.1,
+            "max_output_tokens": 64,
+        },
     )
     end = time.perf_counter()
     logger.info(f"Time taken: {end - start:.2f} seconds")
