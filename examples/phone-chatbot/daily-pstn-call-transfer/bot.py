@@ -9,7 +9,6 @@ import json
 import os
 import sys
 
-from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -30,7 +29,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.llm_service import FunctionCallParams, LLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyDialinSettings, DailyParams, DailyTransport
 
