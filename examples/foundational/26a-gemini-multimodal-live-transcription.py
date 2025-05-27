@@ -124,11 +124,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
-        await task.cancel()
-
     # Register event handler for transcript updates
     @transcript.event_handler("on_transcript_update")
     async def on_transcript_update(processor, frame):
