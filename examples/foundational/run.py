@@ -66,7 +66,7 @@ def run_example_daily(
 
             # Run example function with DailyTransport transport arguments.
             transport = DailyTransport(room_url, token, "Pipecat", params=params)
-            await run_example(transport, args)
+            await run_example(transport, args, True)
 
     asyncio.run(run())
 
@@ -121,7 +121,7 @@ def run_example_webrtc(
 
             # Run example function with SmallWebRTC transport arguments.
             transport = SmallWebRTCTransport(params=params, webrtc_connection=pipecat_connection)
-            background_tasks.add_task(run_example, transport, args)
+            background_tasks.add_task(run_example, transport, args, False)
 
         answer = pipecat_connection.get_answer()
         # Updating the peer connection inside the map
@@ -193,7 +193,7 @@ def run_example_twilio(
             auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
         )
         transport = FastAPIWebsocketTransport(websocket=websocket, params=params)
-        await run_example(transport, args)
+        await run_example(transport, args, False)
 
     uvicorn.run(app, host=args.host, port=args.port)
 

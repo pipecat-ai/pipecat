@@ -40,7 +40,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, args: argparse.Namespace):
+async def run_example(transport: BaseTransport, args: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot with video input: {args.input}")
 
     gst = GStreamerPipelineSource(
@@ -60,7 +60,7 @@ async def run_example(transport: BaseTransport, args: argparse.Namespace):
 
     task = PipelineTask(pipeline)
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 
