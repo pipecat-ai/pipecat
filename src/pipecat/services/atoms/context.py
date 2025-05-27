@@ -371,6 +371,8 @@ class AtomsAgentContext(OpenAILLMContext):
                         )
                 elif message["role"] == "assistant":
                     messages.append(message)
+                elif message["role"] == "system":
+                    messages.append(message)
 
             return messages
         except Exception as e:
