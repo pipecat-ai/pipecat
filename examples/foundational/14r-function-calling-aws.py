@@ -54,7 +54,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace):
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
 
     stt = AWSTranscribeSTTService()
@@ -142,7 +142,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace):
         logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 

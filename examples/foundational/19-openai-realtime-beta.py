@@ -88,7 +88,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace):
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
 
     session_properties = SessionProperties(
@@ -182,7 +182,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
         logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 
