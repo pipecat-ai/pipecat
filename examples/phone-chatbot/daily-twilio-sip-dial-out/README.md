@@ -1,5 +1,3 @@
-<!-- @format -->
-
 # Daily + Twilio SIP dial-out Voice Bot
 
 This project demonstrates how to create a voice bot that can make phone calls via Twilio and use Daily's SIP capabilities to enable voice conversations.
