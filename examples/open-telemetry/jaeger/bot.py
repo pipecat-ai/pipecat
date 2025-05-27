@@ -154,10 +154,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=handle_sigint)

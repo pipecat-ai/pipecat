@@ -187,11 +187,6 @@ indicate you should use the get_image tool are:
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
-        await task.cancel()
-
     runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
