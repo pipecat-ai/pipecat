@@ -141,11 +141,6 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
-        await task.cancel()
-
     runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)

@@ -67,10 +67,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     )
 
     llm = GoogleVertexLLMService(
-        # credentials="<json-credentials>",
+        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
         params=GoogleVertexLLMService.InputParams(
             project_id="<google-project-id>",
-        )
+        ),
     )
     # You can aslo register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
@@ -134,11 +134,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=handle_sigint)

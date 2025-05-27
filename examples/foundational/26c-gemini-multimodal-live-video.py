@@ -10,7 +10,7 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from run import get_transport_client_id, maybe_capture_participant_video
+from run import maybe_capture_participant_video
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -103,11 +103,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-        await task.cancel()
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=handle_sigint)

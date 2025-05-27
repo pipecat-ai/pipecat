@@ -177,11 +177,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
-        await task.cancel()
-
     runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
