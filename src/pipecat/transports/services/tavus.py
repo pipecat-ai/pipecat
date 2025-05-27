@@ -405,7 +405,8 @@ class TavusOutputTransport(BaseOutputTransport):
                 self._start_time = time.time()
                 self._samples_sent = 0
             elif isinstance(frame, BotStoppedSpeakingFrame):
-                await self._client.encode_audio_and_send(b"\x00\x00", True, self._current_idx_str)
+                silence = b"\x00" * self.audio_chunk_size
+                await self._client.encode_audio_and_send(silence, True, self._current_idx_str)
                 self._current_idx_str = None
         await super().push_frame(frame, direction)
 
