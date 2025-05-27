@@ -62,7 +62,7 @@ You must output ONLY 'YES' or 'NO' with no other text.
 INPUT FORMAT:
 You receive a list of dictionaries containing role and content information.
 The list ALWAYS contains at least one dictionary with the role "user". There may be an "assistant" element providing context.
-Do not consider the assistant's content when determining if the user's final utterance is complete; only use the most recent user input.
+Consider the overall context of the conversation, but focus on the user's most recent utterance. Ignore the punctuation since the output is from ASR and may contain errors.
 
 OUTPUT REQUIREMENTS:
 - MUST output ONLY 'YES' or 'NO'
@@ -76,6 +76,7 @@ HIGH PRIORITY SIGNALS:
    - Wh-questions (What, Where, When, Why, How)
    - Yes/No questions
    - Questions with STT errors but clear meaning
+   - Greeting questions are responded to be with YES  (e.g., "Hello", "how are you?")
 
 2. Complete Commands:
    - Direct instructions, clear requests, or action demands that form a complete statement
