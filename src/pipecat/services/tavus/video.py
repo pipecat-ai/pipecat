@@ -247,7 +247,7 @@ class TavusVideoService(AIService):
                 # Send any remaining audio.
                 if len(audio_buffer) > 0:
                     await self._client.encode_audio_and_send(
-                        bytes(audio_buffer), True, current_idx_str
+                        bytes(audio_buffer), False, current_idx_str
                     )
                 await self._client.encode_audio_and_send(silence, True, current_idx_str)
                 audio_buffer.clear()
