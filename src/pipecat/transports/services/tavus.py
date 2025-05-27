@@ -11,6 +11,8 @@ from pydantic import BaseModel
 
 from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -20,8 +22,6 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
@@ -365,7 +365,8 @@ class TavusOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
         self._samples_sent = 0
-        self._start_time = time.time()
+        self._start_time = None
+        self._current_idx_str: Optional[str] = None
 
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
@@ -377,8 +378,6 @@ class TavusOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        self._samples_sent = 0
-        self._start_time = time.time()
         await self._client.start(frame)
         await self.set_transport_ready(frame)
 
@@ -394,24 +393,41 @@ class TavusOutputTransport(BaseOutputTransport):
         logger.info(f"TavusOutputTransport sending message {frame}")
         await self._client.send_message(frame)
 
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        # The BotStartedSpeakingFrame and BotStoppedSpeakingFrame are created inside BaseOutputTransport
+        # so TavusOutputTransport never receives these frames.
+        # This is a workaround, so we can more reliably be aware when the bot has started or stopped speaking
+        if direction == FrameDirection.DOWNSTREAM:
+            if isinstance(frame, BotStartedSpeakingFrame):
+                if self._current_idx_str is not None:
+                    logger.warning("TavusOutputTransport self._current_idx_str is already defined!")
+                self._current_idx_str = str(frame.id)
+                self._start_time = time.time()
+                self._samples_sent = 0
+            elif isinstance(frame, BotStoppedSpeakingFrame):
+                silence = b"\x00" * self.audio_chunk_size
+                await self._client.encode_audio_and_send(silence, True, self._current_idx_str)
+                self._current_idx_str = None
+        await super().push_frame(frame, direction)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartInterruptionFrame):
             await self._handle_interruptions()
-        elif isinstance(frame, TTSStartedFrame):
-            self._current_idx_str = str(frame.id)
-        elif isinstance(frame, TTSStoppedFrame):
-            logger.debug(f"TAVUS: {self}: stopped speaking")
-            await self._client.encode_audio_and_send(b"\x00\x00", True, self._current_idx_str)
 
     async def _handle_interruptions(self):
         await self._client.send_interrupt_message()
 
     async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         # Compute wait time for synchronization
-        wait = self._start_time + (self._samples_sent / self._sample_rate) - time.time()
+        wait = self._start_time + (self._samples_sent / self.sample_rate) - time.time()
         if wait > 0:
+            logger.trace(f"TavusOutputTransport write_raw_audio_frames wait: {wait}")
             await asyncio.sleep(wait)
+
+        if self._current_idx_str is None:
+            logger.warning("TavusOutputTransport self._current_idx_str not defined yet!")
+            return
 
         await self._client.encode_audio_and_send(frames, False, self._current_idx_str)
 
