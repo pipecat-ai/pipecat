@@ -308,32 +308,13 @@ class AtomsAgentContext(OpenAILLMContext):
 
     def _restructure_from_openai_messages(self):
         """This function will restructure the openai user context messages which are in the default string format and convert them to the atoms agent context messages."""
-        messages = []
 
-        # for message in self.messages:
-        #     if message["role"] == "user":
-        #         try:
-        #             json.loads(message["content"])
-        #             # if the content is json than it is already in the atoms agent format no need to convert it
-        #             messages.append(message)
-        #         except json.JSONDecodeError:
-        #             # if json conversion fails than it is a user message and we need to convert it to the atoms agent format
-        #             messages.append(
-        #                 ChatCompletionUserMessageParam(
-        #                     role="user", content=json.dumps({"transcript": message["content"]})
-        #                 )
-        #             )
-        #         except Exception as e:
-        #             logger.error(f"Error parsing user message: {message}")
-        #             messages.append(message)
-        #     else:
-        #         messages.append(message)
-
-        # self.messages.clear()
-        # self.messages.extend(messages)
-
-        # NOTE: We have commented out the above code because we are using the atomsAgentContext when creating pipeline and we are converting the messages to the atoms agent context format when adding messages to the context
-        pass
+        # if last message is not a user message just append empty transcript
+        if self.messages and self.messages[-1]["role"] != "user":
+            logger.error(
+                f"Last message is not a user message, appending empty transcript to the context, last_message: {self.messages[-1]}"
+            )
+            self.add_message(ChatCompletionUserMessageParam(role="user", content=""))
 
     def get_response_model_context(self):
         """Get the response model context from the messages."""

@@ -16,6 +16,8 @@ import functools
 import inspect
 import json
 import logging
+import time
+from inspect import iscoroutinefunction
 from typing import TYPE_CHECKING, Callable, Optional, TypeVar
 
 # Type imports for type checking only
@@ -444,6 +446,62 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 logging.error(f"Error in LLM tracing (continuing without tracing): {e}")
                 # If tracing fails, fall back to the original function
                 return await f(self, context, *args, **kwargs)
+
+        return wrapper
+
+    if func is not None:
+        return decorator(func)
+    return decorator
+
+
+def track_latency(
+    func: Optional[Callable] = None,
+    *,
+    service_name: str,
+    metric_name: str,
+    logger: Optional[logging.Logger] = None,
+    post_call_func: Optional[Callable] = None,
+):
+    """Track the latency of a function and call a post-call function with the latency.
+
+    Args:
+        func: The function to track the latency of.
+        service_name: The name of the service.
+        metric_name: The name of the metric to track.
+        logger: The logger to use for logging.
+        post_call_func: The function to call after the function has been called.
+    """
+
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            start_time = time.time()
+
+            try:
+                if iscoroutinefunction(func):
+                    result = await func(*args, **kwargs)
+                else:
+                    result = func(*args, **kwargs)
+
+                end_time = time.time()
+                latency = end_time - start_time
+
+                # Use proper logging
+                log = logger or logging.getLogger(__name__)
+                log.info(f"{service_name} {metric_name} latency: {latency:.3f}s")
+
+                if post_call_func:
+                    if iscoroutinefunction(post_call_func):
+                        await post_call_func(latency)
+                    else:
+                        post_call_func(latency)
+
+                return result
+            except Exception as e:
+                end_time = time.time()
+                latency = end_time - start_time
+                log.error(f"{service_name} {metric_name} failed after {latency:.3f}s: {e}")
+                raise
 
         return wrapper
 

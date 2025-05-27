@@ -32,7 +32,7 @@ class CallType(Enum):
 
 
 async def initialize_conversational_agent(
-    *, agent_id: str, call_id: str, call_data: CallData, transport_input_filter: Any
+    *, agent_id: str, call_data: CallData, transport_input_filter: Any
 ) -> tuple[FlowGraphManager, Dict[str, Any]]:
     """Initialize a conversational agent with the specified configuration.
 
@@ -55,9 +55,7 @@ async def initialize_conversational_agent(
 
     try:
         # Initialize conversational pathway
-        conv_pathway_data, agent_config = await get_conv_pathway_graph(
-            agent_id=agent_id, call_id=call_id
-        )
+        conv_pathway_data, agent_config = await get_conv_pathway_graph(agent_id=agent_id)
         conv_pathway = ConversationalPathway()
         conv_pathway.build_from_json(conv_pathway_data)
 
@@ -149,14 +147,13 @@ async def initialize_conversational_agent(
                 global_kb_id=global_kb_id,
             ),
         )
-
         return flow_manager, agent_config
 
     except Exception as e:
         raise Exception("Failed to initialize conversational agent")
 
 
-async def get_conv_pathway_graph(agent_id, call_id) -> tuple[str, dict]:
+async def get_conv_pathway_graph(agent_id) -> tuple[str, dict]:
     """Fetch conversation pathway graph along with config from Admin API.
 
     Args:
@@ -215,21 +212,18 @@ async def get_conv_pathway_graph(agent_id, call_id) -> tuple[str, dict]:
             processed_workflow = process_pathway_data(convert_old_to_new_format(workflow_graph))
             logger.info(
                 f"Successfully fetched and processed graph for agent ID {agent_id}",
-                extra={"call_id": call_id},
             )
             return processed_workflow, agent_config
 
     except httpx.HTTPError as e:
         logger.error(
             f"HTTP error for agent ID {agent_id}: {str(e)}",
-            extra={"call_id": call_id},
             exc_info=True,
         )
         raise Exception("Failed to fetch workflow graph")
     except Exception as e:
         logger.error(
             f"Error processing graph for agent ID {agent_id}: {str(e)}",
-            extra={"call_id": call_id},
             exc_info=True,
         )
         raise Exception("Failed to process workflow graph")

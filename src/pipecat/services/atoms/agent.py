@@ -37,6 +37,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFr
 from pipecat.processors.filters.custom_mute_filter import TransportInputFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.documentdb.rag import DocumentDBVectorStore
+from pipecat.utils.tracing.service_decorators import track_latency
 
 from .context import AtomsAgentContext
 from .llm_client import AzureOpenAIClient, BaseClient, OpenAIClient
@@ -68,20 +69,28 @@ class FlowGraphManager(FrameProcessor):
         def __init__(self, flow_graph_manager: "FlowGraphManager"):
             self.flow_graph_manager: "FlowGraphManager" = flow_graph_manager
 
+        def _extract_variables_from_context(self, node: Node, context: AtomsAgentContext) -> None:
+            """Extract data from API response using JSON paths.
+
+            Args:
+                node: The node containing the HTTP request configuration
+                context: The context of the agent
+            """
+            response_data = context.get_last_user_context()["api_node_response"]
+            self._extract_variables(node, response_data)
+
         def _extract_variables(
             self,
             node: Node,
-            context: AtomsAgentContext,
+            response_data: str,
         ) -> None:
             """Extract data from API response using JSON paths.
 
             Args:
-                response_data: Response data from API call
-                config: Configuration for response data extraction
+                node: The node containing the HTTP request configuration
+                response_data: Response data from API call in string format
             """
             config = node.response_data
-            response_data = context.get_last_user_context()["api_node_response"]
-            logger.debug(f"extracting variables from api call node, response_data: {response_data}")
             if (
                 not config.is_enabled
                 or not config.data
@@ -91,7 +100,6 @@ class FlowGraphManager(FrameProcessor):
                 return
 
             extracted = {}
-
             for mapping in config.data:
                 try:
                     # Parse and find value using JSON path
@@ -114,6 +122,11 @@ class FlowGraphManager(FrameProcessor):
                 self.flow_graph_manager.variables.update(extracted)
                 logger.info(f"Updated variables with response data: {extracted}")
 
+        @track_latency(
+            service_name="agent",
+            metric_name="api_call_node_latency",
+            logger=logger,
+        )
         async def _make_api_request_from_node(
             self, node: Node, variables: Dict[str, Any]
         ) -> Union[Dict[str, Any], str]:
@@ -121,6 +134,7 @@ class FlowGraphManager(FrameProcessor):
 
             Args:
                 node: The node containing the HTTP request configuration
+                variables: The variables to use for the API request
 
             Returns:
                 API response data
@@ -286,10 +300,8 @@ class FlowGraphManager(FrameProcessor):
         self.variable_extraction_client: BaseClient = variable_extraction_client
         self.response_model_client: BaseClient = response_model_client
         self.conv_pathway: ConversationalPathway = conversation_pathway
-        self.variables = self._initialize_variables(agent_input_params.initial_variables)
         self.current_node: Node = self._find_root()
-        self._process_pre_call_api_nodes()
-        self.conv_pathway.start_node = self.current_node
+        self.variables = self._initialize_variables(agent_input_params.initial_variables)
         self._end_call_tag = agent_input_params.end_call_tag
         self.agent_persona = agent_input_params.agent_persona
         self.api_node_handler = self.APICallNodeHandler(self)
@@ -302,20 +314,31 @@ class FlowGraphManager(FrameProcessor):
         self.global_kb_id: Optional[str] = agent_input_params.global_kb_id
         self._register_node_event_handlers()
 
-    async def _handle_llm_knowledge_base(self, prompt: Optional[str]) -> None:
+    async def start(self) -> None:
+        """Start the flow graph manager."""
+        await self._process_pre_call_api_nodes()
+        self.conv_pathway.start_node = self.current_node
+
+    @track_latency(
+        service_name="agent",
+        metric_name="llm_knowledge_base_latency",
+        logger=logger,
+    )
+    async def _handle_llm_knowledge_base(self, context: AtomsAgentContext) -> None:
         """Process knowledge base if configured in current node.
 
         Args:
-            prompt: User input to use for knowledge retrieval
+            context: Atoms agent context
         """
         if self.current_node.use_global_knowledge_base:
             logger.debug(f"Using global knowledge base: {self.global_kb_id}")
             if self.global_kb_id is None or self.global_kb_id.strip() == "":
                 return
 
-            if prompt and len(prompt.split(" ")) > 2:
+            user_transcript = context.get_current_user_transcript()
+            if user_transcript and len(user_transcript.split(" ")) > 2:
                 chunks = await self.vector_datastore.retrieve(
-                    knowledge_base_id=self.global_kb_id, query=prompt, limit=4
+                    knowledge_base_id=self.global_kb_id, query=user_transcript, limit=4
                 )
                 knowledge_base = "\n\n".join(chunks)
                 self.current_node.knowledge_base = knowledge_base
@@ -449,13 +472,16 @@ class FlowGraphManager(FrameProcessor):
 
         return self.conv_pathway.nodes[nodes_without_incoming[0]]
 
-    def _process_pre_call_api_nodes(self) -> None:
+    async def _process_pre_call_api_nodes(self) -> None:
         """Process pre-call API nodes sequentially until hitting a non-pre-call node."""
         while self.current_node.type == NodeType.PRE_CALL_API:
             http_request = self.current_node.http_request
             if http_request:
                 try:
-                    response_data = self._make_api_request_from_node(self.current_node)
+                    # response_data = self._make_api_request_from_node(self.current_node)
+                    response_data = await self.api_node_handler._make_api_request_from_node(
+                        self.current_node, self.variables
+                    )
                     logger.debug(f"response data from pre-call api node: {response_data}")
                 except Exception as e:
                     logger.error(
@@ -464,7 +490,9 @@ class FlowGraphManager(FrameProcessor):
 
                 # Process response data mappings
                 if self.current_node.response_data and self.current_node.response_data.is_enabled:
-                    self._extract_response_data(response_data, self.current_node.response_data)
+                    self.api_node_handler._extract_variables(
+                        self.current_node, json.dumps(response_data)
+                    )
 
             # Navigate to the next node - Pre-call nodes should only have one pathway
             if len(self.current_node.pathways) != 1:
@@ -491,6 +519,11 @@ class FlowGraphManager(FrameProcessor):
                 conditional_edges.append((pathway_id, pathway))
         return conditional_edges
 
+    @track_latency(
+        service_name="agent",
+        metric_name="hopping_latency",
+        logger=logger,
+    )
     async def _handle_hopping(self, context: AtomsAgentContext) -> bool:
         """Determine if a node transition is needed and execute if necessary.
 
@@ -556,6 +589,11 @@ class FlowGraphManager(FrameProcessor):
         self.previous_node = self.current_node
         self.current_node = self.current_node.pathways[pathway_id].target_node
 
+    @track_latency(
+        service_name="agent",
+        metric_name="variable_extraction_latency",
+        logger=logger,
+    )
     async def _extract_variables(self, context: AtomsAgentContext) -> bool:
         """Extract variables from conversation context using LLM.
 
@@ -736,33 +774,26 @@ class FlowGraphManager(FrameProcessor):
         """Get the custom instructions for the response model."""
         return [*self.custom_instructions, get_language_switch_inst(self.current_language)]
 
-    async def get_response(self, context: AtomsAgentContext):
-        """Get the response from the response model client."""
-        # Before hopping we need to extract variables from the current node and user response
-        current_user_transcript = context.get_current_user_transcript()
-        await self._handle_llm_knowledge_base(current_user_transcript)
+    async def _handle_variables_extraction(self, context: AtomsAgentContext) -> None:
+        """Handle variables extraction for the current node."""
+        match self.current_node.type:
+            case NodeType.API_CALL | NodeType.PRE_CALL_API | NodeType.POST_CALL_API:
+                if self.current_node.response_data and self.current_node.response_data.is_enabled:
+                    self.api_node_handler._extract_variables_from_context(
+                        self.current_node, context=context
+                    )
+            case NodeType.DEFAULT:
+                if self.current_node.variables and self.current_node.variables.is_enabled:
+                    await self._extract_variables(context=context)
+
+    def _handle_language_switching(self, context: AtomsAgentContext) -> None:
+        """Handle language switching for the current node."""
         if self._is_language_switching_enabled:
+            current_user_transcript = context.get_current_user_transcript()
             self.current_language = self._detect_language(current_user_transcript)
 
-        if self.current_node.variables and self.current_node.variables.is_enabled:
-            if self.current_node.type == NodeType.API_CALL:
-                self.api_node_handler._extract_variables(context=context, node=self.current_node)
-            else:
-                await self._extract_variables(context=context)
-
-        # After extracting variables we need to hop to the next node
-        # If hopping fails for api call node, then we do not proceed with the flow else we will be in infinite loop just let user know that something went wrong and cut the call
-        hopped = await self._handle_hopping(context=context)
-        if self.current_node.type == NodeType.API_CALL:
-            if not hopped:
-                yield "Something went wrong, please try again later."
-                await self.push_frame(LastTurnFrame(conversation_id="123"))
-                logger.debug(f"hopping failed for api call node")
-                return
-
-        self._handle_stt_mute()
-
-        # format the messages for the response model
+    def _update_user_context(self, context: AtomsAgentContext) -> None:
+        current_user_transcript = context.get_current_user_transcript()
         context._update_last_user_context(
             "response_model_context",
             self._get_current_state_as_json(
@@ -770,13 +801,26 @@ class FlowGraphManager(FrameProcessor):
                 custom_instructions=self._get_custom_instructions(),
             ),
         )
-
-        # after hopping we have to update the delta in the context
         delta = context.get_user_context_delta()
         if delta:
             delta = json.dumps(delta, indent=2, ensure_ascii=False)
             context._update_last_user_context("delta", delta)
 
+    async def get_response(self, context: AtomsAgentContext):
+        """Get the response from the response model client."""
+        # Before hopping we need to extract variables from the current node and user response
+        await self._handle_llm_knowledge_base(context=context)
+        self._handle_language_switching(context=context)
+        await self._handle_variables_extraction(context=context)
+        hopped = await self._handle_hopping(context=context)
+        if self.current_node.type == NodeType.API_CALL:
+            if not hopped:
+                yield "Something went wrong, please try again later."
+                await self.push_frame(LastTurnFrame(conversation_id="123"))
+                logger.debug(f"hopping failed for api call node")
+                return
+        self._handle_stt_mute()
+        self._update_user_context(context=context)
         if self.current_node.type == NodeType.DEFAULT:
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):

@@ -162,7 +162,6 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     transport_input_filter = TransportInputFilter()
     agent_flow_processor, agent_config = await initialize_conversational_agent(
         agent_id="6834620651876e6afe20256a",
-        call_id="CALL-1748080011312-b252f8",
         call_data=CallData(
             variables={
                 "call_id": "CALL-1748263569023-2029e3",
@@ -172,6 +171,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         ),
         transport_input_filter=transport_input_filter,
     )
+    await agent_flow_processor.start()
 
     turn_tracking_observer = TurnTrackingObserver()
     agent_action_processor = AgentActionProcessor(turn_tracking_observer)
