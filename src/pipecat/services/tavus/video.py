@@ -202,11 +202,12 @@ class TavusVideoService(AIService):
         # limit (even including base64 encoding). For a sample rate of 16000,
         # that would be 32000 / 20 = 1600.
         sample_rate = self._client.out_sample_rate
+        # 50 ms of audio
         MAX_CHUNK_SIZE = int((sample_rate * 2) / 20)
 
         audio_buffer = bytearray()
         current_idx_str = None
-        silence = b"\x00\x00"
+        silence = b"\x00" * MAX_CHUNK_SIZE
         samples_sent = 0
         start_time = None
 
