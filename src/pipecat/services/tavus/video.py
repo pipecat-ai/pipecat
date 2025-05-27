@@ -31,6 +31,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.services.ai_service import AIService
 from pipecat.transports.services.tavus import TavusCallbacks, TavusParams, TavusTransportClient
 
+# Using the same values that we do in the BaseOutputTransport
+BOT_VAD_STOP_SECS = 0.35
+
 
 class TavusVideoService(AIService):
     """
@@ -169,11 +172,7 @@ class TavusVideoService(AIService):
         if isinstance(frame, StartInterruptionFrame):
             await self._handle_interruptions()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSStartedFrame):
-            await self._queue.put(frame)
         elif isinstance(frame, TTSAudioRawFrame):
-            await self._queue.put(frame)
-        elif isinstance(frame, TTSStoppedFrame):
             await self._queue.put(frame)
         else:
             await self.push_frame(frame, direction)
@@ -197,15 +196,6 @@ class TavusVideoService(AIService):
             await self.cancel_task(self._send_task)
             self._send_task = None
 
-    # TODO (Filipi): this should be all that is needed use this Microphone Echo mode
-    # https://docs.tavus.io/sections/conversational-video-interface/layers-and-modes-overview#microphone-echo
-    # This would allow us to send an audio stream for the replica to repeat
-    # Checking with Tavus what is the right way to create the Persona to make it work
-    # async def _send_task_handler(self):
-    #    while True:
-    #        (audio, in_rate, done) = await self._queue.get()
-    #        await self._client.write_raw_audio_frames(audio)
-
     async def _send_task_handler(self):
         # Daily app-messages have a 4kb limit and also a rate limit of 20
         # messages per second. Below, we only consider the rate limit because 1
@@ -219,14 +209,41 @@ class TavusVideoService(AIService):
         audio_buffer = bytearray()
         current_idx_str = None
         silence = b"\x00\x00"
+        samples_sent = 0
+        start_time = None
 
         while True:
-            frame = await self._queue.get()
-            if isinstance(frame, TTSStartedFrame):
-                if current_idx_str is not None:
-                    continue
-                current_idx_str = str(frame.id)
-            elif isinstance(frame, TTSStoppedFrame):
+            try:
+                frame = await asyncio.wait_for(self._queue.get(), timeout=BOT_VAD_STOP_SECS)
+                if isinstance(frame, TTSAudioRawFrame):
+                    # starting the new inference
+                    if current_idx_str is None:
+                        current_idx_str = str(frame.id)
+                        samples_sent = 0
+                        start_time = time.time()
+
+                    audio = await self._resampler.resample(
+                        frame.audio, frame.sample_rate, sample_rate
+                    )
+                    audio_buffer.extend(audio)
+                    while len(audio_buffer) >= MAX_CHUNK_SIZE:
+                        chunk = audio_buffer[:MAX_CHUNK_SIZE]
+                        audio_buffer = audio_buffer[MAX_CHUNK_SIZE:]
+
+                        # Compute wait time for synchronization
+                        wait = start_time + (samples_sent / sample_rate) - time.time()
+                        if wait > 0:
+                            logger.trace(f"TavusVideoService _send_task_handler wait: {wait}")
+                            await asyncio.sleep(wait)
+
+                        await self._client.encode_audio_and_send(
+                            bytes(chunk), False, current_idx_str
+                        )
+
+                        # Update timestamp based on number of samples sent
+                        samples_sent += len(chunk) // 2  # 2 bytes per sample (16-bit)
+            except asyncio.TimeoutError:
+                # Bot has stopped speaking
                 # Send any remaining audio.
                 if len(audio_buffer) > 0:
                     await self._client.encode_audio_and_send(
@@ -235,17 +252,3 @@ class TavusVideoService(AIService):
                 await self._client.encode_audio_and_send(silence, True, current_idx_str)
                 audio_buffer.clear()
                 current_idx_str = None
-            elif isinstance(frame, TTSAudioRawFrame):
-                if current_idx_str is None:
-                    continue
-                audio = await self._resampler.resample(frame.audio, frame.sample_rate, sample_rate)
-                audio_buffer.extend(audio)
-                while len(audio_buffer) >= MAX_CHUNK_SIZE:
-                    chunk = audio_buffer[:MAX_CHUNK_SIZE]
-                    audio_buffer = audio_buffer[MAX_CHUNK_SIZE:]
-
-                    # Compute wait time for synchronization
-                    wait = 1 / 20  # 50ms
-                    await asyncio.sleep(wait)
-
-                    await self._client.encode_audio_and_send(bytes(chunk), False, current_idx_str)
