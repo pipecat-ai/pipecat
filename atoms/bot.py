@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from fastapi import WebSocket
 from loguru import logger
 from models.agent import CallData
+from observers.agent_response import AgentResponseObserver
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionSystemMessageParam,
@@ -212,6 +213,7 @@ async def run_bot(
     await agent_flow_processor.start()
 
     turn_tracking_observer = TurnTrackingObserver()
+    agent_response_observer = AgentResponseObserver()
     agent_action_processor = AgentActionProcessor(turn_tracking_observer)
     messages = [
         ChatCompletionSystemMessageParam(role="system", content=agent_config["system_prompt"]),
@@ -320,7 +322,7 @@ async def run_bot(
 
     task = PipelineTask(
         pipeline,
-        observers=[turn_tracking_observer],
+        observers=[turn_tracking_observer, agent_response_observer],
         enable_turn_tracking=False,
         params=PipelineParams(
             audio_in_sample_rate=8000,
@@ -340,6 +342,8 @@ async def run_bot(
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
+        latency_stats = agent_response_observer.get_latency_stats()
+        logger.info(f"Agent response latency stats: {latency_stats}")
         await task.cancel()
 
     @audiobuffer.event_handler("on_audio_data")
