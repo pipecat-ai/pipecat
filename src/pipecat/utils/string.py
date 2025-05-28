@@ -114,20 +114,20 @@ def parse_start_end_tags(
     tag and the index of the text.
 
     """
+    # If we are already inside a tag, check if the end tag is in the text.
     if current_tag:
         _, end_tag = current_tag
-        end_pos = text.find(end_tag, current_tag_index)
-        if end_pos != -1:
-            return (None, end_pos + len(end_tag))
-        return (current_tag, len(text))
+        if end_tag in text[current_tag_index:]:
+            return (None, len(text))
+        return (current_tag, current_tag_index)
 
     text_slice = text[current_tag_index:]
     if not text_slice:
         return (None, current_tag_index)
 
-    for start_tag_str, end_tag_str in tags:
+    for start_tag, end_tag in tags:
         start_tag_count = 0
-        simple_match = _SIMPLE_TAG_PATTERN.match(start_tag_str)
+        simple_match = _SIMPLE_TAG_PATTERN.match(start_tag)
 
         if simple_match:
             tag_name = simple_match.group(1)
@@ -135,17 +135,15 @@ def parse_start_end_tags(
             actual_start_tag_regex = re.compile(rf"<{re.escape(tag_name)}(?:\s+[^>]*)?>")
             start_tag_count = len(list(actual_start_tag_regex.finditer(text_slice)))
         else:
-            start_tag_count = text_slice.count(start_tag_str)
+            start_tag_count = text_slice.count(start_tag)
 
-        end_tag_count = text_slice.count(end_tag_str)
+        end_tag_count = text_slice.count(end_tag)
 
         if start_tag_count == 0 and end_tag_count == 0:
-            continue
-
-        if start_tag_count > end_tag_count:
-            return ((start_tag_str, end_tag_str), len(text))
-
-        if start_tag_count == end_tag_count:
+            return (None, current_tag_index)
+        elif start_tag_count > end_tag_count:
+            return ((start_tag, end_tag), len(text))
+        elif start_tag_count == end_tag_count:
             return (None, len(text))
 
     return (None, current_tag_index)
