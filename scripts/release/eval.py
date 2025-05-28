@@ -55,7 +55,14 @@ PIPELINE_IDLE_TIMEOUT_SECS = 30
 
 
 class EvalRunner:
-    def __init__(self, *, pattern: str = "", record_audio: bool = False, log_level: str = "DEBUG"):
+    def __init__(
+        self,
+        *,
+        pattern: str = "",
+        record_audio: bool = False,
+        name: Optional[str] = None,
+        log_level: str = "DEBUG",
+    ):
         self._pattern = f".*{pattern}.*" if pattern else ""
         self._record_audio = record_audio
         self._log_level = log_level
@@ -64,9 +71,8 @@ class EvalRunner:
         self._queue = asyncio.Queue()
 
         # We to save runner files.
-        self._runs_dir = os.path.join(
-            SCRIPT_DIR, "test-runs", f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        )
+        name = name or f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self._runs_dir = os.path.join(SCRIPT_DIR, "test-runs", name)
         self._logs_dir = os.path.join(self._runs_dir, "logs")
         self._recordings_dir = os.path.join(self._runs_dir, "recordings")
         os.makedirs(self._logs_dir, exist_ok=True)
