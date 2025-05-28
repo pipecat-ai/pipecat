@@ -20,8 +20,8 @@ from dotenv import load_dotenv
 from fastapi import HTTPException, WebSocket
 from loguru import logger
 from models.agent import CallData
-from observability.trackers.turn_latency import TurnLatencyTracker
 from observers.agent_response import AgentResponseObserver
+from observers.turn_latency_observer import TurnLatencyObserver
 from openai.types.chat import (
     ChatCompletionAssistantMessageParam,
     ChatCompletionSystemMessageParam,
@@ -272,15 +272,8 @@ async def run_bot(
     await agent_flow_processor.start()
 
     turn_tracking_observer = TurnTrackingObserver()
-    turn_latency_tracker = TurnLatencyTracker()
-
-    turn_tracking_observer.event_handler("on_turn_started")
-    turn_latency_tracker.on_turn_started
-
-    turn_tracking_observer.event_handler("on_turn_ended")
-    turn_latency_tracker.on_turn_ended
-
     agent_response_observer = AgentResponseObserver()
+    turn_latency_observer = TurnLatencyObserver()
     agent_action_processor = AgentActionProcessor(turn_tracking_observer)
     messages = [
         ChatCompletionSystemMessageParam(role="system", content=agent_config["system_prompt"]),
@@ -389,7 +382,7 @@ async def run_bot(
 
     task = PipelineTask(
         pipeline,
-        observers=[turn_tracking_observer, agent_response_observer],
+        observers=[turn_tracking_observer, agent_response_observer, turn_latency_observer],
         enable_turn_tracking=False,
         params=PipelineParams(
             audio_in_sample_rate=8000,

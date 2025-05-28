@@ -25,8 +25,8 @@ from loguru import logger
 from pydantic import BaseModel, Field, field_validator
 
 from pipecat.frames.frames import (
+    EndFrame,
     Frame,
-    LastTurnFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -758,21 +758,6 @@ class FlowGraphManager(FrameProcessor):
         except Exception as e:
             return False
 
-    def _handle_stt_mute(self):
-        match self.current_node.type:
-            case NodeType.PRE_CALL_API:
-                self.transport_input_filter.mute()
-            case NodeType.POST_CALL_API:
-                self.transport_input_filter.mute()
-            case NodeType.DEFAULT:
-                self.transport_input_filter.unmute()
-            case NodeType.API_CALL:
-                self.transport_input_filter.mute()
-            case NodeType.END_CALL:
-                self.transport_input_filter.mute()
-            case NodeType.TRANSFER_CALL:
-                self.transport_input_filter.mute()
-
     def _get_custom_instructions(self) -> str:
         """Get the custom instructions for the response model."""
         return [*self.custom_instructions, get_language_switch_inst(self.current_language)]
@@ -818,13 +803,14 @@ class FlowGraphManager(FrameProcessor):
         hopped = await self._handle_hopping(context=context)
         if self.current_node.type == NodeType.API_CALL:
             if not hopped:
+                self.transport_input_filter.mute()
                 yield "Something went wrong, please try again later."
-                await self.push_frame(LastTurnFrame(conversation_id="123"))
+                await self.push_frame(EndFrame())
                 logger.debug(f"hopping failed for api call node")
                 return
-        self._handle_stt_mute()
         self._update_user_context(context=context)
         if self.current_node.type == NodeType.DEFAULT:
+            self.transport_input_filter.unmute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
@@ -832,15 +818,18 @@ class FlowGraphManager(FrameProcessor):
                 async for chunk in self._handle_dynamic_response(context=context):
                     yield chunk
         elif self.current_node.type == NodeType.END_CALL:
+            self.transport_input_filter.mute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
-                await self.push_frame(LastTurnFrame(conversation_id="123"))
+                await self.push_frame(EndFrame())
             else:
                 async for chunk in self._handle_dynamic_response(context=context):
                     yield chunk
-                await self.push_frame(LastTurnFrame(conversation_id="123"))
+                await self.push_frame(EndFrame())
+            return
         elif self.current_node.type == NodeType.TRANSFER_CALL:
+            self.transport_input_filter.mute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
@@ -850,7 +839,9 @@ class FlowGraphManager(FrameProcessor):
                         conversation_id="123",
                     )
                 )
+            return
         elif self.current_node.type == NodeType.API_CALL:
+            self.transport_input_filter.mute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
@@ -863,8 +854,6 @@ class FlowGraphManager(FrameProcessor):
             )
         else:
             raise Exception(f"Unknown node type: {self.current_node.type}")
-
-        self.transport_input_filter.unmute()
 
     async def _process_context(self, context: AtomsAgentContext) -> None:
         """Process the context and update the flow model client."""
@@ -967,6 +956,7 @@ class FlowGraphManager(FrameProcessor):
     ) -> AsyncGenerator[str, None]:
         """Handle the dynamic response from the response model client."""
         try:
+            is_end_call = False
             response_model_context = context.get_response_model_context()
             async for chunk in await self.response_model_client.get_response(
                 response_model_context, stream=True, stop=[self._end_call_tag]
@@ -981,8 +971,12 @@ class FlowGraphManager(FrameProcessor):
                         and hasattr(chunk.choices[0], "stop_reason")
                         and chunk.choices[0].stop_reason == self._end_call_tag
                     ):
-                        logger.debug("last turn chunk detected")
-                        await self.push_frame(LastTurnFrame(conversation_id="123"))
+                        self.transport_input_filter.mute()
+                        is_end_call = True
+            if is_end_call:
+                await self.push_frame(EndFrame())
+            else:
+                self.transport_input_filter.unmute()
         except Exception as e:
             logger.error(f"Error handling dynamic response: {e}")
 
