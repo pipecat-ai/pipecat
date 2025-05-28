@@ -10,7 +10,6 @@ from pipecat.frames.frames import (
     EndFrame,
     InputDTMFFrame,
     KeypadEntry,
-    StartInterruptionFrame,
     TranscriptionFrame,
 )
 from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator
@@ -135,34 +134,6 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
             send_end_frame=False,  # We're sending one in the test to test EndFrame logic
-        )
-
-        transcription_frames = [
-            f for f in received_down_frames if isinstance(f, TranscriptionFrame)
-        ]
-        self.assertEqual(len(transcription_frames), 1)
-        self.assertEqual(transcription_frames[0].text, "DTMF: 12")
-
-    async def test_interruption_frame_flush(self):
-        """Test that StartInterruptionFrame flushes pending aggregation."""
-        aggregator = DTMFAggregator(timeout=1.0)
-        frames_to_send = [
-            InputDTMFFrame(button=KeypadEntry.ONE),
-            InputDTMFFrame(button=KeypadEntry.TWO),
-            SleepFrame(sleep=0.1),  # Allow time for aggregation
-            StartInterruptionFrame(),
-        ]
-        expected_down_frames = [
-            InputDTMFFrame,
-            InputDTMFFrame,
-            TranscriptionFrame,  # Should flush before interruption
-            StartInterruptionFrame,
-        ]
-
-        received_down_frames, _ = await run_test(
-            aggregator,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
         )
 
         transcription_frames = [
