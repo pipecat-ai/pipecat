@@ -7,6 +7,8 @@
 import re
 from typing import Optional, Sequence, Tuple
 
+from loguru import logger
+
 ENDOFSENTENCE_PATTERN_STR = r"""
     (?<![A-Z])       # Negative lookbehind: not preceded by an uppercase letter (e.g., "U.S.A.")
     (?<!\d\.\d)      # Not preceded by a decimal number (e.g., "3.14159")
@@ -27,6 +29,7 @@ EMAIL_PATTERN = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 NUMBER_PATTERN = re.compile(r"[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?")
 
 StartEndTags = Tuple[str, str]
+_SIMPLE_TAG_PATTERN = re.compile(r"^<([a-zA-Z0-9_:-]+)>$")
 
 
 def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
@@ -98,6 +101,8 @@ def parse_start_end_tags(
     This function will return the index in the text that we should start parsing
     in the next call and the current or new tags.
 
+    EDIT: support for attributes like <say-as attribute="value">...</say-as>
+
     Parameters:
     - text (str): The text to be parsed.
     - tags (Sequence[StartEndTags]): List of tuples containing start and end tags.
@@ -109,22 +114,38 @@ def parse_start_end_tags(
     tag and the index of the text.
 
     """
-    # If we are already inside a tag, check if the end tag is in the text.
     if current_tag:
         _, end_tag = current_tag
-        if end_tag in text[current_tag_index:]:
-            return (None, len(text))
-        return (current_tag, current_tag_index)
+        end_pos = text.find(end_tag, current_tag_index)
+        if end_pos != -1:
+            return (None, end_pos + len(end_tag))
+        return (current_tag, len(text))
 
-    # Check if any start tag appears in the text
-    for start_tag, end_tag in tags:
-        start_tag_count = text[current_tag_index:].count(start_tag)
-        end_tag_count = text[current_tag_index:].count(end_tag)
+    text_slice = text[current_tag_index:]
+    if not text_slice:
+        return (None, current_tag_index)
+
+    for start_tag_str, end_tag_str in tags:
+        start_tag_count = 0
+        simple_match = _SIMPLE_TAG_PATTERN.match(start_tag_str)
+
+        if simple_match:
+            tag_name = simple_match.group(1)
+            # Regex to find <tag_name ...> or <tag_name>
+            actual_start_tag_regex = re.compile(rf"<{re.escape(tag_name)}(?:\s+[^>]*)?>")
+            start_tag_count = len(list(actual_start_tag_regex.finditer(text_slice)))
+        else:
+            start_tag_count = text_slice.count(start_tag_str)
+
+        end_tag_count = text_slice.count(end_tag_str)
+
         if start_tag_count == 0 and end_tag_count == 0:
-            return (None, current_tag_index)
-        elif start_tag_count > end_tag_count:
-            return ((start_tag, end_tag), len(text))
-        elif start_tag_count == end_tag_count:
+            continue
+
+        if start_tag_count > end_tag_count:
+            return ((start_tag_str, end_tag_str), len(text))
+
+        if start_tag_count == end_tag_count:
             return (None, len(text))
 
     return (None, current_tag_index)

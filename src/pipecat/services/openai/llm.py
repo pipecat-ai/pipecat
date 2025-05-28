@@ -6,7 +6,7 @@
 
 import json
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pipecat.frames.frames import (
     FunctionCallCancelFrame,
