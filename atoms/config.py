@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Server URL for webhooks
     server_base_url: Optional[str] = None
 
+    # MongoDB
+    mongodb_url: Optional[str] = None
+
     class Config:
         env_file = ".env"
         case_sensitive = False

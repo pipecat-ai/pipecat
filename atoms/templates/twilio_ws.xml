@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="wss://7cc9-2401-4900-8830-86ea-2d92-3e2e-a19-7ac7.ngrok-free.app/ws"></Stream>
+    <Stream url="wss://{{ server_base_url }}/ws"></Stream>
   </Connect>
   <Pause length="40"/>
 </Response>

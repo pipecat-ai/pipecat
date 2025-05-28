@@ -1,5 +1,6 @@
 import os
 
+from config import settings
 from fastapi import APIRouter, Request, Response
 from jinja2 import Environment, FileSystemLoader
 
@@ -23,7 +24,7 @@ async def twilio_xml(request: Request):
 async def plivo_xml(request: Request):
     """Serve XML for Plivo calls."""
     template = template_env.get_template("plivo_ws.xml")
-    xml_content = template.render()
+    xml_content = template.render(server_base_url=settings.server_base_url)
 
     return Response(content=xml_content, media_type="application/xml")
 

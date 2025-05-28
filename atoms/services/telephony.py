@@ -80,6 +80,8 @@ class PlivoService(TelephonyService):
             "from": from_number,
         }
 
+        logger.info(f"Plivo call data: {data}")
+
         auth = httpx.BasicAuth(self.auth_id, self.auth_token)
 
         async with httpx.AsyncClient() as client:
