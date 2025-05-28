@@ -89,6 +89,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ⚠️ Updated `SmallWebRTCTransport` to align with how other transports handle 
+  `on_client_disconnected`. Now, when the connection is closed and no reconnection 
+  is attempted, `on_client_disconnected` is called instead of `on_client_close`. The 
+  `on_client_close` callback is no longer used, use `on_client_disconnected` instead.
+
+- Check if `PipelineTask` has already been cancelled.
+
+- Don't raise an exception if event handler is not registered.
+
 - Upgraded `deepgram-sdk` to 4.1.0.
 
 - Updated `GoogleTTSService` to use Google's streaming TTS API. The default
@@ -147,6 +156,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `DailyTransport` issue that was not allow capturing video frames if
+  framerate was greater than zero.
+
 - Fixed a `DeegramSTTService` connection issue when the user provided their own
   `LiveOptions`.
 
@@ -172,6 +184,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   registered.
 
 ### Other
+
+- It is now possible to run all (or most) foundational example with multiple
+  transports. By default, they run with P2P (Peer-To-Peer) WebRTC so you can try
+  everything locally. You can also run them with Daily or even with a Twilio
+  phone number.
 
 - Added foundation examples `07y-interruptible-minimax.py` and
   `07z-interruptible-sarvam.py`to show how to use the `MiniMaxHttpTTSService`

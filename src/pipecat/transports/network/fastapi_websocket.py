@@ -26,7 +26,7 @@ from pipecat.frames.frames import (
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -45,7 +45,7 @@ except ModuleNotFoundError as e:
 
 class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
-    serializer: FrameSerializer
+    serializer: Optional[FrameSerializer] = None
     session_timeout: Optional[int] = None
 
 
@@ -125,7 +125,8 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._client.setup(frame)
-        await self._params.serializer.setup(frame)
+        if self._params.serializer:
+            await self._params.serializer.setup(frame)
         if not self._monitor_websocket_task and self._params.session_timeout:
             self._monitor_websocket_task = self.create_task(self._monitor_websocket())
         await self._client.trigger_client_connected()
@@ -158,6 +159,9 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _receive_messages(self):
         try:
             async for message in self._client.receive():
+                if not self._params.serializer:
+                    continue
+
                 frame = await self._params.serializer.deserialize(message)
 
                 if not frame:
@@ -203,7 +207,8 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         await self._client.setup(frame)
-        await self._params.serializer.setup(frame)
+        if self._params.serializer:
+            await self._params.serializer.setup(frame)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         await self.set_transport_ready(frame)
 
@@ -266,6 +271,9 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
+        if not self._params.serializer:
+            return
+
         try:
             payload = await self._params.serializer.serialize(frame)
             if payload:
@@ -302,7 +310,9 @@ class FastAPIWebsocketTransport(BaseTransport):
             on_session_timeout=self._on_session_timeout,
         )
 
-        is_binary = self._params.serializer.type == FrameSerializerType.BINARY
+        is_binary = False
+        if self._params.serializer:
+            is_binary = self._params.serializer.type == FrameSerializerType.BINARY
         self._client = FastAPIWebsocketClient(websocket, is_binary, self._callbacks)
 
         self._input = FastAPIWebsocketInputTransport(
