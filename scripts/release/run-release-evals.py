@@ -117,7 +117,7 @@ async def main(args: argparse.Namespace):
     if not check_env_variables():
         return
 
-    runner = EvalRunner(args.pattern)
+    runner = EvalRunner(pattern=args.pattern, record_audio=args.audio)
     for test, prompt, eval in TESTS:
         await runner.run_eval(test, prompt, eval)
 
@@ -126,6 +126,7 @@ async def main(args: argparse.Namespace):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pipecat Eval Runner")
+    parser.add_argument("--audio", "-a", action="store_true", help="Record audio for each test")
     parser.add_argument("--pattern", "-p", help="Only run tests that match the pattern")
     parser.add_argument("--verbose", "-v", action="count", default=0)
     args = parser.parse_args()
