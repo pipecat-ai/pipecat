@@ -89,6 +89,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Upgraded `deepgram-sdk` to 4.1.0.
+
 - Updated `GoogleTTSService` to use Google's streaming TTS API. The default
   voice also updated to `en-US-Chirp3-HD-Charon`.
 
@@ -144,6 +146,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead. Also removed, `07a-interruptible-vad.py` example.
 
 ### Fixed
+
+- Fixed a `DeegramSTTService` connection issue when the user provided their own
+  `LiveOptions`.
 
 - Fixed a `DailyTransport` issue that would cause images needing resize to block
   the event loop.
