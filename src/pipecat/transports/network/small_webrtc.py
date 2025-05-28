@@ -50,7 +50,6 @@ class SmallWebRTCCallbacks(BaseModel):
     on_app_message: Callable[[Any], Awaitable[None]]
     on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
-    on_client_closed: Callable[[SmallWebRTCConnection], Awaitable[None]]
 
 
 class RawAudioTrack(AudioStreamTrack):
@@ -169,7 +168,7 @@ class SmallWebRTCClient:
         @self._webrtc_connection.event_handler("disconnected")
         async def on_disconnected(connection: SmallWebRTCConnection):
             logger.debug("Peer connection lost.")
-            await self._handle_client_disconnected()
+            await self._handle_peer_disconnected()
 
         @self._webrtc_connection.event_handler("closed")
         async def on_closed(connection: SmallWebRTCConnection):
@@ -313,7 +312,7 @@ class SmallWebRTCClient:
             logger.info(f"Disconnecting to Small WebRTC")
             self._closing = True
             await self._webrtc_connection.disconnect()
-            await self._handle_client_disconnected()
+            await self._handle_peer_disconnected()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         if self._can_send():
@@ -338,19 +337,18 @@ class SmallWebRTCClient:
 
         await self._callbacks.on_client_connected(self._webrtc_connection)
 
-    async def _handle_client_disconnected(self):
+    async def _handle_peer_disconnected(self):
         self._audio_input_track = None
         self._video_input_track = None
         self._audio_output_track = None
         self._video_output_track = None
-        await self._callbacks.on_client_disconnected(self._webrtc_connection)
 
     async def _handle_client_closed(self):
         self._audio_input_track = None
         self._video_input_track = None
         self._audio_output_track = None
         self._video_output_track = None
-        await self._callbacks.on_client_closed(self._webrtc_connection)
+        await self._callbacks.on_client_disconnected(self._webrtc_connection)
 
     async def _handle_app_message(self, message: Any):
         await self._callbacks.on_app_message(message)
@@ -525,7 +523,6 @@ class SmallWebRTCTransport(BaseTransport):
             on_app_message=self._on_app_message,
             on_client_connected=self._on_client_connected,
             on_client_disconnected=self._on_client_disconnected,
-            on_client_closed=self._on_client_closed,
         )
 
         self._client = SmallWebRTCClient(webrtc_connection, self._callbacks)
@@ -538,7 +535,6 @@ class SmallWebRTCTransport(BaseTransport):
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_client_connected")
         self._register_event_handler("on_client_disconnected")
-        self._register_event_handler("on_client_closed")
 
     def input(self) -> SmallWebRTCInputTransport:
         if not self._input:
@@ -572,6 +568,3 @@ class SmallWebRTCTransport(BaseTransport):
 
     async def _on_client_disconnected(self, webrtc_connection):
         await self._call_event_handler("on_client_disconnected", webrtc_connection)
-
-    async def _on_client_closed(self, webrtc_connection):
-        await self._call_event_handler("on_client_closed", webrtc_connection)

@@ -9,7 +9,6 @@ import os
 import sys
 
 import aiohttp
-from daily_runner import configure
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -19,9 +18,9 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService, Language, LiveOptions
-from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.transports.services.tavus import TavusParams, TavusTransport
 
 load_dotenv(override=True)
 
@@ -31,33 +30,27 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def main():
     async with aiohttp.ClientSession() as session:
-        (room_url, token) = await configure(session)
-
-        transport = DailyTransport(
-            room_url,
-            token,
-            "Respond bot",
-            DailyParams(
+        transport = TavusTransport(
+            bot_name="Pipecat bot",
+            api_key=os.getenv("TAVUS_API_KEY"),
+            replica_id=os.getenv("TAVUS_REPLICA_ID"),
+            session=session,
+            params=TavusParams(
                 audio_in_enabled=True,
-                audio_in_passthrough=False,
                 audio_out_enabled=True,
-                audio_out_sample_rate=16000,
-                transcription_enabled=False,
+                microphone_out_enabled=False,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
         )
 
-        stt = DeepgramSTTService(
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            live_options=LiveOptions(language=Language.EN),
-        )
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
         messages = [
             {
@@ -72,7 +65,7 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                stt,
+                stt,  # STT
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
@@ -84,6 +77,8 @@ async def main():
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
+                audio_in_sample_rate=16000,
+                audio_out_sample_rate=24000,
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
@@ -91,15 +86,21 @@ async def main():
             ),
         )
 
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_audio(participant["id"])
+        @transport.event_handler("on_client_connected")
+        async def on_client_connected(transport, participant):
+            logger.info(f"Client connected")
             # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Start by greeting the user and ask how you can help.",
+                }
+            )
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
-        @transport.event_handler("on_participant_left")
-        async def on_participant_left(transport, participant, reason):
+        @transport.event_handler("on_client_disconnected")
+        async def on_client_disconnected(transport, participant):
+            logger.info(f"Client disconnected")
             await task.cancel()
 
         runner = PipelineRunner()
