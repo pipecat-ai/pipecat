@@ -47,7 +47,7 @@ def print_end_test(example_file: str, passed: bool, time: float):
     print(f"{example_file:<55} {status} ({time:.2f}s){CLEAR}")
 
 
-def print_test_results(tests: Sequence[EvalResult], total_success: int):
+def print_test_results(tests: Sequence[EvalResult], total_success: int, location: str):
     total_count = len(tests)
 
     bar = "=" * 80
@@ -70,6 +70,8 @@ def print_test_results(tests: Sequence[EvalResult], total_success: int):
         f"{GREEN}SUCCESS{RESET}: {total_success} | {RED}FAIL{RESET}: {total_fail} | TOTAL TIME: {total_time:.2f}s"
     )
     print(f"{GREEN}{bar}{RESET}")
+    print()
+    print(f"Tests output: {location}")
 
 
 def load_module_from_path(path: str | Path):

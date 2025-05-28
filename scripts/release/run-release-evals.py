@@ -117,7 +117,13 @@ async def main(args: argparse.Namespace):
     if not check_env_variables():
         return
 
-    runner = EvalRunner(pattern=args.pattern, record_audio=args.audio)
+    # Log level
+    logger.remove(0)
+    log_level = "TRACE" if args.verbose >= 2 else "DEBUG"
+    if args.verbose:
+        logger.add(sys.stderr, level=log_level)
+
+    runner = EvalRunner(pattern=args.pattern, record_audio=args.audio, log_level=log_level)
     for test, prompt, eval in TESTS:
         await runner.run_eval(test, prompt, eval)
 
@@ -130,10 +136,5 @@ if __name__ == "__main__":
     parser.add_argument("--pattern", "-p", help="Only run tests that match the pattern")
     parser.add_argument("--verbose", "-v", action="count", default=0)
     args = parser.parse_args()
-
-    # Log level
-    logger.remove(0)
-    if args.verbose:
-        logger.add(sys.stderr, level="TRACE" if args.verbose >= 2 else "DEBUG")
 
     asyncio.run(main(args))

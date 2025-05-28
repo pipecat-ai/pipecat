@@ -55,23 +55,29 @@ PIPELINE_IDLE_TIMEOUT_SECS = 30
 
 
 class EvalRunner:
-    def __init__(self, *, pattern: str = "", record_audio: bool = False):
+    def __init__(self, *, pattern: str = "", record_audio: bool = False, log_level: str = "DEBUG"):
         self._pattern = f".*{pattern}.*" if pattern else ""
         self._record_audio = record_audio
+        self._log_level = log_level
         self._total_success = 0
         self._tests: List[EvalResult] = []
         self._queue = asyncio.Queue()
 
-    @property
-    def record_audio(self):
-        return self._record_audio
+        # We to save runner files.
+        self._runs_dir = os.path.join(
+            SCRIPT_DIR, "test-runs", f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+        self._logs_dir = os.path.join(self._runs_dir, "logs")
+        self._recordings_dir = os.path.join(self._runs_dir, "recordings")
+        os.makedirs(self._logs_dir, exist_ok=True)
+        os.makedirs(self._recordings_dir, exist_ok=True)
 
     async def assert_eval(self, params: FunctionCallParams):
         reasoning = params.arguments["reasoning"]
         logger.debug(f"🧠 EVAL REASONING: {reasoning}")
         await self._queue.put(params.arguments["result"])
-        await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
         await params.result_callback(None)
+        await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     async def assert_eval_false(self):
         await self._queue.put(False)
@@ -79,6 +85,10 @@ class EvalRunner:
     async def run_eval(self, example_file: str, prompt: str, eval: Optional[str] = None):
         if not re.match(self._pattern, example_file):
             return
+
+        # Store logs
+        filename = self._log_file_name(example_file)
+        log_file_id = logger.add(filename, level=self._log_level)
 
         print_begin_test(example_file)
 
@@ -111,8 +121,37 @@ class EvalRunner:
 
         print_end_test(example_file, result, eval_time)
 
+        logger.remove(log_file_id)
+
     def print_results(self):
-        print_test_results(self._tests, self._total_success)
+        print_test_results(self._tests, self._total_success, self._runs_dir)
+
+    async def save_audio(self, name: str, audio: bytes, sample_rate: int, num_channels: int):
+        if len(audio) > 0:
+            filename = self._recording_file_name(name)
+            with io.BytesIO() as buffer:
+                with wave.open(buffer, "wb") as wf:
+                    wf.setsampwidth(2)
+                    wf.setnchannels(num_channels)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(audio)
+                async with aiofiles.open(filename, "wb") as file:
+                    await file.write(buffer.getvalue())
+            logger.debug(f"Saving {name} audio to {filename}")
+        else:
+            logger.warning(f"There's no audio to save for {name}")
+
+    def _base_file_name(self, example_file: str):
+        base_name = os.path.splitext(example_file)[0]
+        return f"{base_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    def _log_file_name(self, example_file: str):
+        base_name = self._base_file_name(example_file)
+        return os.path.join(self._logs_dir, f"{base_name}.log")
+
+    def _recording_file_name(self, example_file: str):
+        base_name = self._base_file_name(example_file)
+        return os.path.join(self._recordings_dir, f"{base_name}.wav")
 
 
 async def run_example_pipeline(example_file: str):
@@ -134,28 +173,6 @@ async def run_example_pipeline(example_file: str):
     )
 
     await module.run_example(transport, argparse.Namespace(), True)
-
-
-async def save_audio(audio: bytes, sample_rate: int, num_channels: int, name: str):
-    if len(audio) > 0:
-        recordings_dir = os.path.join(SCRIPT_DIR, "recordings")
-        base_name = os.path.splitext(name)[0]
-        os.makedirs(recordings_dir, exist_ok=True)
-        filename = os.path.join(
-            recordings_dir,
-            f"{base_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav",
-        )
-        with io.BytesIO() as buffer:
-            with wave.open(buffer, "wb") as wf:
-                wf.setsampwidth(2)
-                wf.setnchannels(num_channels)
-                wf.setframerate(sample_rate)
-                wf.writeframes(audio)
-            async with aiofiles.open(filename, "wb") as file:
-                await file.write(buffer.getvalue())
-        logger.debug(f"Saving {name} audio to {filename}")
-    else:
-        logger.warning(f"There's no audio to save for {name}")
 
 
 async def run_eval_pipeline(
@@ -212,7 +229,7 @@ async def run_eval_pipeline(
     messages = [
         {
             "role": "system",
-            "content": f"You are an LLM eval, be extremly brief. Your goal is to only ask one question: {prompt}. Tell the user to simply say the answer. Call the eval function only if the user answers the question and check if the answer is correct (words as numbers are valid). {eval_prompt}",
+            "content": f"You are an LLM eval, be extremly brief. Your goal is to only ask one question: {prompt}. Call the eval function only if the user answers the question and check if the answer is correct (words as numbers are valid). {eval_prompt}",
         },
     ]
 
@@ -246,8 +263,7 @@ async def run_eval_pipeline(
 
     @audio_buffer.event_handler("on_audio_data")
     async def on_audio_data(buffer, audio, sample_rate, num_channels):
-        if eval_runner.record_audio:
-            await save_audio(audio, sample_rate, num_channels, example_file)
+        await eval_runner.save_audio(example_file, audio, sample_rate, num_channels)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
