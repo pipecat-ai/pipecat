@@ -2,6 +2,7 @@ import json
 
 from fastapi import APIRouter, WebSocket
 from loguru import logger
+from services.redis import redis_service
 
 router = APIRouter()
 
@@ -23,9 +24,22 @@ async def twilio_websocket(websocket: WebSocket):
 
         logger.info(f"Twilio call started - Stream: {stream_sid}, Call: {call_sid}")
 
+        try:
+            call_details = redis_service.get_call_details(call_sid)
+            if call_details is None:
+                logger.warning(
+                    f"No call details found in Redis for call_sid: {call_sid}. Using defaults."
+                )
+                call_details = {}
+        except Exception as e:
+            logger.warning(
+                f"Failed to retrieve call details from Redis for call_sid: {call_sid}. Error: {e}. Using defaults."
+            )
+            call_details = {}
+
         from bot import run_bot
 
-        await run_bot(websocket, stream_sid, call_sid, provider="twilio")
+        await run_bot(websocket, stream_sid, call_sid, provider="twilio", call_details=call_details)
 
     except Exception as e:
         logger.error(f"Error in Twilio WebSocket: {e}")
@@ -48,9 +62,22 @@ async def plivo_websocket(websocket: WebSocket):
 
         logger.info(f"Plivo call started - Stream: {stream_sid}, Call: {call_sid}")
 
+        try:
+            call_details = redis_service.get_call_details(call_sid)
+            if call_details is None:
+                logger.warning(
+                    f"No call details found in Redis for call_sid: {call_sid}. Using defaults."
+                )
+                call_details = {}
+        except Exception as e:
+            logger.warning(
+                f"Failed to retrieve call details from Redis for call_sid: {call_sid}. Error: {e}. Using defaults."
+            )
+            call_details = {}
+
         from bot import run_bot
 
-        await run_bot(websocket, stream_sid, call_sid, provider="plivo")
+        await run_bot(websocket, stream_sid, call_sid, provider="plivo", call_details=call_details)
 
     except Exception as e:
         logger.error(f"Error in Plivo WebSocket: {e}")

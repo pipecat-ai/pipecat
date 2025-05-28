@@ -17,7 +17,7 @@ from typing import Optional
 import aiofiles
 from agent import initialize_conversational_agent
 from dotenv import load_dotenv
-from fastapi import WebSocket
+from fastapi import HTTPException, WebSocket
 from loguru import logger
 from models.agent import CallData
 from observers.agent_response import AgentResponseObserver
@@ -122,11 +122,22 @@ async def run_bot(
     call_sid: str,
     testing: Optional[bool] = False,
     provider: Optional[str] = "plivo",
-    tts_service: Optional[str] = "waves",
-    voice_id: Optional[str] = "deepika",
-    stt_service: Optional[str] = "deepgram",
-    krisp_enabled: Optional[bool] = True,
+    call_details: Optional[dict] = None,
 ):
+    # Extract parameters from call_details with defaults
+    if call_details is None:
+        call_details = {}
+
+    agent_id = call_details.get("agent_id", "")
+    tts_service = call_details.get("tts_service", "waves")
+    voice_id = call_details.get("voice_id", "deepika")
+    stt_service = call_details.get("stt_service", "deepgram")
+    krisp_enabled = call_details.get("krisp_enabled", True)
+
+    logger.info(
+        f"Initializing bot with: TTS={tts_service}, STT={stt_service}, Voice={voice_id}, Krisp={krisp_enabled}, Provider={provider}"
+    )
+
     if provider == "twilio":
         serializer = TwilioFrameSerializer(
             stream_sid=stream_sid,
@@ -143,10 +154,17 @@ async def run_bot(
         )
 
     if krisp_enabled:
-        audio_in_filter = KrispFilter(
-            model_path=os.getenv("KRISP_MODEL_PATH"),
-            suppression_level=90,
-        )
+        try:
+            audio_in_filter = KrispFilter(
+                model_path=os.getenv("KRISP_MODEL_PATH"),
+                suppression_level=90,
+            )
+            logger.info("Krisp filter initialized successfully")
+        except Exception as e:
+            logger.warning(
+                f"Failed to initialize Krisp filter: {e}. Continuing without noise suppression."
+            )
+            audio_in_filter = None
     else:
         audio_in_filter = None
 
@@ -163,27 +181,67 @@ async def run_bot(
     )
 
     if stt_service == "deepgram":
-        stt = DeepgramSTTService(
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            audio_passthrough=True,
-        )
+        try:
+            stt = DeepgramSTTService(
+                api_key=os.getenv("DEEPGRAM_API_KEY"),
+                audio_passthrough=True,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Deepgram STT: {e}. Falling back to OpenAI STT.")
+            stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
     elif stt_service == "groq_whisper":
-        stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))
+        try:
+            stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))
+        except Exception as e:
+            logger.warning(f"Failed to initialize Groq STT: {e}. Falling back to OpenAI STT.")
+            stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
     else:
-        stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
+        try:
+            stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI STT: {e}")
+            raise HTTPException(status_code=500, detail="STT service initialization failed")
+
+    logger.info(f"STT service initialized: {stt.__class__.__name__}")
 
     if tts_service == "waves":
-        tts = WavesHttpTTSService(
-            api_key=os.getenv("WAVES_API_KEY"),
-            voice_id=voice_id,
-        )
+        try:
+            tts = WavesHttpTTSService(
+                api_key=os.getenv("WAVES_API_KEY"),
+                voice_id=voice_id,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Waves TTS: {e}. Falling back to Cartesia TTS.")
+            try:
+                tts = CartesiaTTSService(
+                    api_key=os.getenv("CARTESIA_API_KEY"),
+                    voice_id=voice_id,
+                    model="sonic-turbo",
+                    push_silence_after_stop=True,
+                )
+            except Exception as e2:
+                logger.error(f"Failed to initialize Cartesia TTS fallback: {e2}")
+                raise HTTPException(status_code=500, detail="TTS service initialization failed")
     else:
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id=voice_id,
-            model="sonic-turbo",
-            push_silence_after_stop=True,
-        )
+        try:
+            tts = CartesiaTTSService(
+                api_key=os.getenv("CARTESIA_API_KEY"),
+                voice_id=voice_id,
+                model="sonic-turbo",
+                push_silence_after_stop=True,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Cartesia TTS: {e}. Falling back to Waves TTS.")
+            try:
+                tts = WavesHttpTTSService(
+                    api_key=os.getenv("WAVES_API_KEY"),
+                    voice_id=voice_id,
+                )
+            except Exception as e2:
+                logger.error(f"Failed to initialize Waves TTS fallback: {e2}")
+                raise HTTPException(status_code=500, detail="TTS service initialization failed")
+
+    logger.info(f"TTS service initialized: {tts.__class__.__name__}")
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-3.5-turbo")
     # openai_realtime_llm = OpenAIRealtimeBetaLLMService(
@@ -200,12 +258,12 @@ async def run_bot(
 
     transport_input_filter = TransportInputFilter()
     agent_flow_processor, agent_config = await initialize_conversational_agent(
-        agent_id="67f66a082b02dd3592e5811b",
+        agent_id=agent_id,
         call_data=CallData(
             variables={
-                "call_id": "CALL-1748263569023-2029e3",
-                "user_number": "+918168875163",
-                "agent_number": "+918168875163",
+                "call_id": call_sid,
+                "user_number": call_details.get("from_phone", ""),
+                "agent_number": call_details.get("to_phone", ""),
             }
         ),
         transport_input_filter=transport_input_filter,

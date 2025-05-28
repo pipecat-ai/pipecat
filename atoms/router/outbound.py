@@ -2,6 +2,7 @@ from call_manager import call_manager
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from models.outbound_service import OutboundCallRequest
+from services.redis import redis_service
 from services.telephony import plivo_service, twilio_service
 
 router = APIRouter()
@@ -20,15 +21,31 @@ async def outbound(request: OutboundCallRequest):
                 to=request.to_phone,
                 from_phone=request.from_phone,
             )
-            return {"call_id": call_id, "provider": "plivo", "status": "initiated"}
         elif request.provider == "twilio":
             call_id = await twilio_service.make_outbound_call(
                 to=request.to_phone,
                 from_phone=request.from_phone,
             )
-            return {"call_id": call_id, "provider": "twilio", "status": "initiated"}
         else:
             raise HTTPException(status_code=400, detail="Invalid provider")
+
+        # Store all call details in Redis, including optional parameters
+        call_details = {
+            "to_phone": request.to_phone,
+            "from_phone": request.from_phone,
+            "agent_id": request.agent_id,
+            "provider": request.provider,
+            "tts_service": request.tts_service,
+            "stt_service": request.stt_service,
+            "krisp_enabled": request.krisp_enabled,
+            "voice_id": request.voice_id,
+        }
+        redis_service.set_call_details(call_id=call_id, call_details=call_details)
+
+        logger.info(f"Call details stored in Redis for call_id: {call_id}")
+        logger.debug(f"Call details: {call_details}")
+
+        return {"call_id": call_id, "provider": request.provider, "status": "initiated"}
     except Exception as e:
         logger.error(f"Error in outbound call: {e}")
         raise HTTPException(status_code=500, detail=str(e))

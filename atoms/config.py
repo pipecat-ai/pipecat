@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # MongoDB
     mongodb_url: Optional[str] = None
 
+    # Redis
+    redis_host: Optional[str] = None
+    redis_port: Optional[int] = None
+
     class Config:
         env_file = ".env"
         case_sensitive = False
