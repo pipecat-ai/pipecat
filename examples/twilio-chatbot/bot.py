@@ -277,6 +277,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             tts,  # Text-To-Speech (receives from gated main LLM)
             user_idle,
             transport.output(),  # Websocket output to client
+            audiobuffer,
             context_aggregator.assistant(),  # Aggregates assistant responses into context
         ]
     )
