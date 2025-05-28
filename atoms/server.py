@@ -1,13 +1,24 @@
 import argparse
+from contextlib import asynccontextmanager
 
 import uvicorn
+from call_manager import call_manager
 from config import settings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from router import outbound, webhooks, websocket, xml
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan event."""
+    yield
+    await call_manager.initiate_shutdown()
+
+
+app = FastAPI(lifespan=lifespan)
+
 
 app.add_middleware(
     CORSMiddleware,

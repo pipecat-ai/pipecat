@@ -120,19 +120,20 @@ async def run_bot(
     testing: Optional[bool] = False,
     provider: Optional[str] = "plivo",
 ):
-    # serializer = TwilioFrameSerializer(
-    #     stream_sid=stream_sid,
-    #     call_sid=call_sid,
-    #     account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
-    #     auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
-    # )
-
-    plivo_serializer = PlivoFrameSerializer(
-        stream_sid=stream_sid,
-        call_sid=call_sid,
-        auth_id=os.getenv("PLIVO_AUTH_ID", ""),
-        auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
-    )
+    if provider == "twilio":
+        serializer = TwilioFrameSerializer(
+            stream_sid=stream_sid,
+            call_sid=call_sid,
+            account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
+            auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+        )
+    else:
+        serializer = PlivoFrameSerializer(
+            stream_sid=stream_sid,
+            call_sid=call_sid,
+            auth_id=os.getenv("PLIVO_AUTH_ID", ""),
+            auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
+        )
 
     transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
@@ -141,7 +142,7 @@ async def run_bot(
             audio_out_enabled=True,
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
-            serializer=plivo_serializer,
+            serializer=serializer,
             audio_in_filter=KrispFilter(
                 model_path=os.getenv("KRISP_MODEL_PATH"),
                 suppression_level=90,
