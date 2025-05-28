@@ -196,7 +196,7 @@ class GladiaSTTService(STTService):
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
         model: str = "solaria-1",
-        params: GladiaInputParams = GladiaInputParams(),
+        params: Optional[GladiaInputParams] = None,
         vad_enabled: bool,
         **kwargs,
     ):
@@ -214,6 +214,8 @@ class GladiaSTTService(STTService):
             **kwargs: Additional arguments passed to the STTService
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or GladiaInputParams()
 
         # Warn about deprecated language parameter if it's used
         if params.language is not None:

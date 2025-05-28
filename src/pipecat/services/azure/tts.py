@@ -71,10 +71,12 @@ class AzureBaseTTSService(TTSService):
         region: str,
         voice="en-US-SaraNeural",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or AzureBaseTTSService.InputParams()
 
         self._settings = {
             "emphasis": params.emphasis,

@@ -7,7 +7,7 @@
 import asyncio
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Set
+from typing import Dict, List, Literal, Optional, Set
 
 from loguru import logger
 
@@ -297,11 +297,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self,
         context: OpenAILLMContext,
         *,
-        params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        params: Optional[LLMUserAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=context, role="user", **kwargs)
-        self._params = params
+        self._params = params or LLMUserAggregatorParams()
         if "aggregation_timeout" in kwargs:
             import warnings
 
@@ -500,11 +500,11 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         self,
         context: OpenAILLMContext,
         *,
-        params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        params: Optional[LLMAssistantAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=context, role="assistant", **kwargs)
-        self._params = params
+        self._params = params or LLMAssistantAggregatorParams()
 
         if "expect_stripped_words" in kwargs:
             import warnings
@@ -694,9 +694,9 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 class LLMUserResponseAggregator(BetterLLMUserContextAggregator):
     def __init__(
         self,
-        messages: List[dict] = [],
+        messages: Optional[List[dict]] = None,
         *,
-        params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        params: Optional[LLMUserAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
@@ -716,9 +716,9 @@ class LLMUserResponseAggregator(BetterLLMUserContextAggregator):
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
     def __init__(
         self,
-        messages: List[dict] = [],
+        messages: Optional[List[dict]] = None,
         *,
-        params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        params: Optional[LLMAssistantAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)

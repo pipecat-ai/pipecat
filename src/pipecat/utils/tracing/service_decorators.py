@@ -67,20 +67,6 @@ def _get_parent_service_context(self):
     return context_api.get_current()
 
 
-def _get_service_name(self, service_prefix: str) -> str:
-    """Generate a default span name using service type and class name.
-
-    Args:
-        self: The service instance.
-        service_prefix: The service type (e.g., 'llm', 'stt', 'tts').
-
-    Returns:
-        A default span name string like "type_classname" (e.g. llm_openaillmservice).
-    """
-    service_class_name = self.__class__.__name__.lower()
-    return f"{service_prefix}_{service_class_name}"
-
-
 def _add_token_usage_to_span(span, token_usage):
     """Add token usage metrics to a span (internal use only).
 
@@ -93,13 +79,15 @@ def _add_token_usage_to_span(span, token_usage):
 
     if isinstance(token_usage, dict):
         if "prompt_tokens" in token_usage:
-            span.set_attribute("llm.prompt_tokens", token_usage["prompt_tokens"])
+            span.set_attribute("gen_ai.usage.input_tokens", token_usage["prompt_tokens"])
         if "completion_tokens" in token_usage:
-            span.set_attribute("llm.completion_tokens", token_usage["completion_tokens"])
+            span.set_attribute("gen_ai.usage.output_tokens", token_usage["completion_tokens"])
     else:
         # Handle LLMTokenUsage object
-        span.set_attribute("llm.prompt_tokens", getattr(token_usage, "prompt_tokens", 0))
-        span.set_attribute("llm.completion_tokens", getattr(token_usage, "completion_tokens", 0))
+        span.set_attribute("gen_ai.usage.input_tokens", getattr(token_usage, "prompt_tokens", 0))
+        span.set_attribute(
+            "gen_ai.usage.output_tokens", getattr(token_usage, "completion_tokens", 0)
+        )
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
@@ -134,7 +122,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 return
 
             service_class_name = self.__class__.__name__
-            span_name = name or _get_service_name(self, "tts")
+            span_name = "tts"
 
             # Get parent context
             turn_context = get_current_turn_context()
@@ -237,7 +225,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     return await f(self, transcript, is_final, language)
 
                 service_class_name = self.__class__.__name__
-                span_name = name or _get_service_name(self, "stt")
+                span_name = "stt"
 
                 # Get the turn context first, then fall back to service context
                 turn_context = get_current_turn_context()
@@ -294,6 +282,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     - Tool configurations
     - Token usage metrics
     - Performance metrics like TTFB
+    - Aggregated output text
 
     Args:
         func: The LLM method to trace.
@@ -313,7 +302,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     return await f(self, context, *args, **kwargs)
 
                 service_class_name = self.__class__.__name__
-                span_name = name or _get_service_name(self, "llm")
+                span_name = "llm"
 
                 # Get the parent context - turn context if available, otherwise service context
                 turn_context = get_current_turn_context()
@@ -325,6 +314,26 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     span_name, context=parent_context
                 ) as current_span:
                     try:
+                        # Store original method and output aggregator
+                        original_push_frame = self.push_frame
+                        output_text = ""  # Simple string accumulation
+
+                        async def traced_push_frame(frame, direction=None):
+                            nonlocal output_text
+                            # Capture text from LLMTextFrame during streaming
+                            if (
+                                hasattr(frame, "__class__")
+                                and frame.__class__.__name__ == "LLMTextFrame"
+                                and hasattr(frame, "text")
+                            ):
+                                output_text += frame.text
+
+                            # Call original
+                            if direction is not None:
+                                return await original_push_frame(frame, direction)
+                            else:
+                                return await original_push_frame(frame)
+
                         # For token usage monitoring
                         original_start_llm_usage_metrics = None
                         if hasattr(self, "start_llm_usage_metrics"):
@@ -343,6 +352,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.start_llm_usage_metrics = wrapped_start_llm_usage_metrics
 
                         try:
+                            # Replace push_frame to capture output
+                            self.push_frame = traced_push_frame
+
                             # Detect if we're using Google's service
                             is_google_service = "google" in service_class_name.lower()
 
@@ -423,13 +435,24 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
                             # Add all gathered attributes to the span
                             add_llm_span_attributes(span=current_span, **attribute_kwargs)
-                        except Exception as e:
-                            logging.warning(f"Error adding initial LLM attributes: {e}")
 
-                        # Call the original function
-                        return await f(self, context, *args, **kwargs)
+                        except Exception as e:
+                            logging.warning(f"Error setting up LLM tracing: {e}")
+                            # Don't raise - let the function execute anyway
+
+                        # Run function with modified push_frame to capture the output
+                        result = await f(self, context, *args, **kwargs)
+
+                        # Add aggregated output after function completes, if available
+                        if output_text:
+                            current_span.set_attribute("output", output_text)
+
+                        return result
+
                     finally:
-                        # Restore the original methods if we overrode them
+                        # Always restore the original methods
+                        self.push_frame = original_push_frame
+
                         if (
                             "original_start_llm_usage_metrics" in locals()
                             and original_start_llm_usage_metrics

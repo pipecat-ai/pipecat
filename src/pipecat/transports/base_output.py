@@ -8,6 +8,7 @@ import asyncio
 import itertools
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
 
 from loguru import logger
@@ -233,6 +234,9 @@ class BaseOutputTransport(FrameProcessor):
             self._sample_rate = sample_rate
             self._audio_chunk_size = audio_chunk_size
             self._params = params
+
+            # This is to resize images. We only need to resize one image at a time.
+            self._executor = ThreadPoolExecutor(max_workers=1)
 
             # Buffer to keep track of incoming audio.
             self._audio_buffer = bytearray()
@@ -558,18 +562,25 @@ class BaseOutputTransport(FrameProcessor):
             self._video_queue.task_done()
 
         async def _draw_image(self, frame: OutputImageRawFrame):
-            desired_size = (self._params.video_out_width, self._params.video_out_height)
+            def resize_frame(frame: OutputImageRawFrame) -> OutputImageRawFrame:
+                desired_size = (self._params.video_out_width, self._params.video_out_height)
 
-            # TODO: we should refactor in the future to support dynamic resolutions
-            # which is kind of what happens in P2P connections.
-            # We need to add support for that inside the DailyTransport
-            if frame.size != desired_size:
-                image = Image.frombytes(frame.format, frame.size, frame.image)
-                resized_image = image.resize(desired_size)
-                # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
-                frame = OutputImageRawFrame(
-                    resized_image.tobytes(), resized_image.size, resized_image.format
-                )
+                # TODO: we should refactor in the future to support dynamic resolutions
+                # which is kind of what happens in P2P connections.
+                # We need to add support for that inside the DailyTransport
+                if frame.size != desired_size:
+                    image = Image.frombytes(frame.format, frame.size, frame.image)
+                    resized_image = image.resize(desired_size)
+                    # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
+                    frame = OutputImageRawFrame(
+                        resized_image.tobytes(), resized_image.size, resized_image.format
+                    )
+
+                return frame
+
+            frame = await self._transport.get_event_loop().run_in_executor(
+                self._executor, resize_frame, frame
+            )
 
             await self._transport.write_raw_video_frame(frame, self._destination)
 

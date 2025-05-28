@@ -11,7 +11,7 @@ import warnings
 from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -90,7 +90,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
@@ -112,6 +112,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
             text_aggregator=text_aggregator or SkipTagsAggregator([("<spell>", "</spell>")]),
             **kwargs,
         )
+
+        params = params or CartesiaTTSService.InputParams()
 
         self._api_key = api_key
         self._cartesia_version = cartesia_version
@@ -317,7 +319,7 @@ class CartesiaHttpTTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
-        emotion: Optional[List[str]] = []
+        emotion: Optional[List[str]] = Field(default_factory=list)
 
     def __init__(
         self,
@@ -330,10 +332,12 @@ class CartesiaHttpTTSService(TTSService):
         sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or CartesiaHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._base_url = base_url

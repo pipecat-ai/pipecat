@@ -78,17 +78,19 @@ class DeepgramSTTService(STTService):
             vad_events=False,
         )
 
-        merged_options = default_options
+        merged_options = default_options.to_dict()
         if live_options:
-            merged_options = LiveOptions(**{**default_options.to_dict(), **live_options.to_dict()})
+            default_model = default_options.model
+            merged_options.update(live_options.to_dict())
+            # NOTE(aleix): Fixes an in deepgram-sdk where `model` is initialized
+            # to the string "None" instead of the value `None`.
+            if "model" in merged_options and merged_options["model"] == "None":
+                merged_options["model"] = default_model
 
-        # deepgram connection requires language to be a string
-        if isinstance(merged_options.language, Language) and hasattr(
-            merged_options.language, "value"
-        ):
-            merged_options.language = merged_options.language.value
+        if "language" in merged_options and isinstance(merged_options["language"], Language):
+            merged_options["language"] = merged_options["language"].value
 
-        self._settings = merged_options.to_dict()
+        self._settings = merged_options
         self._addons = addons
 
         self._client = DeepgramClient(

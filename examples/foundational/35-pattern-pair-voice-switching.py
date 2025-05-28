@@ -59,9 +59,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
+from pipecat.transports.services.daily import DailyParams
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
 
 load_dotenv(override=True)
@@ -74,18 +74,30 @@ VOICE_IDS = {
     "male": "7cf0e2b1-8daf-4fe4-89ad-f6039398f359",  # Male character voice
 }
 
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
-
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
 
     # Create pattern pair aggregator for voice switching
     pattern_aggregator = PatternPairAggregator()
@@ -99,21 +111,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     )
 
     # Register handler for voice switching
-    def on_voice_tag(match: PatternMatch):
+    async def on_voice_tag(match: PatternMatch):
         voice_name = match.content.strip().lower()
         if voice_name in VOICE_IDS:
-            voice_id = VOICE_IDS[voice_name]
-
-            # Create task to reset the TTS context after voice change
-            async def change_voice():
-                # First flush any existing audio to finish the current context
-                await tts.flush_audio()
-                # Then set the new voice
-                tts.set_voice(voice_id)
-                logger.info(f"Switched to {voice_name} voice")
-
-            # Schedule the voice change task
-            asyncio.create_task(change_voice())
+            # First flush any existing audio to finish the current context
+            await tts.flush_audio()
+            # Then set the new voice
+            tts.set_voice(VOICE_IDS[voice_name])
+            logger.info(f"Switched to {voice_name} voice")
         else:
             logger.warning(f"Unknown voice: {voice_name}")
 
@@ -222,17 +227,13 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
     await runner.run(task)
 
 
 if __name__ == "__main__":
     from run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

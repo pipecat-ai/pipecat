@@ -125,10 +125,12 @@ class AWSPollyTTSService(TTSService):
         region: Optional[str] = None,
         voice_id: str = "Joanna",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or AWSPollyTTSService.InputParams()
 
         self._polly_client = boto3.client(
             "polly",

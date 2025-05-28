@@ -40,13 +40,14 @@ class AssemblyAISTTService(STTService):
         *,
         api_key: str,
         sample_rate: Optional[int] = None,
-        encoding: AudioEncoding = AudioEncoding("pcm_s16le"),
+        encoding: Optional[AudioEncoding] = None,
         language=Language.EN,  # Only English is supported for Realtime
         vad=False,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        encoding = encoding or AudioEncoding("pcm_s16le")
         aai.settings.api_key = api_key
         self._transcriber: Optional[aai.RealtimeTranscriber] = None
 

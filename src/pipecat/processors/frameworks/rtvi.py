@@ -110,7 +110,7 @@ class RTVIActionArgument(BaseModel):
 class RTVIAction(BaseModel):
     service: str
     action: str
-    arguments: List[RTVIActionArgument] = []
+    arguments: List[RTVIActionArgument] = Field(default_factory=list)
     result: Literal["bool", "number", "string", "array", "object"]
     handler: Callable[["RTVIProcessor", str, Dict[str, Any]], Awaitable[ActionResult]] = Field(
         exclude=True
@@ -437,10 +437,12 @@ class RTVIObserver(BaseObserver):
         params (RTVIObserverParams): Settings to enable/disable specific messages.
     """
 
-    def __init__(self, rtvi: "RTVIProcessor", *, params: RTVIObserverParams = RTVIObserverParams()):
-        super().__init__()
+    def __init__(
+        self, rtvi: "RTVIProcessor", *, params: Optional[RTVIObserverParams] = None, **kwargs
+    ):
+        super().__init__(**kwargs)
         self._rtvi = rtvi
-        self._params = params
+        self._params = params or RTVIObserverParams()
         self._bot_transcription = ""
         self._frames_seen = set()
         rtvi.set_errors_enabled(self._params.errors_enabled)
@@ -632,12 +634,12 @@ class RTVIProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        config: RTVIConfig = RTVIConfig(config=[]),
+        config: Optional[RTVIConfig] = None,
         transport: Optional[BaseTransport] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._config = config
+        self._config = config or RTVIConfig(config=[])
 
         self._bot_ready = False
         self._client_ready = False
@@ -841,7 +843,7 @@ class RTVIProcessor(FrameProcessor):
     async def _handle_client_ready(self, request_id: str):
         logger.debug("Received client-ready")
         if self._input_transport:
-            self._input_transport.start_audio_in_streaming()
+            await self._input_transport.start_audio_in_streaming()
 
         self._client_ready_id = request_id
         await self.set_client_ready()

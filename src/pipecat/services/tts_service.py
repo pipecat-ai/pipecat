@@ -64,7 +64,7 @@ class TTSService(AIService):
         # Text aggregator to aggregate incoming tokens and decide when to push to the TTS.
         text_aggregator: Optional[BaseTextAggregator] = None,
         # Text filter executed after text has been aggregated.
-        text_filters: Sequence[BaseTextFilter] = [],
+        text_filters: Optional[Sequence[BaseTextFilter]] = None,
         text_filter: Optional[BaseTextFilter] = None,
         # Audio transport destination of the generated frames.
         transport_destination: Optional[str] = None,
@@ -83,7 +83,7 @@ class TTSService(AIService):
         self._voice_id: str = ""
         self._settings: Dict[str, Any] = {}
         self._text_aggregator: BaseTextAggregator = text_aggregator or SimpleTextAggregator()
-        self._text_filters: Sequence[BaseTextFilter] = text_filters
+        self._text_filters: Sequence[BaseTextFilter] = text_filters or []
         self._transport_destination: Optional[str] = transport_destination
 
         if text_filter:
@@ -157,7 +157,7 @@ class TTSService(AIService):
                 self.set_voice(value)
             elif key == "text_filter":
                 for filter in self._text_filters:
-                    filter.update_settings(value)
+                    await filter.update_settings(value)
             else:
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
@@ -183,7 +183,7 @@ class TTSService(AIService):
             await self._maybe_pause_frame_processing()
 
             sentence = self._text_aggregator.text
-            self._text_aggregator.reset()
+            await self._text_aggregator.reset()
             self._processing_text = False
             await self._push_tts_frames(sentence)
             if isinstance(frame, LLMFullResponseEndFrame):
@@ -234,9 +234,9 @@ class TTSService(AIService):
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         self._processing_text = False
-        self._text_aggregator.handle_interruption()
+        await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
-            filter.handle_interruption()
+            await filter.handle_interruption()
 
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
@@ -251,7 +251,7 @@ class TTSService(AIService):
         if not self._aggregate_sentences:
             text = frame.text
         else:
-            text = self._text_aggregator.aggregate(frame.text)
+            text = await self._text_aggregator.aggregate(frame.text)
 
         if text:
             await self._push_tts_frames(text)
@@ -274,8 +274,8 @@ class TTSService(AIService):
 
         # Process all filter.
         for filter in self._text_filters:
-            filter.reset_interruption()
-            text = filter.filter(text)
+            await filter.reset_interruption()
+            text = await filter.filter(text)
 
         if text:
             await self.process_generator(self.run_tts(text))

@@ -99,10 +99,13 @@ class RivaSTTService(STTService):
             "model_name": "parakeet-ctc-1.1b-asr",
         },
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or RivaSTTService.InputParams()
+
         self._api_key = api_key
         self._profanity_filter = False
         self._automatic_punctuation = True
@@ -322,10 +325,12 @@ class RivaSegmentedSTTService(SegmentedSTTService):
             "model_name": "canary-1b-asr",
         },
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or RivaSegmentedSTTService.InputParams()
 
         # Set model name
         self.set_model_name(model_function_map.get("model_name"))
@@ -533,7 +538,7 @@ class ParakeetSTTService(RivaSTTService):
             "model_name": "parakeet-ctc-1.1b-asr",
         },
         sample_rate: Optional[int] = None,
-        params: RivaSTTService.InputParams = RivaSTTService.InputParams(),  # Use parent class's type
+        params: Optional[RivaSTTService.InputParams] = None,  # Use parent class's type
         **kwargs,
     ):
         super().__init__(
