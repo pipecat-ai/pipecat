@@ -8,12 +8,12 @@ import asyncio
 from typing import Optional
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputDTMFFrame,
     KeypadEntry,
-    StartInterruptionFrame,
     TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -27,7 +27,7 @@ class DTMFAggregator(FrameProcessor):
     when:
     - Timeout occurs (configurable idle period)
     - Termination digit is received (default: '#')
-    - Interruption occurs
+    - EndFrame or CancelFrame is received
 
     Emits TranscriptionFrame for compatibility with existing LLM context aggregators.
 
@@ -79,12 +79,8 @@ class DTMFAggregator(FrameProcessor):
             await self._stop()
             await self.push_frame(frame, direction)
             return
-        elif isinstance(frame, StartInterruptionFrame):
-            if self._aggregation:
-                await self._flush_aggregation()
-            await self.push_frame(frame, direction)
-            return
 
+        # Push all other frames downstream immediately
         await self.push_frame(frame, direction)
 
         if isinstance(frame, InputDTMFFrame):
@@ -101,6 +97,12 @@ class DTMFAggregator(FrameProcessor):
         digit_value = frame.button.value
         self._aggregation += digit_value
 
+        # If this is the first digit, send BotInterruptionFrame upstream
+        # But use a separate task to avoid interfering with current frame processing
+        if len(self._aggregation) == 1:
+            # Use create_task to avoid queue issues
+            self.create_task(self._send_interruption_frame())
+
         # Check for immediate flush conditions
         if frame.button == self._termination_digit:
             await self._flush_aggregation()
@@ -108,16 +110,36 @@ class DTMFAggregator(FrameProcessor):
             # Signal new digit received
             self._digit_event.set()
 
+    async def _send_interruption_frame(self):
+        """Send an interruption frame in a separate task to avoid queue issues.
+
+        This interruption frame allows for the user to interrupt the bot's speaking
+        with a keypress. Without this, the TranscriptionFrame generated is accompanied
+        by EmulatedUserStarted/StoppedSpeakingFrames, which the bot currently ignores.
+        This treats the keypress as an explicit input which the bot should respond to.
+        """
+        try:
+            await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+        except Exception as e:
+            print(f"Error sending interruption frame: {e}")
+
     async def _aggregation_task_handler(self):
         """Background task that handles timeout-based flushing."""
-        while True:
-            try:
-                await asyncio.wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
-            except asyncio.TimeoutError:
-                if self._aggregation:
-                    await self._flush_aggregation()
-            finally:
-                self._digit_event.clear()
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
+                except asyncio.TimeoutError:
+                    if self._aggregation:
+                        await self._flush_aggregation()
+                finally:
+                    self._digit_event.clear()
+        except asyncio.CancelledError:
+            # Task was cancelled - exit cleanly
+            pass
+        except Exception as e:
+            # Log unexpected errors but don't crash
+            print(f"Unexpected error in DTMF aggregation task: {e}")
 
     async def _flush_aggregation(self):
         """Flush the current aggregation as a TranscriptionFrame."""

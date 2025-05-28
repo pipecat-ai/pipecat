@@ -19,6 +19,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.serializers.twilio import TwilioFrameSerializer
@@ -83,10 +84,23 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         push_silence_after_stop=testing,
     )
 
+    # Create DTMF aggregator
+    dtmf_aggregator = DTMFAggregator(
+        timeout=3.0,  # 3 second timeout
+        prefix="Menu selection: ",  # Helpful prefix for LLM
+    )
+
     messages = [
         {
             "role": "system",
-            "content": "You are an elementary teacher in an audio call. Your output will be converted to audio so don't include special characters in your answers. Respond to what the student said in a short short sentence.",
+            "content": """You are an elementary teacher in an audio call. Your output will be converted to audio so don't include special characters in your answers. 
+
+When you receive input starting with "Menu selection:", this represents button presses on the phone keypad. For example:
+- "Menu selection: 1" means they pressed button 1
+- "Menu selection: 123#" means they pressed 1, 2, 3, then # (pound)
+- Common patterns: single digits for menu choices, sequences ending with # for completed entries
+
+Respond to both voice and keypad input in short sentences.""",
         },
     ]
 
@@ -100,6 +114,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     pipeline = Pipeline(
         [
             transport.input(),  # Websocket input from client
+            dtmf_aggregator,  # DTMF aggregator (processes DTMF before STT)
             stt,  # Speech-To-Text
             context_aggregator.user(),
             llm,  # LLM
@@ -124,7 +139,12 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         # Start recording.
         await audiobuffer.start_recording()
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append(
+            {
+                "role": "system",
+                "content": "Please introduce yourself to the user and mention they can use voice or press numbers on their phone keypad to interact.",
+            }
+        )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
