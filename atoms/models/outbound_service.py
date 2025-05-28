@@ -15,3 +15,7 @@ class OutboundCallRequest(BaseModel):
     to_phone: str
     agent_id: str
     provider: Optional[str] = Field(default="plivo")
+    tts_service: Optional[str] = Field(default="smallest")
+    stt_service: Optional[str] = Field(default="deepgram")
+    krisp_enabled: Optional[bool] = Field(default=True)
+    voice_id: Optional[str] = Field(default="deepika")

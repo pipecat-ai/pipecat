@@ -17,12 +17,14 @@ async def outbound(request: OutboundCallRequest):
     try:
         if request.provider == "plivo":
             call_id = await plivo_service.make_outbound_call(
-                to=request.to_phone, from_phone=request.from_phone
+                to=request.to_phone,
+                from_phone=request.from_phone,
             )
             return {"call_id": call_id, "provider": "plivo", "status": "initiated"}
         elif request.provider == "twilio":
             call_id = await twilio_service.make_outbound_call(
-                to=request.to_phone, from_phone=request.from_phone
+                to=request.to_phone,
+                from_phone=request.from_phone,
             )
             return {"call_id": call_id, "provider": "twilio", "status": "initiated"}
         else:

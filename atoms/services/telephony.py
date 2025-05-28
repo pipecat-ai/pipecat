@@ -8,7 +8,15 @@ from loguru import logger
 class TelephonyService:
     """Base telephony service."""
 
-    async def make_outbound_call(self, to: str, from_phone: str = None) -> str:
+    async def make_outbound_call(
+        self,
+        to: str,
+        from_phone: str = None,
+        tts_service: str = "smallest",
+        stt_service: str = "deepgram",
+        krisp_enabled: bool = True,
+        voice_id: str = "deepika",
+    ) -> str:
         """Make an outbound call."""
         raise NotImplementedError
 
@@ -21,7 +29,11 @@ class TwilioService(TelephonyService):
         self.auth_token = settings.twilio_auth_token
         self.phone_number = settings.twilio_phone_number
 
-    async def make_outbound_call(self, to: str, from_phone: str = None) -> str:
+    async def make_outbound_call(
+        self,
+        to: str,
+        from_phone: str = None,
+    ) -> str:
         """Make an outbound Twilio call."""
         from_number = from_phone or self.phone_number
 

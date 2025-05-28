@@ -119,6 +119,10 @@ async def run_bot(
     call_sid: str,
     testing: Optional[bool] = False,
     provider: Optional[str] = "plivo",
+    tts_service: Optional[str] = "smallest",
+    voice_id: Optional[str] = "deepika",
+    stt_service: Optional[str] = "deepgram",
+    krisp_enabled: Optional[bool] = True,
 ):
     if provider == "twilio":
         serializer = TwilioFrameSerializer(
@@ -135,6 +139,14 @@ async def run_bot(
             auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
         )
 
+    if krisp_enabled:
+        audio_in_filter = KrispFilter(
+            model_path=os.getenv("KRISP_MODEL_PATH"),
+            suppression_level=90,
+        )
+    else:
+        audio_in_filter = None
+
     transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
         params=FastAPIWebsocketParams(
@@ -143,10 +155,7 @@ async def run_bot(
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
             serializer=serializer,
-            audio_in_filter=KrispFilter(
-                model_path=os.getenv("KRISP_MODEL_PATH"),
-                suppression_level=90,
-            ),
+            audio_in_filter=audio_in_filter,
         ),
     )
 
@@ -155,36 +164,28 @@ async def run_bot(
     #     api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini-realtime-preview"
     # )
 
-    statement_llm = GoogleLLMService(
-        name="StatementJudger",
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        model=CLASSIFIER_MODEL,
-        temperature=0.0,
-        system_instruction=classifier_system_instruction,
-    )
+    if stt_service == "deepgram":
+        stt = DeepgramSTTService(
+            api_key=os.getenv("DEEPGRAM_API_KEY"),
+            audio_passthrough=True,
+        )
+    elif stt_service == "groq_whisper":
+        stt = GroqSTTService(api_key=os.getenv("GROQ_API_KEY"))
+    else:
+        stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
-        audio_passthrough=True,
-    )
-
-    # tts = CartesiaTTSService(
-    #     api_key=os.getenv("CARTESIA_API_KEY"),
-    #     voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    #     push_silence_after_stop=testing,
-    # )
-
-    tts = WavesHttpTTSService(
-        api_key=os.getenv("WAVES_API_KEY"),
-        voice_id="deepika",
-    )
-
-    cartesia_tts_service = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="791d5162-d5eb-40f0-8189-f19db44611d8",
-        model="sonic-turbo",
-        push_silence_after_stop=True,
-    )
+    if tts_service == "waves":
+        tts = WavesHttpTTSService(
+            api_key=os.getenv("WAVES_API_KEY"),
+            voice_id=voice_id,
+        )
+    else:
+        tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id=voice_id,
+            model="sonic-turbo",
+            push_silence_after_stop=True,
+        )
 
     transport_input_filter = TransportInputFilter()
     agent_flow_processor = await initialize_conversational_agent(
@@ -305,7 +306,7 @@ async def run_bot(
             agent_action_processor,
             # llm,
             audiobuffer,
-            cartesia_tts_service,
+            tts,
             user_idle,
             transport.output(),
             context_aggregator.assistant(),
