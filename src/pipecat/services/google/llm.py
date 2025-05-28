@@ -496,6 +496,7 @@ class GoogleLLMService(LLMService):
 
     @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
+        is_first_message = True
         await self.push_frame(LLMFullResponseStartFrame())
 
         prompt_tokens = 0
@@ -550,7 +551,6 @@ class GoogleLLMService(LLMService):
                 contents=messages,
                 config=generation_config,
             )
-            await self.stop_ttfb_metrics()
 
             async for chunk in response:
                 if chunk.usage_metadata:
@@ -566,6 +566,9 @@ class GoogleLLMService(LLMService):
                         for part in candidate.content.parts:
                             if not part.thought and part.text:
                                 search_result += part.text
+                                if is_first_message:
+                                    await self.stop_ttfb_metrics()
+                                    is_first_message = False
                                 await self.push_frame(LLMTextFrame(part.text))
                             elif part.function_call:
                                 function_call = part.function_call
