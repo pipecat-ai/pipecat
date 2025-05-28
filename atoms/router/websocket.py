@@ -25,7 +25,7 @@ async def twilio_websocket(websocket: WebSocket):
         logger.info(f"Twilio call started - Stream: {stream_sid}, Call: {call_sid}")
 
         try:
-            call_details = redis_service.get_call_details(call_sid)
+            call_details = await redis_service.get_call_details(call_sid)
             if call_details is None:
                 logger.warning(
                     f"No call details found in Redis for call_sid: {call_sid}. Using defaults."
@@ -63,7 +63,7 @@ async def plivo_websocket(websocket: WebSocket):
         logger.info(f"Plivo call started - Stream: {stream_sid}, Call: {call_sid}")
 
         try:
-            call_details = redis_service.get_call_details(call_sid)
+            call_details = await redis_service.get_call_details(call_sid)
             if call_details is None:
                 logger.warning(
                     f"No call details found in Redis for call_sid: {call_sid}. Using defaults."

@@ -40,8 +40,7 @@ async def outbound(request: OutboundCallRequest):
             "krisp_enabled": request.krisp_enabled,
             "voice_id": request.voice_id,
         }
-        redis_service.set_call_details(call_id=call_id, call_details=call_details)
-
+        await redis_service.set_call_details(call_id=call_id, call_details=call_details)
         logger.info(f"Call details stored in Redis for call_id: {call_id}")
         logger.debug(f"Call details: {call_details}")
 
