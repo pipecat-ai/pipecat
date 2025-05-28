@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="https://7cc9-2401-4900-8830-86ea-2d92-3e2e-a19-7ac7.ngrok-free.app/ws" />
+  </Connect>
+</Response>

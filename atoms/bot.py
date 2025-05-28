@@ -12,18 +12,13 @@ import os
 import sys
 import wave
 from pathlib import Path
+from typing import Optional
 
 import aiofiles
-from agent import initialize_conversational_agent
 from dotenv import load_dotenv
 from fastapi import WebSocket
 from loguru import logger
-from models import CallData
-from openai.types.chat import (
-    ChatCompletionAssistantMessageParam,
-    ChatCompletionSystemMessageParam,
-    ChatCompletionUserMessageParam,
-)
+from openai.types.chat import ChatCompletionAssistantMessageParam
 from smart_endpointing import (
     CLASSIFIER_MODEL,
     AudioAccumulator,
@@ -57,21 +52,21 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
     OpenAILLMContextFrame,
 )
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.filters.custom_mute_filter import TransportInputFilter
 from pipecat.processors.filters.function_filter import FunctionFilter
-from pipecat.processors.filters.stt_mute_filter import (
-    STTMuteConfig,
-    STTMuteFilter,
-    STTMuteStrategy,
-)
+from pipecat.processors.filters.stt_mute_filter import STTMuteConfig, STTMuteFilter, STTMuteStrategy
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.serializers.plivo import PlivoFrameSerializer
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.atoms.agent import (
     AtomsAgentContext,
+    CallData,
+    initialize_conversational_agent,
 )
 from pipecat.services.atoms.manager import AgentActionProcessor
 from pipecat.services.atoms.prompts import FT_RESPONSE_MODEL_SYSTEM_PROMPT
@@ -98,9 +93,13 @@ logger.add(sys.stderr, level="DEBUG")
 
 async def save_audio(server_name: str, audio: bytes, sample_rate: int, num_channels: int):
     if len(audio) > 0:
+        Path("outputs").mkdir(exist_ok=True)
+
         filename = (
-            f"{server_name}_recording_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+            Path("outputs")
+            / f"{server_name}_recording_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
         )
+
         with io.BytesIO() as buffer:
             with wave.open(buffer, "wb") as wf:
                 wf.setsampwidth(2)
@@ -114,7 +113,13 @@ async def save_audio(server_name: str, audio: bytes, sample_rate: int, num_chann
         logger.info("No audio data to save")
 
 
-async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, testing: bool):
+async def run_bot(
+    websocket_client: WebSocket,
+    stream_sid: str,
+    call_sid: str,
+    testing: Optional[bool] = False,
+    provider: Optional[str] = "plivo",
+):
     # serializer = TwilioFrameSerializer(
     #     stream_sid=stream_sid,
     #     call_sid=call_sid,
@@ -168,14 +173,16 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
     #     push_silence_after_stop=testing,
     # )
 
-    # tts = WavesHttpTTSService(
-    #     api_key=os.getenv("WAVES_API_KEY"),
-    #     voice_id="deepika",
-    # )
-
-    tts = WavesSSETTSService(
+    tts = WavesHttpTTSService(
         api_key=os.getenv("WAVES_API_KEY"),
-        voice_id="nyah",
+        voice_id="deepika",
+    )
+
+    cartesia_tts_service = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="791d5162-d5eb-40f0-8189-f19db44611d8",
+        model="sonic-turbo",
+        push_silence_after_stop=True,
     )
 
     transport_input_filter = TransportInputFilter()
@@ -191,15 +198,18 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
         ),
         transport_input_filter=transport_input_filter,
     )
-    await agent_flow_processor.start()
 
     turn_tracking_observer = TurnTrackingObserver()
     agent_action_processor = AgentActionProcessor(turn_tracking_observer)
     messages = [
-        ChatCompletionSystemMessageParam(role="system", content=agent_config["system_prompt"]),
-        AtomsAgentContext.upgrade_user_message_to_atoms_agent_message(
-            ChatCompletionUserMessageParam(role="user", content="")
-        ),
+        {
+            "role": "system",
+            "content": FT_RESPONSE_MODEL_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": json.dumps({"transcript": ""}),
+        },
     ]
 
     context = AtomsAgentContext(messages=messages)
@@ -227,7 +237,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     stt_mute_filter = STTMuteFilter(
         config=STTMuteConfig(
-            strategies={STTMuteStrategy.CUSTOM},
+            strategies={STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE, STTMuteStrategy.CUSTOM},
             should_mute_callback=transport_input_filter.should_mute,
         )
     )
@@ -292,11 +302,12 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
             # ),
             agent_flow_processor,
             agent_action_processor,
-            tts,  # Text-To-Speech (receives from gated main LLM)
+            # llm,
+            audiobuffer,
+            cartesia_tts_service,
             user_idle,
-            transport.output(),  # Websocket output to client
-            audiobuffer,    # # Audio buffer for recording
-            context_aggregator.assistant(),  # Aggregates assistant responses into context
+            transport.output(),
+            context_aggregator.assistant(),
         ]
     )
 

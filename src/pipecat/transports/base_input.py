@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
+    TransferCallFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
@@ -185,6 +186,8 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames
+        elif isinstance(frame, TransferCallFrame):
+            await self.push_frame(frame, direction)
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.

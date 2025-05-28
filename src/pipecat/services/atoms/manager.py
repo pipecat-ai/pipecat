@@ -1,6 +1,14 @@
 from abc import abstractmethod
 
-from pipecat.frames.frames import EndFrame, Frame, LastTurnFrame, TransferCallFrame
+from loguru import logger
+
+from pipecat.frames.frames import (
+    EndFrame,
+    Frame,
+    LastTurnFrame,
+    SetTransferCallDataFrame,
+    TransferCallFrame,
+)
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -51,6 +59,7 @@ class AgentActionProcessor(FrameProcessor):
             self, turn_count: int, duration: float, was_interrupted: bool
         ):
             """End of turn event listener."""
+            logger.debug(f"End of turn event listener: {turn_count}, {duration}, {was_interrupted}")
             if was_interrupted:
                 self._reset()
             elif self._is_last_turn:
@@ -61,24 +70,38 @@ class AgentActionProcessor(FrameProcessor):
 
         def __init__(self, action_processor: "AgentActionProcessor"):
             self._transfer_call_number = None
-            self._reason = None
-            self._conversation_id = None
             self._action_processor = action_processor
 
-        def _handle_transfer_call(self, frame: TransferCallFrame):
-            self._transfer_call_number = frame.transfer_call_number
-            self._reason = frame.reason
-            self._conversation_id = frame.conversation_id
+        def set_transfer_call_data(self, transfer_call_number: str, conversation_id: str):
+            """Set the transfer call data to be used when end of turn is triggered."""
+            self._transfer_call_number = transfer_call_number
+            self._conversation_id = conversation_id
+
+        async def _handle_transfer_call(self):
+            logger.info(f"Handling transfer call to {self._transfer_call_number}")
+            await self._action_processor.push_frame(
+                TransferCallFrame(
+                    transfer_call_number=self._transfer_call_number,
+                    conversation_id=self._conversation_id,
+                )
+            )
 
         def handle_frame(self, frame: TransferCallFrame):
             """Handle the frame."""
-            self._handle_transfer_call(frame)
+            logger.info(f"Received TransferCallFrame: {frame}")
+            self._transfer_call_number = frame.transfer_call_number
+            self._conversation_id = frame.conversation_id
 
         async def end_of_turn_event_listener(
             self, turn_count: int, duration: float, was_interrupted: bool
         ):
             """End of turn event listener."""
-            pass
+            logger.debug(
+                f"End of turn event listener at TransferCallActionManager: {turn_count}, {duration}, {was_interrupted}"
+            )
+            if self._transfer_call_number:
+                logger.info("Transfer call triggered by end of turn event")
+                await self._handle_transfer_call()
 
     def __init__(self, turn_tracking_observer: TurnTrackingObserver):
         """Initialize the action processor."""
@@ -95,12 +118,23 @@ class AgentActionProcessor(FrameProcessor):
             await end_of_turn_event_listener(turn_count, duration, was_interrupted)
             await transfer_call_event_listener(turn_count, duration, was_interrupted)
 
+    def set_transfer_call_data(self, transfer_call_number: str, conversation_id: str):
+        """Set transfer call data to be triggered on end of turn."""
+        self._transfer_call_manager.set_transfer_call_data(transfer_call_number, conversation_id)
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process the frame."""
         await super().process_frame(frame, direction)
+
         if isinstance(frame, LastTurnFrame):
+            logger.debug(f"Processing LastTurnFrame: {frame}")
             self._end_call_manager.handle_frame(frame)
         elif isinstance(frame, TransferCallFrame):
+            logger.info(f"Processing TransferCallFrame in AgentActionProcessor: {frame}")
             self._transfer_call_manager.handle_frame(frame)
+        elif isinstance(frame, SetTransferCallDataFrame):
+            logger.info(f"Processing SetTransferCallDataFrame in AgentActionProcessor: {frame}")
+            self.set_transfer_call_data(frame.transfer_call_number, frame.conversation_id)
 
-        await self.push_frame(frame=frame)
+        # Always push the frame downstream so other processors (like serializers) can handle it
+        await self.push_frame(frame=frame, direction=direction)

@@ -817,12 +817,21 @@ class TransferCallFrame(BaseTelephonyControlFrame):
     """Indicates that the call should be transferred."""
 
     transfer_call_number: str
-    conversation_id: str
-    reason: Optional[str] = None
 
     def __str__(self):
         """Return a string representation of the frame."""
-        return f"{self.name}, transfer_call_number: {self.transfer_call_number}, conversation_id: {self.conversation_id}, reason: {self.reason}"
+        return f"{self.name}, transfer_call_number: {self.transfer_call_number}"
+
+
+@dataclass
+class SetTransferCallDataFrame(BaseTelephonyControlFrame):
+    """Sets transfer call data to be triggered on end of turn."""
+
+    transfer_call_number: str
+
+    def __str__(self):
+        """Return a string representation of the frame."""
+        return f"{self.name}, transfer_call_number: {self.transfer_call_number}"
 
 
 @dataclass

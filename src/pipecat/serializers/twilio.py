@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
 import base64
 import json
 from typing import Optional
@@ -22,6 +23,7 @@ from pipecat.frames.frames import (
     KeypadEntry,
     StartFrame,
     StartInterruptionFrame,
+    TransferCallFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
@@ -57,11 +59,15 @@ class TwilioFrameSerializer(FrameSerializer):
             twilio_sample_rate: Sample rate used by Twilio, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
+            transfer_call_enabled: Whether to enable call transfer functionality.
+            transfer_call_attempted: Whether transfer has already been attempted.
         """
 
         twilio_sample_rate: int = 8000
         sample_rate: Optional[int] = None
         auto_hang_up: bool = True
+        transfer_call_enabled: bool = True
+        transfer_call_attempted: bool = False
 
     def __init__(
         self,
@@ -91,6 +97,8 @@ class TwilioFrameSerializer(FrameSerializer):
 
         self._resampler = create_default_resampler()
         self._hangup_attempted = False
+        self._transfer_call_enabled = self._params.transfer_call_enabled
+        self._transfer_call_attempted = self._params.transfer_call_attempted
 
     @property
     def type(self) -> FrameSerializerType:
@@ -121,13 +129,25 @@ class TwilioFrameSerializer(FrameSerializer):
         Returns:
             Serialized data as string or bytes, or None if the frame isn't handled.
         """
+        logger.trace(f"Twilio serializer processing frame: {type(frame).__name__}")
+
         if (
             self._params.auto_hang_up
+            and not self._transfer_call_attempted
             and not self._hangup_attempted
             and isinstance(frame, (EndFrame, CancelFrame))
         ):
             self._hangup_attempted = True
+            logger.info(f"Auto hang-up triggered by {type(frame).__name__}")
             await self._hang_up_call()
+            return None
+        elif (
+            self._transfer_call_enabled
+            and not self._transfer_call_attempted
+            and isinstance(frame, TransferCallFrame)
+        ):
+            self._transfer_call_attempted = True
+            await self._transfer_call(frame)
             return None
         elif isinstance(frame, StartInterruptionFrame):
             answer = {"event": "clear", "streamSid": self._stream_sid}
@@ -202,6 +222,85 @@ class TwilioFrameSerializer(FrameSerializer):
 
         except Exception as e:
             logger.exception(f"Failed to hang up Twilio call: {e}")
+
+    async def _play_music(self, music_url: str):
+        import aiohttp
+
+        endpoint = f"https://api.twilio.com/2010-04-01/Accounts/{self._account_sid}/Calls/{self._call_sid}.json"
+
+        auth = aiohttp.BasicAuth(self._account_sid, self._auth_token)
+
+        twiml_data = f"<Response><Play loop='0'>{music_url}</Play></Response>"
+
+        try:
+            payload = {"Twiml": twiml_data}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint, auth=auth, data=payload) as response:
+                    if response.status == 200:
+                        logger.info(f"Successfully played music on Twilio call {self._call_sid}")
+        except Exception as e:
+            logger.exception(f"Failed to play music on Twilio call: {e}")
+
+    async def _transfer_call(self, frame: TransferCallFrame):
+        """Transfer the Twilio call to another number using Twilio's REST API."""
+        try:
+            import aiohttp
+
+            account_sid = self._account_sid
+            auth_token = self._auth_token
+            call_sid = self._call_sid
+
+            if not call_sid or not account_sid or not auth_token:
+                missing = []
+                if not call_sid:
+                    missing.append("call_sid")
+                if not account_sid:
+                    missing.append("account_sid")
+                if not auth_token:
+                    missing.append("auth_token")
+
+                logger.error(
+                    f"Cannot transfer Twilio call: missing required parameters: {', '.join(missing)}"
+                )
+                return
+
+            if not frame.transfer_call_number:
+                logger.error("Cannot transfer call: transfer_call_number is required")
+                return
+
+            logger.info(
+                f"Initiating Twilio call transfer from {call_sid} to {frame.transfer_call_number}"
+            )
+
+            await self._play_music(
+                "https://d2ggtb57hogf3o.cloudfront.net/caller-tune/phone_ringtone.wav"
+            )
+
+            endpoint = (
+                f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
+            )
+
+            auth = aiohttp.BasicAuth(account_sid, auth_token)
+
+            twiml_data = "<Response><Dial>+919896140116</Dial></Response>"
+
+            payload = {"Twiml": twiml_data}
+
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint, auth=auth, data=payload) as response:
+                    if response.status == 200:
+                        logger.info(
+                            f"Successfully transferred Twilio call {call_sid} to {frame.transfer_call_number}"
+                        )
+                    else:
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to transfer Twilio call {call_sid}: Status {response.status}, Response: {error_text}"
+                        )
+
+        except Exception as e:
+            logger.exception(f"Failed to transfer Twilio call: {e}")
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         """Deserializes Twilio WebSocket data to Pipecat frames.

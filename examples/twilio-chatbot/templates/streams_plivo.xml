@@ -1,0 +1,3 @@
+<Response>
+  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://7cc9-2401-4900-8830-86ea-2d92-3e2e-a19-7ac7.ngrok-free.app/plivo_ws</Stream>
+</Response>

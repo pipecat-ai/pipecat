@@ -7,7 +7,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 
-from pipecat.frames.frames import Frame, StartFrame
+from pipecat.frames.frames import EndFrame, Frame, StartFrame, TransferCallFrame
 
 
 class FrameSerializerType(Enum):
@@ -30,4 +30,12 @@ class FrameSerializer(ABC):
 
     @abstractmethod
     async def deserialize(self, data: str | bytes) -> Frame | None:
+        pass
+
+    @abstractmethod
+    async def _transfer_call(self, frame: TransferCallFrame):
+        pass
+
+    @abstractmethod
+    async def _hang_up_call(self, frame: EndFrame):
         pass

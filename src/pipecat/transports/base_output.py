@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     SystemFrame,
+    TransferCallFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
     TTSAudioRawFrame,
@@ -176,6 +177,8 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, EndFrame):
             await self.stop(frame)
             # Keep pushing EndFrame down so all the pipeline stops nicely.
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, TransferCallFrame):
             await self.push_frame(frame, direction)
         elif isinstance(frame, MixerControlFrame):
             await self._handle_frame(frame)

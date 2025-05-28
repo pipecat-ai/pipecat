@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
+    TransferCallFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
@@ -227,6 +228,10 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         if isinstance(frame, StartInterruptionFrame):
             await self._write_frame(frame)
             self._next_send_time = 0
+        elif isinstance(frame, TransferCallFrame):
+            # Handle TransferCallFrame by sending it to the serializer
+            logger.debug(f"FastAPIWebsocketOutputTransport handling TransferCallFrame: {frame}")
+            await self._write_frame(frame)
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)
