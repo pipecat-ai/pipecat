@@ -101,7 +101,7 @@ class BaseInputTransport(FrameProcessor):
         logger.debug(f"Enabling audio on start. {enabled}")
         self._params.audio_in_stream_on_start = enabled
 
-    def start_audio_in_streaming(self):
+    async def start_audio_in_streaming(self):
         pass
 
     @property

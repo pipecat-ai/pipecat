@@ -74,6 +74,7 @@ class DebugLogObserver(BaseObserver):
             Union[Tuple[Type[Frame], ...], Dict[Type[Frame], Optional[Tuple[Type, FrameEndpoint]]]]
         ] = None,
         exclude_fields: Optional[Set[str]] = None,
+        **kwargs,
     ):
         """Initialize the debug log observer.
 
@@ -87,6 +88,8 @@ class DebugLogObserver(BaseObserver):
             exclude_fields: Set of field names to exclude from logging. If None, only binary
                 data fields are excluded.
         """
+        super().__init__(**kwargs)
+
         # Process frame filters
         self.frame_filters = {}
 

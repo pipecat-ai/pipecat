@@ -4,12 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass
 
 from typing_extensions import TYPE_CHECKING
 
 from pipecat.frames.frames import Frame
+from pipecat.utils.base_object import BaseObject
 
 if TYPE_CHECKING:
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -39,7 +40,7 @@ class FramePushed:
     timestamp: int
 
 
-class BaseObserver(ABC):
+class BaseObserver(BaseObject):
     """This is the base class for pipeline frame observers. Observers can view
     all the frames that go through the pipeline without the need to inject
     processors in the pipeline. This can be useful, for example, to implement

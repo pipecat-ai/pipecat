@@ -43,10 +43,10 @@ class GStreamerPipelineSource(FrameProcessor):
         audio_channels: int = 1
         clock_sync: bool = True
 
-    def __init__(self, *, pipeline: str, out_params: OutputParams = OutputParams(), **kwargs):
+    def __init__(self, *, pipeline: str, out_params: Optional[OutputParams] = None, **kwargs):
         super().__init__(**kwargs)
 
-        self._out_params = out_params
+        self._out_params = out_params or GStreamerPipelineSource.OutputParams()
         self._sample_rate = 0
 
         Gst.init()

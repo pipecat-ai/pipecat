@@ -34,7 +34,7 @@ class GroqTTSService(TTSService):
         *,
         api_key: str,
         output_format: str = "wav",
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         model_name: str = "playai-tts",
         voice_id: str = "Celeste-PlayAI",
         sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
@@ -42,11 +42,14 @@ class GroqTTSService(TTSService):
     ):
         if sample_rate != self.GROQ_SAMPLE_RATE:
             logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
+
         super().__init__(
             pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or GroqTTSService.InputParams()
 
         self._api_key = api_key
         self._model_name = model_name

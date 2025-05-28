@@ -34,7 +34,7 @@ from pipecat.utils.asyncio import BaseTaskManager
 
 class WebsocketClientParams(TransportParams):
     add_wav_header: bool = True
-    serializer: FrameSerializer = ProtobufFrameSerializer()
+    serializer: Optional[FrameSerializer] = None
 
 
 class WebsocketClientCallbacks(BaseModel):
@@ -133,7 +133,8 @@ class WebsocketClientInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._params.serializer.setup(frame)
+        if self._params.serializer:
+            await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
         await self.set_transport_ready(frame)
@@ -151,6 +152,8 @@ class WebsocketClientInputTransport(BaseInputTransport):
         await self._transport.cleanup()
 
     async def on_message(self, websocket, message):
+        if not self._params.serializer:
+            return
         frame = await self._params.serializer.deserialize(message)
         if not frame:
             return
@@ -184,7 +187,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
     async def start(self, frame: StartFrame):
         await super().start(frame)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
-        await self._params.serializer.setup(frame)
+        if self._params.serializer:
+            await self._params.serializer.setup(frame)
         await self._session.setup(frame)
         await self._session.connect()
         await self.set_transport_ready(frame)
@@ -231,6 +235,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
+        if not self._params.serializer:
+            return
         payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
@@ -250,11 +256,12 @@ class WebsocketClientTransport(BaseTransport):
     def __init__(
         self,
         uri: str,
-        params: WebsocketClientParams = WebsocketClientParams(),
+        params: Optional[WebsocketClientParams] = None,
     ):
         super().__init__()
 
-        self._params = params
+        self._params = params or WebsocketClientParams()
+        self._params.serializer = self._params.serializer or ProtobufFrameSerializer()
 
         callbacks = WebsocketClientCallbacks(
             on_connected=self._on_connected,
@@ -262,7 +269,7 @@ class WebsocketClientTransport(BaseTransport):
             on_message=self._on_message,
         )
 
-        self._session = WebsocketClientSession(uri, params, callbacks, self.name)
+        self._session = WebsocketClientSession(uri, self._params, callbacks, self.name)
         self._input: Optional[WebsocketClientInputTransport] = None
         self._output: Optional[WebsocketClientOutputTransport] = None
 

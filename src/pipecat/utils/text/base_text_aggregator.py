@@ -25,7 +25,7 @@ class BaseTextAggregator(ABC):
         pass
 
     @abstractmethod
-    def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[str]:
         """Aggregates the specified text with the currently accumulated text.
 
         This method should be implemented to define how the new text contributes
@@ -43,7 +43,7 @@ class BaseTextAggregator(ABC):
         pass
 
     @abstractmethod
-    def handle_interruption(self):
+    async def handle_interruption(self):
         """Handles interruptions. When an interruption occurs it is possible
         that we might want to discard the aggregated text or do some internal
         modifications to the aggregated text.
@@ -52,6 +52,6 @@ class BaseTextAggregator(ABC):
         pass
 
     @abstractmethod
-    def reset(self):
+    async def reset(self):
         """Clears the internally aggregated text."""
         pass
