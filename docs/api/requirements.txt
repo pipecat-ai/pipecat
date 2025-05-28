@@ -45,6 +45,7 @@ pipecat-ai[remote-smart-turn]
 pipecat-ai[silero]
 pipecat-ai[simli]
 pipecat-ai[soundfile]
+pipecat-ai[soniox]
 pipecat-ai[tavus]
 pipecat-ai[together]
 # pipecat-ai[ultravox] # Mocked
