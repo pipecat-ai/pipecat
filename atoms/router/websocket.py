@@ -37,6 +37,8 @@ async def twilio_websocket(websocket: WebSocket):
             )
             call_details = {}
 
+        await redis_service.delete_call_details(call_id=call_sid)
+
         from bot import run_bot
 
         await run_bot(websocket, stream_sid, call_sid, provider="twilio", call_details=call_details)
@@ -74,6 +76,8 @@ async def plivo_websocket(websocket: WebSocket):
                 f"Failed to retrieve call details from Redis for call_sid: {call_sid}. Error: {e}. Using defaults."
             )
             call_details = {}
+
+        await redis_service.delete_call_details(call_id=call_sid)
 
         from bot import run_bot
 
