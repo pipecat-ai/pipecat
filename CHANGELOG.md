@@ -5,6 +5,14 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added new functions `DailyTransport.start_transcription()` and
+  `DailyTransport.stop_transcription()` to be able to start and stop Daily
+  transcription dynamically (maybe with different settings).
+
 ## [0.0.68] - 2025-05-28
 
 ### Added
