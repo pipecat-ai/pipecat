@@ -17,6 +17,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    OutputAudioRawFrame,
     OutputImageRawFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -290,12 +291,18 @@ class TavusTransportClient:
         await self.send_message(transport_frame)
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        if not self._client:
+            return
+
         await self._client.update_subscriptions(
             participant_settings=participant_settings, profile_settings=profile_settings
         )
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
-        await self._client.write_raw_audio_frames(frames, destination)
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        if not self._client:
+            return
+
+        await self._client.write_audio_frame(frame)
 
 
 class TavusInputTransport(BaseInputTransport):
@@ -418,26 +425,21 @@ class TavusOutputTransport(BaseOutputTransport):
     async def _handle_interruptions(self):
         await self._client.send_interrupt_message()
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         # Compute wait time for synchronization
         wait = self._start_time + (self._samples_sent / self.sample_rate) - time.time()
         if wait > 0:
-            logger.trace(f"TavusOutputTransport write_raw_audio_frames wait: {wait}")
+            logger.trace(f"TavusOutputTransport write_audio_frame wait: {wait}")
             await asyncio.sleep(wait)
 
         if self._current_idx_str is None:
             logger.warning("TavusOutputTransport self._current_idx_str not defined yet!")
             return
 
-        await self._client.encode_audio_and_send(frames, False, self._current_idx_str)
+        await self._client.encode_audio_and_send(frame.audio, False, self._current_idx_str)
 
         # Update timestamp based on number of samples sent
-        self._samples_sent += len(frames) // 2  # 2 bytes per sample (16-bit)
-
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
-        pass
+        self._samples_sent += len(frame.audio) // 2  # 2 bytes per sample (16-bit)
 
 
 class TavusTransport(BaseTransport):

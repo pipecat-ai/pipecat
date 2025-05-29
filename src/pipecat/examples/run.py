@@ -43,11 +43,21 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     return ""
 
 
-async def maybe_capture_participant_video(transport: BaseTransport, client: Any):
+async def maybe_capture_participant_camera(
+    transport: BaseTransport, client: Any, framerate: int = 0
+):
     if isinstance(transport, DailyTransport):
-        await transport.capture_participant_video(client["id"], framerate=0, video_source="camera")
         await transport.capture_participant_video(
-            client["id"], framerate=0, video_source="screenVideo"
+            client["id"], framerate=framerate, video_source="camera"
+        )
+
+
+async def maybe_capture_participant_screen(
+    transport: BaseTransport, client: Any, framerate: int = 0
+):
+    if isinstance(transport, DailyTransport):
+        await transport.capture_participant_video(
+            client["id"], framerate=framerate, video_source="screenVideo"
         )
 
 

@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_video
+from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_camera
 from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -108,7 +108,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     async def on_client_connected(transport, client):
         logger.info(f"Client connected: {client}")
 
-        await maybe_capture_participant_video(transport, client)
+        await maybe_capture_participant_camera(transport, client)
 
         # Set the participant ID in the image requester
         client_id = get_transport_client_id(transport, client)

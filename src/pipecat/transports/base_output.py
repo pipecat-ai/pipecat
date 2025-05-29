@@ -134,12 +134,10 @@ class BaseOutputTransport(FrameProcessor):
     async def register_audio_destination(self, destination: str):
         pass
 
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
+    async def write_video_frame(self, frame: OutputImageRawFrame):
         pass
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         pass
 
     async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
@@ -507,7 +505,7 @@ class BaseOutputTransport(FrameProcessor):
 
                 # Send audio.
                 if isinstance(frame, OutputAudioRawFrame):
-                    await self._transport.write_raw_audio_frames(frame.audio, self._destination)
+                    await self._transport.write_audio_frame(frame)
 
         #
         # Video handling
@@ -590,8 +588,7 @@ class BaseOutputTransport(FrameProcessor):
             frame = await self._transport.get_event_loop().run_in_executor(
                 self._executor, resize_frame, frame
             )
-
-            await self._transport.write_raw_video_frame(frame, self._destination)
+            await self._transport.write_video_frame(frame)
 
         #
         # Clock handling
