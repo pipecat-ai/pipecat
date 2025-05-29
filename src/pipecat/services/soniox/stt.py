@@ -349,6 +349,7 @@ class SonioxSTTService(STTService):
                     if last_token_age_ms > self._auto_finalize_delay_ms:
                         # No new tokens received for a while, finalize the transcription.
                         logger.debug("No pending frames, sending finalize message")
+                        self._last_tokens_received = None
                         await self._websocket.send(FINALIZE_MESSAGE)
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection.
