@@ -108,7 +108,7 @@ class SonioxSTTService(STTService):
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
             enable_vad: Listen to `UserStoppedSpeakingFrame` to send finalize message to Soniox.
-            auto_finalize_delay: If no new tokens are received for a while and there is active
+            auto_finalize_delay_ms: If no new tokens are received for a while and there is active
                 transcription (only InterimTranscriptionFrame), finalize the transcription by
                 sending the finalize message so user can receive the final transcript. If set
                 to `None`, the auto finalize feature is disabled.
