@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `OutputDTMFUrgentFrame` to send a DTMF keypress quickly. The previous
   `OutputDTMFFrame` queues the keypress with the rest of data frames.
 
+- Added `DTMFAggregator`, which aggregates keypad presses into
+  `TranscriptionFrame`s. Aggregation occurs after a timeout, termination key
+  press, or user interruption. You can specify the prefix of the
+  `TranscriptionFrame`.
+
 - Added new functions `DailyTransport.start_transcription()` and
   `DailyTransport.stop_transcription()` to be able to start and stop Daily
   transcription dynamically (maybe with different settings).
