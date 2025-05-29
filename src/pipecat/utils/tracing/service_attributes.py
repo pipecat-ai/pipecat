@@ -6,7 +6,7 @@
 
 """Functions for adding attributes to OpenTelemetry spans."""
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Import for type checking only
 if TYPE_CHECKING:
@@ -251,6 +251,111 @@ def add_llm_span_attributes(
         for key, value in extra_parameters.items():
             if isinstance(value, (str, int, float, bool)):
                 span.set_attribute(f"extra.{key}", value)
+
+    # Add any additional keyword arguments as attributes
+    for key, value in kwargs.items():
+        if isinstance(value, (str, int, float, bool)):
+            span.set_attribute(key, value)
+
+
+def add_gemini_live_span_attributes(
+    span: "Span",
+    service_name: str,
+    model: str,
+    operation_name: str,
+    voice_id: Optional[str] = None,
+    language: Optional[str] = None,
+    modalities: Optional[str] = None,
+    settings: Optional[Dict[str, Any]] = None,
+    tools: Optional[List[Dict]] = None,
+    tools_serialized: Optional[str] = None,
+    transcript: Optional[str] = None,
+    is_input: Optional[bool] = None,
+    text_output: Optional[str] = None,
+    audio_data_size: Optional[int] = None,
+    **kwargs,
+) -> None:
+    """Add Gemini Live specific attributes to a span.
+
+    Args:
+        span: The span to add attributes to
+        service_name: Name of the service
+        model: Model name/identifier
+        operation_name: Name of the operation (setup, model_turn, tool_call, etc.)
+        voice_id: Voice identifier used for output
+        language: Language code for the session
+        modalities: Supported modalities (e.g., "AUDIO", "TEXT")
+        settings: Service configuration settings
+        tools: Available tools/functions list
+        tools_serialized: JSON-serialized tools for detailed inspection
+        transcript: Transcription text
+        is_input: Whether transcript is input (True) or output (False)
+        text_output: Text output from model
+        audio_data_size: Size of audio data in bytes
+        **kwargs: Additional attributes to add
+    """
+    # Add standard attributes
+    span.set_attribute("gen_ai.system", "gcp.gemini")
+    span.set_attribute("gen_ai.request.model", model)
+    span.set_attribute("gen_ai.operation.name", operation_name)
+    span.set_attribute("service.operation", operation_name)
+
+    # Add optional attributes
+    if voice_id:
+        span.set_attribute("voice_id", voice_id)
+
+    if language:
+        span.set_attribute("language", language)
+
+    if modalities:
+        span.set_attribute("modalities", modalities)
+
+    if transcript:
+        span.set_attribute("transcript", transcript)
+        if is_input is not None:
+            span.set_attribute("transcript.is_input", is_input)
+
+    if text_output:
+        span.set_attribute("text_output", text_output)
+
+    if audio_data_size is not None:
+        span.set_attribute("audio.data_size_bytes", audio_data_size)
+
+    if tools:
+        span.set_attribute("tools.count", len(tools))
+        span.set_attribute("tools.available", True)
+
+        # Add individual tool names for easier filtering
+        tool_names = []
+        for tool in tools:
+            if isinstance(tool, dict) and "name" in tool:
+                tool_names.append(tool["name"])
+            elif hasattr(tool, "name"):
+                tool_name = getattr(tool, "name", None)
+                if tool_name is not None:
+                    tool_names.append(tool_name)
+
+        if tool_names:
+            span.set_attribute("tools.names", ",".join(tool_names))
+
+    if tools_serialized:
+        span.set_attribute("tools.definitions", tools_serialized)
+
+    # Add settings if provided
+    if settings:
+        for key, value in settings.items():
+            if isinstance(value, (str, int, float, bool)):
+                span.set_attribute(f"settings.{key}", value)
+            elif key == "vad" and value:
+                # Handle VAD settings specially
+                if hasattr(value, "disabled") and value.disabled is not None:
+                    span.set_attribute("settings.vad.disabled", value.disabled)
+                if hasattr(value, "start_sensitivity") and value.start_sensitivity:
+                    span.set_attribute(
+                        "settings.vad.start_sensitivity", value.start_sensitivity.value
+                    )
+                if hasattr(value, "end_sensitivity") and value.end_sensitivity:
+                    span.set_attribute("settings.vad.end_sensitivity", value.end_sensitivity.value)
 
     # Add any additional keyword arguments as attributes
     for key, value in kwargs.items():

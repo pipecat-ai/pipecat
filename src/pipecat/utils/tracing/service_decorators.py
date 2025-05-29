@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from opentelemetry import trace
 
 from pipecat.utils.tracing.service_attributes import (
+    add_gemini_live_span_attributes,
     add_llm_span_attributes,
     add_stt_span_attributes,
     add_tts_span_attributes,
@@ -476,4 +477,311 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
     if func is not None:
         return decorator(func)
+    return decorator
+
+
+def traced_gemini_live(operation: str) -> Callable:
+    """Traces Gemini Live service methods with operation-specific attributes.
+
+    This decorator automatically captures relevant information based on the operation type:
+    - setup_complete: Configuration, tools definitions, and system instructions
+    - model_turn: Text and audio output
+    - tool_call: Function call information
+    - tool_result: Function execution results
+    - input_transcription: User transcription
+    - output_transcription: Assistant transcription
+    - usage_metadata: Token usage metrics
+
+    Args:
+        operation: The operation name (matches the event type being handled)
+
+    Returns:
+        Wrapped method with Gemini Live specific tracing.
+    """
+    if not is_tracing_available():
+        return _noop_decorator
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(self, *args, **kwargs):
+            try:
+                if not is_tracing_available():
+                    return await func(self, *args, **kwargs)
+
+                service_class_name = self.__class__.__name__
+                span_name = f"{operation}"
+
+                # Get the parent context - turn context if available, otherwise service context
+                turn_context = get_current_turn_context()
+                parent_context = turn_context or _get_parent_service_context(self)
+
+                # Create a new span as child of the turn span or service span
+                tracer = trace.get_tracer("pipecat")
+                with tracer.start_as_current_span(
+                    span_name, context=parent_context
+                ) as current_span:
+                    try:
+                        # Base service attributes
+                        model_name = getattr(
+                            self, "model_name", getattr(self, "_model_name", "unknown")
+                        )
+                        voice_id = getattr(self, "_voice_id", None)
+                        language_code = getattr(self, "_language_code", None)
+                        settings = getattr(self, "_settings", {})
+
+                        # Get modalities if available
+                        modalities = None
+                        if hasattr(self, "_settings") and "modalities" in self._settings:
+                            modality_obj = self._settings["modalities"]
+                            if hasattr(modality_obj, "value"):
+                                modalities = modality_obj.value
+                            else:
+                                modalities = str(modality_obj)
+
+                        # Operation-specific attribute collection
+                        operation_attrs = {}
+
+                        if operation == "setup":
+                            # Capture detailed tool information
+                            tools = getattr(self, "_tools", None)
+                            if tools:
+                                # Handle different tool formats
+                                tools_list = []
+                                tools_serialized = None
+
+                                try:
+                                    if hasattr(tools, "standard_tools"):
+                                        # ToolsSchema object
+                                        tools_list = tools.standard_tools
+                                        # Serialize the tools for detailed inspection
+                                        tools_serialized = json.dumps(
+                                            [
+                                                {
+                                                    "name": tool.name
+                                                    if hasattr(tool, "name")
+                                                    else tool.get("name", "unknown"),
+                                                    "description": tool.description
+                                                    if hasattr(tool, "description")
+                                                    else tool.get("description", ""),
+                                                    "properties": tool.properties
+                                                    if hasattr(tool, "properties")
+                                                    else tool.get("properties", {}),
+                                                    "required": tool.required
+                                                    if hasattr(tool, "required")
+                                                    else tool.get("required", []),
+                                                }
+                                                for tool in tools_list
+                                            ]
+                                        )
+                                    elif isinstance(tools, list):
+                                        # List of tool dictionaries or objects
+                                        tools_list = tools
+                                        tools_serialized = json.dumps(
+                                            [
+                                                {
+                                                    "name": tool.get("name", "unknown")
+                                                    if isinstance(tool, dict)
+                                                    else getattr(tool, "name", "unknown"),
+                                                    "description": tool.get("description", "")
+                                                    if isinstance(tool, dict)
+                                                    else getattr(tool, "description", ""),
+                                                    "properties": tool.get("properties", {})
+                                                    if isinstance(tool, dict)
+                                                    else getattr(tool, "properties", {}),
+                                                    "required": tool.get("required", [])
+                                                    if isinstance(tool, dict)
+                                                    else getattr(tool, "required", []),
+                                                }
+                                                for tool in tools_list
+                                            ]
+                                        )
+
+                                    if tools_list:
+                                        operation_attrs["tools"] = tools_list
+                                        operation_attrs["tools_serialized"] = tools_serialized
+
+                                except Exception as e:
+                                    logging.warning(f"Error serializing tools for tracing: {e}")
+                                    # Fallback to basic tool count
+                                    if tools_list:
+                                        operation_attrs["tools"] = tools_list
+
+                            # Capture system instruction information
+                            system_instruction = getattr(self, "_system_instruction", None)
+                            if system_instruction:
+                                operation_attrs["system_instruction"] = system_instruction[
+                                    :500
+                                ]  # Truncate if very long
+
+                            # Capture context system instructions if available
+                            if hasattr(self, "_context") and self._context:
+                                try:
+                                    context_system = self._context.extract_system_instructions()
+                                    if context_system:
+                                        operation_attrs["context_system_instruction"] = (
+                                            context_system[:500]
+                                        )  # Truncate if very long
+                                except Exception as e:
+                                    logging.warning(
+                                        f"Error extracting context system instructions: {e}"
+                                    )
+
+                        elif operation == "input_transcription" and args:
+                            # Extract input transcription
+                            evt = args[0] if args else None
+                            if (
+                                evt
+                                and hasattr(evt, "serverContent")
+                                and evt.serverContent.inputTranscription
+                            ):
+                                text = evt.serverContent.inputTranscription.text
+                                if text:
+                                    operation_attrs["transcript"] = text
+                                    operation_attrs["is_input"] = True
+
+                        elif operation == "output_transcription" and args:
+                            # Extract output transcription
+                            evt = args[0] if args else None
+                            if (
+                                evt
+                                and hasattr(evt, "serverContent")
+                                and evt.serverContent.outputTranscription
+                            ):
+                                text = evt.serverContent.outputTranscription.text
+                                if text:
+                                    operation_attrs["transcript"] = text
+                                    operation_attrs["is_input"] = False
+
+                        elif operation == "tool_call" and args:
+                            # Extract tool call information
+                            evt = args[0] if args else None
+                            if evt and hasattr(evt, "toolCall") and evt.toolCall.functionCalls:
+                                function_calls = evt.toolCall.functionCalls
+                                if function_calls:
+                                    # Add information about the first function call
+                                    call = function_calls[0]
+                                    operation_attrs["tool.function_name"] = call.name
+                                    operation_attrs["tool.call_id"] = call.id
+                                    operation_attrs["tool.calls_count"] = len(function_calls)
+
+                                    # Add all function names being called
+                                    all_function_names = [c.name for c in function_calls]
+                                    operation_attrs["tool.all_function_names"] = ",".join(
+                                        all_function_names
+                                    )
+
+                                    # Add arguments for the first call (truncated if too long)
+                                    try:
+                                        args_str = json.dumps(call.args) if call.args else "{}"
+                                        if len(args_str) > 1000:
+                                            args_str = args_str[:1000] + "..."
+                                        operation_attrs["tool.arguments"] = args_str
+                                    except Exception:
+                                        operation_attrs["tool.arguments"] = str(call.args)[:1000]
+
+                        elif operation == "tool_result" and args:
+                            # Extract tool result information
+                            tool_result_message = args[0] if args else None
+                            if tool_result_message and isinstance(tool_result_message, dict):
+                                # Extract the tool call information
+                                tool_call_id = tool_result_message.get("tool_call_id")
+                                tool_call_name = tool_result_message.get("tool_call_name")
+                                result_content = tool_result_message.get("content")
+
+                                if tool_call_id:
+                                    operation_attrs["tool.call_id"] = tool_call_id
+                                if tool_call_name:
+                                    operation_attrs["tool.function_name"] = tool_call_name
+
+                                # Parse and capture the result
+                                if result_content:
+                                    try:
+                                        result = json.loads(result_content)
+                                        # Serialize the result, truncating if too long
+                                        result_str = json.dumps(result)
+                                        if len(result_str) > 2000:  # Larger limit for results
+                                            result_str = result_str[:2000] + "..."
+                                        operation_attrs["tool.result"] = result_str
+
+                                        # Add result status/success indicator if present
+                                        if isinstance(result, dict):
+                                            if "error" in result:
+                                                operation_attrs["tool.result_status"] = "error"
+                                            elif "success" in result:
+                                                operation_attrs["tool.result_status"] = "success"
+                                            else:
+                                                operation_attrs["tool.result_status"] = "completed"
+
+                                    except json.JSONDecodeError as e:
+                                        operation_attrs["tool.result"] = (
+                                            f"Invalid JSON: {str(result_content)[:500]}"
+                                        )
+                                        operation_attrs["tool.result_status"] = "parse_error"
+                                    except Exception as e:
+                                        operation_attrs["tool.result"] = (
+                                            f"Error processing result: {str(e)}"
+                                        )
+                                        operation_attrs["tool.result_status"] = "processing_error"
+
+                        elif operation == "usage_metadata" and args:
+                            # Token usage will be handled by the original start_llm_usage_metrics method
+                            evt = args[0] if args else None
+                            if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
+                                usage = evt.usageMetadata
+                                if hasattr(usage, "promptTokenCount"):
+                                    operation_attrs["tokens.prompt"] = usage.promptTokenCount or 0
+                                if hasattr(usage, "responseTokenCount"):
+                                    operation_attrs["tokens.completion"] = (
+                                        usage.responseTokenCount or 0
+                                    )
+                                if hasattr(usage, "totalTokenCount"):
+                                    operation_attrs["tokens.total"] = usage.totalTokenCount or 0
+
+                        # Add all attributes to the span
+                        add_gemini_live_span_attributes(
+                            span=current_span,
+                            service_name=service_class_name,
+                            model=model_name,
+                            operation_name=operation,
+                            voice_id=voice_id,
+                            language=language_code,
+                            modalities=modalities,
+                            settings=settings,
+                            **operation_attrs,
+                        )
+
+                        # For usage_metadata operation, also handle token usage metrics
+                        if operation == "usage_metadata" and hasattr(
+                            self, "start_llm_usage_metrics"
+                        ):
+                            evt = args[0] if args else None
+                            if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
+                                usage = evt.usageMetadata
+                                # Create LLMTokenUsage object
+                                from pipecat.metrics.metrics import LLMTokenUsage
+
+                                tokens = LLMTokenUsage(
+                                    prompt_tokens=usage.promptTokenCount or 0,
+                                    completion_tokens=usage.responseTokenCount or 0,
+                                    total_tokens=usage.totalTokenCount or 0,
+                                )
+                                _add_token_usage_to_span(current_span, tokens)
+
+                        # Run the original function
+                        result = await func(self, *args, **kwargs)
+
+                        return result
+
+                    except Exception as e:
+                        current_span.record_exception(e)
+                        current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                        raise
+
+            except Exception as e:
+                logging.error(f"Error in Gemini Live tracing (continuing without tracing): {e}")
+                # If tracing fails, fall back to the original function
+                return await func(self, *args, **kwargs)
+
+        return wrapper
+
     return decorator

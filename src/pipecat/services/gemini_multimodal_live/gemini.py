@@ -60,6 +60,7 @@ from pipecat.services.openai.llm import (
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_gemini_live
 
 from . import events
 
@@ -803,6 +804,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
         await self.send_client_event(evt)
 
+    @traced_gemini_live(operation="tool_result")
     async def _tool_result(self, tool_result_message):
         # For now we're shoving the name into the tool_call_id field, so this
         # will work until we revisit that.
@@ -827,6 +829,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self._websocket.send(response_message)
         # await self._websocket.send(json.dumps({"clientContent": {"turnComplete": True}}))
 
+    @traced_gemini_live(operation="setup")
     async def _handle_evt_setup_complete(self, evt):
         # If this is our first context frame, run the LLM
         self._api_session_ready = True
@@ -873,6 +876,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
         await self.push_frame(frame)
 
+    @traced_gemini_live(operation="tool_call")
     async def _handle_evt_tool_call(self, evt):
         function_calls = evt.toolCall.functionCalls
         if not function_calls:
@@ -900,6 +904,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         await self.push_frame(LLMFullResponseEndFrame())
 
+    @traced_gemini_live(operation="input_transcription")
     async def _handle_evt_input_transcription(self, evt):
         """Handle the input transcription event.
 
@@ -945,6 +950,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 FrameDirection.UPSTREAM,
             )
 
+    @traced_gemini_live(operation="output_transcription")
     async def _handle_evt_output_transcription(self, evt):
         if not evt.serverContent.outputTranscription:
             return
@@ -960,6 +966,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
 
+    @traced_gemini_live(operation="usage_metadata")
     async def _handle_evt_usage_metadata(self, evt):
         if not evt.usageMetadata:
             return
