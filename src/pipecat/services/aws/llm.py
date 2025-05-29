@@ -631,6 +631,8 @@ class AWSBedrockLLMService(LLMService):
         cache_creation_input_tokens = 0
         use_completion_tokens_estimate = False
 
+        using_noop_tool = False
+
         try:
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
@@ -670,12 +672,13 @@ class AWSBedrockLLMService(LLMService):
             tools = context.tools or []
             if has_tool_content and not tools:
                 tools = [self._create_no_op_tool()]
+                using_noop_tool = True
 
             if tools:
                 tool_config = {"tools": tools}
 
                 # Only add tool_choice if we have real tools (not just no-op)
-                if context.tools and context.tool_choice:
+                if not using_noop_tool and context.tool_choice:
                     if context.tool_choice == "auto":
                         tool_config["toolChoice"] = {"auto": {}}
                     elif context.tool_choice == "none":
@@ -735,8 +738,8 @@ class AWSBedrockLLMService(LLMService):
                         try:
                             arguments = json.loads(json_accumulator) if json_accumulator else {}
 
-                            # Only call function if it's not the no-op tool
-                            if tool_use_block["name"] != "no_operation":
+                            # Only call function if it's not the no_operation tool
+                            if not using_noop_tool:
                                 await self.call_function(
                                     context=context,
                                     tool_call_id=tool_use_block["id"],
