@@ -11,6 +11,7 @@ import tkinter as tk
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.examples.run import maybe_capture_participant_camera
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -107,6 +108,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        await maybe_capture_participant_camera(transport, client, framerate=30)
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
