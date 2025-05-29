@@ -37,8 +37,7 @@ from smart_endpointing import (
 )
 
 from pipecat.audio.filters.krisp_filter import KrispFilter
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.audio.vad.silero import SileroVADAnalyzer, VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
@@ -175,7 +174,13 @@ async def run_bot(
             audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer(
+                params=VADParams(
+                    confidence=0.7,
+                    start_secs=0.2,
+                    stop_secs=0.4,
+                )
+            ),
             serializer=serializer,
             audio_in_filter=audio_in_filter,
         ),
