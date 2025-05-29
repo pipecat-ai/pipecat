@@ -152,7 +152,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                     raise
                 finally:
                     # Update TTFB metric at the end
-                    ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
+                    ttfb_ms: Optional[int] = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
                     if ttfb_ms is not None:
                         span.set_attribute("metrics.ttfb_ms", ttfb_ms)
 
@@ -238,7 +238,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 ) as current_span:
                     try:
                         # Get TTFB metric if available
-                        ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
+                        ttfb_ms: Optional[int] = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
 
                         # Use settings from the service if available
                         settings = getattr(self, "_settings", {})
@@ -460,7 +460,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.start_llm_usage_metrics = original_start_llm_usage_metrics
 
                         # Update TTFB metric
-                        ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
+                        ttfb_ms: Optional[int] = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
                         if ttfb_ms is not None:
                             current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
             except Exception as e:
