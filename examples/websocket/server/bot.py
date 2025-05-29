@@ -44,8 +44,6 @@ async def run_bot(websocket_client):
         websocket=websocket_client,
         params=FastAPIWebsocketParams(
             audio_in_enabled=True,
-            audio_in_sample_rate=16000,  # Need to be 16_000 in order to VAD to work as expected
-            audio_out_sample_rate=24000,
             audio_out_enabled=True,
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
