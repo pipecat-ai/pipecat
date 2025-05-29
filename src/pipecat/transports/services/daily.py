@@ -372,9 +372,10 @@ class DailyTransportClient(EventHandler):
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         future = self._get_event_loop().create_future()
 
+        destination = frame.transport_destination
         audio_source: Optional[CustomAudioSource] = None
         if not destination and self._microphone_track:
             audio_source = self._microphone_track.source
@@ -383,17 +384,15 @@ class DailyTransportClient(EventHandler):
             audio_source = track.source
 
         if audio_source:
-            audio_source.write_frames(frames, completion=completion_callback(future))
+            audio_source.write_frames(frame.audio, completion=completion_callback(future))
         else:
             logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
             future.set_result(None)
 
         await future
 
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
-        if not destination and self._camera:
+    async def write_video_frame(self, frame: OutputImageRawFrame):
+        if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -1230,13 +1229,11 @@ class DailyOutputTransport(BaseOutputTransport):
             }
         )
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
-        await self._client.write_raw_audio_frames(frames, destination)
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        await self._client.write_audio_frame(frame)
 
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
-        await self._client.write_raw_video_frame(frame, destination)
+    async def write_video_frame(self, frame: OutputImageRawFrame):
+        await self._client.write_video_frame(frame)
 
 
 class DailyTransport(BaseTransport):
