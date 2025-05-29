@@ -252,7 +252,11 @@ class FalSTTService(SegmentedSTTService):
                     await self._handle_transcription(text, True, self._settings["language"])
                     logger.debug(f"Transcription: [{text}]")
                     yield TranscriptionFrame(
-                        text, "", time_now_iso8601(), Language(self._settings["language"])
+                        text,
+                        "",
+                        time_now_iso8601(),
+                        Language(self._settings["language"]),
+                        result=response,
                     )
 
         except Exception as e:

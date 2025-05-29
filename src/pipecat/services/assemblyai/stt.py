@@ -123,9 +123,21 @@ class AssemblyAISTTService(STTService):
             language = self._settings["language"]
 
             if is_final:
-                frame = TranscriptionFrame(transcript.text, "", timestamp, language)
+                frame = TranscriptionFrame(
+                    transcript.text,
+                    "",
+                    timestamp,
+                    language,
+                    result=transcript,
+                )
             else:
-                frame = InterimTranscriptionFrame(transcript.text, "", timestamp, language)
+                frame = InterimTranscriptionFrame(
+                    transcript.text,
+                    "",
+                    timestamp,
+                    language,
+                    result=transcript,
+                )
 
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(transcript.text, is_final, language),
