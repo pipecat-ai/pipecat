@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The examples runner is now public from the `pipecat.examples` package. This
+  allows everyone to build their own examples and run them easily.
+
 - It is now possible to push `OutputDTMFFrame` or `OutputDTMFUrgentFrame` with
   `DailyTransport`. This will be sent properly if a Daily dial-out connection
   has been established.
