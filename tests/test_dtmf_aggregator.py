@@ -81,14 +81,15 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_multiple_aggregations(self):
         """Test multiple DTMF sequences with pound termination."""
-        aggregator = DTMFAggregator(timeout=0.1)
+        aggregator = DTMFAggregator(timeout=0.2)
         frames_to_send = [
             InputDTMFFrame(button=KeypadEntry.ONE),
             InputDTMFFrame(button=KeypadEntry.TWO),
             InputDTMFFrame(button=KeypadEntry.POUND),  # First sequence
+            SleepFrame(sleep=0.1),
             InputDTMFFrame(button=KeypadEntry.FOUR),
             InputDTMFFrame(button=KeypadEntry.FIVE),
-            SleepFrame(sleep=0.2),  # Second sequence via timeout
+            SleepFrame(sleep=0.3),  # Second sequence via timeout
         ]
         expected_down_frames = [
             InputDTMFFrame,

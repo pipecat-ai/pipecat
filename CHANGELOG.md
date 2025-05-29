@@ -50,6 +50,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.68] - 2025-05-28
 
+### Added
+
 - Added `GoogleHttpTTSService` which uses Google's HTTP TTS API.
 
 - Added `TavusTransport`, a new transport implementation compatible with any
