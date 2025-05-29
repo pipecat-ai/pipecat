@@ -45,6 +45,7 @@ FINALIZED_TOKEN = "<fin>"
 
 
 def is_end_token(token: dict) -> bool:
+    """Determine if a token is an end token."""
     return token["text"] == END_TOKEN or token["text"] == FINALIZED_TOKEN
 
 
@@ -270,8 +271,12 @@ class SonioxSTTService(STTService):
                 tokens = content["tokens"]
 
                 if tokens:
-                    # Got at least one token, so we can reset the auto finalize delay.
-                    self._last_tokens_received = time.time()
+                    if len(tokens) == 1 and tokens[0]["text"] == FINALIZED_TOKEN:
+                        # Ignore finalized token, prevent auto-finalize cycling.
+                        pass
+                    else:
+                        # Got at least one token, so we can reset the auto finalize delay.
+                        self._last_tokens_received = time.time()
 
                 # We will only send the final tokens after we get the "endpoint" event.
                 non_final_transcription = ""
