@@ -12,7 +12,7 @@ from loguru import logger
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -21,10 +21,12 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.services.daily import DailyParams
+from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.setup import setup_tracing
 
 load_dotenv(override=True)
@@ -43,11 +45,6 @@ if IS_TRACING_ENABLED:
         console_export=bool(os.getenv("OTEL_CONSOLE_EXPORT")),
     )
     logger.info("OpenTelemetry tracing initialized")
-
-
-async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
-    await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -72,23 +69,28 @@ transport_params = {
 }
 
 
+async def fetch_weather_from_api(params: FunctionCallParams):
+    temperature = 75 if params.arguments["format"] == "fahrenheit" else 24
+    await params.result_callback(
+        {
+            "conditions": "nice",
+            "temperature": temperature,
+            "format": params.arguments["format"],
+            "timestamp": time_now_iso8601(),
+        }
+    )
+
+
+system_instruction = """
+You are a helpful assistant who can answer questions and use tools.
+
+You have a tool called "get_current_weather" that can be used to get the current weather. If the user asks
+for the weather, call this function.
+"""
+
+
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
-
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    )
-
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"), params=OpenAILLMService.InputParams(temperature=0.5)
-    )
-
-    # You can also register a function_name of None to get all functions
-    # sent to the same callback with an additional function_name parameter.
-    llm.register_function("get_current_weather", fetch_weather_from_api)
 
     weather_function = FunctionSchema(
         name="get_current_weather",
@@ -106,25 +108,29 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         },
         required=["location", "format"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function])
+    search_tool = {"google_search": {}}
+    tools = ToolsSchema(
+        standard_tools=[weather_function], custom_tools={AdapterType.GEMINI: [search_tool]}
+    )
 
-    messages = [
-        {
-            "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-        },
-    ]
+    llm = GeminiMultimodalLiveLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        system_instruction=system_instruction,
+        tools=tools,
+    )
 
-    context = OpenAILLMContext(messages, tools)
+    llm.register_function("get_current_weather", fetch_weather_from_api)
+
+    context = OpenAILLMContext(
+        [{"role": "user", "content": "Say hello."}],
+    )
     context_aggregator = llm.create_context_aggregator(context)
 
     pipeline = Pipeline(
         [
             transport.input(),
-            stt,
             context_aggregator.user(),
             llm,
-            tts,
             transport.output(),
             context_aggregator.assistant(),
         ]
