@@ -76,5 +76,6 @@ async def main():
     except asyncio.CancelledError:
         print("Tasks cancelled (probably due to shutdown).")
 
+
 if __name__ == "__main__":
     asyncio.run(main())

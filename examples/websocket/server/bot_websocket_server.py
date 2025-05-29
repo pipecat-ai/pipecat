@@ -13,7 +13,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frameworks.rtvi import RTVIProcessor, RTVIConfig, RTVIObserver
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 from pipecat.transports.network.websocket_server import (
@@ -30,6 +30,7 @@ Your output will be converted to audio so don't include special characters in yo
 
 Respond to what the user said in a creative and helpful way. Keep your responses brief. One or two sentences at most.
 """
+
 
 async def run_bot_websocket_server():
     ws_transport = WebsocketServerTransport(
