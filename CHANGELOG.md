@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages array. This workaround includes a no_op factory function call is
   used to satisfy the requirement.
 
+- Fixed `WebsocketClientTransport` to use `FrameProcessorSetup.task_manager`
+  instead of `StartFrame.task_manager`.
+
 ## [0.0.68] - 2025-05-28
 
 ### Added
