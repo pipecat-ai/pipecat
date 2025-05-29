@@ -35,17 +35,9 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-KEEPALIVE_MESSAGE = json.dumps(
-    {
-        "type": "keepalive",
-    }
-)
+KEEPALIVE_MESSAGE = '{"type": "keepalive"}'
 
-FINALIZE_MESSAGE = json.dumps(
-    {
-        "type": "finalize",
-    }
-)
+FINALIZE_MESSAGE = '{"type": "finalize"}'
 
 END_TOKEN = "<end>"
 
@@ -74,7 +66,7 @@ def _prepare_language_hints(
         return None
 
     prepared_languages = [language_to_soniox_language(lang) for lang in language_hints]
-    # Remove duplicates (in case of language_hints with multiple regions)
+    # Remove duplicates (in case of language_hints with multiple regions).
     return list(set(prepared_languages))
 
 
@@ -96,14 +88,14 @@ class SonioxSTTService(STTService):
         sample_rate: Optional[int] = None,
         params: SonioxInputParams = SonioxInputParams(),
         enable_vad: bool = True,
-        auto_finalize_delay_ms: int | None = 3000,
+        auto_finalize_delay_ms: Optional[int] = 3000,
         **kwargs,
     ):
         """Initialize the Soniox STT service.
 
         Args:
-            api_key: Soniox API key
-            url: Soniox WebSocket API URL
+            api_key: Soniox API key.
+            url: Soniox WebSocket API URL.
             model: Transcription model to use.
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
@@ -112,7 +104,7 @@ class SonioxSTTService(STTService):
                 transcription (only InterimTranscriptionFrame), finalize the transcription by
                 sending the finalize message so user can receive the final transcript. If set
                 to `None`, the auto finalize feature is disabled.
-            **kwargs: Additional arguments passed to the STTService
+            **kwargs: Additional arguments passed to the STTService.
         """
         sample_rate = sample_rate or (params.sample_rate if params.sample_rate else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -126,7 +118,7 @@ class SonioxSTTService(STTService):
         self._websocket = None
 
         self._final_transcription_buffer = ""
-        self._last_tokens_received: float | None = None
+        self._last_tokens_received: Optional[float] = None
 
         self._receive_task = None
         self._keepalive_task = None
@@ -143,7 +135,7 @@ class SonioxSTTService(STTService):
         if not self._websocket:
             logger.error(f"Unable to connect to Soniox API at {self._url}")
 
-        # Send the initial configuration message
+        # Send the initial configuration message.
         config = {
             "api_key": self._api_key,
             "model": self._model_name,
@@ -158,7 +150,7 @@ class SonioxSTTService(STTService):
             "client_reference_id": self._params.client_reference_id,
         }
 
-        # Send the configuration message
+        # Send the configuration message.
         await self._websocket.send(json.dumps(config))
 
         if self._websocket and not self._receive_task:
@@ -278,10 +270,10 @@ class SonioxSTTService(STTService):
                 tokens = content["tokens"]
 
                 if tokens:
-                    # Got at least one token, so we can reset the auto finalize delay
+                    # Got at least one token, so we can reset the auto finalize delay.
                     self._last_tokens_received = time.time()
 
-                # We will only send the final tokens after we get the "endpoint" event
+                # We will only send the final tokens after we get the "endpoint" event.
                 non_final_transcription = ""
 
                 for token in tokens:
@@ -309,7 +301,7 @@ class SonioxSTTService(STTService):
                 error_code = content.get("error_code")
                 error_message = content.get("error_message")
                 if error_code or error_message:
-                    # In case of error, still send the final transcript (if any remaining in the buffer)
+                    # In case of error, still send the final transcript (if any remaining in the buffer).
                     await send_endpoint_transcript()
                     logger.error(
                         f"{self} error: {error_code} (_receive_task_handler) - {error_message}"
@@ -322,13 +314,13 @@ class SonioxSTTService(STTService):
 
                 finished = content.get("finished")
                 if finished:
-                    # When finished, still send the final transcript (if any remaining in the buffer)
+                    # When finished, still send the final transcript (if any remaining in the buffer).
                     await send_endpoint_transcript()
                     logger.debug("Transcription finished.")
                     await self._cleanup()
 
         except websockets.exceptions.ConnectionClosed:
-            # Expected when closing the connection
+            # Expected when closing the connection.
             pass
         except Exception as e:
             logger.error(f"{self} error: {e}")
@@ -346,20 +338,20 @@ class SonioxSTTService(STTService):
                 if not self._websocket or self._websocket.closed:
                     break
 
-                # Check if we have anything to send
+                # Check if we have anything to send.
                 if not self._final_transcription_buffer:
                     continue
 
-                # Check if enough time has passed since the last tokens were received
+                # Check if enough time has passed since the last tokens were received.
                 if self._last_tokens_received:
                     last_token_age_ms = (time.time() - self._last_tokens_received) * 1000
 
                     if last_token_age_ms > self._auto_finalize_delay_ms:
-                        # No new tokens received for a while, finalize the transcription
+                        # No new tokens received for a while, finalize the transcription.
                         logger.debug("No pending frames, sending finalize message")
                         await self._websocket.send(FINALIZE_MESSAGE)
         except websockets.exceptions.ConnectionClosed:
-            # Expected when closing the connection
+            # Expected when closing the connection.
             pass
         except Exception as e:
             logger.error(f"{self} error (_finalize_if_no_tokens_task_handler): {e}")
