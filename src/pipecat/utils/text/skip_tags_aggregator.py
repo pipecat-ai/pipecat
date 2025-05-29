@@ -92,3 +92,5 @@ class SkipTagsAggregator(BaseTextAggregator):
         buffered text.
         """
         self._text = ""
+        self._current_tag = None
+        self._current_tag_index = 0
