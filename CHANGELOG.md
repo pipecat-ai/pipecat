@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `WebsocketClientTransport` to use `FrameProcessorSetup.task_manager`
   instead of `StartFrame.task_manager`.
 
+### Performance
+
+- Use `uvloop` as the new event loop on Linux and macOS systems.
+
 ## [0.0.68] - 2025-05-28
 
 ### Added
