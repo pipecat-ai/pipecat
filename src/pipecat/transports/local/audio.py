@@ -10,7 +10,7 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.frames.frames import InputAudioRawFrame, StartFrame
+from pipecat.frames.frames import InputAudioRawFrame, OutputAudioRawFrame, StartFrame
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
@@ -122,10 +122,10 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             self._out_stream.close()
             self._out_stream = None
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         if self._out_stream:
             await self.get_event_loop().run_in_executor(
-                self._executor, self._out_stream.write, frames
+                self._executor, self._out_stream.write, frame.audio
             )
 
 
