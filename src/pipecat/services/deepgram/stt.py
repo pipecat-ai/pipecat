@@ -90,6 +90,7 @@ class DeepgramSTTService(STTService):
         if "language" in merged_options and isinstance(merged_options["language"], Language):
             merged_options["language"] = merged_options["language"].value
 
+        self.set_model_name(merged_options["model"])
         self._settings = merged_options
         self._addons = addons
 
