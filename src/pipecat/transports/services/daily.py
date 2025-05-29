@@ -1601,10 +1601,16 @@ class DailyTransport(BaseTransport):
         except KeyError:
             language = None
         if is_final:
-            frame = TranscriptionFrame(text, participant_id, timestamp, language)
+            frame = TranscriptionFrame(text, participant_id, timestamp, language, result=message)
             logger.debug(f"Transcription (from: {participant_id}): [{text}]")
         else:
-            frame = InterimTranscriptionFrame(text, participant_id, timestamp, language)
+            frame = InterimTranscriptionFrame(
+                text,
+                participant_id,
+                timestamp,
+                language,
+                result=message,
+            )
 
         if self._input:
             await self._input.push_transcription_frame(frame)

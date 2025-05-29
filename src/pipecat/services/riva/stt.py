@@ -256,7 +256,13 @@ class RivaSTTService(STTService):
                 if result.is_final:
                     await self.stop_processing_metrics()
                     await self.push_frame(
-                        TranscriptionFrame(transcript, "", time_now_iso8601(), self._language_code)
+                        TranscriptionFrame(
+                            transcript,
+                            "",
+                            time_now_iso8601(),
+                            self._language_code,
+                            result=result,
+                        )
                     )
                     await self._handle_transcription(
                         transcript=transcript,
@@ -266,7 +272,11 @@ class RivaSTTService(STTService):
                 else:
                     await self.push_frame(
                         InterimTranscriptionFrame(
-                            transcript, "", time_now_iso8601(), self._language_code
+                            transcript,
+                            "",
+                            time_now_iso8601(),
+                            self._language_code,
+                            result=result,
                         )
                     )
 

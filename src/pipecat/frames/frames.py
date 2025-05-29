@@ -228,14 +228,15 @@ class TTSTextFrame(TextFrame):
 
 @dataclass
 class TranscriptionFrame(TextFrame):
-    """A text frame with transcription-specific data. Will be placed in the
-    transport's receive queue when a participant speaks.
+    """A text frame with transcription-specific data. The `result` field
+    contains the result from the STT service if available.
 
     """
 
     user_id: str
     timestamp: str
     language: Optional[Language] = None
+    result: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -243,14 +244,16 @@ class TranscriptionFrame(TextFrame):
 
 @dataclass
 class InterimTranscriptionFrame(TextFrame):
-    """A text frame with interim transcription-specific data. Will be placed in
-    the transport's receive queue when a participant speaks.
+    """A text frame with interim transcription-specific data. The `result` field
+    contains the result from the STT service if available.
+
     """
 
     text: str
     user_id: str
     timestamp: str
     language: Optional[Language] = None
+    result: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
