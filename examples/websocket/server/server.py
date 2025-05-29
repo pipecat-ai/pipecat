@@ -3,8 +3,10 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+import asyncio
+import os
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import uvicorn
 from dotenv import load_dotenv
@@ -16,7 +18,8 @@ load_dotenv(override=True)
 
 NUMBER_OF_ROOMS = 1
 
-from bot import run_bot
+from bot_fast_api import run_bot
+from bot_websocket_server import run_bot_websocket_server
 
 
 @asynccontextmanager
@@ -50,10 +53,25 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/connect")
 async def bot_connect(request: Request) -> Dict[Any, Any]:
-    return {
-        "ws_url": "ws://localhost:7860/ws"
-    }
+    server_mode = os.getenv("WEBSOCKET_SERVER", "fast_api")
+    if server_mode == "websocket_server":
+        ws_url = "ws://localhost:8765"
+    else:
+        ws_url = "ws://localhost:7860/ws"
+    return {"ws_url": ws_url}
 
+
+async def main():
+    server_mode = os.getenv("WEBSOCKET_SERVER", "fast_api")
+    tasks = []
+    if server_mode == "websocket_server":
+        tasks.append(run_bot_websocket_server())
+
+    config = uvicorn.Config(app, host="0.0.0.0", port=7860)
+    server = uvicorn.Server(config)
+    tasks.append(server.serve())
+
+    await asyncio.gather(*tasks)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    asyncio.run(main())
