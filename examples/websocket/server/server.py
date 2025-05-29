@@ -64,14 +64,17 @@ async def bot_connect(request: Request) -> Dict[Any, Any]:
 async def main():
     server_mode = os.getenv("WEBSOCKET_SERVER", "fast_api")
     tasks = []
-    if server_mode == "websocket_server":
-        tasks.append(run_bot_websocket_server())
+    try:
+        if server_mode == "websocket_server":
+            tasks.append(run_bot_websocket_server())
 
-    config = uvicorn.Config(app, host="0.0.0.0", port=7860)
-    server = uvicorn.Server(config)
-    tasks.append(server.serve())
+        config = uvicorn.Config(app, host="0.0.0.0", port=7860)
+        server = uvicorn.Server(config)
+        tasks.append(server.serve())
 
-    await asyncio.gather(*tasks)
+        await asyncio.gather(*tasks)
+    except asyncio.CancelledError:
+        print("Tasks cancelled (probably due to shutdown).")
 
 if __name__ == "__main__":
     asyncio.run(main())
