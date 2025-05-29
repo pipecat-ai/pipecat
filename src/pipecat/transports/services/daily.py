@@ -22,6 +22,8 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
+    OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
@@ -1220,6 +1222,14 @@ class DailyOutputTransport(BaseOutputTransport):
     async def register_audio_destination(self, destination: str):
         await self._client.register_audio_destination(destination)
 
+    async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        await self._client.send_dtmf(
+            {
+                "sessionId": frame.transport_destination,
+                "tones": frame.button.value,
+            }
+        )
+
     async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         await self._client.write_raw_audio_frames(frames, destination)
 
@@ -1372,6 +1382,14 @@ class DailyTransport(BaseTransport):
         await self._client.stop_dialout(participant_id)
 
     async def send_dtmf(self, settings):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`DailyTransport.send_dtmf()` is deprecated, push an `OutputDTMFFrame` or an `OutputDTMFUrgentFrame` instead.",
+                DeprecationWarning,
+            )
         await self._client.send_dtmf(settings)
 
     async def sip_call_transfer(self, settings):

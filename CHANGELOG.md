@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- It is now possible to push `OutputDTMFFrame` or `OutputDTMFUrgentFrame` with
+  `DailyTransport`. This will be sent properly if a Daily dial-out connection
+  has been established.
+
 - Added `OutputDTMFUrgentFrame` to send a DTMF keypress quickly. The previous
   `OutputDTMFFrame` queues the keypress with the rest of data frames.
 
 - Added new functions `DailyTransport.start_transcription()` and
   `DailyTransport.stop_transcription()` to be able to start and stop Daily
   transcription dynamically (maybe with different settings).
+
+### Deprecated
+
+- `DailyTransport.send_dtmf()` is deprecated, push an `OutputDTMFFrame` or an
+  `OutputDTMFUrgentFrame` instead.
 
 ### Fixed
 
