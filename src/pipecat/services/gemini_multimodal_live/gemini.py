@@ -60,7 +60,7 @@ from pipecat.services.openai.llm import (
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_gemini_live
+from pipecat.utils.tracing.service_decorators import traced_multimodal_llm, traced_stt, traced_tts
 
 from . import events
 
@@ -379,6 +379,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._last_transcription_sent = ""
         self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
+        self._llm_output_buffer = ""
 
         self._sample_rate = 24000
 
@@ -804,7 +805,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
         await self.send_client_event(evt)
 
-    @traced_gemini_live(operation="tool_result")
+    @traced_multimodal_llm(operation="tool_result")
     async def _tool_result(self, tool_result_message):
         # For now we're shoving the name into the tool_call_id field, so this
         # will work until we revisit that.
@@ -829,7 +830,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self._websocket.send(response_message)
         # await self._websocket.send(json.dumps({"clientContent": {"turnComplete": True}}))
 
-    @traced_gemini_live(operation="setup")
+    @traced_multimodal_llm(operation="setup")
     async def _handle_evt_setup_complete(self, evt):
         # If this is our first context frame, run the LLM
         self._api_session_ready = True
@@ -876,7 +877,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
         await self.push_frame(frame)
 
-    @traced_gemini_live(operation="tool_call")
+    @traced_multimodal_llm(operation="tool_call")
     async def _handle_evt_tool_call(self, evt):
         function_calls = evt.toolCall.functionCalls
         if not function_calls:
@@ -891,10 +892,22 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 arguments=call.args,
             )
 
+    @traced_tts
+    async def _handle_bot_transcription(self, text: str):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
         text = self._bot_text_buffer
+        if text:
+            # TEXT modality
+            await self._handle_bot_transcription(text)
+        else:
+            # AUDIO modality
+            await self._handle_bot_transcription(self._llm_output_buffer)
         self._bot_text_buffer = ""
+        self._llm_output_buffer = ""
 
         # Only push the TTSStoppedFrame the bot is outputting audio
         # when text is found, modalities is set to TEXT and no audio
@@ -904,7 +917,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         await self.push_frame(LLMFullResponseEndFrame())
 
-    @traced_gemini_live(operation="input_transcription")
+    @traced_stt
+    async def _handle_user_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def _handle_evt_input_transcription(self, evt):
         """Handle the input transcription event.
 
@@ -940,6 +959,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
             # Send a TranscriptionFrame with the complete sentence
             logger.debug(f"[Transcription:user] [{complete_sentence}]")
+            await self._handle_user_transcription(
+                complete_sentence, True, self._settings["language"]
+            )
             await self.push_frame(
                 TranscriptionFrame(
                     text=complete_sentence,
@@ -950,7 +972,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 FrameDirection.UPSTREAM,
             )
 
-    @traced_gemini_live(operation="output_transcription")
     async def _handle_evt_output_transcription(self, evt):
         if not evt.serverContent.outputTranscription:
             return
@@ -963,10 +984,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not text:
             return
 
+        # Collect text for tracing
+        self._llm_output_buffer += text
+
         await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
 
-    @traced_gemini_live(operation="usage_metadata")
+    @traced_multimodal_llm(operation="usage_metadata")
     async def _handle_evt_usage_metadata(self, evt):
         if not evt.usageMetadata:
             return
