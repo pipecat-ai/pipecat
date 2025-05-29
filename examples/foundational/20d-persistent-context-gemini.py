@@ -15,7 +15,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_video
+from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_camera
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -286,7 +286,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
 
-        await maybe_capture_participant_video(transport, client)
+        await maybe_capture_participant_camera(transport, client)
 
         global client_id
         client_id = get_transport_client_id(transport, client)

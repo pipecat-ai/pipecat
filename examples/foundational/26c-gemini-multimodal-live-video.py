@@ -10,10 +10,10 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from run import maybe_capture_participant_video
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.examples.run import maybe_capture_participant_camera, maybe_capture_participant_screen
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -92,7 +92,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     async def on_client_connected(transport, client):
         logger.info(f"Client connected: {client}")
 
-        await maybe_capture_participant_video(transport, client)
+        await maybe_capture_participant_camera(transport, client, framerate=1)
+        await maybe_capture_participant_screen(transport, client, framerate=1)
 
         await task.queue_frames([context_aggregator.user().get_context_frame()])
         await asyncio.sleep(3)

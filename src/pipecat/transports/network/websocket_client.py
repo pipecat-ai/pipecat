@@ -180,7 +180,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._session = session
         self._params = params
 
-        # write_raw_audio_frames() is called quickly, as soon as we get audio
+        # write_audio_frame() is called quickly, as soon as we get audio
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
@@ -215,9 +215,9 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         frame = OutputAudioRawFrame(
-            audio=frames,
+            audio=frame.audio,
             sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
         )
