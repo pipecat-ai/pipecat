@@ -234,6 +234,6 @@ Remember: Use narrator voice for EVERYTHING except the actual quoted dialogue.""
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)

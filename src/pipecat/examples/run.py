@@ -10,11 +10,10 @@ import json
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 import aiohttp
 import uvicorn
-from daily_runner import configure
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 
 from pipecat.serializers.twilio import TwilioFrameSerializer
-from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
@@ -35,12 +34,31 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 load_dotenv(override=True)
 
 
+def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
+    if isinstance(transport, SmallWebRTCTransport):
+        return client.pc_id
+    elif isinstance(transport, DailyTransport):
+        return client["id"]
+    logger.warning(f"Unable to get client id from unsupported transport {type(transport)}")
+    return ""
+
+
+async def maybe_capture_participant_video(transport: BaseTransport, client: Any):
+    if isinstance(transport, DailyTransport):
+        await transport.capture_participant_video(client["id"], framerate=0, video_source="camera")
+        await transport.capture_participant_video(
+            client["id"], framerate=0, video_source="screenVideo"
+        )
+
+
 def run_example_daily(
     run_example: Callable,
     args: argparse.Namespace,
     params: DailyParams,
 ):
     logger.info("Running example with DailyTransport...")
+
+    from pipecat.examples.daily_runner import configure
 
     async def run():
         async with aiohttp.ClientSession() as session:
