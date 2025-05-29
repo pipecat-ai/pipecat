@@ -16,8 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 # Load environment variables
 load_dotenv(override=True)
 
-NUMBER_OF_ROOMS = 1
-
 from bot_fast_api import run_bot
 from bot_websocket_server import run_bot_websocket_server
 
