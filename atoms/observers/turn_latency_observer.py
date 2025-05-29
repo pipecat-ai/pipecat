@@ -70,6 +70,13 @@ class TurnLatencyObserver(BaseObserver):
         return max(self._latency_history)
 
     def get_latency_stats(self):
+        if not self._latency_history:
+            return {
+                "average": 0,
+                "median": 0,
+                "min": 0,
+                "max": 0,
+            }
         return {
             "average": self.get_average_latency(),
             "median": self.get_median_latency(),

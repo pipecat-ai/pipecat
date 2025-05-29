@@ -291,7 +291,6 @@ class FlowGraphManager(FrameProcessor):
         variable_extraction_client: BaseClient,
         response_model_client: BaseClient,
         conversation_pathway: ConversationalPathway,
-        transport_input_filter: TransportInputFilter,
         agent_input_params: AgentInputParams,
         vector_datastore: DocumentDBVectorStore,
     ):
@@ -306,7 +305,6 @@ class FlowGraphManager(FrameProcessor):
         self.agent_persona = agent_input_params.agent_persona
         self.api_node_handler = self.APICallNodeHandler(self)
         self._event_handlers: Dict[str, List[Callable[..., None]]] = {}
-        self.transport_input_filter: TransportInputFilter = transport_input_filter
         self.current_language: str = agent_input_params.current_language
         self._is_language_switching_enabled: bool = agent_input_params.is_language_switching_enabled
         self.custom_instructions: List[str] = agent_input_params.custom_instructions
@@ -803,14 +801,12 @@ class FlowGraphManager(FrameProcessor):
         hopped = await self._handle_hopping(context=context)
         if self.current_node.type == NodeType.API_CALL:
             if not hopped:
-                self.transport_input_filter.mute()
                 yield "Something went wrong, please try again later."
                 await self.push_frame(EndFrame())
                 logger.debug(f"hopping failed for api call node")
                 return
         self._update_user_context(context=context)
         if self.current_node.type == NodeType.DEFAULT:
-            self.transport_input_filter.unmute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
@@ -818,7 +814,6 @@ class FlowGraphManager(FrameProcessor):
                 async for chunk in self._handle_dynamic_response(context=context):
                     yield chunk
         elif self.current_node.type == NodeType.END_CALL:
-            self.transport_input_filter.mute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
@@ -829,7 +824,6 @@ class FlowGraphManager(FrameProcessor):
                 await self.push_frame(EndFrame())
             return
         elif self.current_node.type == NodeType.TRANSFER_CALL:
-            self.transport_input_filter.mute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
@@ -841,7 +835,6 @@ class FlowGraphManager(FrameProcessor):
                 )
             return
         elif self.current_node.type == NodeType.API_CALL:
-            self.transport_input_filter.mute()
             if self.current_node.static_text:
                 for chunk in self._handle_static_response(context=context):
                     yield chunk
@@ -971,12 +964,9 @@ class FlowGraphManager(FrameProcessor):
                         and hasattr(chunk.choices[0], "stop_reason")
                         and chunk.choices[0].stop_reason == self._end_call_tag
                     ):
-                        self.transport_input_filter.mute()
                         is_end_call = True
             if is_end_call:
                 await self.push_frame(EndFrame())
-            else:
-                self.transport_input_filter.unmute()
         except Exception as e:
             logger.error(f"Error handling dynamic response: {e}")
 

@@ -257,7 +257,6 @@ async def run_bot(
         system_instruction=classifier_system_instruction,
     )
 
-    transport_input_filter = TransportInputFilter()
     agent_flow_processor, agent_config = await initialize_conversational_agent(
         agent_id=agent_id,
         call_data=CallData(
@@ -267,7 +266,6 @@ async def run_bot(
                 "agent_number": call_details.get("to_phone", ""),
             }
         ),
-        transport_input_filter=transport_input_filter,
     )
     await agent_flow_processor.start()
 
@@ -307,8 +305,7 @@ async def run_bot(
 
     stt_mute_filter = STTMuteFilter(
         config=STTMuteConfig(
-            strategies={STTMuteStrategy.CUSTOM},
-            should_mute_callback=transport_input_filter.should_mute,
+            strategies={STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE},
         )
     )
 

@@ -32,7 +32,7 @@ class CallType(Enum):
 
 
 async def initialize_conversational_agent(
-    *, agent_id: str, call_data: CallData, transport_input_filter: Any
+    *, agent_id: str, call_data: CallData
 ) -> tuple[FlowGraphManager, Dict[str, Any]]:
     """Initialize a conversational agent with the specified configuration.
 
@@ -137,7 +137,6 @@ async def initialize_conversational_agent(
             flow_model_client=flow_model_client,
             variable_extraction_client=variable_extraction_client,
             conversation_pathway=conv_pathway,
-            transport_input_filter=transport_input_filter,
             vector_datastore=vector_datastore,
             agent_input_params=FlowGraphManager.AgentInputParams(
                 initial_variables=initial_variables,
