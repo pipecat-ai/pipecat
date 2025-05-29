@@ -98,7 +98,6 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-
         # Special handling for MessageFrame -> TransportMessageUrgentFrame
         if class_name == MessageFrame:
             try:
