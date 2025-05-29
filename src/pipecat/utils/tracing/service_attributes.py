@@ -60,7 +60,7 @@ def add_tts_span_attributes(
     settings: Optional[Dict[str, Any]] = None,
     character_count: Optional[int] = None,
     operation_name: str = "tts",
-    ttfb_ms: Optional[float] = None,
+    ttfb_ms: Optional[int] = None,
     **kwargs,
 ) -> None:
     """Add TTS-specific attributes to a span.
@@ -116,7 +116,7 @@ def add_stt_span_attributes(
     language: Optional[str] = None,
     settings: Optional[Dict[str, Any]] = None,
     vad_enabled: bool = False,
-    ttfb_ms: Optional[float] = None,
+    ttfb_ms: Optional[int] = None,
     **kwargs,
 ) -> None:
     """Add STT-specific attributes to a span.
@@ -178,7 +178,7 @@ def add_llm_span_attributes(
     system: Optional[str] = None,
     parameters: Optional[Dict[str, Any]] = None,
     extra_parameters: Optional[Dict[str, Any]] = None,
-    ttfb_ms: Optional[float] = None,
+    ttfb_ms: Optional[int] = None,
     **kwargs,
 ) -> None:
     """Add LLM-specific attributes to a span.
