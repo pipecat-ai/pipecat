@@ -413,22 +413,19 @@ class TransportMessageFrame(DataFrame):
 
 
 @dataclass
-class DTMFFrame(DataFrame):
+class DTMFFrame:
     """A DTMF button frame"""
 
     button: KeypadEntry
 
 
 @dataclass
-class InputDTMFFrame(DTMFFrame):
-    """A DTMF button input"""
+class OutputDTMFFrame(DTMFFrame, DataFrame):
+    """A DTMF keypress output that will be queued. If your transport supports
+    multiple dial-out destinations, use the `transport_destination` field to
+    specify where the DTMF keypress should be sent.
 
-    pass
-
-
-@dataclass
-class OutputDTMFFrame(DTMFFrame):
-    """A DTMF button output"""
+    """
 
     pass
 
@@ -775,6 +772,24 @@ class VisionImageRawFrame(InputImageRawFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
+
+
+@dataclass
+class InputDTMFFrame(DTMFFrame, SystemFrame):
+    """A DTMF keypress input."""
+
+    pass
+
+
+@dataclass
+class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
+    """A DTMF keypress output that will be sent right away. If your transport
+    supports multiple dial-out destinations, use the `transport_destination`
+    field to specify where the DTMF keypress should be sent.
+
+    """
+
+    pass
 
 
 #
