@@ -51,8 +51,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.post("/connect")
 async def bot_connect(request: Request) -> Dict[Any, Any]:
     return {
-        "ws_host": "localhost",
-        "ws_port": 7860,
+        "ws_url": "ws://localhost:7860/ws"
     }
 
 
