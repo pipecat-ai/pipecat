@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
@@ -68,10 +69,10 @@ class WebsocketClientSession:
             )
         return self._task_manager
 
-    async def setup(self, frame: StartFrame):
+    async def setup(self, task_manager: BaseTaskManager):
         self._leave_counter += 1
         if not self._task_manager:
-            self._task_manager = frame.task_manager
+            self._task_manager = task_manager
 
     async def connect(self):
         if self._websocket:
@@ -131,11 +132,14 @@ class WebsocketClientInputTransport(BaseInputTransport):
         self._session = session
         self._params = params
 
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._session.setup(setup.task_manager)
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         if self._params.serializer:
             await self._params.serializer.setup(frame)
-        await self._session.setup(frame)
         await self._session.connect()
         await self.set_transport_ready(frame)
 
@@ -184,12 +188,15 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._session.setup(setup.task_manager)
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         if self._params.serializer:
             await self._params.serializer.setup(frame)
-        await self._session.setup(frame)
         await self._session.connect()
         await self.set_transport_ready(frame)
 
