@@ -464,7 +464,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         if self._send_transcription_frames:
             await self.push_frame(
                 # no way to get a language code?
-                InterimTranscriptionFrame(evt.delta, "", time_now_iso8601())
+                InterimTranscriptionFrame(evt.delta, "", time_now_iso8601(), result=evt)
             )
 
     async def handle_evt_input_audio_transcription_completed(self, evt):
@@ -473,7 +473,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         if self._send_transcription_frames:
             await self.push_frame(
                 # no way to get a language code?
-                TranscriptionFrame(evt.transcript, "", time_now_iso8601())
+                TranscriptionFrame(evt.transcript, "", time_now_iso8601(), result=evt)
             )
         pair = self._user_and_response_message_tuple
         if pair:

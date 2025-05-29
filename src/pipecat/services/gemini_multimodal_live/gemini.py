@@ -937,7 +937,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
             logger.debug(f"[Transcription:user] [{complete_sentence}]")
             await self.push_frame(
                 TranscriptionFrame(
-                    text=complete_sentence, user_id="", timestamp=time_now_iso8601()
+                    text=complete_sentence,
+                    user_id="",
+                    timestamp=time_now_iso8601(),
+                    result=evt,
                 ),
                 FrameDirection.UPSTREAM,
             )
