@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DailyTransport.stop_transcription()` to be able to start and stop Daily
   transcription dynamically (maybe with different settings).
 
+### Fixed
+
+- In `AWSBedrockLLMService`, worked around a possible bug in AWS Bedrock where
+  a `toolConfig` is required if there has been previous tool use in the
+  messages array. This workaround includes a no_op factory function call is
+  used to satisfy the requirement.
+
 ## [0.0.68] - 2025-05-28
 
 ### Added
