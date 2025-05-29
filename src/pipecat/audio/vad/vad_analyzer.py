@@ -71,7 +71,7 @@ class VADAnalyzer(ABC):
         self.set_params(self._params)
 
     def set_params(self, params: VADParams):
-        logger.info(f"Setting VAD params to: {params}")
+        logger.debug(f"Setting VAD params to: {params}")
         self._params = params
         self._vad_frames = self.num_frames_required()
         self._vad_frames_num_bytes = self._vad_frames * self._num_channels * 2
