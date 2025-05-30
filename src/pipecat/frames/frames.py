@@ -228,14 +228,15 @@ class TTSTextFrame(TextFrame):
 
 @dataclass
 class TranscriptionFrame(TextFrame):
-    """A text frame with transcription-specific data. Will be placed in the
-    transport's receive queue when a participant speaks.
+    """A text frame with transcription-specific data. The `result` field
+    contains the result from the STT service if available.
 
     """
 
     user_id: str
     timestamp: str
     language: Optional[Language] = None
+    result: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -243,14 +244,16 @@ class TranscriptionFrame(TextFrame):
 
 @dataclass
 class InterimTranscriptionFrame(TextFrame):
-    """A text frame with interim transcription-specific data. Will be placed in
-    the transport's receive queue when a participant speaks.
+    """A text frame with interim transcription-specific data. The `result` field
+    contains the result from the STT service if available.
+
     """
 
     text: str
     user_id: str
     timestamp: str
     language: Optional[Language] = None
+    result: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -413,22 +416,19 @@ class TransportMessageFrame(DataFrame):
 
 
 @dataclass
-class DTMFFrame(DataFrame):
+class DTMFFrame:
     """A DTMF button frame"""
 
     button: KeypadEntry
 
 
 @dataclass
-class InputDTMFFrame(DTMFFrame):
-    """A DTMF button input"""
+class OutputDTMFFrame(DTMFFrame, DataFrame):
+    """A DTMF keypress output that will be queued. If your transport supports
+    multiple dial-out destinations, use the `transport_destination` field to
+    specify where the DTMF keypress should be sent.
 
-    pass
-
-
-@dataclass
-class OutputDTMFFrame(DTMFFrame):
-    """A DTMF button output"""
+    """
 
     pass
 
@@ -775,6 +775,24 @@ class VisionImageRawFrame(InputImageRawFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
+
+
+@dataclass
+class InputDTMFFrame(DTMFFrame, SystemFrame):
+    """A DTMF keypress input."""
+
+    pass
+
+
+@dataclass
+class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
+    """A DTMF keypress output that will be sent right away. If your transport
+    supports multiple dial-out destinations, use the `transport_destination`
+    field to specify where the DTMF keypress should be sent.
+
+    """
+
+    pass
 
 
 #

@@ -171,6 +171,7 @@ def add_llm_span_attributes(
     model: str,
     stream: bool = True,
     messages: Optional[str] = None,
+    output: Optional[str] = None,
     tools: Optional[str] = None,
     tool_count: Optional[int] = None,
     tool_choice: Optional[str] = None,
@@ -188,6 +189,7 @@ def add_llm_span_attributes(
         model: Model name/identifier
         stream: Whether streaming is enabled
         messages: JSON-serialized messages
+        output: Aggregated output text from the LLM
         tools: JSON-serialized tools configuration
         tool_count: Number of tools available
         tool_choice: Tool selection configuration
@@ -207,6 +209,9 @@ def add_llm_span_attributes(
     # Add optional attributes
     if messages:
         span.set_attribute("input", messages)
+
+    if output:
+        span.set_attribute("output", output)
 
     if tools:
         span.set_attribute("tools", tools)
