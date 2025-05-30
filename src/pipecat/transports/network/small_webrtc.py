@@ -377,6 +377,9 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_video_task = None
         self._image_requests = {}
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -385,6 +388,12 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(self._params, frame)
         await self._client.connect()
         if not self._receive_audio_task and self._params.audio_in_enabled:
@@ -480,8 +489,17 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(self._params, frame)
         await self._client.connect()
         await self.set_transport_ready(frame)
