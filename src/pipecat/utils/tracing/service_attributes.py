@@ -258,7 +258,7 @@ def add_llm_span_attributes(
             span.set_attribute(key, value)
 
 
-def add_gemini_live_span_attributes(
+def add_multimodal_llm_span_attributes(
     span: "Span",
     service_name: str,
     model: str,
@@ -356,6 +356,105 @@ def add_gemini_live_span_attributes(
                     )
                 if hasattr(value, "end_sensitivity") and value.end_sensitivity:
                     span.set_attribute("settings.vad.end_sensitivity", value.end_sensitivity.value)
+
+    # Add any additional keyword arguments as attributes
+    for key, value in kwargs.items():
+        if isinstance(value, (str, int, float, bool)):
+            span.set_attribute(key, value)
+
+
+def add_openai_realtime_span_attributes(
+    span: "Span",
+    service_name: str,
+    model: str,
+    operation_name: str,
+    session_properties: Optional[Dict[str, Any]] = None,
+    transcript: Optional[str] = None,
+    is_input: Optional[bool] = None,
+    context_messages: Optional[str] = None,
+    function_calls: Optional[List[Dict]] = None,
+    tools: Optional[List[Dict]] = None,
+    tools_serialized: Optional[str] = None,
+    audio_data_size: Optional[int] = None,
+    **kwargs,
+) -> None:
+    """Add OpenAI Realtime specific attributes to a span.
+
+    Args:
+        span: The span to add attributes to
+        service_name: Name of the service
+        model: Model name/identifier
+        operation_name: Name of the operation (setup, transcription, response, etc.)
+        session_properties: Session configuration properties
+        transcript: Transcription text
+        is_input: Whether transcript is input (True) or output (False)
+        context_messages: JSON-serialized context messages
+        function_calls: Function calls being made
+        tools: Available tools/functions list
+        tools_serialized: JSON-serialized tools for detailed inspection
+        audio_data_size: Size of audio data in bytes
+        **kwargs: Additional attributes to add
+    """
+    # Add standard attributes
+    span.set_attribute("gen_ai.system", "openai")
+    span.set_attribute("gen_ai.request.model", model)
+    span.set_attribute("gen_ai.operation.name", operation_name)
+    span.set_attribute("service.operation", operation_name)
+
+    # Add optional attributes
+    if transcript:
+        span.set_attribute("transcript", transcript)
+        if is_input is not None:
+            span.set_attribute("transcript.is_input", is_input)
+
+    if context_messages:
+        span.set_attribute("input", context_messages)
+
+    if audio_data_size is not None:
+        span.set_attribute("audio.data_size_bytes", audio_data_size)
+
+    if tools:
+        span.set_attribute("tools.count", len(tools))
+        span.set_attribute("tools.available", True)
+
+        # Add individual tool names for easier filtering
+        tool_names = []
+        for tool in tools:
+            if isinstance(tool, dict) and "name" in tool:
+                tool_names.append(tool["name"])
+            elif hasattr(tool, "name"):
+                tool_names.append(tool.name)
+            elif isinstance(tool, dict) and "function" in tool and "name" in tool["function"]:
+                tool_names.append(tool["function"]["name"])
+
+        if tool_names:
+            span.set_attribute("tools.names", ",".join(tool_names))
+
+    if tools_serialized:
+        span.set_attribute("tools.definitions", tools_serialized)
+
+    if function_calls:
+        span.set_attribute("function_calls.count", len(function_calls))
+        if function_calls:
+            call = function_calls[0]
+            if hasattr(call, "name"):
+                span.set_attribute("function_calls.first_name", call.name)
+            elif isinstance(call, dict) and "name" in call:
+                span.set_attribute("function_calls.first_name", call["name"])
+
+    # Add session properties if provided
+    if session_properties:
+        for key, value in session_properties.items():
+            if isinstance(value, (str, int, float, bool)):
+                span.set_attribute(f"session.{key}", value)
+            elif key == "turn_detection" and value is not None:
+                if isinstance(value, bool):
+                    span.set_attribute("session.turn_detection.enabled", value)
+                elif isinstance(value, dict):
+                    span.set_attribute("session.turn_detection.enabled", True)
+                    for td_key, td_value in value.items():
+                        if isinstance(td_value, (str, int, float, bool)):
+                            span.set_attribute(f"session.turn_detection.{td_key}", td_value)
 
     # Add any additional keyword arguments as attributes
     for key, value in kwargs.items():

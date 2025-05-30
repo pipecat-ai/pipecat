@@ -24,8 +24,9 @@ if TYPE_CHECKING:
     from opentelemetry import trace
 
 from pipecat.utils.tracing.service_attributes import (
-    add_gemini_live_span_attributes,
     add_llm_span_attributes,
+    add_multimodal_llm_span_attributes,
+    add_openai_realtime_span_attributes,
     add_stt_span_attributes,
     add_tts_span_attributes,
 )
@@ -480,7 +481,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     return decorator
 
 
-def traced_gemini_live(operation: str) -> Callable:
+def traced_multimodal_llm(operation: str) -> Callable:
     """Traces Gemini Live service methods with operation-specific attributes.
 
     This decorator automatically captures relevant information based on the operation type:
@@ -626,32 +627,6 @@ def traced_gemini_live(operation: str) -> Callable:
                                         f"Error extracting context system instructions: {e}"
                                     )
 
-                        elif operation == "input_transcription" and args:
-                            # Extract input transcription
-                            evt = args[0] if args else None
-                            if (
-                                evt
-                                and hasattr(evt, "serverContent")
-                                and evt.serverContent.inputTranscription
-                            ):
-                                text = evt.serverContent.inputTranscription.text
-                                if text:
-                                    operation_attrs["transcript"] = text
-                                    operation_attrs["is_input"] = True
-
-                        elif operation == "output_transcription" and args:
-                            # Extract output transcription
-                            evt = args[0] if args else None
-                            if (
-                                evt
-                                and hasattr(evt, "serverContent")
-                                and evt.serverContent.outputTranscription
-                            ):
-                                text = evt.serverContent.outputTranscription.text
-                                if text:
-                                    operation_attrs["transcript"] = text
-                                    operation_attrs["is_input"] = False
-
                         elif operation == "tool_call" and args:
                             # Extract tool call information
                             evt = args[0] if args else None
@@ -738,7 +713,7 @@ def traced_gemini_live(operation: str) -> Callable:
                                     operation_attrs["tokens.total"] = usage.totalTokenCount or 0
 
                         # Add all attributes to the span
-                        add_gemini_live_span_attributes(
+                        add_multimodal_llm_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
                             model=model_name,
@@ -779,6 +754,202 @@ def traced_gemini_live(operation: str) -> Callable:
 
             except Exception as e:
                 logging.error(f"Error in Gemini Live tracing (continuing without tracing): {e}")
+                # If tracing fails, fall back to the original function
+                return await func(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def traced_openai_realtime(operation: str) -> Callable:
+    """Traces OpenAI Realtime service methods with operation-specific attributes.
+
+    This decorator automatically captures relevant information based on the operation type:
+    - setup: Session configuration and tools
+    - transcription_completed: User transcription
+    - response_create: Context and input messages
+    - response_done: Usage metadata and output
+    - function_call: Function call information
+
+    Args:
+        operation: The operation name (matches the event type being handled)
+
+    Returns:
+        Wrapped method with OpenAI Realtime specific tracing.
+    """
+    if not is_tracing_available():
+        return _noop_decorator
+
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(self, *args, **kwargs):
+            try:
+                if not is_tracing_available():
+                    return await func(self, *args, **kwargs)
+
+                service_class_name = self.__class__.__name__
+                span_name = f"{operation}"
+
+                # Get the parent context - turn context if available, otherwise service context
+                turn_context = get_current_turn_context()
+                parent_context = turn_context or _get_parent_service_context(self)
+
+                # Create a new span as child of the turn span or service span
+                tracer = trace.get_tracer("pipecat")
+                with tracer.start_as_current_span(
+                    span_name, context=parent_context
+                ) as current_span:
+                    try:
+                        # Base service attributes
+                        model_name = getattr(
+                            self, "model_name", getattr(self, "_model_name", "unknown")
+                        )
+
+                        # Operation-specific attribute collection
+                        operation_attrs = {}
+
+                        if operation == "llm_setup":
+                            # Capture session properties and tools
+                            session_properties = getattr(self, "_session_properties", None)
+                            if session_properties:
+                                try:
+                                    # Convert to dict for easier processing
+                                    if hasattr(session_properties, "model_dump"):
+                                        props_dict = session_properties.model_dump()
+                                    elif hasattr(session_properties, "__dict__"):
+                                        props_dict = session_properties.__dict__
+                                    else:
+                                        props_dict = {}
+
+                                    operation_attrs["session_properties"] = props_dict
+
+                                    # Extract tools if available
+                                    tools = props_dict.get("tools")
+                                    if tools:
+                                        operation_attrs["tools"] = tools
+                                        try:
+                                            operation_attrs["tools_serialized"] = json.dumps(tools)
+                                        except Exception as e:
+                                            logging.warning(f"Error serializing OpenAI tools: {e}")
+
+                                    # Extract instructions
+                                    instructions = props_dict.get("instructions")
+                                    if instructions:
+                                        operation_attrs["instructions"] = instructions[:500]
+
+                                except Exception as e:
+                                    logging.warning(f"Error processing session properties: {e}")
+
+                            # Also check context for tools
+                            if hasattr(self, "_context") and self._context:
+                                try:
+                                    context_tools = getattr(self._context, "tools", None)
+                                    if context_tools and not operation_attrs.get("tools"):
+                                        operation_attrs["tools"] = context_tools
+                                        operation_attrs["tools_serialized"] = json.dumps(
+                                            context_tools
+                                        )
+                                except Exception as e:
+                                    logging.warning(f"Error extracting context tools: {e}")
+
+                        elif operation == "llm_request":
+                            # Capture context messages being sent
+                            if hasattr(self, "_context") and self._context:
+                                try:
+                                    messages = self._context.get_messages_for_logging()
+                                    if messages:
+                                        operation_attrs["context_messages"] = json.dumps(messages)
+                                except Exception as e:
+                                    logging.warning(f"Error getting context messages: {e}")
+
+                        elif operation == "llm_response" and args:
+                            # Extract usage and response metadata
+                            evt = args[0] if args else None
+                            if evt and hasattr(evt, "response"):
+                                response = evt.response
+
+                                # Token usage - basic attributes for span visibility
+                                if hasattr(response, "usage"):
+                                    usage = response.usage
+                                    if hasattr(usage, "input_tokens"):
+                                        operation_attrs["tokens.prompt"] = usage.input_tokens
+                                    if hasattr(usage, "output_tokens"):
+                                        operation_attrs["tokens.completion"] = usage.output_tokens
+                                    if hasattr(usage, "total_tokens"):
+                                        operation_attrs["tokens.total"] = usage.total_tokens
+
+                                # Response status and metadata
+                                if hasattr(response, "status"):
+                                    operation_attrs["response.status"] = response.status
+
+                                if hasattr(response, "id"):
+                                    operation_attrs["response.id"] = response.id
+
+                                # Output items and extract transcript for output field
+                                if hasattr(response, "output") and response.output:
+                                    operation_attrs["response.output_items"] = len(response.output)
+
+                                    # Extract assistant transcript for output field
+                                    assistant_transcript = ""
+                                    for item in response.output:
+                                        if (
+                                            hasattr(item, "content")
+                                            and item.content
+                                            and hasattr(item, "role")
+                                            and item.role == "assistant"
+                                        ):
+                                            for content in item.content:
+                                                if (
+                                                    hasattr(content, "transcript")
+                                                    and content.transcript
+                                                ):
+                                                    assistant_transcript += content.transcript + " "
+
+                                    if assistant_transcript.strip():
+                                        operation_attrs["output"] = assistant_transcript.strip()
+
+                        # Add all attributes to the span
+                        add_openai_realtime_span_attributes(
+                            span=current_span,
+                            service_name=service_class_name,
+                            model=model_name,
+                            operation_name=operation,
+                            **operation_attrs,
+                        )
+
+                        # For llm_response operation, also handle token usage metrics
+                        if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
+                            evt = args[0] if args else None
+                            if evt and hasattr(evt, "response") and hasattr(evt.response, "usage"):
+                                usage = evt.response.usage
+                                # Create LLMTokenUsage object
+                                from pipecat.metrics.metrics import LLMTokenUsage
+
+                                tokens = LLMTokenUsage(
+                                    prompt_tokens=getattr(usage, "input_tokens", 0),
+                                    completion_tokens=getattr(usage, "output_tokens", 0),
+                                    total_tokens=getattr(usage, "total_tokens", 0),
+                                )
+                                _add_token_usage_to_span(current_span, tokens)
+
+                            # Capture TTFB metric if available
+                            ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
+                            if ttfb_ms is not None:
+                                current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+
+                        # Run the original function
+                        result = await func(self, *args, **kwargs)
+
+                        return result
+
+                    except Exception as e:
+                        current_span.record_exception(e)
+                        current_span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                        raise
+
+            except Exception as e:
+                logging.error(f"Error in OpenAI Realtime tracing (continuing without tracing): {e}")
                 # If tracing fails, fall back to the original function
                 return await func(self, *args, **kwargs)
 
