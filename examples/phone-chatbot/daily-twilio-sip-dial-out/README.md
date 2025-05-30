@@ -1,3 +1,5 @@
+<!-- @format -->
+
 # Daily + Twilio SIP dial-out Voice Bot
 
 This project demonstrates how to create a voice bot that can make phone calls via Twilio and use Daily's SIP capabilities to enable voice conversations.
@@ -55,7 +57,7 @@ Visit this link to create your [TwiML Bin](https://www.twilio.com/docs/serverles
 </Response>
 ```
 
-- callerId is the phone number you have purchased on Twilio. This is the phone number that will be making the call
+- callerId must be a valid number that you own on [Twilio](https://console.twilio.com/us1/develop/phone-numbers/manage/incoming)
 - Save the file. We will use this when creating the SIP domain
 
 4. Create and configure a programmable SIP domain

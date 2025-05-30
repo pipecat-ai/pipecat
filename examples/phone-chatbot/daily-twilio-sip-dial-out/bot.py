@@ -152,9 +152,7 @@ async def run_bot(
 
         if retry_count < max_retries and not dialout_successful:
             retry_count += 1
-            logger.info(
-                f"Attempting dialout (attempt {retry_count}/{max_retries}) to: {phone_number}"
-            )
+            logger.info(f"Attempting dialout (attempt {retry_count}/{max_retries}) to: {sip_uri}")
             await transport.start_dialout(dialout_params)
         else:
             logger.error(f"Maximum retry attempts ({max_retries}) reached. Giving up on dialout.")
@@ -164,7 +162,7 @@ async def run_bot(
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
         # Start initial dialout attempt
-        logger.debug(f"Dialout settings detected; starting dialout to number: {phone_number}")
+        logger.debug(f"Dialout settings detected; starting dialout to number: {sip_uri}")
         await attempt_dialout()
 
     @transport.event_handler("on_dialout_connected")
