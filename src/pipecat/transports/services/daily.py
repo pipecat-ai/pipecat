@@ -14,14 +14,12 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
-    InputAudioRawFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
@@ -46,12 +44,11 @@ try:
         AudioData,
         CallClient,
         CustomAudioSource,
+        CustomAudioTrack,
         Daily,
         EventHandler,
         VideoFrame,
         VirtualCameraDevice,
-        VirtualMicrophoneDevice,
-        VirtualSpeakerDevice,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -245,6 +242,12 @@ def completion_callback(future):
     return _callback
 
 
+@dataclass
+class DailyAudioTrack:
+    source: CustomAudioSource
+    track: CustomAudioTrack
+
+
 class DailyTransportClient(EventHandler):
     """Core client for interacting with Daily's API.
 
@@ -306,34 +309,32 @@ class DailyTransportClient(EventHandler):
 
         self._client: CallClient = CallClient(event_handler=self)
 
-        # We use a separate task to execute the callbacks, otherwise if we call
-        # a `CallClient` function and wait for its completion this will
-        # currently result in a deadlock. This is because `_call_async_callback`
-        # can be used inside `CallClient` event handlers which are holding the
-        # GIL in `daily-python`. So if the `callback` passed here makes a
-        # `CallClient` call and waits for it to finish using completions (and a
-        # future) we will deadlock because completions use event handlers (which
-        # are holding the GIL).
-        self._callback_queue = asyncio.Queue()
-        self._callback_task = None
+        # We use separate tasks to execute callbacks (events, audio or
+        # video). In the case of events, if we call a `CallClient` function
+        # inside the callback and wait for its completion this will result in a
+        # deadlock (because we haven't exited the event callback). The deadlocks
+        # occur because `daily-python` is holding the GIL when calling the
+        # callbacks. So, if our callback handler makes a `CallClient` call and
+        # waits for it to finish using completions (and a future) we will
+        # deadlock because completions use event handlers (which are holding the
+        # GIL).
+        self._event_queue = asyncio.Queue()
+        self._audio_queue = asyncio.Queue()
+        self._video_queue = asyncio.Queue()
+        self._event_task = None
+        self._audio_task = None
+        self._video_task = None
 
         # Input and ouput sample rates. They will be initialize on setup().
         self._in_sample_rate = 0
         self._out_sample_rate = 0
 
         self._camera: Optional[VirtualCameraDevice] = None
-        self._mic: Optional[VirtualMicrophoneDevice] = None
-        self._speaker: Optional[VirtualSpeakerDevice] = None
-        self._audio_sources: Dict[str, CustomAudioSource] = {}
+        self._microphone_track: Optional[DailyAudioTrack] = None
+        self._custom_audio_tracks: Dict[str, DailyAudioTrack] = {}
 
     def _camera_name(self):
         return f"camera-{self}"
-
-    def _mic_name(self):
-        return f"mic-{self}"
-
-    def _speaker_name(self):
-        return f"speaker-{self}"
 
     @property
     def room_url(self) -> str:
@@ -365,43 +366,26 @@ class DailyTransportClient(EventHandler):
         )
         await future
 
-    async def read_next_audio_frame(self) -> Optional[InputAudioRawFrame]:
-        if not self._speaker:
-            return None
-
-        sample_rate = self._in_sample_rate
-        num_channels = self._params.audio_in_channels
-        num_frames = int(sample_rate / 100) * 2  # 20ms of audio
-
-        future = self._get_event_loop().create_future()
-        self._speaker.read_frames(num_frames, completion=completion_callback(future))
-        audio = await future
-
-        if len(audio) > 0:
-            return InputAudioRawFrame(
-                audio=audio, sample_rate=sample_rate, num_channels=num_channels
-            )
-        else:
-            # If we don't read any audio it could be there's no participant
-            # connected. daily-python will return immediately if that's the
-            # case, so let's sleep for a little bit (i.e. busy wait).
-            await asyncio.sleep(0.01)
-            return None
-
     async def register_audio_destination(self, destination: str):
-        self._audio_sources[destination] = await self.add_custom_audio_track(destination)
+        self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
     async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
         future = self._get_event_loop().create_future()
-        if not destination and self._mic:
-            self._mic.write_frames(frames, completion=completion_callback(future))
-        elif destination and destination in self._audio_sources:
-            source = self._audio_sources[destination]
-            source.write_frames(frames, completion=completion_callback(future))
+
+        audio_source: Optional[CustomAudioSource] = None
+        if not destination and self._microphone_track:
+            audio_source = self._microphone_track.source
+        elif destination and destination in self._custom_audio_tracks:
+            track = self._custom_audio_tracks[destination]
+            audio_source = track.source
+
+        if audio_source:
+            audio_source.write_frames(frames, completion=completion_callback(future))
         else:
             logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
             future.set_result(None)
+
         await future
 
     async def write_raw_video_frame(
@@ -415,15 +399,21 @@ class DailyTransportClient(EventHandler):
             return
 
         self._task_manager = setup.task_manager
-        self._callback_task = self._task_manager.create_task(
-            self._callback_task_handler(),
-            f"{self}::callback_task",
+        self._event_task = self._task_manager.create_task(
+            self._callback_task_handler(self._event_queue),
+            f"{self}::event_callback_task",
         )
 
     async def cleanup(self):
-        if self._callback_task and self._task_manager:
-            await self._task_manager.cancel_task(self._callback_task)
-            self._callback_task = None
+        if self._event_task and self._task_manager:
+            await self._task_manager.cancel_task(self._event_task)
+            self._event_task = None
+        if self._audio_task and self._task_manager:
+            await self._task_manager.cancel_task(self._audio_task)
+            self._audio_task = None
+        if self._video_task and self._task_manager:
+            await self._task_manager.cancel_task(self._video_task)
+            self._video_task = None
         # Make sure we don't block the event loop in case `client.release()`
         # takes extra time.
         await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
@@ -432,6 +422,17 @@ class DailyTransportClient(EventHandler):
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
+        if self._params.audio_in_enabled and not self._audio_task and self._task_manager:
+            self._audio_task = self._task_manager.create_task(
+                self._callback_task_handler(self._audio_queue),
+                f"{self}::audio_callback_task",
+            )
+
+        if self._params.video_in_enabled and not self._video_task and self._task_manager:
+            self._video_task = self._task_manager.create_task(
+                self._callback_task_handler(self._video_queue),
+                f"{self}::video_callback_task",
+            )
         if self._params.video_out_enabled and not self._camera:
             self._camera = Daily.create_camera_device(
                 self._camera_name(),
@@ -440,22 +441,10 @@ class DailyTransportClient(EventHandler):
                 color_format=self._params.video_out_color_format,
             )
 
-        if self._params.audio_out_enabled and not self._mic:
-            self._mic = Daily.create_microphone_device(
-                self._mic_name(),
-                sample_rate=self._out_sample_rate,
-                channels=self._params.audio_out_channels,
-                non_blocking=True,
-            )
-
-        if self._params.audio_in_enabled and not self._speaker:
-            self._speaker = Daily.create_speaker_device(
-                self._speaker_name(),
-                sample_rate=self._in_sample_rate,
-                channels=self._params.audio_in_channels,
-                non_blocking=True,
-            )
-            Daily.select_speaker_device(self._speaker_name())
+        if self._params.audio_out_enabled and not self._microphone_track:
+            audio_source = CustomAudioSource(self._out_sample_rate, self._params.audio_out_channels)
+            audio_track = CustomAudioTrack(audio_source)
+            self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
     async def join(self):
         # Transport already joined or joining, ignore.
@@ -540,12 +529,11 @@ class DailyTransportClient(EventHandler):
                     "microphone": {
                         "isEnabled": microphone_enabled,
                         "settings": {
-                            "deviceId": self._mic_name(),
-                            "customConstraints": {
-                                "autoGainControl": {"exact": False},
-                                "echoCancellation": {"exact": False},
-                                "noiseSuppression": {"exact": False},
-                            },
+                            "customTrack": {
+                                "id": self._microphone_track.track.id
+                                if self._microphone_track
+                                else "no-microphone-track"
+                            }
                         },
                     },
                 },
@@ -592,7 +580,7 @@ class DailyTransportClient(EventHandler):
             await self._stop_transcription()
 
         # Remove any custom tracks, if any.
-        for track_name, _ in self._audio_sources.items():
+        for track_name, _ in self._custom_audio_tracks.items():
             await self.remove_custom_audio_track(track_name)
 
         try:
@@ -694,6 +682,8 @@ class DailyTransportClient(EventHandler):
         participant_id: str,
         callback: Callable,
         audio_source: str = "microphone",
+        sample_rate: int = 16000,
+        callback_interval_ms: int = 20,
     ):
         # Only enable the desired audio source subscription on this participant.
         if audio_source in ("microphone", "screenAudio"):
@@ -705,14 +695,14 @@ class DailyTransportClient(EventHandler):
 
         self._audio_renderers.setdefault(participant_id, {})[audio_source] = callback
 
-        logger.info(
-            f"Starting to capture audio from participant {participant_id} to {audio_source}"
-        )
+        logger.info(f"Starting to capture [{audio_source}] audio from participant {participant_id}")
 
         self._client.set_audio_renderer(
             participant_id,
             self._audio_data_received,
             audio_source=audio_source,
+            sample_rate=sample_rate,
+            callback_interval_ms=callback_interval_ms,
         )
 
     async def capture_participant_video(
@@ -740,19 +730,24 @@ class DailyTransportClient(EventHandler):
             color_format=color_format,
         )
 
-    async def add_custom_audio_track(self, track_name: str) -> CustomAudioSource:
+    async def add_custom_audio_track(self, track_name: str) -> DailyAudioTrack:
         future = self._get_event_loop().create_future()
 
         audio_source = CustomAudioSource(self._out_sample_rate, 1)
+
+        audio_track = CustomAudioTrack(audio_source)
+
         self._client.add_custom_audio_track(
             track_name=track_name,
-            audio_source=audio_source,
+            audio_track=audio_track,
             completion=completion_callback(future),
         )
 
         await future
 
-        return audio_source
+        track = DailyAudioTrack(source=audio_source, track=audio_track)
+
+        return track
 
     async def remove_custom_audio_track(self, track_name: str):
         future = self._get_event_loop().create_future()
@@ -799,57 +794,57 @@ class DailyTransportClient(EventHandler):
     #
 
     def on_active_speaker_changed(self, participant):
-        self._call_async_callback(self._callbacks.on_active_speaker_changed, participant)
+        self._call_event_callback(self._callbacks.on_active_speaker_changed, participant)
 
     def on_app_message(self, message: Any, sender: str):
-        self._call_async_callback(self._callbacks.on_app_message, message, sender)
+        self._call_event_callback(self._callbacks.on_app_message, message, sender)
 
     def on_call_state_updated(self, state: str):
-        self._call_async_callback(self._callbacks.on_call_state_updated, state)
+        self._call_event_callback(self._callbacks.on_call_state_updated, state)
 
     def on_dialin_connected(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialin_connected, data)
+        self._call_event_callback(self._callbacks.on_dialin_connected, data)
 
     def on_dialin_ready(self, sip_endpoint: str):
-        self._call_async_callback(self._callbacks.on_dialin_ready, sip_endpoint)
+        self._call_event_callback(self._callbacks.on_dialin_ready, sip_endpoint)
 
     def on_dialin_stopped(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialin_stopped, data)
+        self._call_event_callback(self._callbacks.on_dialin_stopped, data)
 
     def on_dialin_error(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialin_error, data)
+        self._call_event_callback(self._callbacks.on_dialin_error, data)
 
     def on_dialin_warning(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialin_warning, data)
+        self._call_event_callback(self._callbacks.on_dialin_warning, data)
 
     def on_dialout_answered(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialout_answered, data)
+        self._call_event_callback(self._callbacks.on_dialout_answered, data)
 
     def on_dialout_connected(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialout_connected, data)
+        self._call_event_callback(self._callbacks.on_dialout_connected, data)
 
     def on_dialout_stopped(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialout_stopped, data)
+        self._call_event_callback(self._callbacks.on_dialout_stopped, data)
 
     def on_dialout_error(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialout_error, data)
+        self._call_event_callback(self._callbacks.on_dialout_error, data)
 
     def on_dialout_warning(self, data: Any):
-        self._call_async_callback(self._callbacks.on_dialout_warning, data)
+        self._call_event_callback(self._callbacks.on_dialout_warning, data)
 
     def on_participant_joined(self, participant):
-        self._call_async_callback(self._callbacks.on_participant_joined, participant)
+        self._call_event_callback(self._callbacks.on_participant_joined, participant)
 
     def on_participant_left(self, participant, reason):
-        self._call_async_callback(self._callbacks.on_participant_left, participant, reason)
+        self._call_event_callback(self._callbacks.on_participant_left, participant, reason)
 
     def on_participant_updated(self, participant):
-        self._call_async_callback(self._callbacks.on_participant_updated, participant)
+        self._call_event_callback(self._callbacks.on_participant_updated, participant)
 
     def on_transcription_started(self, status):
         logger.debug(f"Transcription started: {status}")
         self._transcription_status = status
-        self._call_async_callback(self.update_transcription, self._transcription_ids)
+        self._call_event_callback(self.update_transcription, self._transcription_ids)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
         logger.debug("Transcription stopped")
@@ -858,19 +853,19 @@ class DailyTransportClient(EventHandler):
         logger.error(f"Transcription error: {message}")
 
     def on_transcription_message(self, message):
-        self._call_async_callback(self._callbacks.on_transcription_message, message)
+        self._call_event_callback(self._callbacks.on_transcription_message, message)
 
     def on_recording_started(self, status):
         logger.debug(f"Recording started: {status}")
-        self._call_async_callback(self._callbacks.on_recording_started, status)
+        self._call_event_callback(self._callbacks.on_recording_started, status)
 
     def on_recording_stopped(self, stream_id):
         logger.debug(f"Recording stopped: {stream_id}")
-        self._call_async_callback(self._callbacks.on_recording_stopped, stream_id)
+        self._call_event_callback(self._callbacks.on_recording_stopped, stream_id)
 
     def on_recording_error(self, stream_id, message):
         logger.error(f"Recording error for {stream_id}: {message}")
-        self._call_async_callback(self._callbacks.on_recording_error, stream_id, message)
+        self._call_event_callback(self._callbacks.on_recording_error, stream_id, message)
 
     #
     # Daily (CallClient callbacks)
@@ -878,25 +873,38 @@ class DailyTransportClient(EventHandler):
 
     def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
         callback = self._audio_renderers[participant_id][audio_source]
-        self._call_async_callback(callback, participant_id, audio_data, audio_source)
+        self._call_audio_callback(callback, participant_id, audio_data, audio_source)
 
     def _video_frame_received(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
     ):
         callback = self._video_renderers[participant_id][video_source]
-        self._call_async_callback(callback, participant_id, video_frame, video_source)
+        self._call_video_callback(callback, participant_id, video_frame, video_source)
 
-    def _call_async_callback(self, callback, *args):
+    #
+    # Queue callbacks handling
+    #
+
+    def _call_audio_callback(self, callback, *args):
+        self._call_async_callback(self._audio_queue, callback, *args)
+
+    def _call_video_callback(self, callback, *args):
+        self._call_async_callback(self._video_queue, callback, *args)
+
+    def _call_event_callback(self, callback, *args):
+        self._call_async_callback(self._event_queue, callback, *args)
+
+    def _call_async_callback(self, queue: asyncio.Queue, callback, *args):
         future = asyncio.run_coroutine_threadsafe(
-            self._callback_queue.put((callback, *args)), self._get_event_loop()
+            queue.put((callback, *args)), self._get_event_loop()
         )
         future.result()
 
-    async def _callback_task_handler(self):
+    async def _callback_task_handler(self, queue: asyncio.Queue):
         while True:
             # Wait to process any callback until we are joined.
             await self._joined_event.wait()
-            (callback, *args) = await self._callback_queue.get()
+            (callback, *args) = await queue.get()
             await callback(*args)
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
@@ -936,11 +944,12 @@ class DailyInputTransport(BaseInputTransport):
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
-        # Task that gets audio data from a device or the network and queues it
-        # internally to be processed.
-        self._audio_in_task = None
+        # Whether we have started audio streaming.
+        self._streaming_started = False
 
-        self._resampler = create_default_resampler()
+        # Store the list of participants we should stream. This is necessary in
+        # case we don't start streaming right away.
+        self._capture_participant_audio = []
 
         self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
 
@@ -948,12 +957,17 @@ class DailyInputTransport(BaseInputTransport):
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
         return self._vad_analyzer
 
-    def start_audio_in_streaming(self):
-        # Create audio task. It reads audio frames from Daily and push them
-        # internally for VAD processing.
-        if not self._audio_in_task and self._params.audio_in_enabled:
-            logger.debug(f"Start receiving audio")
-            self._audio_in_task = self.create_task(self._audio_in_task_handler())
+    async def start_audio_in_streaming(self):
+        if not self._params.audio_in_enabled:
+            return
+
+        logger.debug(f"Start receiving audio")
+        for participant_id, audio_source, sample_rate in self._capture_participant_audio:
+            await self._client.capture_participant_audio(
+                participant_id, self._on_participant_audio_data, audio_source, sample_rate
+            )
+
+        self._streaming_started = True
 
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
@@ -983,27 +997,19 @@ class DailyInputTransport(BaseInputTransport):
         await self.set_transport_ready(frame)
 
         if self._params.audio_in_stream_on_start:
-            self.start_audio_in_streaming()
+            await self.start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
         # Parent stop.
         await super().stop(frame)
         # Leave the room.
         await self._client.leave()
-        # Stop audio thread.
-        if self._audio_in_task and self._params.audio_in_enabled:
-            await self.cancel_task(self._audio_in_task)
-            self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
         # Parent stop.
         await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
-        # Stop audio thread.
-        if self._audio_in_task and self._params.audio_in_enabled:
-            await self.cancel_task(self._audio_in_task)
-            self._audio_in_task = None
 
     #
     # FrameProcessor
@@ -1034,32 +1040,26 @@ class DailyInputTransport(BaseInputTransport):
         self,
         participant_id: str,
         audio_source: str = "microphone",
+        sample_rate: int = 16000,
     ):
-        await self._client.capture_participant_audio(
-            participant_id, self._on_participant_audio_data, audio_source
-        )
+        if self._streaming_started:
+            await self._client.capture_participant_audio(
+                participant_id, self._on_participant_audio_data, audio_source, sample_rate
+            )
+        else:
+            self._capture_participant_audio.append((participant_id, audio_source, sample_rate))
 
     async def _on_participant_audio_data(
         self, participant_id: str, audio: AudioData, audio_source: str
     ):
-        resampled = await self._resampler.resample(
-            audio.audio_frames, audio.sample_rate, self._client.out_sample_rate
-        )
-
         frame = UserAudioRawFrame(
             user_id=participant_id,
-            audio=resampled,
-            sample_rate=self._client.out_sample_rate,
+            audio=audio.audio_frames,
+            sample_rate=audio.sample_rate,
             num_channels=audio.num_channels,
         )
         frame.transport_source = audio_source
-        await self.push_frame(frame)
-
-    async def _audio_in_task_handler(self):
-        while True:
-            frame = await self._client.read_next_audio_frame()
-            if frame:
-                await self.push_audio_frame(frame)
+        await self.push_audio_frame(frame)
 
     #
     # Camera in
@@ -1376,9 +1376,10 @@ class DailyTransport(BaseTransport):
         self,
         participant_id: str,
         audio_source: str = "microphone",
+        sample_rate: int = 16000,
     ):
         if self._input:
-            await self._input.capture_participant_audio(participant_id, audio_source)
+            await self._input.capture_participant_audio(participant_id, audio_source, sample_rate)
 
     async def capture_participant_video(
         self,
@@ -1508,6 +1509,11 @@ class DailyTransport(BaseTransport):
     async def _on_participant_joined(self, participant):
         id = participant["id"]
         logger.info(f"Participant joined {id}")
+
+        if self._input and self._params.audio_in_enabled:
+            await self._input.capture_participant_audio(
+                id, "microphone", self._client.in_sample_rate
+            )
 
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True

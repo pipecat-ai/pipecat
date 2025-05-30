@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GoogleHttpTTSService` which uses Google's HTTP TTS API.
+
+- Added `TavusTransport`, a new transport implementation compatible with any
+  Pipecat pipeline. When using the `TavusTransport`the Pipecat bot will
+  connect in the same room as the Tavus Avatar and the user.
+
+- Added `PlivoFrameSerializer` to support Plivo calls. A full running example
+  has also been added to `examples/plivo-chatbot`.
+
+- Added `UserBotLatencyLogObserver`. This is an observer that logs the latency
+  between when the user stops speaking and when the bot starts speaking. This
+  gives you an initial idea on how quickly the AI services respond.
+
 - Added `SarvamTTSService`, which implements Sarvam AI's TTS API:
   https://docs.sarvam.ai/api-reference-docs/text-to-speech/convert.
 
@@ -26,8 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correspond to the `StartFrame`, `StopFrame`, `EndFrame` and `CancelFrame`
   respectively.
 
-- Added additional languages to `LmntTTSService`. Languages include: `hi`, `id`,
-  `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
+- Added additional languages to `LmntTTSService`. Languages include: `hi`,
+  `id`, `it`, `ja`, `nl`, `pl`, `ru`, `sv`, `th`, `tr`, `uk`, `vi`.
 
 - Added a `model` parameter to the `LmntTTSService` constructor, allowing
   switching between LMNT models.
@@ -65,8 +78,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ```
 
   By default, Pipecat has implemented service decorators to trace execution of
-  STT, LLM, and TTS services. You can enable tracing by setting `enable_tracing`
-  to `True` in the PipelineTask.
+  STT, LLM, and TTS services. You can enable tracing by setting
+  `enable_tracing` to `True` in the PipelineTask.
 
 - Added `TurnTrackingObserver`, which tracks the start and end of a user/bot
   turn pair and emits events `on_turn_started` and `on_turn_stopped`
@@ -75,6 +88,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow passing observers to `run_test()` while running unit tests.
 
 ### Changed
+
+- Updated `GoogleTTSService` to use Google's streaming TTS API. The default
+  voice also updated to `en-US-Chirp3-HD-Charon`.
+
+- ⚠️ Refactored the `TavusVideoService`, so it acts like a proxy, sending audio
+  to Tavus and receiving both audio and video. This will make
+  `TavusVideoService` usable with any Pipecat pipeline and with any transport.
+  This is a **breaking change**, check the
+  `examples/foundational/21a-tavus-layer-small-webrtc.py` to see how to use it.
+
+- `DailyTransport` now uses custom microphone audio tracks instead of virtual
+  microphones. Now, multiple Daily transports can be used in the same process.
+
+- `DailyTransport` now captures audio from individual participants instead of
+  the whole room. This allows identifying audio frames per participant.
 
 - Updated the default model for `AnthropicLLMService` to
   `claude-sonnet-4-20250514`.
@@ -117,6 +145,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `DailyTransport` issue that would cause images needing resize to block
+  the event loop.
+
 - Fixed an issue with `ElevenLabsTTSService` where changing the model or voice
   while the service is running wasn't working.
 
@@ -129,6 +160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assistant context not being updated with assistant messages.
 
 ### Performance
+
+- `DailyTransport`: process audio, video and events in separate tasks.
 
 - Don't create event handler tasks if no user event handlers have been
   registered.

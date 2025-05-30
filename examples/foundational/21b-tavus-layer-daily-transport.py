@@ -19,7 +19,9 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.tavus.video import TavusVideoService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
@@ -35,21 +37,32 @@ async def main():
         transport = DailyTransport(
             room_url,
             token,
-            "Respond bot",
+            "Pipecat bot",
             DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
-                transcription_enabled=True,
+                video_out_enabled=True,
+                video_out_is_live=True,
                 vad_analyzer=SileroVADAnalyzer(),
+                video_out_width=1280,
+                video_out_height=720,
             ),
         )
 
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+            voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o")
+        llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+
+        tavus = TavusVideoService(
+            api_key=os.getenv("TAVUS_API_KEY"),
+            replica_id=os.getenv("TAVUS_REPLICA_ID"),
+            session=session,
+        )
 
         messages = [
             {
@@ -64,9 +77,11 @@ async def main():
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
+                stt,  # STT
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
+                tavus,  # Tavus output layer
                 transport.output(),  # Transport bot output
                 context_aggregator.assistant(),  # Assistant spoken responses
             ]
@@ -75,6 +90,8 @@ async def main():
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
+                audio_in_sample_rate=16000,
+                audio_out_sample_rate=24000,
                 allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
@@ -84,16 +101,20 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
             # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "Start by greeting the user and ask how you can help.",
+                }
+            )
             await task.queue_frames([context_aggregator.user().get_context_frame()])
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):
             await task.cancel()
 
-        runner = PipelineRunner()
+        runner = PipelineRunner(handle_sigint=False)
 
         await runner.run(task)
 

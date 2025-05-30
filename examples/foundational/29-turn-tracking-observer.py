@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.observers.loggers.user_bot_latency_log_observer import UserBotLatencyLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -76,6 +77,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             enable_usage_metrics=True,
             report_only_initial_ttfb=True,
         ),
+        observers=[UserBotLatencyLogObserver()],
     )
 
     turn_observer = task.turn_tracking_observer
