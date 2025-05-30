@@ -28,7 +28,7 @@ class FrameProcessorMetrics:
         self._should_report_ttfb = True
 
     @property
-    def ttfb_ms(self) -> Optional[float]:
+    def ttfb(self) -> Optional[float]:
         """Get the current TTFB value in seconds.
 
         Returns:
