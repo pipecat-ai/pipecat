@@ -238,7 +238,9 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                 ) as current_span:
                     try:
                         # Get TTFB metric if available
-                        ttfb: Optional[float] = getattr(getattr(self, "_metrics", None), "ttfb", None)
+                        ttfb: Optional[float] = getattr(
+                            getattr(self, "_metrics", None), "ttfb", None
+                        )
 
                         # Use settings from the service if available
                         settings = getattr(self, "_settings", {})
@@ -460,7 +462,9 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             self.start_llm_usage_metrics = original_start_llm_usage_metrics
 
                         # Update TTFB metric
-                        ttfb: Optional[float] = getattr(getattr(self, "_metrics", None), "ttfb", None)
+                        ttfb: Optional[float] = getattr(
+                            getattr(self, "_metrics", None), "ttfb", None
+                        )
                         if ttfb is not None:
                             current_span.set_attribute("metrics.ttfb", ttfb)
             except Exception as e:
