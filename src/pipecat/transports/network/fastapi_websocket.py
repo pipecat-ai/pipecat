@@ -122,8 +122,17 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         self._receive_task = None
         self._monitor_websocket_task = None
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(frame)
         if self._params.serializer:
             await self._params.serializer.setup(frame)
@@ -204,8 +213,17 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(frame)
         if self._params.serializer:
             await self._params.serializer.setup(frame)
