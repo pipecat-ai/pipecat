@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -500,7 +501,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self._params.expect_stripped_words = kwargs["expect_stripped_words"]
 
         self._started = 0
-        self._function_calls_in_progress: Dict[str, FunctionCallInProgressFrame] = {}
+        self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
     async def handle_aggregation(self, aggregation: str):
@@ -538,6 +539,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            await self._handle_function_calls_started(frame)
         elif isinstance(frame, FunctionCallInProgressFrame):
             await self._handle_function_call_in_progress(frame)
         elif isinstance(frame, FunctionCallResultFrame):
@@ -574,6 +577,12 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         self._started = 0
         self.reset()
 
+    async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
+        function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
+        logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
+        for function_call in frame.function_calls:
+            self._function_calls_in_progress[function_call.tool_call_id] = None
+
     async def _handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         logger.debug(
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
@@ -597,9 +606,10 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         await self.handle_function_call_result(frame)
 
+        run_llm = False
+
         # Run inference if the function call result requires it.
         if frame.result:
-            run_llm = False
             if properties and properties.run_llm is not None:
                 # If the tool call result has a run_llm property, use it.
                 run_llm = properties.run_llm
@@ -610,8 +620,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
                 # If this is the last function call in progress, run the LLM.
                 run_llm = not bool(self._function_calls_in_progress)
 
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
+        if run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
         # is added to the context. Also, run this in a separate task to make
