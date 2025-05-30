@@ -249,6 +249,7 @@ class AssemblyAISTTService(STTService):
                     "",  # participant
                     time_now_iso8601(),
                     self._language,
+                    message,
                 )
             )
             await self.stop_processing_metrics()
@@ -259,5 +260,6 @@ class AssemblyAISTTService(STTService):
                     "",  # participant
                     time_now_iso8601(),
                     self._language,
+                    message,
                 )
             )
