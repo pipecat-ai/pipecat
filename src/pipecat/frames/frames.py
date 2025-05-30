@@ -439,6 +439,20 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
 
 
 @dataclass
+class InterruptionConfig:
+    """Configuration for interruption behavior.
+
+    When specified, the bot will not be interrupted immediately when the user speaks.
+    Instead, interruption will only occur when the configured conditions are met.
+
+    Args:
+        min_words: If set, user must speak at least this many words to interrupt
+    """
+
+    min_words: Optional[int] = None
+
+
+@dataclass
 class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
@@ -448,6 +462,7 @@ class StartFrame(SystemFrame):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
+    interruption_config: Optional[InterruptionConfig] = None
 
 
 @dataclass
