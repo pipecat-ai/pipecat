@@ -43,3 +43,13 @@ tests:
 ```sh
 python run-release-evals.py -p 07 -a -v
 ```
+
+## Script Evals
+
+You can also run evals for a single example (not part of the release set):
+
+```sh
+python run-eval.py YOUR_EXAMPLE_SCRIPT -a -v
+```
+
+Your script needs to follow any of the foundation examples pattern.
