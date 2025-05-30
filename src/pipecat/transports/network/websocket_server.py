@@ -78,8 +78,17 @@ class WebsocketServerInputTransport(BaseInputTransport):
 
         self._stop_server_event = asyncio.Event()
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         if self._params.serializer:
             await self._params.serializer.setup(frame)
         if not self._server_task:
@@ -190,6 +199,9 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def set_client_connection(self, websocket: Optional[websockets.WebSocketServerProtocol]):
         if self._websocket:
             await self._websocket.close()
@@ -198,6 +210,12 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         if self._params.serializer:
             await self._params.serializer.setup(frame)
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
