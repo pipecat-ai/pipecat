@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
+    InterruptionConfig,
     LLMFullResponseEndFrame,
     MetricsFrame,
     StartFrame,
@@ -58,6 +59,7 @@ class PipelineParams(BaseModel):
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
+        interruption_config: Configuration for bot interruption behavior.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -73,6 +75,7 @@ class PipelineParams(BaseModel):
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
     start_metadata: Dict[str, Any] = Field(default_factory=dict)
+    interruption_config: Optional[InterruptionConfig] = None
 
 
 class PipelineTaskSource(FrameProcessor):
@@ -518,6 +521,7 @@ class PipelineTask(BaseTask):
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            interruption_config=self._params.interruption_config,
         )
         start_frame.metadata = self._params.start_metadata
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
