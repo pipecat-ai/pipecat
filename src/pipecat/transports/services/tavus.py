@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
-    OutputImageRawFrame,
     StartFrame,
     StartInterruptionFrame,
     TransportMessageFrame,
@@ -317,6 +316,9 @@ class TavusInputTransport(BaseInputTransport):
         self._params = params
         self._resampler = create_default_resampler()
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
         await self._client.setup(setup)
@@ -327,6 +329,12 @@ class TavusInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.start(frame)
         await self.set_transport_ready(frame)
 
@@ -375,6 +383,9 @@ class TavusOutputTransport(BaseOutputTransport):
         self._start_time = None
         self._current_idx_str: Optional[str] = None
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
         await self._client.setup(setup)
@@ -385,6 +396,12 @@ class TavusOutputTransport(BaseOutputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.start(frame)
         await self.set_transport_ready(frame)
 
