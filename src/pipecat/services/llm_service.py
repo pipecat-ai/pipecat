@@ -18,9 +18,11 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     FunctionCallCancelFrame,
+    FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallResultProperties,
+    FunctionCallsStartedFrame,
     StartFrame,
     StartInterruptionFrame,
     UserImageRequestFrame,
@@ -64,24 +66,6 @@ class FunctionCallParams:
     llm: "LLMService"
     context: OpenAILLMContext
     result_callback: FunctionCallResultCallback
-
-
-@dataclass
-class FunctionCallFromLLM:
-    """Represents a function call returned by the LLM to be registered for execution.
-
-    Attributes:
-        function_name (str): The name of the function.
-        tool_call_id (str): A unique identifier for the function call.
-        arguments (Mapping[str, Any]): The arguments for the function.
-        context (OpenAILLMContext): The LLM context.
-
-    """
-
-    function_name: str
-    tool_call_id: str
-    arguments: Mapping[str, Any]
-    context: OpenAILLMContext
 
 
 @dataclass
@@ -238,8 +222,13 @@ class LLMService(AIService):
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         await self._call_event_handler("on_function_calls_started", function_calls)
 
-        total_function_calls = len(function_calls)
-        for index, function_call in enumerate(function_calls):
+        # Push frame both downstream and upstream
+        started_frame_downstream = FunctionCallsStartedFrame(function_calls=function_calls)
+        started_frame_upstream = FunctionCallsStartedFrame(function_calls=function_calls)
+        await self.push_frame(started_frame_downstream, FrameDirection.DOWNSTREAM)
+        await self.push_frame(started_frame_upstream, FrameDirection.UPSTREAM)
+
+        for function_call in function_calls:
             if function_call.function_name in self._functions.keys():
                 item = self._functions[function_call.function_name]
             elif None in self._functions.keys():
@@ -250,20 +239,12 @@ class LLMService(AIService):
                 )
                 continue
 
-            # If we are not running in parallel, run inference on the last
-            # function call. Otherwise, the last function call to finish is the
-            # one that will run the inference.
-            run_llm = None
-            if not self._run_in_parallel:
-                run_llm = index == total_function_calls - 1
-
             runner_item = FunctionCallRunnerItem(
                 registry_item=item,
                 function_name=function_call.function_name,
                 tool_call_id=function_call.tool_call_id,
                 arguments=function_call.arguments,
                 context=function_call.context,
-                run_llm=run_llm,
             )
 
             if self._run_in_parallel:

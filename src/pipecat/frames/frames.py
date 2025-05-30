@@ -668,6 +668,32 @@ class MetricsFrame(SystemFrame):
 
 
 @dataclass
+class FunctionCallFromLLM:
+    """Represents a function call returned by the LLM to be registered for execution.
+
+    Attributes:
+        function_name (str): The name of the function.
+        tool_call_id (str): A unique identifier for the function call.
+        arguments (Mapping[str, Any]): The arguments for the function.
+        context (OpenAILLMContext): The LLM context.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+    context: Any
+
+
+@dataclass
+class FunctionCallsStartedFrame(SystemFrame):
+    """A frame signaling that one or more function call execution is going to
+    start."""
+
+    function_calls: Sequence[FunctionCallFromLLM]
+
+
+@dataclass
 class FunctionCallInProgressFrame(SystemFrame):
     """A frame signaling that a function call is in progress."""
 
