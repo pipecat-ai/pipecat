@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `interruption_config` to `PipelineParams` which uses an
+  `InterruptionConfig` to specify criteria required to interrupt the bot when
+  it's speaking. You can specify `min_words` to require the user to say at
+  least `min_words` words before their speech will interrupt the bot. If not
+  specified, the normal interruption behavior applies.
+
 - `BaseInputTransport` now handles `StopFrame`. When a `StopFrame` is received
   the transport will pause sending frames downstream until a new `StartFrame` is
   received. This allows the transport to be reused (keeping the same connection)
