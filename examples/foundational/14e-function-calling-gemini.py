@@ -35,7 +35,6 @@ client_id = ""
 
 
 async def get_weather(params: FunctionCallParams):
-    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
     location = params.arguments["location"]
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
@@ -93,6 +92,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
     llm.register_function("get_weather", get_weather)
     llm.register_function("get_image", get_image)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_weather",
