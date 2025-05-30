@@ -132,7 +132,7 @@ class AssemblyAISTTService(STTService):
                 extra_headers=headers,
             )
             self._connected = True
-            self._receive_task = asyncio.create_task(self._receive_task_handler())
+            self._receive_task = self.create_task(self._receive_task_handler())
         except Exception as e:
             logger.error(f"Failed to connect to AssemblyAI: {e}")
             self._connected = False
@@ -166,11 +166,7 @@ class AssemblyAISTTService(STTService):
                 logger.warning(f"Error during termination handshake: {e}")
 
             if self._receive_task:
-                self._receive_task.cancel()
-                try:
-                    await self._receive_task
-                except asyncio.CancelledError:
-                    pass
+                await self.cancel_task(self._receive_task)
 
             await self._websocket.close()
 
