@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Updated AssemblyAI STT service to support their latest streaming
+  speech-to-text model with improved transcription latency and endpointing.
+
 - You can now access STT service results through the new
   `TranscriptionFrame.result` and `InterimTranscriptionFrame.result` field. This
   is useful in case you use some specific settings for the STT and you want to
