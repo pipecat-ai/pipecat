@@ -1,11 +1,11 @@
-# Daily + Twilio SIP Voice Bot
+# Daily + Twilio SIP dial-in Voice Bot
 
 This project demonstrates how to create a voice bot that can receive phone calls via Twilio and use Daily's SIP capabilities to enable voice conversations.
 
 ## How It Works
 
 1. Twilio receives an incoming call to your phone number
-2. Twilio calls your webhook server (`/call` endpoint)
+2. Twilio calls your webhook server (`/start` endpoint)
 3. The server creates a Daily room with SIP capabilities
 4. The server starts the bot process with the room details
 5. The caller is put on hold with music
@@ -44,12 +44,12 @@ cp .env.example .env
 In the Twilio console:
 
 - Go to your phone number's configuration
-- Set the webhook for "A Call Comes In" to your server's URL + "/call"
+- Set the webhook for "A Call Comes In" to your server's URL + "/start"
 - For local testing, you can use ngrok to expose your local server
 
 ```bash
-ngrok http 8000
-# Then use the provided URL (e.g., https://abc123.ngrok.io/call) in Twilio
+ngrok http 7860
+# Then use the provided URL (e.g., https://abc123.ngrok.io/start) in Twilio
 ```
 
 ## Running the Server
