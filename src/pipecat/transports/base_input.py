@@ -24,9 +24,11 @@ from pipecat.frames.frames import (
     FilterUpdateSettingsFrame,
     Frame,
     InputAudioRawFrame,
+    InputImageRawFrame,
     MetricsFrame,
     StartFrame,
     StartInterruptionFrame,
+    StopFrame,
     StopInterruptionFrame,
     SystemFrame,
     UserStartedSpeakingFrame,
@@ -56,6 +58,11 @@ class BaseInputTransport(FrameProcessor):
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
         self._audio_task = None
+
+        # If the transport is stopped with `StopFrame` we might still be
+        # receiving frames from the transport but we really don't want to push
+        # them downstream until we get another `StartFrame`.
+        self._paused = False
 
         if self._params.vad_enabled:
             import warnings
@@ -117,6 +124,8 @@ class BaseInputTransport(FrameProcessor):
         return self._params.turn_analyzer
 
     async def start(self, frame: StartFrame):
+        self._paused = False
+
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
 
         # Configure VAD analyzer.
@@ -133,28 +142,33 @@ class BaseInputTransport(FrameProcessor):
 
     async def stop(self, frame: EndFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._audio_task and self._params.audio_in_enabled:
-            await self.cancel_task(self._audio_task)
-            self._audio_task = None
+        await self._cancel_audio_task()
         # Stop audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.stop()
 
+    async def pause(self, frame: StopFrame):
+        self._paused = True
+        # Cancel task so we clear the queue
+        await self._cancel_audio_task()
+        # Retart the task
+        self._create_audio_task()
+
     async def cancel(self, frame: CancelFrame):
         # Cancel and wait for the audio input task to finish.
-        if self._audio_task and self._params.audio_in_enabled:
-            await self.cancel_task(self._audio_task)
-            self._audio_task = None
+        await self._cancel_audio_task()
 
     async def set_transport_ready(self, frame: StartFrame):
         """To be called when the transport is ready to stream."""
         # Create audio input queue and task if needed.
-        if not self._audio_task and self._params.audio_in_enabled:
-            self._audio_in_queue = asyncio.Queue()
-            self._audio_task = self.create_task(self._audio_task_handler())
+        self._create_audio_task()
+
+    async def push_video_frame(self, frame: InputImageRawFrame):
+        if self._params.video_in_enabled and not self._paused:
+            await self.push_frame(frame)
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
-        if self._params.audio_in_enabled:
+        if self._params.audio_in_enabled and not self._paused:
             await self._audio_in_queue.put(frame)
 
     #
@@ -190,6 +204,9 @@ class BaseInputTransport(FrameProcessor):
             # finish and the task finishes when EndFrame is processed.
             await self.push_frame(frame, direction)
             await self.stop(frame)
+        elif isinstance(frame, StopFrame):
+            await self.push_frame(frame, direction)
+            await self.pause(frame)
         elif isinstance(frame, VADParamsUpdateFrame):
             if self.vad_analyzer:
                 self.vad_analyzer.set_params(frame.params)
@@ -230,6 +247,16 @@ class BaseInputTransport(FrameProcessor):
     #
     # Audio input
     #
+
+    def _create_audio_task(self):
+        if not self._audio_task and self._params.audio_in_enabled:
+            self._audio_in_queue = asyncio.Queue()
+            self._audio_task = self.create_task(self._audio_task_handler())
+
+    async def _cancel_audio_task(self):
+        if self._audio_task:
+            await self.cancel_task(self._audio_task)
+            self._audio_task = None
 
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
         state = VADState.QUIET

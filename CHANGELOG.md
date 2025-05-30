@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `BaseInputTransport` now handles `StopFrame`. When a `StopFrame` is received
+  the transport will pause sending frames downstream until a new `StartFrame` is
+  received. This allows the transport to be reused (keeping the same connection)
+  in a different pipeline.
+
 - Updated AssemblyAI STT service to support their latest streaming
   speech-to-text model with improved transcription latency and endpointing.
 
