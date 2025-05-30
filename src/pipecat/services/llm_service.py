@@ -124,7 +124,23 @@ class FunctionCallRunnerItem:
 
 
 class LLMService(AIService):
-    """This class is a no-op but serves as a base class for LLM services."""
+    """This is the base class for all LLM services. It handles function calling
+    registration and execution. The class also provides event handlers.
+
+    An event to know when an LLM service completion timeout occurs:
+
+       @task.event_handler("on_completion_timeout")
+       async def on_completion_timeout(service):
+           ...
+
+    And an event to know that function calls have been received from the LLM
+    service and that we are going to start executing them:
+
+       @task.event_handler("on_function_calls_started")
+       async def on_function_calls_started(service, function_calls: Sequence[FunctionCallFromLLM]):
+           ...
+
+    """
 
     # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
     # However, subclasses should override this with a more specific adapter when necessary.
@@ -139,6 +155,7 @@ class LLMService(AIService):
         self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
 
+        self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
 
     def get_llm_adapter(self) -> BaseLLMAdapter:
@@ -219,6 +236,8 @@ class LLMService(AIService):
         return function_name in self._functions.keys()
 
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
+        await self._call_event_handler("on_function_calls_started", function_calls)
+
         total_function_calls = len(function_calls)
         for index, function_call in enumerate(function_calls):
             if function_call.function_name in self._functions.keys():
