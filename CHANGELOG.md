@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added LLM services `on_function_calls_started` event. This event will be
+  triggered when the LLM service receives function calls from the model and is
+  going to start executing them.
+
 - Function calls can now be executed sequentially (in the order received in the
   completion) by passing `run_in_parallel=False` when creating your LLM
   service. By default, if the LLM completion returns 2 or more function calls
