@@ -112,7 +112,7 @@ class AssemblyAISTTService(STTService):
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
         params = {
             k: str(v).lower() if isinstance(v, bool) else v
-            for k, v in self._connection_params.dict().items()
+            for k, v in self._connection_params.model_dump().items()
             if v is not None
         }
         if params:
