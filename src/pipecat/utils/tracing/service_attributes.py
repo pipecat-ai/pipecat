@@ -258,7 +258,7 @@ def add_llm_span_attributes(
             span.set_attribute(key, value)
 
 
-def add_multimodal_llm_span_attributes(
+def add_gemini_live_span_attributes(
     span: "Span",
     service_name: str,
     model: str,
