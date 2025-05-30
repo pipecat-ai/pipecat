@@ -1,3 +1,9 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
 import aiohttp
 import mimetypes
 from typing import Dict, Any, Optional
@@ -24,9 +30,11 @@ class GeminiFileAPI:
         """
         self.api_key = api_key
         self.base_url = base_url
+        # Upload URL uses the /upload/ path
+        self.upload_base_url = "https://generativelanguage.googleapis.com/upload/v1beta/files"
     
     async def upload_file(self, file_path: str, display_name: Optional[str] = None) -> Dict[str, Any]:
-        """Upload a file to the Gemini File API.
+        """Upload a file to the Gemini File API using the correct resumable upload protocol.
         
         Args:
             file_path: Path to the file to upload
@@ -47,7 +55,12 @@ class GeminiFileAPI:
             with open(file_path, "rb") as f:
                 file_data = f.read()
                 
-            # First request to initiate the upload
+            # Create the metadata payload
+            metadata = {}
+            if display_name:
+                metadata = {"file": {"display_name": display_name}}
+            
+            # Step 1: Initial resumable request to get upload URL
             headers = {
                 "X-Goog-Upload-Protocol": "resumable",
                 "X-Goog-Upload-Command": "start",
@@ -56,43 +69,42 @@ class GeminiFileAPI:
                 "Content-Type": "application/json"
             }
             
-            # Create the metadata payload
-            metadata = {}
-            if display_name:
-                metadata = {"file": {"display_name": display_name}}
-            
-            # Initial request to get the upload URL
+            logger.debug(f"Step 1: Getting upload URL from {self.upload_base_url}")
             async with session.post(
-                f"{self.base_url}?key={self.api_key}",
+                f"{self.upload_base_url}?key={self.api_key}",
                 headers=headers,
                 json=metadata
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Error initiating file upload: {error_text}")
-                    raise Exception(f"Failed to initiate upload: {response.status}")
+                    raise Exception(f"Failed to initiate upload: {response.status} - {error_text}")
                 
                 # Get the upload URL from the response header
                 upload_url = response.headers.get("X-Goog-Upload-URL")
                 if not upload_url:
-                    raise Exception("No upload URL in response")
+                    logger.error(f"Response headers: {dict(response.headers)}")
+                    raise Exception("No upload URL in response headers")
+                
+                logger.debug(f"Got upload URL: {upload_url}")
             
-            # Upload the actual file
-            headers = {
+            # Step 2: Upload the actual file data
+            upload_headers = {
                 "Content-Length": str(len(file_data)),
                 "X-Goog-Upload-Offset": "0",
                 "X-Goog-Upload-Command": "upload, finalize"
             }
             
+            logger.debug(f"Step 2: Uploading file data to {upload_url}")
             async with session.post(
                 upload_url, 
-                headers=headers,
+                headers=upload_headers,
                 data=file_data
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
-                    logger.error(f"Error uploading file: {error_text}")
-                    raise Exception(f"Failed to upload file: {response.status}")
+                    logger.error(f"Error uploading file data: {error_text}")
+                    raise Exception(f"Failed to upload file: {response.status} - {error_text}")
                 
                 file_info = await response.json()
                 logger.info(f"File uploaded successfully: {file_info.get('file', {}).get('name')}")
