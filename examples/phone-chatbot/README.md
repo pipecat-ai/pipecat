@@ -1,3 +1,5 @@
+<!-- @format -->
+
 <div align="center">
  <img alt="pipecat" width="300px" height="auto" src="image.png">
 </div>
@@ -11,6 +13,7 @@ This repository contains examples for building intelligent phone chatbots using 
 - **daily-twilio-sip-dial-in**: Basic incoming call handling using Daily SIP + Twilio
 - **daily-twilio-sip-dial-out**: Basic outgoing call handling using Daily SIP + Twilio
 - **daily-pstn-simple-voicemail-detection**: Voicemail detection Bot. Bot calls a number, detects if it reaches voicemail or a human, and responds appropriately
+- **daily-pstn-advanced-voicemail-detection**: A more advanced example of the voicemail detection bot. Utilises multiple pipelines. The first pipeline uses a much simpler, faster and cheaper LLM to detect the voicemail machine. Then switches to a more powerful LLM if it needs to have a conversation with a user. You should use this one if you want to use different LLMs for different tasks, it also shows how to do audio input for one LLM (multimodal LLM) and then STT for the other one. Switching out methods of sending data to the LLM
 - **daily-pstn-simple-call-transfer**: Bot handles initial customer interaction and transfers to a human operator when needed
 
 ## Architecture Overview
@@ -45,7 +48,8 @@ Each example in this repository is implemented with a specific LLM provider:
 - **daily-pstn-dial-out**: Uses OpenAI
 - **daily-twilio-sip-dial-in**: Uses OpenAI
 - **daily-twilio-sip-dial-out**: Uses OpenAI
-- **daily-pstn-simple-voicemail-detection**: Uses Google Gemini
+- **daily-pstn-simple-voicemail-detection**: Uses Google Gemini Flash 2.0
+- **daily-pstn-simple-voicemail-detection**: Uses Google Gemini Flash Lite 2.0 and Flash 2.0
 - **daily-pstn-simple-call-transfer**: Uses OpenAI
 
 If you want to implement one of these examples with a different LLM provider than what's provided:
