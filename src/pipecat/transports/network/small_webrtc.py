@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
-    InputImageRawFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
@@ -232,7 +231,8 @@ class SmallWebRTCClient:
             frame_array = frame.to_ndarray(format=format_name)
             frame_rgb = self._convert_frame(frame_array, format_name)
 
-            image_frame = InputImageRawFrame(
+            image_frame = UserImageRawFrame(
+                user_id=self._webrtc_connection.pc_id,
                 image=frame_rgb.tobytes(),
                 size=(frame.width, frame.height),
                 format="RGB",
@@ -377,6 +377,9 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._receive_video_task = None
         self._image_requests = {}
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
@@ -385,6 +388,12 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(self._params, frame)
         await self._client.connect()
         if not self._receive_audio_task and self._params.audio_in_enabled:
@@ -424,7 +433,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         try:
             async for video_frame in self._client.read_video_frame():
                 if video_frame:
-                    await self.push_frame(video_frame)
+                    await self.push_video_frame(video_frame)
 
                     # Check if there are any pending image requests and create UserImageRawFrame
                     if self._image_requests:
@@ -438,7 +447,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                                 format=video_frame.format,
                             )
                             # Push the frame to the pipeline
-                            await self.push_frame(image_frame)
+                            await self.push_video_frame(image_frame)
                             # Remove from pending requests
                             del self._image_requests[req_id]
 
@@ -480,8 +489,17 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(self._params, frame)
         await self._client.connect()
         await self.set_transport_ready(frame)

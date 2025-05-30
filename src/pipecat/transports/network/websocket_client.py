@@ -132,12 +132,21 @@ class WebsocketClientInputTransport(BaseInputTransport):
         self._session = session
         self._params = params
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
         await self._session.setup(setup.task_manager)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         if self._params.serializer:
             await self._params.serializer.setup(frame)
         await self._session.connect()
@@ -188,12 +197,21 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
         await self._session.setup(setup.task_manager)
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
         if self._params.serializer:
             await self._params.serializer.setup(frame)

@@ -279,6 +279,7 @@ async def main(
     voicemail_detection_pipeline_task = PipelineTask(
         voicemail_detection_pipeline,
         params=PipelineParams(allow_interruptions=True),
+        check_dangling_tasks=False,
     )
 
     # ------------ EVENT HANDLERS ------------
