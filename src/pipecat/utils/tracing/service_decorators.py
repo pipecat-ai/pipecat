@@ -761,9 +761,9 @@ def traced_gemini_live(operation: str) -> Callable:
                                 _add_token_usage_to_span(current_span, tokens)
 
                         # Capture TTFB metric if available
-                        ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
-                        if ttfb_ms is not None:
-                            current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+                        ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
+                        if ttfb is not None:
+                            current_span.set_attribute("metrics.ttfb", ttfb)
 
                         # Run the original function
                         result = await func(self, *args, **kwargs)
@@ -979,9 +979,9 @@ def traced_openai_realtime(operation: str) -> Callable:
                                 _add_token_usage_to_span(current_span, tokens)
 
                             # Capture TTFB metric if available
-                            ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
-                            if ttfb_ms is not None:
-                                current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+                            ttfb = getattr(getattr(self, "_metrics", None), "ttfb", None)
+                            if ttfb is not None:
+                                current_span.set_attribute("metrics.ttfb", ttfb)
 
                         # Run the original function
                         result = await func(self, *args, **kwargs)
