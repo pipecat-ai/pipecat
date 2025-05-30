@@ -53,6 +53,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
@@ -415,6 +416,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Initialize the File API client
         self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
 
+        # Grounding metadata tracking
+        self._search_result_buffer = ""
+        self._accumulated_grounding_metadata = None
+
     def can_generate_metrics(self) -> bool:
         return True
 
@@ -741,6 +746,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_turn_complete(evt)
             elif evt.serverContent and evt.serverContent.outputTranscription:
                 await self._handle_evt_output_transcription(evt)
+            elif evt.serverContent and evt.serverContent.groundingMetadata:
+                await self._handle_evt_grounding_metadata(evt)
             elif evt.toolCall:
                 await self._handle_evt_tool_call(evt)
             elif False:  # !!! todo: error events?
@@ -748,6 +755,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # errors are fatal, so exit the receive loop
                 return
             else:
+                # Log unhandled events that might contain grounding metadata
+                logger.warning(f"Received unhandled server event type: {evt}")
                 pass
 
     async def _transcribe_audio_handler(self):
@@ -902,7 +911,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self.push_frame(LLMFullResponseStartFrame())
 
             self._bot_text_buffer += text
+            self._search_result_buffer += text  # Also accumulate for grounding
             await self.push_frame(LLMTextFrame(text=text))
+
+        # Check for grounding metadata in server content
+        if evt.serverContent and evt.serverContent.groundingMetadata:
+            self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
+            logger.debug("Grounding metadata detected in model turn.")
 
         inline_data = part.inlineData
         if not inline_data:
@@ -947,6 +962,17 @@ class GeminiMultimodalLiveLLMService(LLMService):
         text = self._bot_text_buffer
         self._bot_text_buffer = ""
 
+        # Process grounding metadata if we have accumulated any
+        if self._accumulated_grounding_metadata:
+            logger.debug("Processing grounding metadata...")
+            await self._process_grounding_metadata(self._accumulated_grounding_metadata, self._search_result_buffer)
+        else:
+            logger.debug("No grounding metadata to process")
+
+        # Reset grounding tracking for next response
+        self._search_result_buffer = ""
+        self._accumulated_grounding_metadata = None
+
         # Only push the TTSStoppedFrame the bot is outputting audio
         # when text is found, modalities is set to TEXT and no audio
         # is produced.
@@ -967,8 +993,82 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not text:
             return
 
+        # Accumulate text for grounding as well
+        self._search_result_buffer += text
+
+        # Check for grounding metadata in server content
+        if evt.serverContent and evt.serverContent.groundingMetadata:
+            self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
+
         await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
+
+    async def _handle_evt_grounding_metadata(self, evt):
+        """Handle dedicated grounding metadata events."""
+        logger.debug("Received dedicated grounding metadata event.")
+        
+        if evt.serverContent and evt.serverContent.groundingMetadata:
+            grounding_metadata = evt.serverContent.groundingMetadata
+            logger.debug(f"Grounding data: {len(grounding_metadata.groundingChunks or [])} chunks, {len(grounding_metadata.groundingSupports or [])} supports")
+            
+            # Process the grounding metadata immediately
+            await self._process_grounding_metadata(grounding_metadata, self._search_result_buffer)
+
+    async def _process_grounding_metadata(self, grounding_metadata: events.GroundingMetadata, search_result: str = ""):
+        """Process grounding metadata and emit LLMSearchResponseFrame."""
+        logger.debug(f"Processing grounding metadata. Search result text length: {len(search_result)}")
+        if not grounding_metadata:
+            logger.warning("No grounding metadata provided to _process_grounding_metadata")
+            return
+
+        # logger.debug(f"Processing grounding metadata: {grounding_metadata}") # Too verbose for PR
+
+        # Extract rendered content for search suggestions
+        rendered_content = None
+        if grounding_metadata.searchEntryPoint and grounding_metadata.searchEntryPoint.renderedContent:
+            rendered_content = grounding_metadata.searchEntryPoint.renderedContent
+
+        # Convert grounding chunks and supports to LLMSearchOrigin format
+        origins = []
+        
+        if grounding_metadata.groundingChunks and grounding_metadata.groundingSupports:
+            # Create a mapping of chunk indices to origins
+            chunk_to_origin = {}
+            
+            for index, chunk in enumerate(grounding_metadata.groundingChunks):
+                if chunk.web:
+                    origin = LLMSearchOrigin(
+                        site_uri=chunk.web.uri,
+                        site_title=chunk.web.title,
+                        results=[]
+                    )
+                    chunk_to_origin[index] = origin
+                    origins.append(origin)
+            
+            # Add grounding support results to the appropriate origins
+            for support in grounding_metadata.groundingSupports:
+                if support.segment and support.groundingChunkIndices:
+                    text = support.segment.text or ""
+                    confidence_scores = support.confidenceScores or []
+                    
+                    # Add this result to all origins referenced by this support
+                    for chunk_index in support.groundingChunkIndices:
+                        if chunk_index in chunk_to_origin:
+                            result = LLMSearchResult(
+                                text=text,
+                                confidence=confidence_scores
+                            )
+                            chunk_to_origin[chunk_index].results.append(result)
+
+        # Create and push the search response frame
+        search_frame = LLMSearchResponseFrame(
+            search_result=search_result,
+            origins=origins,
+            rendered_content=rendered_content
+        )
+        
+        logger.debug(f"Emitting LLMSearchResponseFrame with {len(origins)} origins, rendered_content available: {rendered_content is not None}")
+        await self.push_frame(search_frame)
 
     def create_context_aggregator(
         self,
