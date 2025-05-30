@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import sys
+from typing import Any
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -135,17 +136,36 @@ async def run_bot(
     # Create pipeline task
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
+    # ------------ RETRY LOGIC VARIABLES ------------
+    max_retries = 5
+    retry_count = 0
+    dialout_successful = False
+
+    # Build dialout parameters conditionally
+    dialout_params = {"sipUri": sip_uri}
+
+    logger.debug(f"Dialout parameters: {dialout_params}")
+
+    async def attempt_dialout():
+        """Attempt to start dialout with retry logic."""
+        nonlocal retry_count, dialout_successful
+
+        if retry_count < max_retries and not dialout_successful:
+            retry_count += 1
+            logger.info(
+                f"Attempting dialout (attempt {retry_count}/{max_retries}) to: {phone_number}"
+            )
+            await transport.start_dialout(dialout_params)
+        else:
+            logger.error(f"Maximum retry attempts ({max_retries}) reached. Giving up on dialout.")
+
     # ------------ EVENT HANDLERS ------------
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
-        # Start dialout with conditional caller_id
-        logger.debug(f"Dialout settings detected; starting dialout to sip_uri: {sip_uri}")
-
-        # Build dialout parameters conditionally
-        dialout_params = {"sipUri": sip_uri}
-
-        await transport.start_dialout(dialout_params)
+        # Start initial dialout attempt
+        logger.debug(f"Dialout settings detected; starting dialout to number: {phone_number}")
+        await attempt_dialout()
 
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
@@ -153,10 +173,23 @@ async def run_bot(
 
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
+        nonlocal dialout_successful
         logger.debug(f"Dial-out answered: {data}")
+        dialout_successful = True  # Mark as successful to stop retries
         # Automatically start capturing transcription for the participant
         await transport.capture_participant_transcription(data["sessionId"])
         # The bot will wait to hear the user before the bot speaks
+
+    @transport.event_handler("on_dialout_error")
+    async def on_dialout_error(transport, data: Any):
+        logger.error(f"Dial-out error (attempt {retry_count}/{max_retries}): {data}")
+
+        if retry_count < max_retries:
+            logger.info(f"Retrying dialout")
+            await attempt_dialout()
+        else:
+            logger.error(f"All {max_retries} dialout attempts failed. Stopping bot.")
+            await task.cancel()
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
