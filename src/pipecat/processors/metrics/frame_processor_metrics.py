@@ -28,18 +28,18 @@ class FrameProcessorMetrics:
         self._should_report_ttfb = True
 
     @property
-    def ttfb_ms(self) -> Optional[int]:
+    def ttfb_ms(self) -> Optional[float]:
         """Get the current TTFB value in milliseconds.
 
         Returns:
             Optional[int]: The TTFB value in milliseconds, or None if not measured
         """
         if self._last_ttfb_time > 0:
-            return int(self._last_ttfb_time * 1000)
+            return self._last_ttfb_time * 1000
 
         # If TTFB is in progress, calculate current value
         if self._start_ttfb_time > 0:
-            return int((time.time() - self._start_ttfb_time) * 1000)
+            return (time.time() - self._start_ttfb_time) * 1000
 
         return None
 
