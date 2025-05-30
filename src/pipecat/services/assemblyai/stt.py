@@ -204,11 +204,11 @@ class AssemblyAISTTService(STTService):
         msg_type = message.get("type")
 
         if msg_type == "Begin":
-            return BeginMessage.parse_obj(message)
+            return BeginMessage.model_validate(message)
         elif msg_type == "Turn":
-            return TurnMessage.parse_obj(message)
+            return TurnMessage.model_validate(message)
         elif msg_type == "Termination":
-            return TerminationMessage.parse_obj(message)
+            return TerminationMessage.model_validate(message)
         else:
             raise ValueError(f"Unknown message type: {msg_type}")
 
