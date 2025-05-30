@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import InterruptionConfig
+from pipecat.frames.frames import MinWordsInterruptionStrategy
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -92,7 +92,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
             report_only_initial_ttfb=True,
-            interruption_config=InterruptionConfig(min_words=3),
+            interruption_strategies=[MinWordsInterruptionStrategy(min_words=3)],
         ),
     )
 

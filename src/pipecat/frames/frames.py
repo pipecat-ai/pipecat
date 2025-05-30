@@ -15,6 +15,7 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Sequence,
     Tuple,
 )
 
@@ -439,17 +440,25 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
 
 
 @dataclass
-class InterruptionConfig:
-    """Configuration for interruption behavior.
+class InterruptionStrategy:
+    """Base class for interruption strategies."""
 
-    When specified, the bot will not be interrupted immediately when the user speaks.
-    Instead, interruption will only occur when the configured conditions are met.
+    pass
+
+
+@dataclass
+class MinWordsInterruptionStrategy(InterruptionStrategy):
+    """Strategy for interruption behavior based on a minimum number of words spoken by the user.
 
     Args:
         min_words: If set, user must speak at least this many words to interrupt
     """
 
-    min_words: Optional[int] = None
+    min_words: int
+
+    def __post_init__(self):
+        if self.min_words <= 0:
+            raise ValueError("min_words must be greater than 0")
 
 
 @dataclass
@@ -462,7 +471,7 @@ class StartFrame(SystemFrame):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
-    interruption_config: Optional[InterruptionConfig] = None
+    interruption_strategies: Optional[Sequence[InterruptionStrategy]] = None
 
 
 @dataclass

@@ -24,7 +24,6 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InterimTranscriptionFrame,
-    InterruptionConfig,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -33,6 +32,7 @@ from pipecat.frames.frames import (
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    MinWordsInterruptionStrategy,
     OpenAILLMContextAssistantTimestampFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -195,7 +195,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         self._context = context
         self._role = role
 
-        self._aggregation = ""
+        self._aggregation: str = ""
 
     @property
     def messages(self) -> List[dict]:
@@ -268,8 +268,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._seen_interim_results = False
         self._waiting_for_aggregation = False
 
-        self._interruption_config: Optional[InterruptionConfig] = None
-
         self._aggregation_event = asyncio.Event()
         self._aggregation_task = None
 
@@ -335,8 +333,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def push_aggregation(self):
         """Pushes the current aggregation based on interruption configuration and conditions."""
         if len(self._aggregation) > 0:
-            if self._interruption_config and self._bot_speaking:
-                should_interrupt = await self._should_interrupt_based_on_config()
+            if self.interruption_strategies and self._bot_speaking:
+                should_interrupt = self._should_interrupt_based_on_strategies()
 
                 if should_interrupt:
                     logger.debug(
@@ -352,18 +350,25 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 # No interruption config - normal behavior (always push aggregation)
                 await self._process_aggregation()
 
-    async def _should_interrupt_based_on_config(self) -> bool:
-        """Check if interruption should occur based on configured conditions."""
-        assert self._interruption_config is not None
-
-        if not self._aggregation or self._interruption_config.min_words is None:
+    def _should_interrupt_based_on_strategies(self) -> bool:
+        """Check if interruption should occur based on configured strategies."""
+        if not self.interruption_strategies:
             return False
 
+        # Check strategies one by one until first match
+        for strategy in self.interruption_strategies:
+            if isinstance(strategy, MinWordsInterruptionStrategy):
+                if self._should_interrupt_min_words(strategy):
+                    return True
+
+        return False
+
+    def _should_interrupt_min_words(self, strategy: MinWordsInterruptionStrategy) -> bool:
+        """Check if word count threshold is met."""
         word_count = len(self._aggregation.split())
-        return word_count >= self._interruption_config.min_words
+        return word_count >= strategy.min_words
 
     async def _start(self, frame: StartFrame):
-        self._interruption_config = frame.interruption_config
         self._create_aggregation_task()
 
     async def _stop(self, frame: EndFrame):
