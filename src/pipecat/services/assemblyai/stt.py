@@ -52,7 +52,7 @@ class AssemblyAISTTService(STTService):
         language: Language = Language.EN,  # AssemblyAI only supports English
         api_endpoint_base_url: str = "wss://streaming.assemblyai.com/v3/ws",
         connection_params: AssemblyAIConnectionParams = AssemblyAIConnectionParams(),
-        vad_force_turn_endpoint: bool = False,
+        vad_force_turn_endpoint: bool = True,
         **kwargs,
     ):
         self._api_key = api_key
