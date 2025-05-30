@@ -18,7 +18,6 @@ from pipecat.frames.frames import (
     EndFrame,
     EndTaskFrame,
     InputAudioRawFrame,
-    StartFrame,
     StopTaskFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -359,6 +358,7 @@ async def run_bot(
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
+        await transport.capture_participant_transcription(participant["id"])
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
@@ -452,9 +452,6 @@ async def run_bot(
     # ------------ RUN HUMAN CONVERSATION PIPELINE ------------
 
     print("!!! starting human conversation pipeline")
-    # FrameProcessor.setup()
-
-    await voicemail_detection_pipeline_task.queue_frame(StartFrame())
 
     # Initialize the context with system message
     human_conversation_context_aggregator.user().set_messages(
