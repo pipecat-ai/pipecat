@@ -26,6 +26,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 from .models import (
     AssemblyAIConnectionParams,
@@ -107,6 +108,11 @@ class AssemblyAISTTService(STTService):
             if self._vad_force_turn_endpoint:
                 await self._websocket.send(json.dumps({"type": "ForceEndpoint"}))
             await self.start_processing_metrics()
+
+    @traced_stt
+    async def _trace_transcription(self, transcript: str, is_final: bool, language: Language):
+        """Record transcription event for tracing."""
+        pass
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
@@ -252,6 +258,7 @@ class AssemblyAISTTService(STTService):
                     message,
                 )
             )
+            await self._trace_transcription(message.transcript, True, self._language)
             await self.stop_processing_metrics()
         else:
             await self.push_frame(
