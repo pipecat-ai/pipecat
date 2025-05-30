@@ -17,6 +17,8 @@ from pipecat.audio.turn.base_turn_analyzer import (
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
@@ -25,6 +27,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InterruptionConfig,
     MetricsFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -50,6 +53,12 @@ class BaseInputTransport(FrameProcessor):
 
         # Input sample rate. It will be initialized on StartFrame.
         self._sample_rate = 0
+
+        # Interruption configuration from StartFrame
+        self._interruption_config: Optional[InterruptionConfig] = None
+
+        # Track bot speaking state for interruption logic
+        self._bot_speaking = False
 
         # We read audio from a single queue one at a time and we then run VAD in
         # a thread. Therefore, only one thread should be necessary.
@@ -128,6 +137,9 @@ class BaseInputTransport(FrameProcessor):
 
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
 
+        # Store interruption configuration
+        self._interruption_config = frame.interruption_config
+
         # Configure VAD analyzer.
         if self._params.vad_analyzer:
             self._params.vad_analyzer.set_sample_rate(self._sample_rate)
@@ -189,6 +201,10 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotInterruptionFrame):
             await self._handle_bot_interruption(frame)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking(frame)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
         elif isinstance(frame, EmulateUserStartedSpeakingFrame):
             logger.debug("Emulating user started speaking")
             await self._handle_user_interruption(UserStartedSpeakingFrame(emulated=True))
@@ -230,19 +246,44 @@ class BaseInputTransport(FrameProcessor):
         if isinstance(frame, UserStartedSpeakingFrame):
             logger.debug("User started speaking")
             await self.push_frame(frame)
+
+            # Only push StartInterruptionFrame if:
+            # 1. No interruption config is set, OR
+            # 2. Interruption config is set but bot is not speaking
+            should_push_immediate_interruption = (
+                self._interruption_config is None or not self._bot_speaking
+            )
+
             # Make sure we notify about interruptions quickly out-of-band.
-            if self.interruptions_allowed:
+            if should_push_immediate_interruption and self.interruptions_allowed:
                 await self._start_interruption()
                 # Push an out-of-band frame (i.e. not using the ordered push
                 # frame task) to stop everything, specially at the output
                 # transport.
                 await self.push_frame(StartInterruptionFrame())
+            elif self._interruption_config and self._bot_speaking:
+                logger.trace(
+                    "User started speaking while bot is speaking with interruption config - "
+                    "deferring interruption to aggregator"
+                )
         elif isinstance(frame, UserStoppedSpeakingFrame):
             logger.debug("User stopped speaking")
             await self.push_frame(frame)
             if self.interruptions_allowed:
                 await self._stop_interruption()
                 await self.push_frame(StopInterruptionFrame())
+
+    #
+    # Handle bot speaking state
+    #
+
+    async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
+        self._bot_speaking = True
+        await self.push_frame(frame)
+
+    async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
+        self._bot_speaking = False
+        await self.push_frame(frame)
 
     #
     # Audio input
