@@ -240,7 +240,9 @@ class AssemblyAISTTService(STTService):
         if not message.transcript:
             return
         await self.stop_ttfb_metrics()
-        if message.end_of_turn:
+        if message.end_of_turn and (
+            not self._connection_params.formatted_finals or message.turn_is_formatted
+        ):
             await self.push_frame(
                 TranscriptionFrame(
                     message.transcript,
