@@ -60,7 +60,7 @@ def add_tts_span_attributes(
     settings: Optional[Dict[str, Any]] = None,
     character_count: Optional[int] = None,
     operation_name: str = "tts",
-    ttfb_ms: Optional[float] = None,
+    ttfb: Optional[float] = None,
     **kwargs,
 ) -> None:
     """Add TTS-specific attributes to a span.
@@ -74,7 +74,7 @@ def add_tts_span_attributes(
         settings: Service configuration settings
         character_count: Number of characters in the text
         operation_name: Name of the operation (default: "tts")
-        ttfb_ms: Time to first byte in milliseconds
+        ttfb: Time to first byte in seconds
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
@@ -91,8 +91,8 @@ def add_tts_span_attributes(
     if character_count is not None:
         span.set_attribute("metrics.character_count", character_count)
 
-    if ttfb_ms is not None:
-        span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+    if ttfb is not None:
+        span.set_attribute("metrics.ttfb", ttfb)
 
     # Add settings if provided
     if settings:
@@ -116,7 +116,7 @@ def add_stt_span_attributes(
     language: Optional[str] = None,
     settings: Optional[Dict[str, Any]] = None,
     vad_enabled: bool = False,
-    ttfb_ms: Optional[float] = None,
+    ttfb: Optional[float] = None,
     **kwargs,
 ) -> None:
     """Add STT-specific attributes to a span.
@@ -131,7 +131,7 @@ def add_stt_span_attributes(
         language: Detected or configured language
         settings: Service configuration settings
         vad_enabled: Whether voice activity detection is enabled
-        ttfb_ms: Time to first byte in milliseconds
+        ttfb: Time to first byte in seconds
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
@@ -150,8 +150,8 @@ def add_stt_span_attributes(
     if language:
         span.set_attribute("language", language)
 
-    if ttfb_ms is not None:
-        span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+    if ttfb is not None:
+        span.set_attribute("metrics.ttfb", ttfb)
 
     # Add settings if provided
     if settings:
@@ -178,7 +178,7 @@ def add_llm_span_attributes(
     system: Optional[str] = None,
     parameters: Optional[Dict[str, Any]] = None,
     extra_parameters: Optional[Dict[str, Any]] = None,
-    ttfb_ms: Optional[float] = None,
+    ttfb: Optional[float] = None,
     **kwargs,
 ) -> None:
     """Add LLM-specific attributes to a span.
@@ -196,7 +196,7 @@ def add_llm_span_attributes(
         system: System message
         parameters: Service parameters
         extra_parameters: Additional parameters
-        ttfb_ms: Time to first byte in milliseconds
+        ttfb: Time to first byte in seconds
         **kwargs: Additional attributes to add
     """
     # Add standard attributes
@@ -225,8 +225,8 @@ def add_llm_span_attributes(
     if system:
         span.set_attribute("system", system)
 
-    if ttfb_ms is not None:
-        span.set_attribute("metrics.ttfb_ms", ttfb_ms)
+    if ttfb is not None:
+        span.set_attribute("metrics.ttfb", ttfb)
 
     # Add parameters if provided
     if parameters:
