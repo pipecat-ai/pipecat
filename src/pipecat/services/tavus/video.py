@@ -24,12 +24,13 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
-    TTSStartedFrame,
-    TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.transports.services.tavus import TavusCallbacks, TavusParams, TavusTransportClient
+
+# Using the same values that we do in the BaseOutputTransport
+BOT_VAD_STOP_SECS = 0.35
 
 
 class TavusVideoService(AIService):
@@ -169,16 +170,8 @@ class TavusVideoService(AIService):
         if isinstance(frame, StartInterruptionFrame):
             await self._handle_interruptions()
             await self.push_frame(frame, direction)
-        elif isinstance(frame, TTSStartedFrame):
-            await self.start_processing_metrics()
-            await self.start_ttfb_metrics()
-            self._current_idx_str = str(frame.id)
         elif isinstance(frame, TTSAudioRawFrame):
-            await self._queue_audio(frame.audio, frame.sample_rate, done=False)
-        elif isinstance(frame, TTSStoppedFrame):
-            await self._queue_audio(b"\x00\x00", self._client.in_sample_rate, done=True)
-            await self.stop_ttfb_metrics()
-            await self.stop_processing_metrics()
+            await self._queue.put(frame)
         else:
             await self.push_frame(frame, direction)
 
@@ -191,9 +184,6 @@ class TavusVideoService(AIService):
         await self._client.stop()
         self._other_participant_has_joined = False
 
-    async def _queue_audio(self, audio: bytes, in_rate: int, done: bool):
-        await self._queue.put((audio, in_rate, done))
-
     async def _create_send_task(self):
         if not self._send_task:
             self._queue = asyncio.Queue()
@@ -204,15 +194,6 @@ class TavusVideoService(AIService):
             await self.cancel_task(self._send_task)
             self._send_task = None
 
-    # TODO (Filipi): this should be all that is needed use this Microphone Echo mode
-    # https://docs.tavus.io/sections/conversational-video-interface/layers-and-modes-overview#microphone-echo
-    # This would allow us to send an audio stream for the replica to repeat
-    # Checking with Tavus what is the right way to create the Persona to make it work
-    # async def _send_task_handler(self):
-    #    while True:
-    #        (audio, in_rate, done) = await self._queue.get()
-    #        await self._client.write_raw_audio_frames(audio)
-
     async def _send_task_handler(self):
         # Daily app-messages have a 4kb limit and also a rate limit of 20
         # messages per second. Below, we only consider the rate limit because 1
@@ -221,38 +202,52 @@ class TavusVideoService(AIService):
         # limit (even including base64 encoding). For a sample rate of 16000,
         # that would be 32000 / 20 = 1600.
         sample_rate = self._client.out_sample_rate
+        # 50 ms of audio
         MAX_CHUNK_SIZE = int((sample_rate * 2) / 20)
 
         audio_buffer = bytearray()
+        current_idx_str = None
+        silence = b"\x00" * MAX_CHUNK_SIZE
         samples_sent = 0
-        start_time = time.time()
+        start_time = None
 
         while True:
-            (audio, in_rate, done) = await self._queue.get()
+            try:
+                frame = await asyncio.wait_for(self._queue.get(), timeout=BOT_VAD_STOP_SECS)
+                if isinstance(frame, TTSAudioRawFrame):
+                    # starting the new inference
+                    if current_idx_str is None:
+                        current_idx_str = str(frame.id)
+                        samples_sent = 0
+                        start_time = time.time()
 
-            if done:
+                    audio = await self._resampler.resample(
+                        frame.audio, frame.sample_rate, sample_rate
+                    )
+                    audio_buffer.extend(audio)
+                    while len(audio_buffer) >= MAX_CHUNK_SIZE:
+                        chunk = audio_buffer[:MAX_CHUNK_SIZE]
+                        audio_buffer = audio_buffer[MAX_CHUNK_SIZE:]
+
+                        # Compute wait time for synchronization
+                        wait = start_time + (samples_sent / sample_rate) - time.time()
+                        if wait > 0:
+                            logger.trace(f"TavusVideoService _send_task_handler wait: {wait}")
+                            await asyncio.sleep(wait)
+
+                        await self._client.encode_audio_and_send(
+                            bytes(chunk), False, current_idx_str
+                        )
+
+                        # Update timestamp based on number of samples sent
+                        samples_sent += len(chunk) // 2  # 2 bytes per sample (16-bit)
+            except asyncio.TimeoutError:
+                # Bot has stopped speaking
                 # Send any remaining audio.
                 if len(audio_buffer) > 0:
                     await self._client.encode_audio_and_send(
-                        bytes(audio_buffer), done, self._current_idx_str
+                        bytes(audio_buffer), False, current_idx_str
                     )
-                await self._client.encode_audio_and_send(audio, done, self._current_idx_str)
+                await self._client.encode_audio_and_send(silence, True, current_idx_str)
                 audio_buffer.clear()
-            else:
-                audio = await self._resampler.resample(audio, in_rate, sample_rate)
-                audio_buffer.extend(audio)
-                while len(audio_buffer) >= MAX_CHUNK_SIZE:
-                    chunk = audio_buffer[:MAX_CHUNK_SIZE]
-                    audio_buffer = audio_buffer[MAX_CHUNK_SIZE:]
-
-                    # Compute wait time for synchronization
-                    wait = start_time + (samples_sent / sample_rate) - time.time()
-                    if wait > 0:
-                        await asyncio.sleep(wait)
-
-                    await self._client.encode_audio_and_send(
-                        bytes(chunk), done, self._current_idx_str
-                    )
-
-                    # Update timestamp based on number of samples sent
-                    samples_sent += len(chunk) // 2  # 2 bytes per sample (16-bit)
+                current_idx_str = None

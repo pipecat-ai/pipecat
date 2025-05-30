@@ -305,6 +305,7 @@ class AWSTranscribeSTTService(STTService):
                                             "",
                                             time_now_iso8601(),
                                             self._settings["language"],
+                                            result=result,
                                         )
                                     )
                                     await self._handle_transcription(
@@ -320,6 +321,7 @@ class AWSTranscribeSTTService(STTService):
                                             "",
                                             time_now_iso8601(),
                                             self._settings["language"],
+                                            result=result,
                                         )
                                     )
                 elif headers.get(":message-type") == "exception":

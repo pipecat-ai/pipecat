@@ -31,7 +31,8 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.70.0"
+    "openai~=1.70.0",
+    "uvloop~=0.21.0; sys_platform!='win32'"
 ]
 
 [project.urls]
@@ -47,8 +48,8 @@ azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "websockets~=13.1" ]
 cerebras = []
 deepseek = []
-daily = [ "daily-python~=0.19.0" ]
-deepgram = [ "deepgram-sdk~=3.8.0" ]
+daily = [ "daily-python~=0.19.1" ]
+deepgram = [ "deepgram-sdk~=4.1.0" ]
 elevenlabs = [ "websockets~=13.1" ]
 fal = [ "fal-client~=0.5.9" ]
 fireworks = []
@@ -72,7 +73,7 @@ nim = []
 neuphonic = [ "pyneuphonic~=1.5.13", "websockets~=13.1" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "websockets~=13.1" ]
-openpipe = [ "openpipe~=4.48.0" ]
+openpipe = [ "openpipe~=4.50.0" ]
 openrouter = []
 perplexity = []
 playht = [ "pyht~=0.1.12", "websockets~=13.1" ]

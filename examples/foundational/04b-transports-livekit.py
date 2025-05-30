@@ -10,7 +10,6 @@ import json
 import os
 import sys
 
-import aiohttp
 from deepgram import LiveOptions
 from dotenv import load_dotenv
 from livekit import api
@@ -104,101 +103,100 @@ async def configure_livekit():
 
 
 async def main():
-    async with aiohttp.ClientSession() as session:
-        (url, token, room_name) = await configure_livekit()
+    (url, token, room_name) = await configure_livekit()
 
-        transport = LiveKitTransport(
-            url=url,
-            token=token,
-            room_name=room_name,
-            params=LiveKitParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-            ),
-        )
+    transport = LiveKitTransport(
+        url=url,
+        token=token,
+        room_name=room_name,
+        params=LiveKitParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    )
 
-        stt = DeepgramSTTService(
-            api_key=os.getenv("DEEPGRAM_API_KEY"),
-            live_options=LiveOptions(
-                vad_events=True,
-            ),
-        )
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        live_options=LiveOptions(
+            vad_events=True,
+        ),
+    )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-        tts = CartesiaTTSService(
-            api_key=os.getenv("CARTESIA_API_KEY"),
-            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-        )
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. "
-                "Your goal is to demonstrate your capabilities in a succinct way. "
-                "Your output will be converted to audio so don't include special characters in your answers. "
-                "Respond to what the user said in a creative and helpful way.",
-            },
-        ]
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. "
+            "Your goal is to demonstrate your capabilities in a succinct way. "
+            "Your output will be converted to audio so don't include special characters in your answers. "
+            "Respond to what the user said in a creative and helpful way.",
+        },
+    ]
 
-        context = OpenAILLMContext(messages)
-        context_aggregator = llm.create_context_aggregator(context)
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
 
-        runner = PipelineRunner()
+    runner = PipelineRunner()
 
-        task = PipelineTask(
-            Pipeline(
-                [
-                    transport.input(),
-                    stt,
-                    context_aggregator.user(),
-                    llm,
-                    tts,
-                    transport.output(),
-                    context_aggregator.assistant(),
-                ],
-            ),
-            params=PipelineParams(
-                allow_interruptions=True, enable_metrics=True, enable_usage_metrics=True
-            ),
-        )
+    task = PipelineTask(
+        Pipeline(
+            [
+                transport.input(),
+                stt,
+                context_aggregator.user(),
+                llm,
+                tts,
+                transport.output(),
+                context_aggregator.assistant(),
+            ],
+        ),
+        params=PipelineParams(
+            allow_interruptions=True, enable_metrics=True, enable_usage_metrics=True
+        ),
+    )
 
-        # Register an event handler so we can play the audio when the
-        # participant joins.
-        @transport.event_handler("on_first_participant_joined")
-        async def on_first_participant_joined(transport, participant_id):
-            await asyncio.sleep(1)
-            await task.queue_frame(
-                TextFrame(
-                    "Hello there! How are you doing today? Would you like to talk about the weather?"
-                )
+    # Register an event handler so we can play the audio when the
+    # participant joins.
+    @transport.event_handler("on_first_participant_joined")
+    async def on_first_participant_joined(transport, participant_id):
+        await asyncio.sleep(1)
+        await task.queue_frame(
+            TextFrame(
+                "Hello there! How are you doing today? Would you like to talk about the weather?"
             )
+        )
 
-        # Register an event handler to receive data from the participant via text chat
-        # in the LiveKit room. This will be used to as transcription frames and
-        # interrupt the bot and pass it to llm for processing and
-        # then pass back to the participant as audio output.
-        @transport.event_handler("on_data_received")
-        async def on_data_received(transport, data, participant_id):
-            logger.info(f"Received data from participant {participant_id}: {data}")
-            # convert data from bytes to string
-            json_data = json.loads(data)
+    # Register an event handler to receive data from the participant via text chat
+    # in the LiveKit room. This will be used to as transcription frames and
+    # interrupt the bot and pass it to llm for processing and
+    # then pass back to the participant as audio output.
+    @transport.event_handler("on_data_received")
+    async def on_data_received(transport, data, participant_id):
+        logger.info(f"Received data from participant {participant_id}: {data}")
+        # convert data from bytes to string
+        json_data = json.loads(data)
 
-            await task.queue_frames(
-                [
-                    BotInterruptionFrame(),
-                    UserStartedSpeakingFrame(),
-                    TranscriptionFrame(
-                        user_id=participant_id,
-                        timestamp=json_data["timestamp"],
-                        text=json_data["message"],
-                    ),
-                    UserStoppedSpeakingFrame(),
-                ],
-            )
+        await task.queue_frames(
+            [
+                BotInterruptionFrame(),
+                UserStartedSpeakingFrame(),
+                TranscriptionFrame(
+                    user_id=participant_id,
+                    timestamp=json_data["timestamp"],
+                    text=json_data["message"],
+                ),
+                UserStoppedSpeakingFrame(),
+            ],
+        )
 
-        await runner.run(task)
+    await runner.run(task)
 
 
 if __name__ == "__main__":

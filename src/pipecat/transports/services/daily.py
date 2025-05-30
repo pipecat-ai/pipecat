@@ -22,6 +22,8 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
+    OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
@@ -370,9 +372,10 @@ class DailyTransportClient(EventHandler):
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         future = self._get_event_loop().create_future()
 
+        destination = frame.transport_destination
         audio_source: Optional[CustomAudioSource] = None
         if not destination and self._microphone_track:
             audio_source = self._microphone_track.source
@@ -381,17 +384,15 @@ class DailyTransportClient(EventHandler):
             audio_source = track.source
 
         if audio_source:
-            audio_source.write_frames(frames, completion=completion_callback(future))
+            audio_source.write_frames(frame.audio, completion=completion_callback(future))
         else:
             logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
             future.set_result(None)
 
         await future
 
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
-        if not destination and self._camera:
+    async def write_video_frame(self, frame: OutputImageRawFrame):
+        if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
 
     async def setup(self, setup: FrameProcessorSetup):
@@ -476,7 +477,7 @@ class DailyTransportClient(EventHandler):
                 logger.info(f"Joined {self._room_url}")
 
                 if self._params.transcription_enabled:
-                    await self._start_transcription()
+                    await self.start_transcription(self._params.transcription_settings)
 
                 await self._callbacks.on_joined(data)
 
@@ -490,23 +491,6 @@ class DailyTransportClient(EventHandler):
             logger.error(error_msg)
             self._joining = False
             await self._callbacks.on_error(error_msg)
-
-    async def _start_transcription(self):
-        if not self._token:
-            logger.warning("Transcription can't be started without a room token")
-            return
-
-        logger.info(f"Enabling transcription with settings {self._params.transcription_settings}")
-
-        future = self._get_event_loop().create_future()
-        self._client.start_transcription(
-            settings=self._params.transcription_settings.model_dump(exclude_none=True),
-            completion=completion_callback(future),
-        )
-        error = await future
-        if error:
-            logger.error(f"Unable to start transcription: {error}")
-            return
 
     async def _join(self):
         future = self._get_event_loop().create_future()
@@ -577,7 +561,7 @@ class DailyTransportClient(EventHandler):
         logger.info(f"Leaving {self._room_url}")
 
         if self._params.transcription_enabled:
-            await self._stop_transcription()
+            await self.stop_transcription()
 
         # Remove any custom tracks, if any.
         for track_name, _ in self._custom_audio_tracks.items():
@@ -597,15 +581,6 @@ class DailyTransportClient(EventHandler):
             logger.error(error_msg)
             await self._callbacks.on_error(error_msg)
 
-    async def _stop_transcription(self):
-        if not self._token:
-            return
-        future = self._get_event_loop().create_future()
-        self._client.stop_transcription(completion=completion_callback(future))
-        error = await future
-        if error:
-            logger.error(f"Unable to stop transcription: {error}")
-
     async def _leave(self):
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
@@ -623,14 +598,22 @@ class DailyTransportClient(EventHandler):
         return self._client.participant_counts()
 
     async def start_dialout(self, settings):
+        logger.debug(f"Starting dialout: settings={settings}")
+
         future = self._get_event_loop().create_future()
         self._client.start_dialout(settings, completion=completion_callback(future))
-        await future
+        error = await future
+        if error:
+            logger.error(f"Unable to start dialout: {error}")
 
     async def stop_dialout(self, participant_id):
+        logger.debug(f"Stopping dialout: participant_id={participant_id}")
+
         future = self._get_event_loop().create_future()
         self._client.stop_dialout(participant_id, completion=completion_callback(future))
-        await future
+        error = await future
+        if error:
+            logger.error(f"Unable to stop dialout: {error}")
 
     async def send_dtmf(self, settings):
         future = self._get_event_loop().create_future()
@@ -648,16 +631,54 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def start_recording(self, streaming_settings, stream_id, force_new):
+        logger.debug(
+            f"Starting recording: stream_id={stream_id} force_new={force_new} settings={streaming_settings}"
+        )
+
         future = self._get_event_loop().create_future()
         self._client.start_recording(
             streaming_settings, stream_id, force_new, completion=completion_callback(future)
         )
-        await future
+        error = await future
+        if error:
+            logger.error(f"Unable to start recording: {error}")
 
     async def stop_recording(self, stream_id):
+        logger.debug(f"Stopping recording: stream_id={stream_id}")
+
         future = self._get_event_loop().create_future()
         self._client.stop_recording(stream_id, completion=completion_callback(future))
-        await future
+        error = await future
+        if error:
+            logger.error(f"Unable to stop recording: {error}")
+
+    async def start_transcription(self, settings):
+        if not self._token:
+            logger.warning("Transcription can't be started without a room token")
+            return
+
+        logger.debug(f"Starting transcription: settings={settings}")
+
+        future = self._get_event_loop().create_future()
+        self._client.start_transcription(
+            settings=self._params.transcription_settings.model_dump(exclude_none=True),
+            completion=completion_callback(future),
+        )
+        error = await future
+        if error:
+            logger.error(f"Unable to start transcription: {error}")
+
+    async def stop_transcription(self):
+        if not self._token:
+            return
+
+        logger.debug(f"Stopping transcription")
+
+        future = self._get_event_loop().create_future()
+        self._client.stop_transcription(completion=completion_callback(future))
+        error = await future
+        if error:
+            logger.error(f"Unable to stop transcription: {error}")
 
     async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
         if not self._joined:
@@ -695,7 +716,9 @@ class DailyTransportClient(EventHandler):
 
         self._audio_renderers.setdefault(participant_id, {})[audio_source] = callback
 
-        logger.info(f"Starting to capture [{audio_source}] audio from participant {participant_id}")
+        logger.debug(
+            f"Starting to capture [{audio_source}] audio from participant {participant_id}"
+        )
 
         self._client.set_audio_renderer(
             participant_id,
@@ -722,6 +745,10 @@ class DailyTransportClient(EventHandler):
         await self.update_subscriptions(participant_settings={participant_id: media})
 
         self._video_renderers.setdefault(participant_id, {})[video_source] = callback
+
+        logger.debug(
+            f"Starting to capture [{video_source}] video from participant {participant_id}"
+        )
 
         self._client.set_video_renderer(
             participant_id,
@@ -1106,7 +1133,7 @@ class DailyInputTransport(BaseInputTransport):
             next_time = prev_time + 1 / framerate
             render_frame = (next_time - curr_time) < 0.1
 
-        elif self._video_renderers[participant_id][video_source]["render_next_frame"]:
+        if self._video_renderers[participant_id][video_source]["render_next_frame"]:
             request_frame = self._video_renderers[participant_id][video_source][
                 "render_next_frame"
             ].pop(0)
@@ -1194,13 +1221,19 @@ class DailyOutputTransport(BaseOutputTransport):
     async def register_audio_destination(self, destination: str):
         await self._client.register_audio_destination(destination)
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
-        await self._client.write_raw_audio_frames(frames, destination)
+    async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        await self._client.send_dtmf(
+            {
+                "sessionId": frame.transport_destination,
+                "tones": frame.button.value,
+            }
+        )
 
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
-        await self._client.write_raw_video_frame(frame, destination)
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        await self._client.write_audio_frame(frame)
+
+    async def write_video_frame(self, frame: OutputImageRawFrame):
+        await self._client.write_video_frame(frame)
 
 
 class DailyTransport(BaseTransport):
@@ -1346,6 +1379,14 @@ class DailyTransport(BaseTransport):
         await self._client.stop_dialout(participant_id)
 
     async def send_dtmf(self, settings):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`DailyTransport.send_dtmf()` is deprecated, push an `OutputDTMFFrame` or an `OutputDTMFUrgentFrame` instead.",
+                DeprecationWarning,
+            )
         await self._client.send_dtmf(settings)
 
     async def sip_call_transfer(self, settings):
@@ -1359,6 +1400,12 @@ class DailyTransport(BaseTransport):
 
     async def stop_recording(self, stream_id=None):
         await self._client.stop_recording(stream_id)
+
+    async def start_transcription(self, settings=None):
+        await self._client.start_transcription(settings)
+
+    async def stop_transcription(self):
+        await self._client.stop_transcription()
 
     async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
         """Sends a chat message to Daily's Prebuilt main room.
@@ -1551,10 +1598,16 @@ class DailyTransport(BaseTransport):
         except KeyError:
             language = None
         if is_final:
-            frame = TranscriptionFrame(text, participant_id, timestamp, language)
+            frame = TranscriptionFrame(text, participant_id, timestamp, language, result=message)
             logger.debug(f"Transcription (from: {participant_id}): [{text}]")
         else:
-            frame = InterimTranscriptionFrame(text, participant_id, timestamp, language)
+            frame = InterimTranscriptionFrame(
+                text,
+                participant_id,
+                timestamp,
+                language,
+                result=message,
+            )
 
         if self._input:
             await self._input.push_transcription_frame(frame)

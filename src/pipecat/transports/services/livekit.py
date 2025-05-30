@@ -477,8 +477,8 @@ class LiveKitOutputTransport(BaseOutputTransport):
         else:
             await self._client.send_data(frame.message.encode())
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
-        livekit_audio = self._convert_pipecat_audio_to_livekit(frames)
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
         await self._client.publish_audio(livekit_audio)
 
     def _convert_pipecat_audio_to_livekit(self, pipecat_audio: bytes) -> rtc.AudioFrame:
