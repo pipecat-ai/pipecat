@@ -24,8 +24,8 @@ if TYPE_CHECKING:
     from opentelemetry import trace
 
 from pipecat.utils.tracing.service_attributes import (
+    add_gemini_live_span_attributes,
     add_llm_span_attributes,
-    add_multimodal_llm_span_attributes,
     add_openai_realtime_span_attributes,
     add_stt_span_attributes,
     add_tts_span_attributes,
@@ -481,17 +481,14 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     return decorator
 
 
-def traced_multimodal_llm(operation: str) -> Callable:
+def traced_gemini_live(operation: str) -> Callable:
     """Traces Gemini Live service methods with operation-specific attributes.
 
     This decorator automatically captures relevant information based on the operation type:
-    - setup_complete: Configuration, tools definitions, and system instructions
-    - model_turn: Text and audio output
-    - tool_call: Function call information
-    - tool_result: Function execution results
-    - input_transcription: User transcription
-    - output_transcription: Assistant transcription
-    - usage_metadata: Token usage metrics
+    - llm_setup: Configuration, tools definitions, and system instructions
+    - llm_tool_call: Function call information
+    - llm_tool_result: Function execution results
+    - llm_response: Complete LLM response with usage and output
 
     Args:
         operation: The operation name (matches the event type being handled)
@@ -542,7 +539,7 @@ def traced_multimodal_llm(operation: str) -> Callable:
                         # Operation-specific attribute collection
                         operation_attrs = {}
 
-                        if operation == "setup":
+                        if operation == "llm_setup":
                             # Capture detailed tool information
                             tools = getattr(self, "_tools", None)
                             if tools:
@@ -627,7 +624,7 @@ def traced_multimodal_llm(operation: str) -> Callable:
                                         f"Error extracting context system instructions: {e}"
                                     )
 
-                        elif operation == "tool_call" and args:
+                        elif operation == "llm_tool_call" and args:
                             # Extract tool call information
                             evt = args[0] if args else None
                             if evt and hasattr(evt, "toolCall") and evt.toolCall.functionCalls:
@@ -654,7 +651,7 @@ def traced_multimodal_llm(operation: str) -> Callable:
                                     except Exception:
                                         operation_attrs["tool.arguments"] = str(call.args)[:1000]
 
-                        elif operation == "tool_result" and args:
+                        elif operation == "llm_tool_result" and args:
                             # Extract tool result information
                             tool_result_message = args[0] if args else None
                             if tool_result_message and isinstance(tool_result_message, dict):
@@ -698,11 +695,13 @@ def traced_multimodal_llm(operation: str) -> Callable:
                                         )
                                         operation_attrs["tool.result_status"] = "processing_error"
 
-                        elif operation == "usage_metadata" and args:
-                            # Token usage will be handled by the original start_llm_usage_metrics method
+                        elif operation == "llm_response" and args:
+                            # Extract usage and response metadata from turn complete event
                             evt = args[0] if args else None
                             if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
                                 usage = evt.usageMetadata
+
+                                # Token usage - basic attributes for span visibility
                                 if hasattr(usage, "promptTokenCount"):
                                     operation_attrs["tokens.prompt"] = usage.promptTokenCount or 0
                                 if hasattr(usage, "responseTokenCount"):
@@ -712,8 +711,29 @@ def traced_multimodal_llm(operation: str) -> Callable:
                                 if hasattr(usage, "totalTokenCount"):
                                     operation_attrs["tokens.total"] = usage.totalTokenCount or 0
 
+                            # Get output text and modality from service state
+                            text = getattr(self, "_bot_text_buffer", "")
+                            audio_text = getattr(self, "_llm_output_buffer", "")
+
+                            if text:
+                                # TEXT modality
+                                operation_attrs["output"] = text
+                                operation_attrs["output_modality"] = "TEXT"
+                            elif audio_text:
+                                # AUDIO modality
+                                operation_attrs["output"] = audio_text
+                                operation_attrs["output_modality"] = "AUDIO"
+
+                            # Add turn completion status
+                            if (
+                                evt
+                                and hasattr(evt, "serverContent")
+                                and evt.serverContent.turnComplete
+                            ):
+                                operation_attrs["turn_complete"] = True
+
                         # Add all attributes to the span
-                        add_multimodal_llm_span_attributes(
+                        add_gemini_live_span_attributes(
                             span=current_span,
                             service_name=service_class_name,
                             model=model_name,
@@ -725,10 +745,8 @@ def traced_multimodal_llm(operation: str) -> Callable:
                             **operation_attrs,
                         )
 
-                        # For usage_metadata operation, also handle token usage metrics
-                        if operation == "usage_metadata" and hasattr(
-                            self, "start_llm_usage_metrics"
-                        ):
+                        # For llm_response operation, also handle token usage metrics
+                        if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
                             evt = args[0] if args else None
                             if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
                                 usage = evt.usageMetadata
@@ -741,6 +759,11 @@ def traced_multimodal_llm(operation: str) -> Callable:
                                     total_tokens=usage.totalTokenCount or 0,
                                 )
                                 _add_token_usage_to_span(current_span, tokens)
+
+                        # Capture TTFB metric if available
+                        ttfb_ms = getattr(getattr(self, "_metrics", None), "ttfb_ms", None)
+                        if ttfb_ms is not None:
+                            current_span.set_attribute("metrics.ttfb_ms", ttfb_ms)
 
                         # Run the original function
                         result = await func(self, *args, **kwargs)
@@ -766,11 +789,9 @@ def traced_openai_realtime(operation: str) -> Callable:
     """Traces OpenAI Realtime service methods with operation-specific attributes.
 
     This decorator automatically captures relevant information based on the operation type:
-    - setup: Session configuration and tools
-    - transcription_completed: User transcription
-    - response_create: Context and input messages
-    - response_done: Usage metadata and output
-    - function_call: Function call information
+    - llm_setup: Session configuration and tools
+    - llm_request: Context and input messages
+    - llm_response: Usage metadata, output, and function calls
 
     Args:
         operation: The operation name (matches the event type being handled)
@@ -890,8 +911,10 @@ def traced_openai_realtime(operation: str) -> Callable:
                                 if hasattr(response, "output") and response.output:
                                     operation_attrs["response.output_items"] = len(response.output)
 
-                                    # Extract assistant transcript for output field
+                                    # Extract assistant transcript and function calls
                                     assistant_transcript = ""
+                                    function_calls = []
+
                                     for item in response.output:
                                         if (
                                             hasattr(item, "content")
@@ -906,8 +929,30 @@ def traced_openai_realtime(operation: str) -> Callable:
                                                 ):
                                                     assistant_transcript += content.transcript + " "
 
+                                        elif hasattr(item, "type") and item.type == "function_call":
+                                            function_call_info = {
+                                                "name": getattr(item, "name", "unknown"),
+                                                "call_id": getattr(item, "call_id", "unknown"),
+                                            }
+                                            if hasattr(item, "arguments"):
+                                                args_str = item.arguments
+                                                if len(args_str) > 500:
+                                                    args_str = args_str[:500] + "..."
+                                                function_call_info["arguments"] = args_str
+                                            function_calls.append(function_call_info)
+
                                     if assistant_transcript.strip():
                                         operation_attrs["output"] = assistant_transcript.strip()
+
+                                    if function_calls:
+                                        operation_attrs["function_calls"] = function_calls
+                                        operation_attrs["function_calls.count"] = len(
+                                            function_calls
+                                        )
+                                        all_names = [call["name"] for call in function_calls]
+                                        operation_attrs["function_calls.all_names"] = ",".join(
+                                            all_names
+                                        )
 
                         # Add all attributes to the span
                         add_openai_realtime_span_attributes(
