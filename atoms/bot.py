@@ -91,12 +91,7 @@ from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
 )
-
 load_dotenv(override=True)
-
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
-
 
 async def save_audio(server_name: str, audio: bytes, sample_rate: int, num_channels: int):
     if len(audio) > 0:

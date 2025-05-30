@@ -9,3 +9,10 @@ pydantic>=2.0.0
 pydantic-settings>=2.0.0 
 redis
 fastembed
+opentelemetry-api==1.30.0
+opentelemetry-exporter-otlp==1.30.0
+opentelemetry-exporter-otlp-proto-common==1.30.0
+opentelemetry-exporter-otlp-proto-grpc==1.30.0
+opentelemetry-exporter-otlp-proto-http==1.30.0
+opentelemetry-proto==1.30.0
+opentelemetry-sdk==1.30.0

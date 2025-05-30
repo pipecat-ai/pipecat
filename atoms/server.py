@@ -1,4 +1,5 @@
 import argparse
+import asyncio
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -8,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from router import outbound, webhooks, websocket, xml
-
+from services.telemetry import instrument_app
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,7 +47,7 @@ async def readiness_check():
     return {"status": "ready", "service": "pipecat-production-app"}
 
 
-if __name__ == "__main__":
+async def main():
     parser = argparse.ArgumentParser(description="Pipecat Production Server")
     parser.add_argument(
         "--env",
@@ -58,16 +59,18 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=settings.port, help="Port to bind to")
     args = parser.parse_args()
 
-    if args.env == "production":
-        logger.remove()
-        logger.add("logs/app.log", rotation="1 day", retention="30 days", level="INFO")
-        logger.add("sys.stderr", level="ERROR")
-    else:
-        logger.add("sys.stderr", level="DEBUG")
+    instrument_app(args.env)
 
     logger.info(f"Starting pipetoms in {args.env} mode")
 
     if args.env == "development":
-        uvicorn.run("server:app", host=args.host, port=args.port, reload=True, access_log=True)
+        config = uvicorn.Config(app, host=args.host, port=args.port, reload=True, access_log=True, log_level="info")
     else:
-        uvicorn.run(app, host=args.host, port=args.port, access_log=True)
+        config = uvicorn.Config(app, host=args.host, port=args.port, access_log=True, log_level="info")
+    
+    server = uvicorn.Server(config)
+    await server.serve()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

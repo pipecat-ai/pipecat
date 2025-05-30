@@ -4,6 +4,7 @@ from loguru import logger
 from models.outbound_service import OutboundCallRequest
 from services.redis import redis_service
 from services.telephony import plivo_service, twilio_service
+from services.telemetry import call_id_context
 
 router = APIRouter()
 
@@ -40,10 +41,12 @@ async def outbound(request: OutboundCallRequest):
             "krisp_enabled": request.krisp_enabled,
             "voice_id": request.voice_id,
         }
+        token = call_id_context.set(call_id)
         await redis_service.set_call_details(call_id=call_id, call_details=call_details)
         logger.info(f"Call details stored in Redis for call_id: {call_id}")
         logger.debug(f"Call details: {call_details}")
 
+        call_id_context.reset(token)
         return {"call_id": call_id, "provider": request.provider, "status": "initiated"}
     except Exception as e:
         logger.error(f"Error in outbound call: {e}")

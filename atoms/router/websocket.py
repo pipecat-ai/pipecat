@@ -3,6 +3,7 @@ import json
 from fastapi import APIRouter, WebSocket
 from loguru import logger
 from services.redis import redis_service
+from services.telemetry import call_id_context
 
 router = APIRouter()
 
@@ -21,6 +22,8 @@ async def twilio_websocket(websocket: WebSocket):
 
         stream_sid = call_data["start"]["streamSid"]
         call_sid = call_data["start"]["callSid"]
+        
+        call_id_context.set(call_sid)
 
         logger.info(f"Twilio call started - Stream: {stream_sid}, Call: {call_sid}")
 
@@ -38,10 +41,11 @@ async def twilio_websocket(websocket: WebSocket):
             call_details = {}
 
         await redis_service.delete_call_details(call_id=call_sid)
-
         from bot import run_bot
 
         await run_bot(websocket, stream_sid, call_sid, provider="twilio", call_details=call_details)
+
+        call_id_context.delete()
 
     except Exception as e:
         logger.error(f"Error in Twilio WebSocket: {e}")
@@ -61,6 +65,8 @@ async def plivo_websocket(websocket: WebSocket):
 
         stream_sid = call_data["start"]["streamId"]
         call_sid = call_data["start"]["callId"]
+        
+        token =call_id_context.set(call_sid)
 
         logger.info(f"Plivo call started - Stream: {stream_sid}, Call: {call_sid}")
 
@@ -82,6 +88,8 @@ async def plivo_websocket(websocket: WebSocket):
         from bot import run_bot
 
         await run_bot(websocket, stream_sid, call_sid, provider="plivo", call_details=call_details)
+
+        call_id_context.reset(token)
 
     except Exception as e:
         logger.error(f"Error in Plivo WebSocket: {e}")
