@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import aiofiles
+from deepgram import LiveOptions
 from loguru import logger
 from utils import (
     EvalResult,
@@ -195,7 +196,12 @@ async def run_eval_pipeline(
         ),
     )
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # We disable smart formatting because some times if the user says "3 + 2 is
+    # 5" (in audio) this can be converted to "32 is 5".
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        live_options=LiveOptions(smart_format=False),
+    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
