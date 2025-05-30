@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from dotenv import load_dotenv
 from eval import EvalRunner
@@ -15,6 +16,11 @@ from loguru import logger
 from utils import check_env_variables
 
 load_dotenv(override=True)
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples" / "foundational"
+
 
 # Math
 PROMPT_SIMPLE_MATH = "A simple math addition."
@@ -124,6 +130,7 @@ async def main(args: argparse.Namespace):
         logger.add(sys.stderr, level=log_level)
 
     runner = EvalRunner(
+        examples_dir=FOUNDATIONAL_DIR,
         name=args.name,
         pattern=args.pattern,
         record_audio=args.audio,
