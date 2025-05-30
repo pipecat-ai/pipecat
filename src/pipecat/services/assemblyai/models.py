@@ -54,7 +54,7 @@ AnyMessage = BeginMessage | TurnMessage | TerminationMessage
 class AssemblyAIConnectionParams(BaseModel):
     sample_rate: int = 16000
     encoding: Literal["pcm_s16le", "pcm_mulaw"] = "pcm_s16le"
-    formatted_finals: bool = False
+    formatted_finals: bool = True
     word_finalization_max_wait_time: Optional[int] = None
     end_of_turn_confidence_threshold: Optional[float] = None
     min_end_of_turn_silence_when_confident: Optional[int] = None
