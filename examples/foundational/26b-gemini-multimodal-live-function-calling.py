@@ -40,11 +40,17 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     )
 
 
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 system_instruction = """
 You are a helpful assistant who can answer questions and use tools.
 
-You have a tool called "get_current_weather" that can be used to get the current weather. If the user asks
-for the weather, call this function.
+You have three tools available to you:
+1. get_current_weather: Use this tool to get the current weather in a specific location.
+2. get_restaurant_recommendation: Use this tool to get a restaurant recommendation in a specific location.
+3. google_search: Use this tool to search the web for information.
 """
 
 
@@ -101,9 +107,21 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         },
         required=["location", "format"],
     )
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
     search_tool = {"google_search": {}}
     tools = ToolsSchema(
-        standard_tools=[weather_function], custom_tools={AdapterType.GEMINI: [search_tool]}
+        standard_tools=[weather_function, restaurant_function],
+        custom_tools={AdapterType.GEMINI: [search_tool]},
     )
 
     llm = GeminiMultimodalLiveLLMService(
@@ -113,6 +131,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     )
 
     llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     context = OpenAILLMContext(
         [{"role": "user", "content": "Say hello."}],
