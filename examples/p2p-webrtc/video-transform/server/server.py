@@ -74,7 +74,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield  # Run app
-    coros = [pc.close() for pc in pcs_map.values()]
+    coros = [pc.disconnect() for pc in pcs_map.values()]
     await asyncio.gather(*coros)
     pcs_map.clear()
 

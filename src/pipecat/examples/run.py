@@ -142,7 +142,7 @@ def run_example_webrtc(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield  # Run app
-        coros = [pc.close() for pc in pcs_map.values()]
+        coros = [pc.disconnect() for pc in pcs_map.values()]
         await asyncio.gather(*coros)
         pcs_map.clear()
 
