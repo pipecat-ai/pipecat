@@ -50,7 +50,9 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt, traced_tts
 
 from . import events
 from .context import (
@@ -100,6 +102,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         self.api_key = api_key
         self.base_url = full_url
+        self.set_model_name(model)
 
         self._session_properties: events.SessionProperties = (
             session_properties or events.SessionProperties()
@@ -402,6 +405,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                     # errors are fatal, so exit the receive loop
                     return
 
+    @traced_openai_realtime(operation="llm_setup")
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message
         # to configure the session properties.
@@ -467,6 +471,13 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 InterimTranscriptionFrame(evt.delta, "", time_now_iso8601(), result=evt)
             )
 
+    @traced_stt
+    async def _handle_user_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def handle_evt_input_audio_transcription_completed(self, evt):
         await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
 
@@ -475,6 +486,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 # no way to get a language code?
                 TranscriptionFrame(evt.transcript, "", time_now_iso8601(), result=evt)
             )
+            await self._handle_user_transcription(evt.transcript, True, Language.EN)
         pair = self._user_and_response_message_tuple
         if pair:
             user, assistant = pair
@@ -493,6 +505,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             for future in futures:
                 future.set_result(evt.item)
 
+    @traced_openai_realtime(operation="llm_response")
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
@@ -609,6 +622,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             self._context.llm_needs_initial_messages = True
         await self._connect()
 
+    @traced_openai_realtime(operation="llm_request")
     async def _create_response(self):
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True

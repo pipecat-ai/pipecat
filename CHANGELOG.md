@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added OpenTelemetry tracing for `GeminiMultimodalLiveLLMService` and
+  `OpenAIRealtimeBetaLLMService`.
+
 - Added `interruption_strategies` to `PipelineParams` using
   `MinWordsInterruptionStrategy` to specify minimum words required to interrupt
   the bot when it's speaking. Use
@@ -47,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new functions `DailyTransport.start_transcription()` and
   `DailyTransport.stop_transcription()` to be able to start and stop Daily
   transcription dynamically (maybe with different settings).
+
+### Changed
+
+- Updated OpenTelemetry tracing attribute `metrics.ttfb_ms` to `metrics.ttfb`.
+  The attribute reports TTFB in seconds.
 
 ### Deprecated
 
