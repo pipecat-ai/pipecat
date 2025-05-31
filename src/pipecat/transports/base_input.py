@@ -17,6 +17,8 @@ from pipecat.audio.turn.base_turn_analyzer import (
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
     BotInterruptionFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EmulateUserStartedSpeakingFrame,
     EmulateUserStoppedSpeakingFrame,
@@ -50,6 +52,9 @@ class BaseInputTransport(FrameProcessor):
 
         # Input sample rate. It will be initialized on StartFrame.
         self._sample_rate = 0
+
+        # Track bot speaking state for interruption logic
+        self._bot_speaking = False
 
         # We read audio from a single queue one at a time and we then run VAD in
         # a thread. Therefore, only one thread should be necessary.
@@ -189,6 +194,12 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotInterruptionFrame):
             await self._handle_bot_interruption(frame)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking(frame)
+            await self.push_frame(frame)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
+            await self.push_frame(frame)
         elif isinstance(frame, EmulateUserStartedSpeakingFrame):
             logger.debug("Emulating user started speaking")
             await self._handle_user_interruption(UserStartedSpeakingFrame(emulated=True))
@@ -230,19 +241,42 @@ class BaseInputTransport(FrameProcessor):
         if isinstance(frame, UserStartedSpeakingFrame):
             logger.debug("User started speaking")
             await self.push_frame(frame)
+
+            # Only push StartInterruptionFrame if:
+            # 1. No interruption config is set, OR
+            # 2. Interruption config is set but bot is not speaking
+            should_push_immediate_interruption = (
+                self.interruption_strategies is None or not self._bot_speaking
+            )
+
             # Make sure we notify about interruptions quickly out-of-band.
-            if self.interruptions_allowed:
+            if should_push_immediate_interruption and self.interruptions_allowed:
                 await self._start_interruption()
                 # Push an out-of-band frame (i.e. not using the ordered push
                 # frame task) to stop everything, specially at the output
                 # transport.
                 await self.push_frame(StartInterruptionFrame())
+            elif self.interruption_strategies and self._bot_speaking:
+                logger.debug(
+                    "User started speaking while bot is speaking with interruption config - "
+                    "deferring interruption to aggregator"
+                )
         elif isinstance(frame, UserStoppedSpeakingFrame):
             logger.debug("User stopped speaking")
             await self.push_frame(frame)
             if self.interruptions_allowed:
                 await self._stop_interruption()
                 await self.push_frame(StopInterruptionFrame())
+
+    #
+    # Handle bot speaking state
+    #
+
+    async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
+        self._bot_speaking = True
+
+    async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
+        self._bot_speaking = False
 
     #
     # Audio input

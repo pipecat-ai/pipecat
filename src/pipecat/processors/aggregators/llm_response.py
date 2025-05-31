@@ -12,6 +12,7 @@ from typing import Dict, List, Literal, Optional, Set
 from loguru import logger
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
+    MinWordsInterruptionStrategy,
     OpenAILLMContextAssistantTimestampFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -193,7 +195,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         self._context = context
         self._role = role
 
-        self._aggregation = ""
+        self._aggregation: str = ""
 
     @property
     def messages(self) -> List[dict]:
@@ -320,18 +322,51 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         else:
             await self.push_frame(frame, direction)
 
+    async def _process_aggregation(self):
+        """Process the current aggregation and push it downstream."""
+        aggregation = self._aggregation
+        self.reset()
+        await self.handle_aggregation(aggregation)
+        frame = OpenAILLMContextFrame(self._context)
+        await self.push_frame(frame)
+
     async def push_aggregation(self):
+        """Pushes the current aggregation based on interruption configuration and conditions."""
         if len(self._aggregation) > 0:
-            aggregation = self._aggregation
+            if self.interruption_strategies and self._bot_speaking:
+                should_interrupt = self._should_interrupt_based_on_strategies()
 
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            self.reset()
+                if should_interrupt:
+                    logger.debug(
+                        "Interruption conditions met - pushing BotInterruptionFrame and aggregation"
+                    )
+                    await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                    await self._process_aggregation()
+                else:
+                    logger.debug("Interruption conditions not met - not pushing aggregation")
+                    # Don't process aggregation, just reset it
+                    self.reset()
+            else:
+                # No interruption config - normal behavior (always push aggregation)
+                await self._process_aggregation()
 
-            await self.handle_aggregation(aggregation)
+    def _should_interrupt_based_on_strategies(self) -> bool:
+        """Check if interruption should occur based on configured strategies."""
+        if not self.interruption_strategies:
+            return False
 
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
+        # Check strategies one by one until first match
+        for strategy in self.interruption_strategies:
+            if isinstance(strategy, MinWordsInterruptionStrategy):
+                if self._should_interrupt_min_words(strategy):
+                    return True
+
+        return False
+
+    def _should_interrupt_min_words(self, strategy: MinWordsInterruptionStrategy) -> bool:
+        """Check if word count threshold is met."""
+        word_count = len(self._aggregation.split())
+        return word_count >= strategy.min_words
 
     async def _start(self, frame: StartFrame):
         self._create_aggregation_task()

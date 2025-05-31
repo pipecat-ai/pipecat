@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `interruption_strategies` to `PipelineParams` using
+  `MinWordsInterruptionStrategy` to specify minimum words required to interrupt
+  the bot when it's speaking. Use
+  `interruption_strategies=[MinWordsInterruptionStrategy(min_words=N)]` to
+  require users to speak at least N words before interrupting. If not
+  specified, the normal interruption behavior applies.
+
 - `BaseInputTransport` now handles `StopFrame`. When a `StopFrame` is received
   the transport will pause sending frames downstream until a new `StartFrame` is
   received. This allows the transport to be reused (keeping the same connection)
