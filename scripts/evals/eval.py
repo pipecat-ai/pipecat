@@ -9,7 +9,6 @@ import asyncio
 import io
 import os
 import re
-import sys
 import time
 import wave
 from datetime import datetime
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import aiofiles
+from deepgram import LiveOptions
 from loguru import logger
 from utils import (
     EvalResult,
@@ -45,12 +45,6 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples" / "foundational"
-
-sys.path.insert(0, os.path.abspath(FOUNDATIONAL_DIR))
-
-EVAL_PROMPT = ""
-
 PIPELINE_IDLE_TIMEOUT_SECS = 30
 
 
@@ -58,11 +52,13 @@ class EvalRunner:
     def __init__(
         self,
         *,
+        examples_dir: Path,
         pattern: str = "",
         record_audio: bool = False,
         name: Optional[str] = None,
         log_level: str = "DEBUG",
     ):
+        self._examples_dir = examples_dir
         self._pattern = f".*{pattern}.*" if pattern else ""
         self._record_audio = record_audio
         self._log_level = log_level
@@ -79,9 +75,10 @@ class EvalRunner:
         os.makedirs(self._recordings_dir, exist_ok=True)
 
     async def assert_eval(self, params: FunctionCallParams):
+        result = params.arguments["result"]
         reasoning = params.arguments["reasoning"]
-        logger.debug(f"🧠 EVAL REASONING: {reasoning}")
-        await self._queue.put(params.arguments["result"])
+        logger.debug(f"🧠 EVAL REASONING(result: {result}): {reasoning}")
+        await self._queue.put(result)
         await params.result_callback(None)
         await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
@@ -98,12 +95,14 @@ class EvalRunner:
 
         print_begin_test(example_file)
 
+        script_path = self._examples_dir / example_file
+
         start_time = time.time()
 
         try:
             await asyncio.wait(
                 [
-                    asyncio.create_task(run_example_pipeline(example_file)),
+                    asyncio.create_task(run_example_pipeline(script_path)),
                     asyncio.create_task(run_eval_pipeline(self, example_file, prompt, eval)),
                 ],
                 timeout=90,
@@ -160,10 +159,8 @@ class EvalRunner:
         return os.path.join(self._recordings_dir, f"{base_name}.wav")
 
 
-async def run_example_pipeline(example_file: str):
+async def run_example_pipeline(script_path: Path):
     room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
-
-    script_path = FOUNDATIONAL_DIR / example_file
 
     module = load_module_from_path(script_path)
 
@@ -199,7 +196,12 @@ async def run_eval_pipeline(
         ),
     )
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # We disable smart formatting because some times if the user says "3 + 2 is
+    # 5" (in audio) this can be converted to "32 is 5".
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        live_options=LiveOptions(smart_format=False),
+    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
