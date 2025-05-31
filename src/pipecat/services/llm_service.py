@@ -220,6 +220,9 @@ class LLMService(AIService):
         return function_name in self._functions.keys()
 
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
+        if len(function_calls) == 0:
+            return
+
         await self._call_event_handler("on_function_calls_started", function_calls)
 
         # Push frame both downstream and upstream
