@@ -45,7 +45,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -202,9 +202,8 @@ class AnthropicLLMService(LLMService):
             tool_use_block = None
             json_accumulator = ""
 
+            function_calls = []
             async for event in response:
-                # logger.debug(f"Anthropic LLM event: {event}")
-
                 # Aggregate streaming content, create frames, trigger events
 
                 if event.type == "content_block_delta":
@@ -226,11 +225,14 @@ class AnthropicLLMService(LLMService):
                     and event.delta.stop_reason == "tool_use"
                 ):
                     if tool_use_block:
-                        await self.call_function(
-                            context=context,
-                            tool_call_id=tool_use_block.id,
-                            function_name=tool_use_block.name,
-                            arguments=json.loads(json_accumulator) if json_accumulator else dict(),
+                        args = json.loads(json_accumulator) if json_accumulator else {}
+                        function_calls.append(
+                            FunctionCallFromLLM(
+                                context=context,
+                                tool_call_id=tool_use_block.id,
+                                function_name=tool_use_block.name,
+                                arguments=args,
+                            )
                         )
 
                 # Calculate usage. Do this here in its own if statement, because there may be usage
@@ -276,6 +278,8 @@ class AnthropicLLMService(LLMService):
                     )
                     if total_input_tokens >= 1024:
                         context.turns_above_cache_threshold += 1
+
+            await self.run_function_calls(function_calls)
 
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the

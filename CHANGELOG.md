@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new frame `FunctionCallsStartedFrame`. This frame is pushed both
+  upstream and downstream from the LLM service to indicate that one or more
+  function calls are going to be executed.
+
+- Added LLM services `on_function_calls_started` event. This event will be
+  triggered when the LLM service receives function calls from the model and is
+  going to start executing them.
+
+- Function calls can now be executed sequentially (in the order received in the
+  completion) by passing `run_in_parallel=False` when creating your LLM
+  service. By default, if the LLM completion returns 2 or more function calls
+  they run concurrently. In both cases, concurrently and sequentially, a new LLM
+  completion will run when the last function call finishes.
+
 - Added OpenTelemetry tracing for `GeminiMultimodalLiveLLMService` and
   `OpenAIRealtimeBetaLLMService`.
 
@@ -52,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transcription dynamically (maybe with different settings).
 
 ### Changed
+
+- Function calls are now cancelled by default if there's an interruption. To
+  disable this behavior you can set `cancel_on_interruption=False` when
+  registering the function call. Since function calls are executed as tasks you
+  can tell if a function call has been cancelled by catching the
+  `asyncio.CancelledError` exception (and don't forget to raise it again!).
 
 - Updated OpenTelemetry tracing attribute `metrics.ttfb_ms` to `metrics.ttfb`.
   The attribute reports TTFB in seconds.

@@ -30,8 +30,11 @@ load_dotenv(override=True)
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
     await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -71,6 +74,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_current_weather",
@@ -88,7 +96,18 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         },
         required=["location", "format"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function])
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
     messages = [
         {

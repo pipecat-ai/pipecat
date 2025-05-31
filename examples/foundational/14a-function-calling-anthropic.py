@@ -33,6 +33,10 @@ async def get_weather(params: FunctionCallParams):
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
 # selected.
@@ -66,9 +70,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     )
 
     llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        model="claude-3-7-sonnet-latest",
     )
     llm.register_function("get_weather", get_weather)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     weather_function = FunctionSchema(
         name="get_weather",
@@ -81,7 +87,18 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         },
         required=["location"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function])
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
     # todo: test with very short initial user message
 

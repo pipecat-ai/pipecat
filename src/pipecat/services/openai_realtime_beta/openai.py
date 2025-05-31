@@ -48,7 +48,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -76,10 +76,6 @@ class CurrentAudioResponse:
     content_index: int
     start_time_ms: int
     total_size: int = 0
-
-
-class OpenAIUnhandledFunctionException(Exception):
-    pass
 
 
 class OpenAIRealtimeBetaLLMService(LLMService):
@@ -587,25 +583,18 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self._handle_function_call_items(function_calls)
 
     async def _handle_function_call_items(self, items):
-        total_items = len(items)
-        for index, item in enumerate(items):
-            function_name = item.name
-            tool_id = item.call_id
-            arguments = json.loads(item.arguments)
-            if self.has_function(function_name):
-                run_llm = index == total_items - 1
-                if function_name in self._functions.keys() or None in self._functions.keys():
-                    await self.call_function(
-                        context=self._context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
-                        arguments=arguments,
-                        run_llm=run_llm,
-                    )
-            else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+        function_calls = []
+        for item in items:
+            args = json.loads(item.arguments)
+            function_calls.append(
+                FunctionCallFromLLM(
+                    context=self._context,
+                    tool_call_id=item.call_id,
+                    function_name=item.name,
+                    arguments=args,
                 )
+            )
+        await self.run_function_calls(function_calls)
 
     #
     # state and client events for the current conversation
