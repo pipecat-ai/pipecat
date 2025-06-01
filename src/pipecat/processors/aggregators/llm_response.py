@@ -11,6 +11,7 @@ from typing import Dict, List, Literal, Optional, Set
 
 from loguru import logger
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     BotStartedSpeakingFrame,
@@ -24,6 +25,7 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     FunctionCallsStartedFrame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -33,7 +35,6 @@ from pipecat.frames.frames import (
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
-    MinWordsInterruptionStrategy,
     OpenAILLMContextAssistantTimestampFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -296,6 +297,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
             await self.push_frame(frame, direction)
+        elif isinstance(frame, InputAudioRawFrame):
+            await self._handle_input_audio(frame)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
             await self.push_frame(frame, direction)
@@ -332,10 +336,10 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         await self.push_frame(frame)
 
     async def push_aggregation(self):
-        """Pushes the current aggregation based on interruption configuration and conditions."""
+        """Pushes the current aggregation based on interruption strategies and conditions."""
         if len(self._aggregation) > 0:
             if self.interruption_strategies and self._bot_speaking:
-                should_interrupt = self._should_interrupt_based_on_strategies()
+                should_interrupt = await self._should_interrupt_based_on_strategies()
 
                 if should_interrupt:
                     logger.debug(
@@ -351,23 +355,19 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 # No interruption config - normal behavior (always push aggregation)
                 await self._process_aggregation()
 
-    def _should_interrupt_based_on_strategies(self) -> bool:
+    async def _should_interrupt_based_on_strategies(self) -> bool:
         """Check if interruption should occur based on configured strategies."""
-        if not self.interruption_strategies:
-            return False
 
-        # Check strategies one by one until first match
-        for strategy in self.interruption_strategies:
-            if isinstance(strategy, MinWordsInterruptionStrategy):
-                if self._should_interrupt_min_words(strategy):
-                    return True
+        async def should_interrupt(strategy: BaseInterruptionStrategy):
+            await strategy.append_text(self._aggregation)
+            return await strategy.should_interrupt()
 
-        return False
+        result = any([await should_interrupt(s) for s in self._interruption_strategies])
 
-    def _should_interrupt_min_words(self, strategy: MinWordsInterruptionStrategy) -> bool:
-        """Check if word count threshold is met."""
-        word_count = len(self._aggregation.split())
-        return word_count >= strategy.min_words
+        # Reset all strategies.
+        [await s.reset() for s in self._interruption_strategies]
+
+        return result
 
     async def _start(self, frame: StartFrame):
         self._create_aggregation_task()
@@ -377,6 +377,10 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _cancel(self, frame: CancelFrame):
         await self._cancel_aggregation_task()
+
+    async def _handle_input_audio(self, frame: InputAudioRawFrame):
+        for s in self.interruption_strategies:
+            await s.append_audio(frame.audio, frame.sample_rate)
 
     async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
         self._user_speaking = True
