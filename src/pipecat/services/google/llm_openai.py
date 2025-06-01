@@ -10,6 +10,8 @@ import os
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
+from pipecat.services.llm_service import FunctionCallFromLLM
+
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
@@ -18,7 +20,6 @@ from loguru import logger
 from pipecat.frames.frames import LLMTextFrame
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.base_llm import OpenAIUnhandledFunctionException
 from pipecat.services.openai.llm import OpenAILLMService
 
 
@@ -112,25 +113,26 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             logger.debug(
                 f"Function list: {functions_list}, Arguments list: {arguments_list}, Tool ID list: {tool_id_list}"
             )
-            for index, (function_name, arguments, tool_id) in enumerate(
-                zip(functions_list, arguments_list, tool_id_list), start=1
+
+            function_calls = []
+            for function_name, arguments, tool_id in zip(
+                functions_list, arguments_list, tool_id_list
             ):
                 if function_name == "":
                     # TODO: Remove the _process_context method once Google resolves the bug
                     # where the index is incorrectly set to None instead of returning the actual index,
                     # which currently results in an empty function name('').
                     continue
-                if self.has_function(function_name):
-                    run_llm = False
-                    arguments = json.loads(arguments)
-                    await self.call_function(
+
+                arguments = json.loads(arguments)
+
+                function_calls.append(
+                    FunctionCallFromLLM(
                         context=context,
+                        tool_call_id=tool_id,
                         function_name=function_name,
                         arguments=arguments,
-                        tool_call_id=tool_id,
-                        run_llm=run_llm,
                     )
-                else:
-                    raise OpenAIUnhandledFunctionException(
-                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
-                    )
+                )
+
+            await self.run_function_calls(function_calls)
