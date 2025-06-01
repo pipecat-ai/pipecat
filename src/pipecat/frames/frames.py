@@ -19,6 +19,7 @@ from typing import (
     Tuple,
 )
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -440,28 +441,6 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
 
 
 @dataclass
-class InterruptionStrategy:
-    """Base class for interruption strategies."""
-
-    pass
-
-
-@dataclass
-class MinWordsInterruptionStrategy(InterruptionStrategy):
-    """Strategy for interruption behavior based on a minimum number of words spoken by the user.
-
-    Args:
-        min_words: If set, user must speak at least this many words to interrupt
-    """
-
-    min_words: int
-
-    def __post_init__(self):
-        if self.min_words <= 0:
-            raise ValueError("min_words must be greater than 0")
-
-
-@dataclass
 class StartFrame(SystemFrame):
     """This is the first frame that should be pushed down a pipeline."""
 
@@ -471,7 +450,7 @@ class StartFrame(SystemFrame):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
-    interruption_strategies: Optional[Sequence[InterruptionStrategy]] = None
+    interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
 
 
 @dataclass
