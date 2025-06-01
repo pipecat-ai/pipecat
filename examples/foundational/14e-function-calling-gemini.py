@@ -35,9 +35,12 @@ client_id = ""
 
 
 async def get_weather(params: FunctionCallParams):
-    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
     location = params.arguments["location"]
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
+
+
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
 
 
 async def get_image(params: FunctionCallParams):
@@ -93,6 +96,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
     llm.register_function("get_weather", get_weather)
     llm.register_function("get_image", get_image)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_weather",
@@ -110,6 +118,17 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         },
         required=["location", "format"],
     )
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
     get_image_function = FunctionSchema(
         name="get_image",
         description="Get an image from the video stream.",
@@ -121,14 +140,14 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         },
         required=["question"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function, get_image_function])
+    tools = ToolsSchema(standard_tools=[weather_function, get_image_function, restaurant_function])
 
     system_prompt = """\
 You are a helpful assistant who converses with a user and answers questions. Respond concisely to general questions.
 
 Your response will be turned into speech so use only simple words and punctuation.
 
-You have access to two tools: get_weather and get_image.
+You have access to three tools: get_weather, get_restaurant_recommendation, and get_image.
 
 You can respond to questions about the weather using the get_weather tool.
 
