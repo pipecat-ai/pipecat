@@ -117,9 +117,10 @@ def parse_start_end_tags(
     # If we are already inside a tag, check if the end tag is in the text.
     if current_tag:
         _, end_tag = current_tag
-        if end_tag in text[current_tag_index:]:
-            return (None, len(text))
-        return (current_tag, current_tag_index)
+        end_pos = text.find(end_tag, current_tag_index)
+        if end_pos != -1:
+            return (None, end_pos + len(end_tag))
+        return (current_tag, len(text))
 
     text_slice = text[current_tag_index:]
     if not text_slice:
