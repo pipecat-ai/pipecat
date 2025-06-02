@@ -55,7 +55,7 @@ class PipelineParams(BaseModel):
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
-        observers: List of observers for monitoring pipeline execution.
+        observers: [deprecated] Use `observers` arg in `PipelineTask` class.
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
