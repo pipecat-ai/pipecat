@@ -84,6 +84,8 @@ class SkipTagsAggregator(BaseTextAggregator):
         to reset the state and discard any partially aggregated text.
         """
         self._text = ""
+        self._current_tag = None
+        self._current_tag_index = 0
 
     async def reset(self):
         """Clear the internally aggregated text.

@@ -7,6 +7,8 @@
 import re
 from typing import Optional, Sequence, Tuple
 
+from loguru import logger
+
 ENDOFSENTENCE_PATTERN_STR = r"""
     (?<![A-Z])       # Negative lookbehind: not preceded by an uppercase letter (e.g., "U.S.A.")
     (?<!\d\.\d)      # Not preceded by a decimal number (e.g., "3.14159")
