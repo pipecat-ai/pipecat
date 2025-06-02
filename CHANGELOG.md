@@ -88,6 +88,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `ElevenLabsTTSService` where long responses would
+  continue generating output even after an interruption.
+
 - Fixed an issue with the `OpenAILLMContext` where non-Roman characters were
   being incorrectly encoded as Unicode escape sequences. This was a logging
   issue and did not impact the actual conversation.

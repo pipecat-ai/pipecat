@@ -389,14 +389,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         async for message in self._get_websocket():
             msg = json.loads(message)
             # Check if this message belongs to the current context
-            # The default context may return null/None for context_id
             received_ctx_id = msg.get("contextId")
-            if (
-                self._context_id is not None
-                and received_ctx_id is not None
-                and received_ctx_id != self._context_id
-            ):
-                logger.trace(f"Ignoring message from different context: {received_ctx_id}")
+            if not self.audio_context_available(received_ctx_id):
+                logger.trace(f"Ignoring message from unavailable context: {received_ctx_id}")
                 continue
 
             if msg.get("audio"):
@@ -405,14 +400,15 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
                 audio = base64.b64decode(msg["audio"])
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
-                await self.push_frame(frame)
+                await self.append_to_audio_context(received_ctx_id, frame)
             if msg.get("alignment"):
                 word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
                 await self.add_word_timestamps(word_times)
                 self._cumulative_time = word_times[-1][1]
             if msg.get("isFinal"):
                 logger.trace(f"Received final message for context {received_ctx_id}")
-                # Context has finished
+                await self.remove_audio_context(received_ctx_id)
+                # Reset context tracking if this was our active context
                 if self._context_id == received_ctx_id:
                     self._context_id = None
                     self._started = False
@@ -464,6 +460,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     await self._websocket.send(
                         json.dumps({"context_id": self._context_id, "close_context": True})
                     )
+                    await self.remove_audio_context(self._context_id)
                     self._context_id = None
 
                 if not self._started:
@@ -471,6 +468,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
+                    # Create new context ID and register it
+                    self._context_id = str(uuid.uuid4())
+                    await self.create_audio_context(self._context_id)
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
@@ -478,7 +478,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
                 self._started = False
-                self._context_id = None
+                if self._context_id:
+                    await self.remove_audio_context(self._context_id)
+                    self._context_id = None
                 return
             yield None
         except Exception as e:
