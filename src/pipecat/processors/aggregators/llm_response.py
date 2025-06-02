@@ -163,7 +163,7 @@ class BaseLLMResponseAggregator(FrameProcessor):
         pass
 
     @abstractmethod
-    def reset(self):
+    async def reset(self):
         """Reset the internals of this aggregator. This should not modify the
         internal messages.
         """
@@ -230,7 +230,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | dict):
         self._context.set_tool_choice(tool_choice)
 
-    def reset(self):
+    async def reset(self):
         self._aggregation = ""
 
 
@@ -273,10 +273,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._aggregation_event = asyncio.Event()
         self._aggregation_task = None
 
-    def reset(self):
-        super().reset()
+    async def reset(self):
+        await super().reset()
         self._seen_interim_results = False
         self._waiting_for_aggregation = False
+        [await s.reset() for s in self._interruption_strategies]
 
     async def handle_aggregation(self, aggregation: str):
         self._context.add_message({"role": self.role, "content": aggregation})
@@ -330,7 +331,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
         aggregation = self._aggregation
-        self.reset()
+        await self.reset()
         await self.handle_aggregation(aggregation)
         frame = OpenAILLMContextFrame(self._context)
         await self.push_frame(frame)
@@ -350,7 +351,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 else:
                     logger.debug("Interruption conditions not met - not pushing aggregation")
                     # Don't process aggregation, just reset it
-                    self.reset()
+                    await self.reset()
             else:
                 # No interruption config - normal behavior (always push aggregation)
                 await self._process_aggregation()
@@ -362,12 +363,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await strategy.append_text(self._aggregation)
             return await strategy.should_interrupt()
 
-        result = any([await should_interrupt(s) for s in self._interruption_strategies])
-
-        # Reset all strategies.
-        [await s.reset() for s in self._interruption_strategies]
-
-        return result
+        return any([await should_interrupt(s) for s in self._interruption_strategies])
 
     async def _start(self, frame: StartFrame):
         self._create_aggregation_task()
@@ -467,7 +463,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 # If we reached this case and the bot is speaking, let's ignore
                 # what the user said.
                 logger.debug("Ignoring user speaking emulation, bot is speaking.")
-                self.reset()
+                await self.reset()
             else:
                 # The bot is not speaking so, let's trigger user speaking
                 # emulation.
@@ -564,7 +560,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             return
 
         aggregation = self._aggregation.strip()
-        self.reset()
+        await self.reset()
 
         if aggregation:
             await self.handle_aggregation(aggregation)
@@ -579,7 +575,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
     async def _handle_interruptions(self, frame: StartInterruptionFrame):
         await self.push_aggregation()
         self._started = 0
-        self.reset()
+        await self.reset()
 
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
@@ -704,7 +700,7 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self.reset()
+            await self.reset()
 
             frame = LLMMessagesFrame(self._context.messages)
             await self.push_frame(frame)
@@ -726,7 +722,7 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self.reset()
+            await self.reset()
 
             frame = LLMMessagesFrame(self._context.messages)
             await self.push_frame(frame)
