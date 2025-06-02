@@ -7,16 +7,16 @@
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Awaitable, Callable, Coroutine, Optional, Sequence
+from typing import Awaitable, Callable, Coroutine, List, Optional, Sequence
 
 from loguru import logger
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
     Frame,
-    InterruptionStrategy,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -68,7 +68,7 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
-        self._interruption_strategies: Optional[Sequence[InterruptionStrategy]] = None
+        self._interruption_strategies: List[BaseInterruptionStrategy] = []
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -122,7 +122,7 @@ class FrameProcessor(BaseObject):
         return self._report_only_initial_ttfb
 
     @property
-    def interruption_strategies(self) -> Optional[Sequence[InterruptionStrategy]]:
+    def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
         return self._interruption_strategies
 
     def can_generate_metrics(self) -> bool:

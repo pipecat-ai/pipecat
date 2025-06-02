@@ -11,6 +11,7 @@ from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Sequence,
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
@@ -22,7 +23,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
-    InterruptionStrategy,
     LLMFullResponseEndFrame,
     MetricsFrame,
     StartFrame,
@@ -75,7 +75,7 @@ class PipelineParams(BaseModel):
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
     start_metadata: Dict[str, Any] = Field(default_factory=dict)
-    interruption_strategies: Optional[Sequence[InterruptionStrategy]] = None
+    interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
 
 
 class PipelineTaskSource(FrameProcessor):
