@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reverted the default model for `GeminiMultimodalLiveLLMService` back to
+  `models/gemini-2.0-flash-live-001`.
+  `gemini-2.5-flash-preview-native-audio-dialog` has inconsistent performance.
+  You can opt in to using this model by setting the `model` arg.
+
 - Function calls are now cancelled by default if there's an interruption. To
   disable this behavior you can set `cancel_on_interruption=False` when
   registering the function call. Since function calls are executed as tasks you
