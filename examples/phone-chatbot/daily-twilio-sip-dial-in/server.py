@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-@app.post("/call", response_class=PlainTextResponse)
+@app.post("/start", response_class=PlainTextResponse)
 async def handle_call(request: Request):
     """Handle incoming Twilio call webhook."""
     print("Received call webhook from Twilio")
@@ -111,6 +111,6 @@ async def health_check():
 
 if __name__ == "__main__":
     # Run the server
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", "7860"))
     print(f"Starting server on port {port}")
     uvicorn.run("server:app", host="0.0.0.0", port=port, reload=True)
