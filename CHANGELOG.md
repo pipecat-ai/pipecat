@@ -26,12 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added OpenTelemetry tracing for `GeminiMultimodalLiveLLMService` and
   `OpenAIRealtimeBetaLLMService`.
 
-- Added `interruption_strategies` to `PipelineParams` using
-  `MinWordsInterruptionStrategy` to specify minimum words required to interrupt
-  the bot when it's speaking. Use
-  `interruption_strategies=[MinWordsInterruptionStrategy(min_words=N)]` to
-  require users to speak at least N words before interrupting. If not
-  specified, the normal interruption behavior applies.
+- Added initial support for interruption strategies, which determine if the user
+  should interrupt the bot while the bot is speaking. Interruption strategies
+  can be based on factors such as audio volume or the number of words spoken by
+  the user. These can be specified via the new `interruption_strategies` field
+  in `PipelineParams`. A new `MinWordsInterruptionStrategy` strategy has been
+  introduced which triggers an interruption if the user has spoken a minimum
+  number of words. If no interruption strategies are specified, the normal
+  interruption behavior applies. If multiple strategies are provided, the first
+  one that evaluates to true will trigger the interruption.
 
 - `BaseInputTransport` now handles `StopFrame`. When a `StopFrame` is received
   the transport will pause sending frames downstream until a new `StartFrame` is
