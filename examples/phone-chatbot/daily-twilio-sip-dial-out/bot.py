@@ -3,26 +3,28 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
+"""simple_dialout.py.
+
+Simple Dial-out Bot.
+"""
+
 import argparse
 import asyncio
+import json
 import os
 import sys
+from typing import Any
 
-from call_connection_manager import CallConfigManager
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -35,19 +37,41 @@ daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
-async def main(
+async def run_bot(
     room_url: str,
     token: str,
     body: dict,
-):
+) -> None:
+    """Run the voice bot with the given parameters.
+
+    Args:
+        room_url: The Daily room URL
+        token: The Daily room token
+        body: Body passed to the bot from the webhook
+
+    """
     # ------------ CONFIGURATION AND SETUP ------------
+    logger.info(f"Starting bot with room: {room_url}")
+    logger.info(f"Token: {token}")
+    logger.info(f"Body: {body}")
+    # Parse the body to get the dial-in settings
+    body_data = json.loads(body)
 
-    # Create a config manager using the provided body
-    call_config_manager = CallConfigManager.from_json_string(body) if body else CallConfigManager()
+    # Check if the body contains dial-in settings
+    logger.debug(f"Body data: {body_data}")
 
-    # Get important configuration values
-    dialout_settings = call_config_manager.get_dialout_settings()
-    test_mode = call_config_manager.is_test_mode()
+    if not body_data.get("dialout_settings"):
+        logger.error("Dial-out settings not found in the body data")
+        return
+
+    dialout_settings = body_data["dialout_settings"]
+
+    if not dialout_settings.get("sip_uri"):
+        logger.error("Dial-out sip_uri not found in the dial-out settings")
+        return
+
+    # Extract sip_uri
+    sip_uri = dialout_settings["sip_uri"]
 
     # ------------ TRANSPORT SETUP ------------
 
@@ -65,7 +89,7 @@ async def main(
     transport = DailyTransport(
         room_url,
         token,
-        "Simple Dial-out Bot",
+        "Phone Bot",
         transport_params,
     )
 
@@ -75,39 +99,24 @@ async def main(
         voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
     )
 
-    # ------------ FUNCTION DEFINITIONS ------------
-
-    async def terminate_call(params: FunctionCallParams):
-        """Function the bot can call to terminate the call upon completion of a voicemail message."""
-        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-
-    # Define function schemas for tools
-    terminate_call_function = FunctionSchema(
-        name="terminate_call",
-        description="Call this function to terminate the call.",
-        properties={},
-        required=[],
-    )
-
-    # Create tools schema
-    tools = ToolsSchema(standard_tools=[terminate_call_function])
-
     # ------------ LLM AND CONTEXT SETUP ------------
-
-    # Set up the system instruction for the LLM
-    system_instruction = """You are Chatbot, a friendly, helpful robot. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way, but keep your responses brief. Start by introducing yourself. If the user ends the conversation, **IMMEDIATELY** call the `terminate_call` function. """
 
     # Initialize LLM
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    # Register functions with the LLM
-    llm.register_function("terminate_call", terminate_call)
-
     # Create system message and initialize messages list
-    messages = [call_config_manager.create_system_message(system_instruction)]
-
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a friendly phone assistant. Your responses will be read aloud, "
+                "so keep them concise and conversational. Avoid special characters or "
+                "formatting. Begin by greeting the caller and asking how you can help them today."
+            ),
+        },
+    ]
     # Initialize LLM context and aggregator
-    context = OpenAILLMContext(messages, tools)
+    context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
     # ------------ PIPELINE SETUP ------------
@@ -127,14 +136,34 @@ async def main(
     # Create pipeline task
     task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
 
+    # ------------ RETRY LOGIC VARIABLES ------------
+    max_retries = 5
+    retry_count = 0
+    dialout_successful = False
+
+    # Build dialout parameters conditionally
+    dialout_params = {"sipUri": sip_uri}
+
+    logger.debug(f"Dialout parameters: {dialout_params}")
+
+    async def attempt_dialout():
+        """Attempt to start dialout with retry logic."""
+        nonlocal retry_count, dialout_successful
+
+        if retry_count < max_retries and not dialout_successful:
+            retry_count += 1
+            logger.info(f"Attempting dialout (attempt {retry_count}/{max_retries}) to: {sip_uri}")
+            await transport.start_dialout(dialout_params)
+        else:
+            logger.error(f"Maximum retry attempts ({max_retries}) reached. Giving up on dialout.")
+
     # ------------ EVENT HANDLERS ------------
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
-        # Start dialout if needed
-        if not test_mode and dialout_settings:
-            logger.debug("Dialout settings detected; starting dialout")
-            await call_config_manager.start_dialout(transport, dialout_settings)
+        # Start initial dialout attempt
+        logger.debug(f"Dialout settings detected; starting dialout to number: {sip_uri}")
+        await attempt_dialout()
 
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
@@ -142,17 +171,27 @@ async def main(
 
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
+        nonlocal dialout_successful
         logger.debug(f"Dial-out answered: {data}")
+        dialout_successful = True  # Mark as successful to stop retries
         # Automatically start capturing transcription for the participant
         await transport.capture_participant_transcription(data["sessionId"])
         # The bot will wait to hear the user before the bot speaks
 
+    @transport.event_handler("on_dialout_error")
+    async def on_dialout_error(transport, data: Any):
+        logger.error(f"Dial-out error (attempt {retry_count}/{max_retries}): {data}")
+
+        if retry_count < max_retries:
+            logger.info(f"Retrying dialout")
+            await attempt_dialout()
+        else:
+            logger.error(f"All {max_retries} dialout attempts failed. Stopping bot.")
+            await task.cancel()
+
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
-        if test_mode:
-            logger.debug(f"First participant joined: {participant['id']}")
-            await transport.capture_participant_transcription(participant["id"])
-            # The bot will wait to hear the user before the bot speaks
+        logger.debug(f"First participant joined: {participant['id']}")
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
@@ -161,14 +200,12 @@ async def main(
 
     # ------------ RUN PIPELINE ------------
 
-    if test_mode:
-        logger.debug("Running in test mode (can be tested in Daily Prebuilt)")
-
     runner = PipelineRunner()
     await runner.run(task)
 
 
-if __name__ == "__main__":
+async def main():
+    """Parse command line arguments and run the bot."""
     parser = argparse.ArgumentParser(description="Simple Dial-out Bot")
     parser.add_argument("-u", "--url", type=str, help="Room URL")
     parser.add_argument("-t", "--token", type=str, help="Room Token")
@@ -176,9 +213,16 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Log the arguments for debugging
-    logger.info(f"Room URL: {args.url}")
-    logger.info(f"Token: {args.token}")
-    logger.info(f"Body provided: {bool(args.body)}")
+    logger.debug(f"url: {args.url}")
+    logger.debug(f"token: {args.token}")
+    logger.debug(f"body: {args.body}")
+    if not all([args.url, args.token, args.body]):
+        logger.error("All arguments (-u, -t, -b) are required")
+        parser.print_help()
+        sys.exit(1)
 
-    asyncio.run(main(args.url, args.token, args.body))
+    await run_bot(args.url, args.token, args.body)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

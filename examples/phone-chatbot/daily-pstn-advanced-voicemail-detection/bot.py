@@ -6,11 +6,11 @@
 
 import argparse
 import asyncio
-import functools
+import json
 import os
 import sys
+from typing import Any
 
-from call_connection_manager import CallConfigManager, SessionManager
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -48,6 +48,39 @@ daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
 
 # ------------ HELPER CLASSES ------------
+
+
+class CallFlowState:
+    """State for tracking call flow operations and state transitions."""
+
+    def __init__(self):
+        # Voicemail detection state
+        self.voicemail_detected = False
+        self.human_detected = False
+
+        # Call termination state
+        self.call_terminated = False
+        self.participant_left_early = False
+
+    # Voicemail detection methods
+    def set_voicemail_detected(self):
+        """Mark that a voicemail system has been detected."""
+        self.voicemail_detected = True
+        self.human_detected = False
+
+    def set_human_detected(self):
+        """Mark that a human has been detected (not voicemail)."""
+        self.human_detected = True
+        self.voicemail_detected = False
+
+    # Call termination methods
+    def set_call_terminated(self):
+        """Mark that the call has been terminated by the bot."""
+        self.call_terminated = True
+
+    def set_participant_left_early(self):
+        """Mark that a participant left the call early."""
+        self.participant_left_early = True
 
 
 class UserAudioCollector(FrameProcessor):
@@ -94,9 +127,8 @@ class UserAudioCollector(FrameProcessor):
 class FunctionHandlers:
     """Handlers for the voicemail detection bot functions."""
 
-    def __init__(self, session_manager):
-        self.session_manager = session_manager
-        self.prompt = None  # Can be set externally
+    def __init__(self, call_flow_state: CallFlowState):
+        self.call_flow_state = call_flow_state
 
     async def voicemail_response(self, params: FunctionCallParams):
         """Function the bot can call to leave a voicemail message."""
@@ -109,49 +141,73 @@ class FunctionHandlers:
     async def human_conversation(self, params: FunctionCallParams):
         """Function called when bot detects it's talking to a human."""
         # Update state to indicate human was detected
-        self.session_manager.call_flow_state.set_human_detected()
+        self.call_flow_state.set_human_detected()
         await params.llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
 
 
 # ------------ MAIN FUNCTION ------------
 
 
-async def main(
+async def run_bot(
     room_url: str,
     token: str,
     body: dict,
-):
+) -> None:
+    """Run the voice bot with the given parameters.
+
+    Args:
+        room_url: The Daily room URL
+        token: The Daily room token
+        body: Body passed to the bot from the webhook
+
+    """
     # ------------ CONFIGURATION AND SETUP ------------
+    logger.info(f"Starting bot with room: {room_url}")
+    logger.info(f"Token: {token}")
+    logger.info(f"Body: {body}")
+    # Parse the body to get the dial-in settings
+    body_data = json.loads(body)
 
-    # Create a configuration manager from the provided body
-    call_config_manager = CallConfigManager.from_json_string(body) if body else CallConfigManager()
+    # Check if the body contains dial-in settings
+    logger.debug(f"Body data: {body_data}")
 
-    # Get important configuration values
-    dialout_settings = call_config_manager.get_dialout_settings()
-    test_mode = call_config_manager.is_test_mode()
+    if not body_data.get("dialout_settings"):
+        logger.error("Dial-out settings not found in the body data")
+        return
 
-    # Get caller info (might be None for dialout scenarios)
-    caller_info = call_config_manager.get_caller_info()
-    logger.info(f"Caller info: {caller_info}")
+    dialout_settings = body_data["dialout_settings"]
 
-    # Initialize the session manager
-    session_manager = SessionManager()
+    if not dialout_settings.get("phone_number"):
+        logger.error("Dial-out phone number not found in the dial-out settings")
+        return
 
-    # ------------ TRANSPORT AND SERVICES SETUP ------------
+    # Extract dial-out phone number
+    phone_number = dialout_settings["phone_number"]
+    caller_id = dialout_settings.get("caller_id")  # Use .get() to handle optional field
 
-    # Initialize transport
+    if caller_id:
+        logger.info(f"Dial-out caller ID specified: {caller_id}")
+    else:
+        logger.info("Dial-out caller ID not specified; proceeding without it")
+
+    # ------------ TRANSPORT SETUP ------------
+
+    transport_params = DailyParams(
+        api_url=daily_api_url,
+        api_key=daily_api_key,
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_out_enabled=False,
+        vad_analyzer=SileroVADAnalyzer(),
+        transcription_enabled=True,
+    )
+
+    # Initialize transport with Daily
     transport = DailyTransport(
         room_url,
         token,
         "Voicemail Detection Bot",
-        DailyParams(
-            api_url=daily_api_url,
-            api_key=daily_api_key,
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            video_out_enabled=False,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
+        transport_params,
     )
 
     # Initialize TTS
@@ -167,12 +223,12 @@ async def main(
 
     async def terminate_call(
         params: FunctionCallParams,
-        session_manager=None,
+        call_flow_state: CallFlowState = None,
     ):
         """Function the bot can call to terminate the call."""
-        if session_manager:
+        if call_flow_state:
             # Set call terminated flag in the session manager
-            session_manager.call_flow_state.set_call_terminated()
+            call_flow_state.set_call_terminated()
 
         await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
@@ -198,12 +254,7 @@ async def main(
         }
     ]
 
-    # Get voicemail detection prompt
-    voicemail_detection_prompt = call_config_manager.get_prompt("voicemail_detection_prompt")
-    if voicemail_detection_prompt:
-        system_instruction = voicemail_detection_prompt
-    else:
-        system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
+    system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
 
         If you hear any of these phrases (or very similar ones):
         - "Please leave a message after the beep"
@@ -238,12 +289,9 @@ async def main(
         voicemail_detection_context
     )
 
-    # Get custom voicemail prompt if available
-    voicemail_prompt = call_config_manager.get_prompt("voicemail_prompt")
-
     # Set up function handlers
-    handlers = FunctionHandlers(session_manager)
-    handlers.prompt = voicemail_prompt  # Set custom prompt if available
+    call_flow_state = CallFlowState()
+    handlers = FunctionHandlers(call_flow_state)
 
     # Register functions with the voicemail detection LLM
     voicemail_detection_llm.register_function(
@@ -254,7 +302,7 @@ async def main(
         "switch_to_human_conversation", handlers.human_conversation
     )
     voicemail_detection_llm.register_function(
-        "terminate_call", lambda params: terminate_call(params, session_manager)
+        "terminate_call", lambda params: terminate_call(params, call_flow_state)
     )
 
     # Set up audio collector for handling audio input
@@ -279,17 +327,41 @@ async def main(
     voicemail_detection_pipeline_task = PipelineTask(
         voicemail_detection_pipeline,
         params=PipelineParams(allow_interruptions=True),
-        check_dangling_tasks=False,
     )
+
+    # ------------ RETRY LOGIC VARIABLES ------------
+    max_retries = 5
+    retry_count = 0
+    dialout_successful = False
+
+    # Build dialout parameters conditionally
+    dialout_params = {"phoneNumber": phone_number}
+    if caller_id:
+        dialout_params["callerId"] = caller_id
+        logger.debug(f"Including caller ID in dialout: {caller_id}")
+
+    logger.debug(f"Dialout parameters: {dialout_params}")
+
+    async def attempt_dialout():
+        """Attempt to start dialout with retry logic."""
+        nonlocal retry_count, dialout_successful
+
+        if retry_count < max_retries and not dialout_successful:
+            retry_count += 1
+            logger.info(
+                f"Attempting dialout (attempt {retry_count}/{max_retries}) to: {phone_number}"
+            )
+            await transport.start_dialout(dialout_params)
+        else:
+            logger.error(f"Maximum retry attempts ({max_retries}) reached. Giving up on dialout.")
 
     # ------------ EVENT HANDLERS ------------
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
-        # Start dialout if needed
-        if not test_mode and dialout_settings:
-            logger.debug("Dialout settings detected; starting dialout")
-            await call_config_manager.start_dialout(transport, dialout_settings)
+        # Start initial dialout attempt
+        logger.debug(f"Dialout settings detected; starting dialout to number: {phone_number}")
+        await attempt_dialout()
 
     @transport.event_handler("on_dialout_connected")
     async def on_dialout_connected(transport, data):
@@ -297,26 +369,35 @@ async def main(
 
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
+        nonlocal dialout_successful
         logger.debug(f"Dial-out answered: {data}")
-        # Start capturing transcription
+        dialout_successful = True  # Mark as successful to stop retries
+        # Automatically start capturing transcription for the participant
         await transport.capture_participant_transcription(data["sessionId"])
+        # The bot will wait to hear the user before the bot speaks
+
+    @transport.event_handler("on_dialout_error")
+    async def on_dialout_error(transport, data: Any):
+        logger.error(f"Dial-out error (attempt {retry_count}/{max_retries}): {data}")
+
+        if retry_count < max_retries:
+            logger.info(f"Retrying dialout")
+            await attempt_dialout()
+        else:
+            logger.error(f"All {max_retries} dialout attempts failed. Stopping bot.")
+            await voicemail_detection_pipeline_task.queue_frame(EndFrame())
 
     @transport.event_handler("on_first_participant_joined")
     async def on_first_participant_joined(transport, participant):
         logger.debug(f"First participant joined: {participant['id']}")
-        if test_mode:
-            await transport.capture_participant_transcription(participant["id"])
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
         # Mark that a participant left early
-        session_manager.call_flow_state.set_participant_left_early()
+        call_flow_state.set_participant_left_early()
         await voicemail_detection_pipeline_task.queue_frame(EndFrame())
 
     # ------------ RUN VOICEMAIL DETECTION PIPELINE ------------
-
-    if test_mode:
-        logger.debug("Detect voicemail example. You can test this in Daily Prebuilt")
 
     runner = PipelineRunner()
 
@@ -331,24 +412,17 @@ async def main(
     print("!!! Done with voicemail detection pipeline")
 
     # Check if we should exit early
-    if (
-        session_manager.call_flow_state.participant_left_early
-        or session_manager.call_flow_state.call_terminated
-    ):
-        if session_manager.call_flow_state.participant_left_early:
+    if call_flow_state.participant_left_early or call_flow_state.call_terminated:
+        if call_flow_state.participant_left_early:
             print("!!! Participant left early; terminating call")
-        elif session_manager.call_flow_state.call_terminated:
+        elif call_flow_state.call_terminated:
             print("!!! Bot terminated call; not proceeding to human conversation")
         return
 
     # ------------ HUMAN CONVERSATION PHASE SETUP ------------
 
     # Get human conversation prompt
-    human_conversation_prompt = call_config_manager.get_prompt("human_conversation_prompt")
-    if human_conversation_prompt:
-        human_conversation_system_instruction = human_conversation_prompt
-    else:
-        human_conversation_system_instruction = """You are Chatbot talking to a human. Be friendly and helpful.
+    human_conversation_system_instruction = """You are Chatbot talking to a human. Be friendly and helpful.
 
         Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
 
@@ -378,7 +452,7 @@ async def main(
 
     # Register terminate function with the human conversation LLM
     human_conversation_llm.register_function(
-        "terminate_call", functools.partial(terminate_call, session_manager=session_manager)
+        "terminate_call", lambda params: terminate_call(params, call_flow_state)
     )
 
     # Build human conversation pipeline
@@ -412,7 +486,12 @@ async def main(
 
     # Initialize the context with system message
     human_conversation_context_aggregator.user().set_messages(
-        [call_config_manager.create_system_message(human_conversation_system_instruction)]
+        [
+            {
+                "role": "system",
+                "content": human_conversation_system_instruction,
+            }
+        ]
     )
 
     # Queue the context frame to start the conversation
@@ -434,17 +513,26 @@ async def main(
 
 # ------------ SCRIPT ENTRY POINT ------------
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Pipecat Voicemail Detection Bot")
+
+async def main():
+    """Parse command line arguments and run the bot."""
+    parser = argparse.ArgumentParser(description="Simple Dial-out Bot")
     parser.add_argument("-u", "--url", type=str, help="Room URL")
     parser.add_argument("-t", "--token", type=str, help="Room Token")
     parser.add_argument("-b", "--body", type=str, help="JSON configuration string")
 
     args = parser.parse_args()
 
-    # Log the arguments for debugging
-    logger.info(f"Room URL: {args.url}")
-    logger.info(f"Token: {args.token}")
-    logger.info(f"Body provided: {bool(args.body)}")
+    logger.debug(f"url: {args.url}")
+    logger.debug(f"token: {args.token}")
+    logger.debug(f"body: {args.body}")
+    if not all([args.url, args.token, args.body]):
+        logger.error("All arguments (-u, -t, -b) are required")
+        parser.print_help()
+        sys.exit(1)
 
-    asyncio.run(main(args.url, args.token, args.body))
+    await run_bot(args.url, args.token, args.body)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
