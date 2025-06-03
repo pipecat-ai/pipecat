@@ -5,6 +5,15 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [Unreleased]
+
+### Fixed
+
+- Fixed an issue where `OutputAudioRawFrame.transport_destination` was being 
+  reset to `None` instead of retaining its intended value before sending the 
+  audio frame to `write_audio_frame`.
+
 ## [0.0.69] - 2025-06-02 "AI Engineer World's Fair release" ✨
 
 ### Added
