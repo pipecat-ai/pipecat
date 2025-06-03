@@ -66,6 +66,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             api_key=os.getenv("TAVUS_API_KEY"),
             replica_id=os.getenv("TAVUS_REPLICA_ID"),
             session=session,
+            transport_destination="stream",
         )
 
         messages = [
