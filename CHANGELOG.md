@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `TavusTransport` and `TavusVideoService` now send audio to Tavus using WebRTC 
+  audio tracks instead of `app-messages` over WebSocket. This should improve the 
+  overall audio quality.
+
 ### Fixed
 
 - Fixed an issue where `OutputAudioRawFrame.transport_destination` was being 
