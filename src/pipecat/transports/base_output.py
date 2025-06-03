@@ -351,6 +351,7 @@ class BaseOutputTransport(FrameProcessor):
                     sample_rate=self._sample_rate,
                     num_channels=frame.num_channels,
                 )
+                chunk.transport_destination = self._destination
                 await self._audio_queue.put(chunk)
                 self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
 
