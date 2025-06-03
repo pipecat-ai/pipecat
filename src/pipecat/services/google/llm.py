@@ -83,7 +83,7 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
             await self.push_frame(frame)
 
             # Reset our accumulator state.
-            self.reset()
+            await self.reset()
 
 
 class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
