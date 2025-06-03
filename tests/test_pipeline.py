@@ -142,7 +142,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             observer = CustomAddObserver()
             # Wait after the pipeline is started and add an observer.
             await asyncio.sleep(0.1)
-            await task.add_observer(observer)
+            task.add_observer(observer)
             # Push a TextFrame and wait for the observer to pick it up.
             await task.queue_frame(TextFrame(text="Hello Downstream!"))
             await asyncio.sleep(0.1)
