@@ -74,7 +74,7 @@ class TranslationConfig(BaseModel):
         target_languages: List of target language codes for translation
         model: Translation model to use ("base" or "enhanced")
         match_original_utterances: Whether to align translations with original utterances
-        informal: Force informal language forms when available 
+        informal: Force informal language forms when available
     """
 
     target_languages: Optional[List[str]] = None
