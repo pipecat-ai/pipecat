@@ -77,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DailyTransport.stop_transcription()` to be able to start and stop Daily
   transcription dynamically (maybe with different settings).
 
+- Added the option `informal` to `TranslationConfig` on Gladia config.
+  Allowing to force informal language forms when available.
+
 ### Changed
 
 - Reverted the default model for `GeminiMultimodalLiveLLMService` back to
