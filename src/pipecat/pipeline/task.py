@@ -310,8 +310,8 @@ class PipelineTask(BaseTask):
         """Return the turn trace observer if enabled."""
         return self._turn_trace_observer
 
-    async def add_observer(self, observer: BaseObserver):
-        await self._observer.add_observer(observer)
+    def add_observer(self, observer: BaseObserver):
+        self._observer.add_observer(observer)
 
     async def remove_observer(self, observer: BaseObserver):
         await self._observer.remove_observer(observer)
