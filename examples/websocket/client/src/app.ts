@@ -19,7 +19,7 @@ import {
   RTVIEvent,
 } from '@pipecat-ai/client-js';
 import {
-  PipecatWebsocketTransport
+  WebSocketTransport
 } from "@pipecat-ai/realtime-websocket-transport";
 
 class WebsocketClientApp {
@@ -141,7 +141,7 @@ class WebsocketClientApp {
       const startTime = Date.now();
 
       //const transport = new DailyTransport();
-      const transport = new PipecatWebsocketTransport();
+      const transport = new WebSocketTransport();
       const RTVIConfig: RTVIClientOptions = {
         transport,
         params: {
