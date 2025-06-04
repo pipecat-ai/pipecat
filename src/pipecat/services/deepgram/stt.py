@@ -90,6 +90,7 @@ class DeepgramSTTService(STTService):
         if "language" in merged_options and isinstance(merged_options["language"], Language):
             merged_options["language"] = merged_options["language"].value
 
+        self.set_model_name(merged_options["model"])
         self._settings = merged_options
         self._addons = addons
 
@@ -213,7 +214,13 @@ class DeepgramSTTService(STTService):
                 if self.vad_enabled:
                     await self.push_frame(UserStartedSpeakingFrame())
                 await self.push_frame(
-                    TranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                    TranscriptionFrame(
+                        transcript,
+                        "",
+                        time_now_iso8601(),
+                        language,
+                        result=result,
+                    )
                 )
                 logger.debug(f">> Deepgram: {transcript}")
                 if self.vad_enabled:
@@ -223,7 +230,13 @@ class DeepgramSTTService(STTService):
             else:
                 # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
-                    InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                    InterimTranscriptionFrame(
+                        transcript,
+                        "",
+                        time_now_iso8601(),
+                        language,
+                        result=result,
+                    )
                 )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

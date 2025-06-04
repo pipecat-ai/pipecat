@@ -142,7 +142,13 @@ class AzureSTTService(STTService):
     def _on_handle_recognized(self, event):
         if event.result.reason == ResultReason.RecognizedSpeech and len(event.result.text) > 0:
             language = getattr(event.result, "language", None) or self._settings.get("language")
-            frame = TranscriptionFrame(event.result.text, "", time_now_iso8601(), language)
+            frame = TranscriptionFrame(
+                event.result.text,
+                "",
+                time_now_iso8601(),
+                language,
+                result=event,
+            )
             asyncio.run_coroutine_threadsafe(
                 self.frame_dispatcher(frame, "final"), self.get_event_loop()
             )
