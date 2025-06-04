@@ -10,11 +10,11 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from run import get_transport_client_id, maybe_capture_participant_video
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_camera
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -164,7 +164,7 @@ indicate you should use the get_image tool are:
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
 
-        await maybe_capture_participant_video(transport, client)
+        await maybe_capture_participant_camera(transport, client)
 
         global client_id
         client_id = get_transport_client_id(transport, client)
@@ -183,6 +183,6 @@ indicate you should use the get_image tool are:
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)

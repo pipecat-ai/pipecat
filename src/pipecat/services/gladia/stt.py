@@ -233,7 +233,7 @@ class GladiaSTTService(STTService):
         self._params = params
         self._websocket = None
         self._receive_task = None
-        self.vad_enabled = vad_enabled
+        self._vad_enabled = vad_enabled
         self._keepalive_task = None
         self._settings = {}
 
@@ -410,24 +410,37 @@ class GladiaSTTService(STTService):
                     language = utterance["language"]
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
-                    if confidence >= self._confidence and is_final:
-                        if self.vad_enabled:
-                            await self.push_frame(UserStartedSpeakingFrame())
-                        await self.push_frame(
-                            TranscriptionFrame(transcript, "", time_now_iso8601(), language)
-                        )
-                        logger.debug(f">> Gladia: {transcript}")
-                        if self.vad_enabled:
-                            await self.push_frame(UserStoppedSpeakingFrame())
-                        await self._handle_transcription(
-                            transcript=transcript,
-                            is_final=is_final,
-                            language=language,
-                        )
-                    else:
-                        await self.push_frame(
-                            InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
-                        )
+                    if confidence >= self._confidence:
+                        if is_final:
+                            if self._vad_enabled:
+                                await self.push_frame(UserStartedSpeakingFrame())
+                            await self.push_frame(
+                                TranscriptionFrame(
+                                    transcript,
+                                    "",
+                                    time_now_iso8601(),
+                                    language,
+                                    result=content,
+                                )
+                            )
+                            logger.debug(f">> Gladia: {transcript}")
+                            if self._vad_enabled:
+                                await self.push_frame(UserStoppedSpeakingFrame())
+                            await self._handle_transcription(
+                                transcript=transcript,
+                                is_final=is_final,
+                                language=language,
+                            )
+                        else:
+                            await self.push_frame(
+                                InterimTranscriptionFrame(
+                                    transcript,
+                                    "",
+                                    time_now_iso8601(),
+                                    language,
+                                    result=content,
+                                )
+                            )
                 elif content["type"] == "translation":
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]

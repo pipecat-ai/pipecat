@@ -6,11 +6,12 @@
 
 import asyncio
 import time
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Sequence, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
@@ -54,10 +55,11 @@ class PipelineParams(BaseModel):
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
-        observers: List of observers for monitoring pipeline execution.
+        observers: [deprecated] Use `observers` arg in `PipelineTask` class.
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
+        interruption_strategies: Strategies for bot interruption behavior.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -73,6 +75,7 @@ class PipelineParams(BaseModel):
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
     start_metadata: Dict[str, Any] = Field(default_factory=dict)
+    interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
 
 
 class PipelineTaskSource(FrameProcessor):
@@ -518,6 +521,7 @@ class PipelineTask(BaseTask):
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            interruption_strategies=self._params.interruption_strategies,
         )
         start_frame.metadata = self._params.start_metadata
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)

@@ -198,7 +198,6 @@ class OutputGate(FrameProcessor):
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
@@ -244,6 +243,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     tools = [
         ChatCompletionToolParam(
@@ -397,6 +400,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)
