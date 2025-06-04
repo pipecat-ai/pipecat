@@ -363,8 +363,6 @@ class LiveKitInputTransport(BaseInputTransport):
         self._audio_in_task = None
         self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
         self._resampler = create_default_resampler()
-        if self._initialized:
-            return
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
