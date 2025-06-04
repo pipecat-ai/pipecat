@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reset to `None` instead of retaining its intended value before sending the 
   audio frame to `write_audio_frame`.
 
+- Fixed a typo in Livekit transport that prevented initialization.
+
 ## [0.0.69] - 2025-06-02 "AI Engineer World's Fair release" ✨
 
 ### Added
