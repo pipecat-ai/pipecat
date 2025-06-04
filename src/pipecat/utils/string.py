@@ -120,7 +120,7 @@ def parse_start_end_tags(
         end_pos = text.find(end_tag, current_tag_index)
         if end_pos != -1:
             return (None, end_pos + len(end_tag))
-        return (current_tag, len(text))
+        return (current_tag, current_tag_index)
 
     text_slice = text[current_tag_index:]
     if not text_slice:

@@ -72,6 +72,7 @@ class SkipTagsAggregator(BaseTextAggregator):
                 # Extract text up to the sentence boundary
                 result = self._text[:eos_marker]
                 self._text = self._text[eos_marker:]
+                self._current_tag_index = 0
                 return result
 
         # No complete sentence found yet
