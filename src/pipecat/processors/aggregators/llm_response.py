@@ -244,8 +244,8 @@ class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
     ):
         super().__init__(context=context, role="user", **kwargs)
 
-    def reset(self):
-        super().reset()
+    async def reset(self):
+        await super().reset()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -273,7 +273,7 @@ class BetterLLMUserContextAggregator(LLMContextResponseAggregator):
         if len(self._aggregation) > 0:
             aggregation = self._aggregation
 
-            self.reset()
+            await self.reset()
 
             await self.handle_aggregation(aggregation)
 
