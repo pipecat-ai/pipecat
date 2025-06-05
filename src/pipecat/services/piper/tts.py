@@ -74,12 +74,12 @@ class PiperTTSService(TTSService):
 
             async with self._session.post(self._base_url, data=text, headers=headers) as response:
                 if response.status != 200:
-                    eror = await response.text()
+                    error = await response.text()
                     logger.error(
-                        f"{self} error getting audio (status: {response.status}, error: {eror})"
+                        f"{self} error getting audio (status: {response.status}, error: {error})"
                     )
                     yield ErrorFrame(
-                        f"Error getting audio (status: {response.status}, error: {eror})"
+                        f"Error getting audio (status: {response.status}, error: {error})"
                     )
                     return
 
