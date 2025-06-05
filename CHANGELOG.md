@@ -5,13 +5,23 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
 ## [Unreleased]
+
+### Changed
+
+- Pipecat 0.0.69 forced `uvloop` event loop on Linux on macOS. Unfortunately,
+  this is causing issue in some systems. So, `uvloop` is not enabled by default
+  anymore. If you want to use `uvloop` you can just set the `asyncio` event
+  policy before starting your agent with:
+
+```python
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+```
 
 ### Fixed
 
-- Fixed an issue where `OutputAudioRawFrame.transport_destination` was being 
-  reset to `None` instead of retaining its intended value before sending the 
+- Fixed an issue where `OutputAudioRawFrame.transport_destination` was being
+  reset to `None` instead of retaining its intended value before sending the
   audio frame to `write_audio_frame`.
 
 - Fixed a typo in Livekit transport that prevented initialization.
