@@ -197,7 +197,7 @@ class GladiaSTTService(STTService):
         params: Optional[GladiaInputParams] = None,
         max_reconnection_attempts: int = 5,
         reconnection_delay: float = 1.0,
-        max_buffer_size: int = 1024 * 1024 * 5,  # 5MB default buffer
+        max_buffer_size: int = 1024 * 1024 * 20,  # 20MB default buffer
         **kwargs,
     ):
         """Initialize the Gladia STT service.
@@ -207,8 +207,7 @@ class GladiaSTTService(STTService):
             url: Gladia API URL
             confidence: Minimum confidence threshold for transcriptions
             sample_rate: Audio sample rate in Hz
-            model: Model to use ("solaria-1", "solaria-mini-1", "fast",
-                or "accurate")
+            model: Model to use ("solaria-1")
             params: Additional configuration parameters
             max_reconnection_attempts: Maximum number of reconnection attempts
             reconnection_delay: Initial delay between reconnection attempts (exponential backoff)
@@ -507,16 +506,9 @@ class GladiaSTTService(STTService):
     async def _send_buffered_audio(self):
         """Send any buffered audio after reconnection."""
         async with self._buffer_lock:
-            if self._bytes_sent < len(self._audio_buffer):
-                buffered_data = self._audio_buffer[self._bytes_sent :]
-                if buffered_data:
-                    logger.info(f"Sending {len(buffered_data)} bytes of buffered audio")
-                    # Send in chunks to avoid overwhelming the connection
-                    chunk_size = 16384  # 16KB chunks
-                    for i in range(0, len(buffered_data), chunk_size):
-                        chunk = buffered_data[i : i + chunk_size]
-                        await self._send_audio(bytes(chunk))
-                        await asyncio.sleep(0.01)  # Small delay between chunks
+            if self._audio_buffer:
+                logger.info(f"Sending {len(self._audio_buffer)} bytes of buffered audio")
+                await self._send_audio(bytes(self._audio_buffer))
 
     async def _send_stop_recording(self):
         if self._websocket and not self._websocket.closed:
