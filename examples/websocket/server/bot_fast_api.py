@@ -54,7 +54,6 @@ async def run_bot(websocket_client):
     llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
-        transcribe_user_audio=True,
         transcribe_model_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
     )
@@ -87,20 +86,20 @@ async def run_bot(websocket_client):
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            observers=[RTVIObserver(rtvi)],
         ),
+        observers=[RTVIObserver(rtvi)],
     )
 
     @rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
         logger.info("Pipecat client ready.")
+        await rtvi.set_bot_ready()
+        # Kick off the conversation.
+        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @ws_transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Pipecat Client connected")
-        await rtvi.set_bot_ready()
-        # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @ws_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
