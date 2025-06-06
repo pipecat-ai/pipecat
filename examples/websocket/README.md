@@ -1,6 +1,6 @@
 # Voice Agent
 
-A Pipecat example demonstrating the simplest way to create a voice agent using `PipecatWebsocketTransport`.
+A Pipecat example demonstrating the simplest way to create a voice agent using `WebsocketTransport`.
 
 ## 🚀 Quick Start
 
@@ -24,6 +24,7 @@ A Pipecat example demonstrating the simplest way to create a voice agent using `
    cp env.example .env
    ```
    - Add your API keys
+   - Choose what do you wish to use, 'fast_api' or 'websocket_server'
 
 #### ▶️ Run the Server
 ```bash
