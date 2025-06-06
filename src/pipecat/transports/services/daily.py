@@ -1569,10 +1569,10 @@ class DailyTransport(BaseTransport):
         id = participant["id"]
         logger.info(f"Participant joined {id}")
 
-        if self._input and self._params.audio_in_enabled:
-            await self._input.capture_participant_audio(
-                id, "microphone", self._client.in_sample_rate
-            )
+        # if self._input and self._params.audio_in_enabled:
+        #     await self._input.capture_participant_audio(
+        #         id, "microphone", self._client.in_sample_rate
+        #     )
 
         if not self._other_participant_has_joined:
             self._other_participant_has_joined = True
