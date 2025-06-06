@@ -1,3 +1,13 @@
-from .tts import ResembleTTSService  # Explicitly expose only the TTS service
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
 
-__all__ = ["ResembleTTSService"]
+import sys
+
+from pipecat.services import DeprecatedModuleProxy
+
+from .tts import *
+
+sys.modules[__name__] = DeprecatedModuleProxy(globals(), "resembleai", "resembleai.tts")
