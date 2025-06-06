@@ -74,11 +74,17 @@ class TranslationConfig(BaseModel):
         target_languages: List of target language codes for translation
         model: Translation model to use ("base" or "enhanced")
         match_original_utterances: Whether to align translations with original utterances
+        lipsync: Whether to enable lip-sync optimization for translations
+        context_adaptation: Whether to enable context-aware translation adaptation
+        context: Additional context to help with translation accuracy
     """
 
     target_languages: Optional[List[str]] = None
     model: Optional[str] = None
     match_original_utterances: Optional[bool] = None
+    lipsync: Optional[bool] = None
+    context_adaptation: Optional[bool] = None
+    context: Optional[str] = None
 
 
 class RealtimeProcessingConfig(BaseModel):
