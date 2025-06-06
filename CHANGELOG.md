@@ -26,6 +26,12 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 - Fixed a typo in Livekit transport that prevented initialization.
 
+### Added
+
+- Added an `websocket` example, showing how to use the new Pipecat client 
+  `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or 
+  `WebsocketServerTransport`.
+
 ## [0.0.69] - 2025-06-02 "AI Engineer World's Fair release" ✨
 
 ### Added
