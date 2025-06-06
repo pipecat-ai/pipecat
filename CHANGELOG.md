@@ -20,6 +20,9 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 ### Fixed
 
+- Fixed an `AssemblyAISTTService` issue that could cause unexpected behavior
+  when yielding empty `Frame()`s.
+
 - Fixed an issue where `OutputAudioRawFrame.transport_destination` was being
   reset to `None` instead of retaining its intended value before sending the
   audio frame to `write_audio_frame`.
@@ -28,8 +31,8 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 ### Added
 
-- Added an `websocket` example, showing how to use the new Pipecat client 
-  `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or 
+- Added an `websocket` example, showing how to use the new Pipecat client
+  `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or
   `WebsocketServerTransport`.
 
 ## [0.0.69] - 2025-06-02 "AI Engineer World's Fair release" ✨
