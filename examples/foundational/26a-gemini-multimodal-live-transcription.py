@@ -66,10 +66,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     llm = GeminiMultimodalLiveLLMService(
+        model="models/gemini-2.5-flash-preview-native-audio-dialog",
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
         # system_instruction="Talk like a pirate."
         # inference_on_context_initialization=False,
+        # params=InputParams(
+        #     session_resumption=SessionResumptionParams(
+        #     ),
+        #     context_window_compression=ContextWindowCompressionParams(
+        #         enabled=True,
+        #     ),
+        #     media_resolution=GeminiMediaResolution.LOW
+        # ),
     )
 
     context = OpenAILLMContext(
@@ -109,6 +118,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
+            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
