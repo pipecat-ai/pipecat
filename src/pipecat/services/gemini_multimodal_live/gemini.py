@@ -431,6 +431,12 @@ class ContextWindowCompressionParams(BaseModel):
     )  # None = use default (80% of context window)
 
 
+class SessionResumptionParams(BaseModel):
+    """Parameters for session resumption."""
+
+    transparent: Optional[bool] = Field(default=None)
+    handle: Optional[str] = Field(default=None)
+
 class InputParams(BaseModel):
     """Input parameters for Gemini Multimodal Live generation.
 
@@ -464,6 +470,7 @@ class InputParams(BaseModel):
     )
     vad: Optional[GeminiVADParams] = Field(default=None)
     context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
+    session_resumption: Optional[SessionResumptionParams] = Field(default=None)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -565,6 +572,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "language": self._language_code,
             "media_resolution": params.media_resolution,
             "vad": params.vad,
+            "session_resumption": params.session_resumption.model_dump()
+            if params.session_resumption
+            else None,
             "context_window_compression": params.context_window_compression.model_dump()
             if params.context_window_compression
             else {},
@@ -842,6 +852,20 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
                 config_data["setup"]["context_window_compression"] = compression_config
 
+            if self._settings.get("session_resumption"):
+                session_resumption_config = {}
+
+                transparent = self._settings.get("session_resumption").get("transparent")
+                handle = self._settings.get("session_resumption").get("handle")
+
+                if transparent is not None:
+                    session_resumption_config["transparent"] = transparent
+
+                if handle is not None:
+                    session_resumption_config["handle"] = handle
+
+                config_data["setup"]["session_resumption"] = session_resumption_config
+
             # Add VAD configuration if provided
             if self._settings.get("vad"):
                 vad_config = {}
@@ -886,6 +910,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 logger.debug(f"Gemini is configuring to use tools{self._tools}")
                 config.setup.tools = self.get_llm_adapter().from_standard_tools(self._tools)
 
+            logger.debug(f"settings {self._settings}")
+
             # Send the configuration
             await self.send_client_event(config)
 
@@ -919,7 +945,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         except Exception as e:
             if self._disconnecting:
                 return
-            logger.error(f"Error sending message to websocket: {e}")
+            # logger.error(f"Error sending message to websocket: {e}")
             # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
@@ -953,6 +979,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_grounding_metadata(evt)
             elif evt.toolCall:
                 await self._handle_evt_tool_call(evt)
+            elif evt.goAway:
+                await self._handle_evt_go_away(evt)
+            elif evt.sessionResumptionUpdate:
+                await self._handle_evt_session_resumption_update(evt)
             elif False:  # !!! todo: error events?
                 await self._handle_evt_error(evt)
                 # errors are fatal, so exit the receive loop
@@ -1191,6 +1221,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
         ]
 
         await self.run_function_calls(function_calls_llm)
+
+    @traced_gemini_live(operation="llm_go_away")
+    async def _handle_evt_go_away(self, evt):
+        logger.info(f"Gemini is going away in {evt.goAway.timeLeft}")
+
+    @traced_gemini_live(operation="llm_session_resumption_update")
+    async def _handle_evt_session_resumption_update(self, evt):
+        logger.info(f"Gemini session resumption update: {evt.sessionResumptionUpdate}")
 
     @traced_gemini_live(operation="llm_response")
     async def _handle_evt_turn_complete(self, evt):

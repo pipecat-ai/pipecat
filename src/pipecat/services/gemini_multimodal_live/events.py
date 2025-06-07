@@ -392,6 +392,11 @@ class BidiGenerateContentTranscription(BaseModel):
     text: str
 
 
+class Duration(BaseModel):
+    seconds: int
+    nanos: int
+
+
 class ServerContent(BaseModel):
     """Content sent from server to client.
 
@@ -485,6 +490,20 @@ class UsageMetadata(BaseModel):
     toolUsePromptTokensDetails: Optional[List[ModalityTokenCount]] = None
 
 
+class GoAway(BaseModel):
+    """Server will not be able to service client soon."""
+
+    timeLeft: str
+
+
+class SessionResumptionUpdate(BaseModel):
+    """Update of the session resumption state. Only sent if BidiGenerateContentSetup.session_resumption was set."""
+
+    newHandle: str
+    resumable: bool
+    lastConsumedClientMessageIndex: int
+
+
 class ServerEvent(BaseModel):
     """Server event received from the Gemini Live API.
 
@@ -499,6 +518,8 @@ class ServerEvent(BaseModel):
     serverContent: Optional[ServerContent] = None
     toolCall: Optional[ToolCall] = None
     usageMetadata: Optional[UsageMetadata] = None
+    goAway: Optional[GoAway] = None
+    sessionResumptionUpdate: Optional[SessionResumptionUpdate] = None
 
 
 def parse_server_event(str):
