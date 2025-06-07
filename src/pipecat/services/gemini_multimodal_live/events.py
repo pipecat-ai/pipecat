@@ -236,6 +236,20 @@ class AudioTranscriptionConfig(BaseModel):
     pass
 
 
+class ContextWindowCompressionConfig(BaseModel):
+    """Configuration for context window compression."""
+
+    sliding_window: Optional[dict] = Field(default=True)
+    trigger_tokens: Optional[int] = Field(default=None)
+
+
+class SessionResumptionConfig(BaseModel):
+    """Configuration for session resumption."""
+
+    transparent: Optional[bool] = Field(default=None)
+    handle: Optional[str] = Field(default=None)
+
+
 class Setup(BaseModel):
     """Setup configuration for the Gemini Live session.
 
@@ -247,6 +261,8 @@ class Setup(BaseModel):
         input_audio_transcription: Input audio transcription config. Defaults to None.
         output_audio_transcription: Output audio transcription config. Defaults to None.
         realtime_input_config: Realtime input configuration. Defaults to None.
+        context_window_compression: context_window_compression. Defaults to None.
+        session_resumption: session_resumption. Defaults to None.
     """
 
     model: str
@@ -256,6 +272,8 @@ class Setup(BaseModel):
     input_audio_transcription: Optional[AudioTranscriptionConfig] = None
     output_audio_transcription: Optional[AudioTranscriptionConfig] = None
     realtime_input_config: Optional[RealtimeInputConfig] = None
+    context_window_compression: Optional[ContextWindowCompressionConfig] = None
+    session_resumption: Optional[SessionResumptionConfig] = None
 
 
 class Config(BaseModel):
@@ -499,9 +517,9 @@ class GoAway(BaseModel):
 class SessionResumptionUpdate(BaseModel):
     """Update of the session resumption state. Only sent if BidiGenerateContentSetup.session_resumption was set."""
 
-    newHandle: str
-    resumable: bool
-    lastConsumedClientMessageIndex: int
+    newHandle: Optional[str] = None
+    resumable: Optional[bool] = None
+    lastConsumedClientMessageIndex: Optional[int] = None
 
 
 class ServerEvent(BaseModel):
