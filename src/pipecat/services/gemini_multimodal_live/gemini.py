@@ -700,7 +700,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         except Exception as e:
             if self._disconnecting:
                 return
-            # logger.error(f"Error sending message to websocket: {e}")
+            logger.error(f"Error sending message to websocket: {e}")
             # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
             # it is to recover from a send-side error with proper state management, and that exponential
             # backoff for retries can have cost/stability implications for a service cluster, let's just
