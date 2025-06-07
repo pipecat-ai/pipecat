@@ -66,7 +66,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     llm = GeminiMultimodalLiveLLMService(
-        model="models/gemini-2.5-flash-preview-native-audio-dialog",
+        # model="models/gemini-2.5-flash-preview-native-audio-dialog",
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
         # system_instruction="Talk like a pirate."
