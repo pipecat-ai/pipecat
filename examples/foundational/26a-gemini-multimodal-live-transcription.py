@@ -18,10 +18,10 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.transcript_processor import TranscriptProcessor
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService, GeminiMultimodalModalities, ContextWindowCompressionParams, InputParams, GeminiMediaResolution, SessionResumptionParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -64,10 +64,19 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     logger.info(f"Starting bot")
 
     llm = GeminiMultimodalLiveLLMService(
+        model="models/gemini-2.5-flash-preview-native-audio-dialog",
         api_key=os.getenv("GOOGLE_API_KEY"),
         voice_id="Aoede",  # Puck, Charon, Kore, Fenrir, Aoede
         # system_instruction="Talk like a pirate."
         # inference_on_context_initialization=False,
+        # params=InputParams(
+        #     session_resumption=SessionResumptionParams(
+        #     ),
+        #     context_window_compression=ContextWindowCompressionParams(
+        #         enabled=True,
+        #     ),
+        #     media_resolution=GeminiMediaResolution.LOW
+        # ),
     )
 
     context = OpenAILLMContext(
