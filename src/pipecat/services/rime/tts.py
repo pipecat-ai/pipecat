@@ -51,6 +51,8 @@ def language_to_rime_language(language: Language) -> str:
     LANGUAGE_MAP = {
         Language.EN: "eng",
         Language.ES: "spa",
+        Language.FR: "fra",
+        Language.DE: "ger",
     }
     return LANGUAGE_MAP.get(language, "eng")
 
