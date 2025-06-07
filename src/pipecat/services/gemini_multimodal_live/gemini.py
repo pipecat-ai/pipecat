@@ -667,6 +667,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 config.setup.tools = self.get_llm_adapter().from_standard_tools(self._tools)
 
             logger.debug(f"settings {self._settings}")
+            logger.debug(f"config {config.model_dump(exclude_none=True)}")
 
             # Send the configuration
             await self.send_client_event(config)
@@ -936,11 +937,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     @traced_gemini_live(operation="llm_go_away")
     async def _handle_evt_go_away(self, evt):
-        logger.info(f"Gemini is going away in {evt.goAway.timeLeft}")
+        logger.debug(f"Gemini is going away in {evt.goAway.timeLeft}")
 
     @traced_gemini_live(operation="llm_session_resumption_update")
     async def _handle_evt_session_resumption_update(self, evt):
-        logger.info(f"Gemini session resumption update: {evt.sessionResumptionUpdate}")
+        logger.debug(f"Gemini session resumption update: {evt.sessionResumptionUpdate}")
 
     @traced_gemini_live(operation="llm_response")
     async def _handle_evt_turn_complete(self, evt):

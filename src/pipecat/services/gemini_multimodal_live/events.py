@@ -115,6 +115,20 @@ class AudioTranscriptionConfig(BaseModel):
     pass
 
 
+class ContextWindowCompressionConfig(BaseModel):
+    """Configuration for context window compression."""
+
+    sliding_window: Optional[dict] = Field(default=True)
+    trigger_tokens: Optional[int] = Field(default=None)
+
+
+class SessionResumptionConfig(BaseModel):
+    """Configuration for session resumption."""
+
+    transparent: Optional[bool] = Field(default=None)
+    handle: Optional[str] = Field(default=None)
+
+
 class Setup(BaseModel):
     model: str
     system_instruction: Optional[SystemInstruction] = None
@@ -123,6 +137,8 @@ class Setup(BaseModel):
     input_audio_transcription: Optional[AudioTranscriptionConfig] = None
     output_audio_transcription: Optional[AudioTranscriptionConfig] = None
     realtime_input_config: Optional[RealtimeInputConfig] = None
+    context_window_compression: Optional[ContextWindowCompressionConfig] = None
+    session_resumption: Optional[SessionResumptionConfig] = None
 
 
 class Config(BaseModel):
@@ -228,9 +244,9 @@ class GoAway(BaseModel):
 class SessionResumptionUpdate(BaseModel):
     """Update of the session resumption state. Only sent if BidiGenerateContentSetup.session_resumption was set."""
 
-    newHandle: str
-    resumable: bool
-    lastConsumedClientMessageIndex: int
+    newHandle: Optional[str] = None
+    resumable: Optional[bool] = None
+    lastConsumedClientMessageIndex: Optional[int] = None
 
 
 class ServerEvent(BaseModel):
@@ -249,10 +265,3 @@ def parse_server_event(str):
     except Exception as e:
         print(f"Error parsing server event: {e}")
         return None
-
-
-class ContextWindowCompressionConfig(BaseModel):
-    """Configuration for context window compression."""
-
-    sliding_window: Optional[bool] = Field(default=True)
-    trigger_tokens: Optional[int] = Field(default=None)
