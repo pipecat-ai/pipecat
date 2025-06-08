@@ -279,9 +279,12 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         await self._disconnect()
 
     async def flush_audio(self):
-        if self._websocket and self._context_id:
-            msg = {"context_id": self._context_id, "flush": True}
-            await self._websocket.send(json.dumps(msg))
+        if not self._context_id or not self._websocket:
+            return
+        logger.trace(f"{self}: flushing audio")
+        msg = {"context_id": self._context_id, "flush": True}
+        await self._websocket.send(json.dumps(msg))
+        self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
