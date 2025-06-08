@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or
   `WebsocketServerTransport`.
 
+- Added language support to `RimeHttpTTSService`. Extended languages to include
+  German and French for both `RimeTTSService` and `RimeHttpTTSService`.
+
 ### Changed
 
 - Upgraded `daily-python` to 0.19.2.
