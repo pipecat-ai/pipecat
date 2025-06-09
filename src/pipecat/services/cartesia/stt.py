@@ -73,7 +73,7 @@ class CartesiaSTTService(STTService):
         self,
         *,
         api_key: str,
-        base_url: str = None,
+        base_url: str = "",
         sample_rate: int = 16000,
         live_options: Optional[CartesiaLiveOptions] = None,
         **kwargs,
@@ -101,6 +101,7 @@ class CartesiaSTTService(STTService):
             )
 
         self._settings = merged_options
+        self.set_model_name(merged_options["model"])
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
         self._connection = None
