@@ -55,6 +55,15 @@ class CartesiaLiveOptions:
 
         return params
 
+    def items(self):
+        """Return items from the dictionary representation of the options."""
+        return self.to_dict().items()
+
+    def get(self, key, default=None):
+        if hasattr(self, key):
+            return getattr(self, key)
+        return self.additional_params.get(key, default)
+
     @classmethod
     def from_json(cls, json_str: str) -> "CartesiaLiveOptions":
         return cls(**json.loads(json_str))
@@ -163,6 +172,13 @@ class CartesiaSTTService(STTService):
             elif data["type"] == "error":
                 logger.error(f"Cartesia error: {data.get('message', 'Unknown error')}")
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def _on_transcript(self, data):
         if "text" not in data:
             return
@@ -183,6 +199,7 @@ class CartesiaSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
+                await self._handle_transcription(transcript, is_final, language)
                 await self.stop_processing_metrics()
             else:
                 # For interim transcriptions, just push the frame without tracing
