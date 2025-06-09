@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added ExotelFrameSerializer to handle telephony calls via Exotel.
+
 ### Changed
 
 - Make `PipelineTask.add_observer()` synchronous. This allows callers to call it before doing the
