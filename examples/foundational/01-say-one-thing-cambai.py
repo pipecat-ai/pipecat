@@ -36,8 +36,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     logger.info(f"Starting CambAI TTS bot")
 
     tts = CambAITTSService(
-        api_key=os.getenv("CAMBAI_API_KEY"),
-        voice_id=int(os.getenv("CAMBAI_VOICE_ID", "1")),
+        api_key=os.getenv("CAMBAI_API_KEY", "d144c37e-9028-46b2-b23b-3a2ab615959f"),
+        voice_id=int(os.getenv("CAMBAI_VOICE_ID", "20303")),
         sample_rate=24000,
     )
 

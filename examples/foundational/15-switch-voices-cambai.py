@@ -54,8 +54,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CambAITTSService(
-        api_key=os.getenv("CAMBAI_API_KEY"),
-        voice_id=int(os.getenv("CAMBAI_VOICE_ID", "1")),
+        api_key=os.getenv("CAMBAI_API_KEY", ""),
+        voice_id=int(os.getenv("CAMBAI_VOICE_ID", "20303")),
         sample_rate=24000,
     )
 

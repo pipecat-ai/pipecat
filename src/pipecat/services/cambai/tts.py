@@ -53,7 +53,7 @@ class CambAITTSService(TTSService):
     class InputParams(BaseModel):
         language: Optional[int] = 1
         gender: Optional[int] = 1
-        age: Optional[int] = 0
+        age: Optional[int] = 1
 
     def __init__(
         self,
