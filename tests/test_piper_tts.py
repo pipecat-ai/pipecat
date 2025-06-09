@@ -47,8 +47,9 @@ async def test_run_piper_tts_success(aiohttp_client):
 
         # Write out some chunked byte data
         # In reality, you’d return WAV data or similar
-        data_chunk_1 = b"\x00\x01\x02\x03" * 1024  # 4096 bytes, 04 TTSAudioRawFrame
-        data_chunk_2 = b"\x04\x05\x06\x07" * 1024  # another chunk
+        CHUNK_SIZE = 24000
+        data_chunk_1 = b"\x00\x01\x02\x03" * CHUNK_SIZE  # 4xTTSAudioRawFrame
+        data_chunk_2 = b"\x04\x05\x06\x07" * CHUNK_SIZE  # another chunk
         await resp.write(data_chunk_1)
         await asyncio.sleep(0.01)  # simulate async chunk delay
         await resp.write(data_chunk_2)
