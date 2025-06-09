@@ -56,7 +56,6 @@ class CartesiaLiveOptions:
         return params
 
     def items(self):
-        """Return items from the dictionary representation of the options."""
         return self.to_dict().items()
 
     def get(self, key, default=None):
