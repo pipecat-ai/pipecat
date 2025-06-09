@@ -152,7 +152,7 @@ class XTTSService(TTSService):
 
             yield TTSStartedFrame()
 
-            CHUNK_SIZE = 1024
+            CHUNK_SIZE = self.chunk_size
 
             buffer = bytearray()
             async for chunk in r.content.iter_chunked(CHUNK_SIZE):

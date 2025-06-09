@@ -20,6 +20,9 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 ### Fixed
 
+- Fixed an issue with various TTS services that would cause audio glitches at
+  the start of every bot turn.
+
 - Fixed an `AssemblyAISTTService` issue that could cause unexpected behavior
   when yielding empty `Frame()`s.
 
