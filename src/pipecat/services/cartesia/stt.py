@@ -213,6 +213,8 @@ class CartesiaSTTService(STTService):
                 await self._receiver_task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                logger.exception(f"Unexpected exception while cancelling task: {e}")
             self._receiver_task = None
 
         if self._connection and self._connection.open:
