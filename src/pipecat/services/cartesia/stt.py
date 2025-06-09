@@ -65,7 +65,7 @@ class CartesiaSTTService(STTService):
         self,
         *,
         api_key: str,
-        base_url: str,
+        base_url: str = None,
         sample_rate: int = 16000,
         live_options: Optional[CartesiaLiveOptions] = None,
         **kwargs,
@@ -163,13 +163,6 @@ class CartesiaSTTService(STTService):
             elif data["type"] == "error":
                 logger.error(f"Cartesia error: {data.get('message', 'Unknown error')}")
 
-    @traced_stt
-    async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
-    ):
-        """Handle a transcription result with tracing."""
-        pass
-
     async def _on_transcript(self, data):
         if "text" not in data:
             return
@@ -190,7 +183,6 @@ class CartesiaSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(transcript, "", time_now_iso8601(), language)
                 )
-                await self._handle_transcription(transcript, is_final, language)
                 await self.stop_processing_metrics()
             else:
                 # For interim transcriptions, just push the frame without tracing
