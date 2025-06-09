@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Make `PipelineTask.add_observer()` synchronous. This allows callers to call it before doing the
+  work of running the `PipelineTask` (i.e. without invoking `PipelineTask.set_event_loop()` first).
+
 - Pipecat 0.0.69 forced `uvloop` event loop on Linux on macOS. Unfortunately,
   this is causing issue in some systems. So, `uvloop` is not enabled by default
   anymore. If you want to use `uvloop` you can just set the `asyncio` event
