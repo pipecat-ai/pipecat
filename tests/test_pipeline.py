@@ -117,7 +117,8 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
     async def test_task_add_observer(self):
         frame_received = False
-        frame_add_count = 0
+        frame_count_1 = 0
+        frame_count_2 = 0
 
         class CustomObserver(BaseObserver):
             async def on_push_frame(self, data: FramePushed):
@@ -126,28 +127,41 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
                 if isinstance(data.frame, TextFrame):
                     frame_received = True
 
-        class CustomAddObserver(BaseObserver):
+        class CustomAddObserver1(BaseObserver):
             async def on_push_frame(self, data: FramePushed):
-                nonlocal frame_add_count
+                nonlocal frame_count_1
 
                 if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
-                    frame_add_count += 1
+                    frame_count_1 += 1
+
+        class CustomAddObserver2(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_count_2
+
+                if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
+                    frame_count_2 += 1
 
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, observers=[CustomObserver()])
+
+        # Add a new observer right away, before doing anything else with the task.
+        observer1 = CustomAddObserver1()
+        task.add_observer(observer1)
+
         task.set_event_loop(asyncio.get_event_loop())
 
         async def delayed_add_observer():
-            observer = CustomAddObserver()
-            # Wait after the pipeline is started and add an observer.
+            observer2 = CustomAddObserver2()
+            # Wait after the pipeline is started and add another observer.
             await asyncio.sleep(0.1)
-            await task.add_observer(observer)
+            task.add_observer(observer2)
             # Push a TextFrame and wait for the observer to pick it up.
             await task.queue_frame(TextFrame(text="Hello Downstream!"))
             await asyncio.sleep(0.1)
-            # Remove the observer
-            await task.remove_observer(observer)
+            # Remove both observers.
+            await task.remove_observer(observer1)
+            await task.remove_observer(observer2)
             # Push another TextFrame. This time the counter should not
             # increments since we have removed the observer.
             await task.queue_frame(TextFrame(text="Hello Downstream!"))
@@ -158,7 +172,8 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(task.run(), delayed_add_observer())
 
         assert frame_received
-        assert frame_add_count == 1
+        assert frame_count_1 == 1
+        assert frame_count_2 == 1
 
     async def test_task_started_ended_event_handler(self):
         start_received = False
