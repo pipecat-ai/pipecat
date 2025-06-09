@@ -85,8 +85,7 @@ class PiperTTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                # Process the streaming response
-                CHUNK_SIZE = 1024
+                CHUNK_SIZE = self.chunk_size
 
                 yield TTSStartedFrame()
                 async for chunk in response.content.iter_chunked(CHUNK_SIZE):

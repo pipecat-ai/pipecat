@@ -430,8 +430,7 @@ class RimeHttpTTSService(TTSService):
 
                 yield TTSStartedFrame()
 
-                # Process the streaming response
-                CHUNK_SIZE = 1024
+                CHUNK_SIZE = self.chunk_size
 
                 async for chunk in response.content.iter_chunked(CHUNK_SIZE):
                     if need_to_strip_wav_header and chunk.startswith(b"RIFF"):
