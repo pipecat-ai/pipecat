@@ -209,6 +209,10 @@ class CartesiaSTTService(STTService):
     async def _disconnect(self):
         if self._receiver_task:
             self._receiver_task.cancel()
+            try:
+                await self._receiver_task
+            except asyncio.CancelledError:
+                pass
             self._receiver_task = None
 
         if self._connection and self._connection.open:
