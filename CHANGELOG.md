@@ -31,7 +31,7 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 ### Added
 
-- Added `CartesiaSTTService` which is a websocket based implementation to transcribe audio. Adds a foundational example in `13f-cartesia-transcription.py`
+- Added `CartesiaSTTService` which is a websocket based implementation to transcribe audio. Added a foundational example in `13f-cartesia-transcription.py`
 
 - Added an `websocket` example, showing how to use the new Pipecat client
   `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or
