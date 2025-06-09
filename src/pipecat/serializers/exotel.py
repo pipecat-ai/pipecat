@@ -11,6 +11,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -63,6 +64,8 @@ class ExotelFrameSerializer(FrameSerializer):
         self._exotel_sample_rate = self._params.exotel_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
+        self._resampler = create_default_resampler()
+
     @property
     def type(self) -> FrameSerializerType:
         """Gets the serializer type.
@@ -95,8 +98,13 @@ class ExotelFrameSerializer(FrameSerializer):
             answer = {"event": "clear", "streamSid": self._stream_sid}
             return json.dumps(answer)
         elif isinstance(frame, AudioRawFrame):
-            # Audio data is now directly used without resampling
-            payload = base64.b64encode(frame.audio).decode("ascii")
+            data = frame.audio
+
+            # Output: Exotel outputs PCM audio, but we need to resample to match requested sample_rate
+            serialized_data = await self._resampler.resample(
+                data, frame.sample_rate, self._exotel_sample_rate
+            )
+            payload = base64.b64encode(serialized_data).decode("ascii")
 
             answer = {
                 "event": "media",
@@ -125,11 +133,17 @@ class ExotelFrameSerializer(FrameSerializer):
 
         if message["event"] == "media":
             payload_base64 = message["media"]["payload"]
-            audio_data = base64.b64decode(payload_base64)
+            payload = base64.b64decode(payload_base64)
 
-            # Audio data is now directly used without resampling
+            deserialized_data = await self._resampler.resample(
+                payload,
+                self._exotel_sample_rate,
+                self._sample_rate,
+            )
+
+            # Input: Exotel takes PCM data, so just resample to match sample_rate
             audio_frame = InputAudioRawFrame(
-                audio=audio_data,
+                audio=deserialized_data,
                 num_channels=1,  # Assuming mono audio from Exotel
                 sample_rate=self._sample_rate,  # Use the configured pipeline input rate
             )
