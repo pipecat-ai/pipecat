@@ -10,9 +10,7 @@ from loguru import logger
 
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
-from pipecat.utils.tracing.conversation_context_provider import (
-    ConversationContextProvider,
-)
+from pipecat.utils.tracing.conversation_context_provider import ConversationContextProvider
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_context_provider import TurnContextProvider
 
