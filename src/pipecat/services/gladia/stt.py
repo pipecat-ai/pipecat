@@ -26,6 +26,7 @@ from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import websockets
@@ -193,7 +194,7 @@ class GladiaSTTService(STTService):
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
         model: str = "solaria-1",
-        params: GladiaInputParams = GladiaInputParams(),
+        params: Optional[GladiaInputParams] = None,
         **kwargs,
     ):
         """Initialize the Gladia STT service.
@@ -209,6 +210,8 @@ class GladiaSTTService(STTService):
             **kwargs: Additional arguments passed to the STTService
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or GladiaInputParams()
 
         # Warn about deprecated language parameter if it's used
         if params.language is not None:
@@ -227,6 +230,10 @@ class GladiaSTTService(STTService):
         self._websocket = None
         self._receive_task = None
         self._keepalive_task = None
+        self._settings = {}
+
+    def can_generate_metrics(self) -> bool:
+        return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert pipecat Language enum to Gladia's language code."""
@@ -278,6 +285,9 @@ class GladiaSTTService(STTService):
         if self._params.messages_config:
             settings["messages_config"] = self._params.messages_config.model_dump(exclude_none=True)
 
+        # Store settings for tracing
+        self._settings = settings
+
         return settings
 
     async def start(self, frame: StartFrame):
@@ -328,9 +338,9 @@ class GladiaSTTService(STTService):
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Run speech-to-text on audio data."""
+        await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self._send_audio(audio)
-        await self.stop_processing_metrics()
         yield None
 
     async def _setup_gladia(self, settings: Dict[str, Any]):
@@ -350,6 +360,13 @@ class GladiaSTTService(STTService):
                     raise Exception(
                         f"Failed to initialize Gladia session: {response.status} - {error_text}"
                     )
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[str] = None
+    ):
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
 
     async def _send_audio(self, audio: bytes):
         data = base64.b64encode(audio).decode("utf-8")
@@ -387,15 +404,31 @@ class GladiaSTTService(STTService):
                     confidence = utterance.get("confidence", 0)
                     language = utterance["language"]
                     transcript = utterance["text"]
+                    is_final = content["data"]["is_final"]
                     if confidence >= self._confidence:
-                        if content["data"]["is_final"]:
+                        if is_final:
                             await self.push_frame(
-                                TranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                                TranscriptionFrame(
+                                    transcript,
+                                    "",
+                                    time_now_iso8601(),
+                                    language,
+                                    result=content,
+                                )
+                            )
+                            await self._handle_transcription(
+                                transcript=transcript,
+                                is_final=is_final,
+                                language=language,
                             )
                         else:
                             await self.push_frame(
                                 InterimTranscriptionFrame(
-                                    transcript, "", time_now_iso8601(), language
+                                    transcript,
+                                    "",
+                                    time_now_iso8601(),
+                                    language,
+                                    result=content,
                                 )
                             )
                 elif content["type"] == "translation":

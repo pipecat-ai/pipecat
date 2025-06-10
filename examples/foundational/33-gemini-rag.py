@@ -52,8 +52,8 @@ import json
 import os
 import time
 
-import google.generativeai as genai
 from dotenv import load_dotenv
+from google import genai
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -65,11 +65,14 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
+
+# Initialize the client globally
+client = genai.Client(api_key=os.environ["GOOGLE_API_KEY"])
 
 
 def get_rag_content():
@@ -105,20 +108,12 @@ Each request will include:
 Here is the knowledge base you have access to:
 {RAG_CONTENT}
 """
-genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
 
 async def query_knowledge_base(params: FunctionCallParams):
     """Query the knowledge base for the answer to the question."""
     logger.info(f"Querying knowledge base for question: {params.arguments['question']}")
-    client = genai.GenerativeModel(
-        model_name=RAG_MODEL,
-        system_instruction=RAG_PROMPT,
-        generation_config=genai.types.GenerationConfig(
-            temperature=0.1,
-            max_output_tokens=64,
-        ),
-    )
+
     # for our case, the first two messages are the instructions and the user message
     # so we remove them.
     conversation_turns = params.context.messages[2:]
@@ -143,8 +138,15 @@ async def query_knowledge_base(params: FunctionCallParams):
     logger.info(f"Conversation turns: {messages_json}")
 
     start = time.perf_counter()
-    response = client.generate_content(
-        contents=[messages_json],
+    full_prompt = f"System: {RAG_PROMPT}\n\nConversation History: {messages_json}"
+
+    response = await client.aio.models.generate_content(
+        model=RAG_MODEL,
+        contents=[full_prompt],
+        config={
+            "temperature": 0.1,
+            "max_output_tokens": 64,
+        },
     )
     end = time.perf_counter()
     logger.info(f"Time taken: {end - start:.2f} seconds")
@@ -152,17 +154,30 @@ async def query_knowledge_base(params: FunctionCallParams):
     await params.result_callback(response.text)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting bot")
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -239,17 +254,13 @@ Your response will be turned into speech so use only simple words and punctuatio
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
     await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

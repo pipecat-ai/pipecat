@@ -11,21 +11,20 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai import audio
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService, LLMSearchResponseFrame
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.services.llm_service import LLMService
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
+from pipecat.transports.services.daily import DailyParams
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -33,7 +32,7 @@ load_dotenv(override=True)
 
 
 # Function handlers for the LLM
-search_tool = {"google_search_retrieval": {}}
+search_tool = {"google_search": {}}
 tools = [search_tool]
 
 system_instruction = """
@@ -50,27 +49,48 @@ Start each interaction by asking the user about which place they would like to k
 """
 
 
-class LLMSearchLoggerProcessor(FrameProcessor):
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
+class LLMSearchLoggerObserver(BaseObserver):
+    async def on_push_frame(self, data: FramePushed):
+        src = data.source
+        dst = data.destination
+        frame = data.frame
+        timestamp = data.timestamp
+
+        if not isinstance(src, LLMService) and not isinstance(dst, LLMService):
+            return
+
+        time_sec = timestamp / 1_000_000_000
+
+        arrow = "→"
 
         if isinstance(frame, LLMSearchResponseFrame):
-            print(f"LLMSearchLoggerProcessor: {frame}")
-
-        await self.push_frame(frame)
+            logger.debug(f"🧠 {arrow} {dst} LLM SEARCH RESPONSE FRAME: {frame} at {time_sec:.2f}s")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
+
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
-
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -84,7 +104,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         tools=tools,
-        model="gemini-1.5-flash-002",
     )
 
     context = OpenAILLMContext(
@@ -97,22 +116,23 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     )
     context_aggregator = llm.create_context_aggregator(context)
 
-    llm_search_logger = LLMSearchLoggerProcessor()
-
     pipeline = Pipeline(
         [
             transport.input(),
             stt,
             context_aggregator.user(),
             llm,
-            llm_search_logger,
             tts,
             transport.output(),
             context_aggregator.assistant(),
         ]
     )
 
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(allow_interruptions=True),
+        observers=[LLMSearchLoggerObserver()],
+    )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -123,17 +143,13 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
     await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

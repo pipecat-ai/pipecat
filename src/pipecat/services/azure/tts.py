@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     from azure.cognitiveservices.speech import (
@@ -67,10 +68,12 @@ class AzureBaseTTSService(TTSService):
         region: str,
         voice="en-US-SaraNeural",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or AzureBaseTTSService.InputParams()
 
         self._settings = {
             "emphasis": params.emphasis,
@@ -196,6 +199,7 @@ class AzureTTSService(AzureBaseTTSService):
     async def flush_audio(self):
         logger.trace(f"{self}: flushing audio")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -263,6 +267,7 @@ class AzureHttpTTSService(AzureBaseTTSService):
             speech_config=self._speech_config, audio_config=None
         )
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 

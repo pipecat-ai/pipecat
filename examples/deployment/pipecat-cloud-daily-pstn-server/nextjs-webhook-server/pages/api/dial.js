@@ -65,6 +65,7 @@ export default async function handler(req, res) {
       From,
       callId,
       callDomain,
+      sipHeaders,
       dialout_settings,
       voicemail_detection,
       call_transfer
@@ -117,6 +118,7 @@ export default async function handler(req, res) {
         dialout_settings,
         voicemail_detection,
         call_transfer,
+        sip_headers: sipHeaders,
       },
     };
 

@@ -22,7 +22,7 @@ class WakeNotifierFilter(FrameProcessor):
         self,
         notifier: BaseNotifier,
         *,
-        types: Tuple[Type[Frame]],
+        types: Tuple[Type[Frame], ...],
         filter: Callable[[Frame], Awaitable[bool]],
         **kwargs,
     ):

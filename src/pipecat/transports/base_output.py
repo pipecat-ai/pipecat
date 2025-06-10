@@ -8,6 +8,7 @@ import asyncio
 import itertools
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
 
 from loguru import logger
@@ -24,6 +25,8 @@ from pipecat.frames.frames import (
     Frame,
     MixerControlFrame,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
+    OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
@@ -131,12 +134,13 @@ class BaseOutputTransport(FrameProcessor):
     async def register_audio_destination(self, destination: str):
         pass
 
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
+    async def write_video_frame(self, frame: OutputImageRawFrame):
         pass
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        pass
+
+    async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         pass
 
     async def send_audio(self, frame: OutputAudioRawFrame):
@@ -170,6 +174,8 @@ class BaseOutputTransport(FrameProcessor):
             await self._handle_frame(frame)
         elif isinstance(frame, TransportMessageUrgentFrame):
             await self.send_message(frame)
+        elif isinstance(frame, OutputDTMFUrgentFrame):
+            await self.write_dtmf(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames.
@@ -233,6 +239,9 @@ class BaseOutputTransport(FrameProcessor):
             self._sample_rate = sample_rate
             self._audio_chunk_size = audio_chunk_size
             self._params = params
+
+            # This is to resize images. We only need to resize one image at a time.
+            self._executor = ThreadPoolExecutor(max_workers=1)
 
             # Buffer to keep track of incoming audio.
             self._audio_buffer = bytearray()
@@ -342,6 +351,7 @@ class BaseOutputTransport(FrameProcessor):
                     sample_rate=self._sample_rate,
                     num_channels=frame.num_channels,
                 )
+                chunk.transport_destination = self._destination
                 await self._audio_queue.put(chunk)
                 self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
 
@@ -421,6 +431,8 @@ class BaseOutputTransport(FrameProcessor):
                 await self._set_video_images(frame.images)
             elif isinstance(frame, TransportMessageFrame):
                 await self._transport.send_message(frame)
+            elif isinstance(frame, OutputDTMFFrame):
+                await self._transport.write_dtmf(frame)
 
         def _next_frame(self) -> AsyncGenerator[Frame, None]:
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
@@ -494,7 +506,7 @@ class BaseOutputTransport(FrameProcessor):
 
                 # Send audio.
                 if isinstance(frame, OutputAudioRawFrame):
-                    await self._transport.write_raw_audio_frames(frame.audio, self._destination)
+                    await self._transport.write_audio_frame(frame)
 
         #
         # Video handling
@@ -558,20 +570,26 @@ class BaseOutputTransport(FrameProcessor):
             self._video_queue.task_done()
 
         async def _draw_image(self, frame: OutputImageRawFrame):
-            desired_size = (self._params.video_out_width, self._params.video_out_height)
+            def resize_frame(frame: OutputImageRawFrame) -> OutputImageRawFrame:
+                desired_size = (self._params.video_out_width, self._params.video_out_height)
 
-            # TODO: we should refactor in the future to support dynamic resolutions
-            # which is kind of what happens in P2P connections.
-            # We need to add support for that inside the DailyTransport
-            if frame.size != desired_size:
-                image = Image.frombytes(frame.format, frame.size, frame.image)
-                resized_image = image.resize(desired_size)
-                # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
-                frame = OutputImageRawFrame(
-                    resized_image.tobytes(), resized_image.size, resized_image.format
-                )
+                # TODO: we should refactor in the future to support dynamic resolutions
+                # which is kind of what happens in P2P connections.
+                # We need to add support for that inside the DailyTransport
+                if frame.size != desired_size:
+                    image = Image.frombytes(frame.format, frame.size, frame.image)
+                    resized_image = image.resize(desired_size)
+                    # logger.warning(f"{frame} does not have the expected size {desired_size}, resizing")
+                    frame = OutputImageRawFrame(
+                        resized_image.tobytes(), resized_image.size, resized_image.format
+                    )
 
-            await self._transport.write_raw_video_frame(frame, self._destination)
+                return frame
+
+            frame = await self._transport.get_event_loop().run_in_executor(
+                self._executor, resize_frame, frame
+            )
+            await self._transport.write_video_frame(frame)
 
         #
         # Clock handling

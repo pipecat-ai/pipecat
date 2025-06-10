@@ -7,11 +7,13 @@
 import asyncio
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Set
+from typing import Dict, List, Literal, Optional, Set
 
 from loguru import logger
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -22,6 +24,8 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -159,7 +163,7 @@ class BaseLLMResponseAggregator(FrameProcessor):
         pass
 
     @abstractmethod
-    def reset(self):
+    async def reset(self):
         """Reset the internals of this aggregator. This should not modify the
         internal messages.
         """
@@ -193,7 +197,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         self._context = context
         self._role = role
 
-        self._aggregation = ""
+        self._aggregation: str = ""
 
     @property
     def messages(self) -> List[dict]:
@@ -226,7 +230,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | dict):
         self._context.set_tool_choice(tool_choice)
 
-    def reset(self):
+    async def reset(self):
         self._aggregation = ""
 
 
@@ -243,11 +247,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self,
         context: OpenAILLMContext,
         *,
-        params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        params: Optional[LLMUserAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=context, role="user", **kwargs)
-        self._params = params
+        self._params = params or LLMUserAggregatorParams()
         if "aggregation_timeout" in kwargs:
             import warnings
 
@@ -269,10 +273,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._aggregation_event = asyncio.Event()
         self._aggregation_task = None
 
-    def reset(self):
-        super().reset()
+    async def reset(self):
+        await super().reset()
         self._seen_interim_results = False
         self._waiting_for_aggregation = False
+        [await s.reset() for s in self._interruption_strategies]
 
     async def handle_aggregation(self, aggregation: str):
         self._context.add_message({"role": self.role, "content": aggregation})
@@ -292,6 +297,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self._stop(frame)
         elif isinstance(frame, CancelFrame):
             await self._cancel(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, InputAudioRawFrame):
+            await self._handle_input_audio(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
@@ -320,18 +328,42 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         else:
             await self.push_frame(frame, direction)
 
+    async def _process_aggregation(self):
+        """Process the current aggregation and push it downstream."""
+        aggregation = self._aggregation
+        await self.reset()
+        await self.handle_aggregation(aggregation)
+        frame = OpenAILLMContextFrame(self._context)
+        await self.push_frame(frame)
+
     async def push_aggregation(self):
+        """Pushes the current aggregation based on interruption strategies and conditions."""
         if len(self._aggregation) > 0:
-            aggregation = self._aggregation
+            if self.interruption_strategies and self._bot_speaking:
+                should_interrupt = await self._should_interrupt_based_on_strategies()
 
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            self.reset()
+                if should_interrupt:
+                    logger.debug(
+                        "Interruption conditions met - pushing BotInterruptionFrame and aggregation"
+                    )
+                    await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                    await self._process_aggregation()
+                else:
+                    logger.debug("Interruption conditions not met - not pushing aggregation")
+                    # Don't process aggregation, just reset it
+                    await self.reset()
+            else:
+                # No interruption config - normal behavior (always push aggregation)
+                await self._process_aggregation()
 
-            await self.handle_aggregation(aggregation)
+    async def _should_interrupt_based_on_strategies(self) -> bool:
+        """Check if interruption should occur based on configured strategies."""
 
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
+        async def should_interrupt(strategy: BaseInterruptionStrategy):
+            await strategy.append_text(self._aggregation)
+            return await strategy.should_interrupt()
+
+        return any([await should_interrupt(s) for s in self._interruption_strategies])
 
     async def _start(self, frame: StartFrame):
         self._create_aggregation_task()
@@ -341,6 +373,10 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _cancel(self, frame: CancelFrame):
         await self._cancel_aggregation_task()
+
+    async def _handle_input_audio(self, frame: InputAudioRawFrame):
+        for s in self.interruption_strategies:
+            await s.append_audio(frame.audio, frame.sample_rate)
 
     async def _handle_user_started_speaking(self, frame: UserStartedSpeakingFrame):
         self._user_speaking = True
@@ -427,7 +463,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 # If we reached this case and the bot is speaking, let's ignore
                 # what the user said.
                 logger.debug("Ignoring user speaking emulation, bot is speaking.")
-                self.reset()
+                await self.reset()
             else:
                 # The bot is not speaking so, let's trigger user speaking
                 # emulation.
@@ -446,11 +482,11 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         self,
         context: OpenAILLMContext,
         *,
-        params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        params: Optional[LLMAssistantAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=context, role="assistant", **kwargs)
-        self._params = params
+        self._params = params or LLMAssistantAggregatorParams()
 
         if "expect_stripped_words" in kwargs:
             import warnings
@@ -465,7 +501,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self._params.expect_stripped_words = kwargs["expect_stripped_words"]
 
         self._started = 0
-        self._function_calls_in_progress: Dict[str, FunctionCallInProgressFrame] = {}
+        self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
     async def handle_aggregation(self, aggregation: str):
@@ -503,6 +539,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            await self._handle_function_calls_started(frame)
         elif isinstance(frame, FunctionCallInProgressFrame):
             await self._handle_function_call_in_progress(frame)
         elif isinstance(frame, FunctionCallResultFrame):
@@ -522,7 +560,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             return
 
         aggregation = self._aggregation.strip()
-        self.reset()
+        await self.reset()
 
         if aggregation:
             await self.handle_aggregation(aggregation)
@@ -537,7 +575,13 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
     async def _handle_interruptions(self, frame: StartInterruptionFrame):
         await self.push_aggregation()
         self._started = 0
-        self.reset()
+        await self.reset()
+
+    async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
+        function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
+        logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
+        for function_call in frame.function_calls:
+            self._function_calls_in_progress[function_call.tool_call_id] = None
 
     async def _handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
         logger.debug(
@@ -562,19 +606,22 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         await self.handle_function_call_result(frame)
 
+        run_llm = False
+
         # Run inference if the function call result requires it.
         if frame.result:
-            run_llm = False
-
             if properties and properties.run_llm is not None:
-                # If the tool call result has a run_llm property, use it
+                # If the tool call result has a run_llm property, use it.
                 run_llm = properties.run_llm
+            elif frame.run_llm is not None:
+                # If the frame is indicating we should run the LLM, do it.
+                run_llm = frame.run_llm
             else:
-                # Default behavior is to run the LLM if there are no function calls in progress
+                # If this is the last function call in progress, run the LLM.
                 run_llm = not bool(self._function_calls_in_progress)
 
-            if run_llm:
-                await self.push_context_frame(FrameDirection.UPSTREAM)
+        if run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
 
         # Call the `on_context_updated` callback once the function call result
         # is added to the context. Also, run this in a separate task to make
@@ -640,9 +687,9 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 class LLMUserResponseAggregator(LLMUserContextAggregator):
     def __init__(
         self,
-        messages: List[dict] = [],
+        messages: Optional[List[dict]] = None,
         *,
-        params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        params: Optional[LLMUserAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
@@ -653,7 +700,7 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self.reset()
+            await self.reset()
 
             frame = LLMMessagesFrame(self._context.messages)
             await self.push_frame(frame)
@@ -662,9 +709,9 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
     def __init__(
         self,
-        messages: List[dict] = [],
+        messages: Optional[List[dict]] = None,
         *,
-        params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        params: Optional[LLMAssistantAggregatorParams] = None,
         **kwargs,
     ):
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
@@ -675,7 +722,7 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
 
             # Reset the aggregation. Reset it before pushing it down, otherwise
             # if the tasks gets cancelled we won't be able to clear things up.
-            self.reset()
+            await self.reset()
 
             frame = LLMMessagesFrame(self._context.messages)
             await self.push_frame(frame)

@@ -52,7 +52,7 @@ class GoogleVertexLLMService(OpenAILLMService):
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         model: str = "google/gemini-2.0-flash-001",
-        params: InputParams = OpenAILLMService.InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initializes the VertexLLMService.
@@ -64,6 +64,7 @@ class GoogleVertexLLMService(OpenAILLMService):
             params (InputParams): Vertex AI input parameters.
             **kwargs: Additional arguments for OpenAILLMService.
         """
+        params = params or OpenAILLMService.InputParams()
         base_url = self._get_base_url(params)
         self._api_key = self._get_api_token(credentials, credentials_path)
 

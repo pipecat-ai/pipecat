@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import boto3
@@ -124,10 +125,12 @@ class AWSPollyTTSService(TTSService):
         region: Optional[str] = None,
         voice_id: str = "Joanna",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or AWSPollyTTSService.InputParams()
 
         self._polly_client = boto3.client(
             "polly",
@@ -207,6 +210,7 @@ class AWSPollyTTSService(TTSService):
 
         return ssml
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         def read_audio_data(**args):
             response = self._polly_client.synthesize_speech(**args)
@@ -249,7 +253,8 @@ class AWSPollyTTSService(TTSService):
 
             yield TTSStartedFrame()
 
-            CHUNK_SIZE = 1024
+            CHUNK_SIZE = self.chunk_size
+
             for i in range(0, len(audio_data), CHUNK_SIZE):
                 chunk = audio_data[i : i + CHUNK_SIZE]
                 if len(chunk) > 0:

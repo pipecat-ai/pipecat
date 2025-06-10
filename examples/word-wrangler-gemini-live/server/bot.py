@@ -183,6 +183,7 @@ async def bot(args: DailySessionArguments):
         args.token,
         "Word Wrangler Bot",
         DailyParams(
+            audio_in_enabled=True,
             audio_in_filter=None if LOCAL_RUN else KrispFilter(),
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
@@ -210,6 +211,7 @@ async def local_daily():
                 token,
                 bot_name="Bot",
                 params=DailyParams(
+                    audio_in_enabled=True,
                     audio_out_enabled=True,
                     vad_analyzer=SileroVADAnalyzer(),
                 ),
