@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Adds a parameter called `additional_span_attributes` to PipelineTask that
+  lets you add any additional attributes you'd like to the conversation span.
+
 ### Fixed
 
 - Fixed an issue with `CartesiaSTTService` initialization.
