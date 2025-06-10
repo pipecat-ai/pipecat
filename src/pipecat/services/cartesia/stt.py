@@ -101,7 +101,7 @@ class CartesiaSTTService(STTService):
             )
 
         self._settings = merged_options
-        self.set_model_name(merged_options["model"])
+        self.set_model_name(merged_options.model)
         self._api_key = api_key
         self._base_url = base_url or "api.cartesia.ai"
         self._connection = None
