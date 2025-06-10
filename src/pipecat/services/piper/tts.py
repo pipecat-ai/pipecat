@@ -74,19 +74,18 @@ class PiperTTSService(TTSService):
 
             async with self._session.post(self._base_url, data=text, headers=headers) as response:
                 if response.status != 200:
-                    eror = await response.text()
+                    error = await response.text()
                     logger.error(
-                        f"{self} error getting audio (status: {response.status}, error: {eror})"
+                        f"{self} error getting audio (status: {response.status}, error: {error})"
                     )
                     yield ErrorFrame(
-                        f"Error getting audio (status: {response.status}, error: {eror})"
+                        f"Error getting audio (status: {response.status}, error: {error})"
                     )
                     return
 
                 await self.start_tts_usage_metrics(text)
 
-                # Process the streaming response
-                CHUNK_SIZE = 1024
+                CHUNK_SIZE = self.chunk_size
 
                 yield TTSStartedFrame()
                 async for chunk in response.content.iter_chunked(CHUNK_SIZE):

@@ -253,7 +253,8 @@ class AWSPollyTTSService(TTSService):
 
             yield TTSStartedFrame()
 
-            CHUNK_SIZE = 1024
+            CHUNK_SIZE = self.chunk_size
+
             for i in range(0, len(audio_data), CHUNK_SIZE):
                 chunk = audio_data[i : i + CHUNK_SIZE]
                 if len(chunk) > 0:

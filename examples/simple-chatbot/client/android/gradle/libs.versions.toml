@@ -2,7 +2,7 @@
 accompanistPermissions = "0.34.0"
 agp = "8.7.3"
 constraintlayoutCompose = "1.1.0"
-pipecatClientDaily = "0.3.2"
+pipecatClientDaily = "0.3.7"
 kotlin = "2.0.20"
 coreKtx = "1.15.0"
 lifecycleRuntimeKtx = "2.8.7"

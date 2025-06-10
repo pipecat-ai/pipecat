@@ -41,6 +41,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         TextFrame: "text",
         InputAudioRawFrame: "audio",
         TranscriptionFrame: "transcription",
+        MessageFrame: "message",
     }
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
@@ -97,8 +98,18 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Create the instance
-        instance = class_name(**args_dict)
+        # Special handling for MessageFrame -> TransportMessageUrgentFrame
+        if class_name == MessageFrame:
+            try:
+                msg = json.loads(args_dict["data"])
+                instance = TransportMessageUrgentFrame(message=msg)
+                logger.debug(f"ProtobufFrameSerializer: Transport message {instance}")
+            except Exception as e:
+                logger.error(f"Error parsing MessageFrame data: {e}")
+                return None
+        else:
+            # Normal deserialization, create the instance
+            instance = class_name(**args_dict)
 
         # Set special fields
         if id:

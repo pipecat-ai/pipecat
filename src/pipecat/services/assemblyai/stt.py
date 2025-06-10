@@ -98,7 +98,7 @@ class AssemblyAISTTService(STTService):
             self._audio_buffer = self._audio_buffer[self._chunk_size_bytes :]
             await self._websocket.send(chunk)
 
-        yield Frame()
+        yield None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

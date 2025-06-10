@@ -16,6 +16,7 @@ import ai.pipecat.client.types.ServiceConfig
 import ai.pipecat.client.types.Tracks
 import ai.pipecat.client.types.Transcript
 import ai.pipecat.client.types.TransportState
+import ai.pipecat.client.types.Value
 import ai.pipecat.simple_chatbot_client.utils.Timestamp
 import android.content.Context
 import android.util.Log
@@ -86,6 +87,10 @@ class VoiceClientManager(private val context: Context) {
                     Log.e(TAG, it)
                     errors.add(Error(it))
                 }
+            }
+
+            override fun onServerMessage(data: Value) {
+                Log.i(TAG, "onServerMessage: $data")
             }
 
             override fun onBotReady(version: String, config: List<ServiceConfig>) {

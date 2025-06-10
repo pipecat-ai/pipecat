@@ -31,8 +31,7 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.70.0",
-    "uvloop~=0.21.0; sys_platform!='win32'"
+    "openai~=1.70.0"
 ]
 
 [project.urls]
@@ -48,7 +47,7 @@ azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "websockets~=13.1" ]
 cerebras = []
 deepseek = []
-daily = [ "daily-python~=0.19.1" ]
+daily = [ "daily-python~=0.19.2" ]
 deepgram = [ "deepgram-sdk~=4.1.0" ]
 elevenlabs = [ "websockets~=13.1" ]
 fal = [ "fal-client~=0.5.9" ]

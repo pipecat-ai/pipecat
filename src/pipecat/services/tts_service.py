@@ -106,6 +106,19 @@ class TTSService(AIService):
     def sample_rate(self) -> int:
         return self._sample_rate
 
+    @property
+    def chunk_size(self) -> int:
+        """This property indicates how much audio we download (from TTS services
+        that require chunking) before we start pushing the first audio
+        frame. This will make sure we download the rest of the audio while audio
+        is being played without causing audio glitches (specially at the
+        beginning). Of course, this will also depend on how fast the TTS service
+        generates bytes.
+
+        """
+        CHUNK_SECONDS = 0.5
+        return int(self.sample_rate * CHUNK_SECONDS * 2)  # 2 bytes/sample
+
     async def set_model(self, model: str):
         self.set_model_name(model)
 

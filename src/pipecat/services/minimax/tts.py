@@ -227,7 +227,8 @@ class MiniMaxHttpTTSService(TTSService):
 
                 # Process the streaming response
                 buffer = bytearray()
-                CHUNK_SIZE = 1024
+
+                CHUNK_SIZE = self.chunk_size
 
                 async for chunk in response.content.iter_chunked(CHUNK_SIZE):
                     if not chunk:
@@ -279,10 +280,8 @@ class MiniMaxHttpTTSService(TTSService):
                                         await self.stop_ttfb_metrics()
                                         yield TTSAudioRawFrame(
                                             audio=audio_chunk,
-                                            sample_rate=self._settings["audio_setting"][
-                                                "sample_rate"
-                                            ],
-                                            num_channels=self._settings["audio_setting"]["channel"],
+                                            sample_rate=self.sample_rate,
+                                            num_channels=1,
                                         )
                                 except ValueError as e:
                                     logger.error(f"Error converting hex to binary: {e}")
