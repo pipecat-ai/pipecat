@@ -5,7 +5,7 @@
 #
 
 import asyncio
-from typing import Awaitable, Callable, List
+from typing import Awaitable, Callable, List, Optional
 
 from pipecat.frames.frames import Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -22,14 +22,14 @@ class IdleFrameProcessor(FrameProcessor):
         *,
         callback: Callable[["IdleFrameProcessor"], Awaitable[None]],
         timeout: float,
-        types: List[type] = [],
+        types: Optional[List[type]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
 
         self._callback = callback
         self._timeout = timeout
-        self._types = types
+        self._types = types or []
         self._idle_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

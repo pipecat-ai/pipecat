@@ -21,6 +21,7 @@ from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.frames.frames import (
     Frame,
     FunctionCallCancelFrame,
+    FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     LLMFullResponseEndFrame,
@@ -44,6 +45,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     import boto3
@@ -529,16 +531,18 @@ class AWSBedrockLLMService(LLMService):
     def __init__(
         self,
         *,
+        model: str,
         aws_access_key: Optional[str] = None,
         aws_secret_key: Optional[str] = None,
         aws_session_token: Optional[str] = None,
         aws_region: str = "us-east-1",
-        model: str,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         client_config: Optional[Config] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        params = params or AWSBedrockLLMService.InputParams()
 
         # Initialize the AWS Bedrock client
         if not client_config:
@@ -603,6 +607,22 @@ class AWSBedrockLLMService(LLMService):
         assistant = AWSBedrockAssistantContextAggregator(context, params=assistant_params)
         return AWSBedrockContextAggregatorPair(_user=user, _assistant=assistant)
 
+    def _create_no_op_tool(self):
+        """Create a no-operation tool for AWS Bedrock when tool content exists but no tools are defined.
+
+        This is required because AWS Bedrock doesn't allow empty tool configurations after tools were
+        previously set. Other LLM vendors allow NOT_GIVEN or empty tool configurations,
+        but AWS Bedrock requires at least one tool to be defined.
+        """
+        return {
+            "toolSpec": {
+                "name": "no_operation",
+                "description": "Internal placeholder function. Do not call this function.",
+                "inputSchema": {"json": {"type": "object", "properties": {}, "required": []}},
+            }
+        }
+
+    @traced_llm
     async def _process_context(self, context: AWSBedrockLLMContext):
         # Usage tracking
         prompt_tokens = 0
@@ -611,6 +631,8 @@ class AWSBedrockLLMService(LLMService):
         cache_read_input_tokens = 0
         cache_creation_input_tokens = 0
         use_completion_tokens_estimate = False
+
+        using_noop_tool = False
 
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -636,12 +658,28 @@ class AWSBedrockLLMService(LLMService):
             # Add system message
             request_params["system"] = context.system
 
-            # Add tools if present
-            if context.tools:
-                tool_config = {"tools": context.tools}
+            # Check if messages contain tool use or tool result content blocks
+            has_tool_content = False
+            for message in context.messages:
+                if isinstance(message.get("content"), list):
+                    for content_item in message["content"]:
+                        if "toolUse" in content_item or "toolResult" in content_item:
+                            has_tool_content = True
+                            break
+                if has_tool_content:
+                    break
 
-                # Add tool_choice if specified
-                if context.tool_choice:
+            # Handle tools: use current tools, or no-op if tool content exists but no current tools
+            tools = context.tools or []
+            if has_tool_content and not tools:
+                tools = [self._create_no_op_tool()]
+                using_noop_tool = True
+
+            if tools:
+                tool_config = {"tools": tools}
+
+                # Only add tool_choice if we have real tools (not just no-op)
+                if not using_noop_tool and context.tool_choice:
                     if context.tool_choice == "auto":
                         tool_config["toolChoice"] = {"auto": {}}
                     elif context.tool_choice == "none":
@@ -671,6 +709,7 @@ class AWSBedrockLLMService(LLMService):
             tool_use_block = None
             json_accumulator = ""
 
+            function_calls = []
             for event in response["stream"]:
                 # Handle text content
                 if "contentBlockDelta" in event:
@@ -700,12 +739,19 @@ class AWSBedrockLLMService(LLMService):
                     if event["messageStop"]["stopReason"] == "tool_use" and tool_use_block:
                         try:
                             arguments = json.loads(json_accumulator) if json_accumulator else {}
-                            await self.call_function(
-                                context=context,
-                                tool_call_id=tool_use_block["id"],
-                                function_name=tool_use_block["name"],
-                                arguments=arguments,
-                            )
+
+                            # Only call function if it's not the no_operation tool
+                            if not using_noop_tool:
+                                function_calls.append(
+                                    FunctionCallFromLLM(
+                                        context=context,
+                                        tool_call_id=tool_use_block["id"],
+                                        function_name=tool_use_block["name"],
+                                        arguments=arguments,
+                                    )
+                                )
+                            else:
+                                logger.debug("Ignoring no_operation tool call")
                         except json.JSONDecodeError:
                             logger.error(f"Failed to parse tool arguments: {json_accumulator}")
 
@@ -716,7 +762,7 @@ class AWSBedrockLLMService(LLMService):
                     completion_tokens += usage.get("outputTokens", 0)
                     cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
                     cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
-
+            await self.run_function_calls(function_calls)
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
             # token estimate. The reraise the exception so all the processors running in this task

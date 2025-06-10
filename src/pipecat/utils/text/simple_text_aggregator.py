@@ -23,7 +23,7 @@ class SimpleTextAggregator(BaseTextAggregator):
     def text(self) -> str:
         return self._text
 
-    def aggregate(self, text: str) -> Optional[str]:
+    async def aggregate(self, text: str) -> Optional[str]:
         result: Optional[str] = None
 
         self._text += text
@@ -35,8 +35,8 @@ class SimpleTextAggregator(BaseTextAggregator):
 
         return result
 
-    def handle_interruption(self):
+    async def handle_interruption(self):
         self._text = ""
 
-    def reset(self):
+    async def reset(self):
         self._text = ""

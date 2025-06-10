@@ -21,9 +21,9 @@ from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -33,17 +33,34 @@ async def get_weather(params: FunctionCallParams):
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting bot")
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
+
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
+
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -53,9 +70,11 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     )
 
     llm = AnthropicLLMService(
-        api_key=os.getenv("ANTHROPIC_API_KEY"), model="claude-3-7-sonnet-latest"
+        api_key=os.getenv("ANTHROPIC_API_KEY"),
+        model="claude-3-7-sonnet-latest",
     )
     llm.register_function("get_weather", get_weather)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     weather_function = FunctionSchema(
         name="get_weather",
@@ -68,7 +87,18 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         },
         required=["location"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function])
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
     # todo: test with very short initial user message
 
@@ -111,18 +141,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

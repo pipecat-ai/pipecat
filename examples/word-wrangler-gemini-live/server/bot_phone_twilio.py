@@ -178,7 +178,7 @@ class HostResponseTextFilter(BaseTextFilter):
         # No settings to update for this filter
         pass
 
-    def filter(self, text: str) -> str:
+    async def filter(self, text: str) -> str:
         # Remove case and whitespace for comparison
         clean_text = text.strip().upper()
 
@@ -188,10 +188,10 @@ class HostResponseTextFilter(BaseTextFilter):
 
         return text
 
-    def handle_interruption(self):
+    async def handle_interruption(self):
         self._interrupted = True
 
-    def reset_interruption(self):
+    async def reset_interruption(self):
         self._interrupted = False
 
 

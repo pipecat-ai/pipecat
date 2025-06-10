@@ -115,7 +115,7 @@ class ResponseProperties(BaseModel):
     instructions: Optional[str] = None
     voice: Optional[str] = None
     output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
-    tools: Optional[List[Dict]] = []
+    tools: Optional[List[Dict]] = Field(default_factory=list)
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
     temperature: Optional[float] = None
     max_response_output_tokens: Optional[Union[int, Literal["inf"]]] = None

@@ -32,10 +32,41 @@ Depending on what you're trying to build, these learning paths will guide you th
 4. Run any example:
 
    ```bash
-   python run.py 01-say-one-thing.py
+   python 01-say-one-thing.py
    ```
 
 5. Open the web interface at http://localhost:7860 and click "Connect"
+
+## Running examples with other transports
+
+It is possible to run most of the examples with other transports such as Twilio or Daily.
+
+### Daily
+
+You need to create a Daily account at https://dashboard.daily.co/u/signup. Once signed up, you can create your own room from the dashboard and set the environment variables `DAILY_SAMPLE_ROOM_URL` and `DAILY_API_KEY`. Alternatively, you can let the example create a room for you (still needs `DAILY_API_KEY` environment variable). Then, start any example with `-t daily`:
+
+```bash
+python 07-interruptible.py -t daily
+```
+
+### Twilio
+
+It is also possible to run the example through a Twilio phone number. You will
+need to setup a few things:
+
+1. Install and run [ngrok](https://ngrok.com/download).
+
+  ```bash
+  ngrok http 7860
+  ```
+
+2. Configure your Twilio phone number. One way is to setup a TwiML app and set the request URL to the ngrok URL from step (1). Then, set your phone number to use the new TwiML app.
+
+Then, run the example with:
+
+```bash
+python 07-interruptible.py -t twilio -x NGROK_HOST_NAME (no protocol)
+```
 
 ## Examples by Feature
 
@@ -95,7 +126,7 @@ Depending on what you're trying to build, these learning paths will guide you th
 
 - **[18-gstreamer-filesrc.py](./18-gstreamer-filesrc.py)**: GStreamer video streaming (Video processing)
 - **[19-openai-realtime-beta.py](./19-openai-realtime-beta.py)**: OpenAI Speech-to-Speech (Direct S2S, Function calls)
-- **[21-tavus-layer.py](./21-tavus-layer.py)**: Tavus digital twin (Avatar integration)
+- **[21-tavus-layer-tavus-transport.py](./21-tavus-layer-tavus-transport.py)**: Tavus digital twin (Avatar integration)
 - **[27-simli-layer.py](./27-simli-layer.py)**: Simli avatar integration (Video synchronization)
 
 ### Performance & Optimization
@@ -109,7 +140,7 @@ Depending on what you're trying to build, these learning paths will guide you th
 ### Customizing Network Settings
 
 ```bash
-python run.py <example-name> --host 0.0.0.0 --port 8080
+python <example-name> --host 0.0.0.0 --port 8080
 ```
 
 ### Troubleshooting

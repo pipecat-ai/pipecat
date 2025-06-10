@@ -14,6 +14,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
@@ -126,6 +127,13 @@ class BaseWhisperSTTService(SegmentedSTTService):
         self._prompt = prompt
         self._temperature = temperature
 
+        self._settings = {
+            "base_url": base_url,
+            "language": self._language,
+            "prompt": self._prompt,
+            "temperature": self._temperature,
+        }
+
     def _create_client(self, api_key: Optional[str], base_url: Optional[str]):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
@@ -147,6 +155,13 @@ class BaseWhisperSTTService(SegmentedSTTService):
         logger.info(f"Switching STT language to: [{language}]")
         self._language = language
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         try:
             await self.start_processing_metrics()
@@ -160,6 +175,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             text = response.text.strip()
 
             if text:
+                await self._handle_transcription(text, True, self._language)
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(text, "", time_now_iso8601())
             else:

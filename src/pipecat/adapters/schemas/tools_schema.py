@@ -5,7 +5,7 @@
 #
 
 from enum import Enum
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
@@ -18,7 +18,7 @@ class ToolsSchema:
     def __init__(
         self,
         standard_tools: List[FunctionSchema],
-        custom_tools: Dict[AdapterType, List[Dict[str, Any]]] = None,
+        custom_tools: Optional[Dict[AdapterType, List[Dict[str, Any]]]] = None,
     ) -> None:
         """
         A schema for tools that includes both standardized function schemas

@@ -6,7 +6,7 @@
 
 import asyncio
 import io
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import aiohttp
 import numpy as np
@@ -21,12 +21,12 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         *,
         url: str,
         aiohttp_session: aiohttp.ClientSession,
-        headers: Dict[str, str] = {},
+        headers: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._url = url
-        self._headers = headers
+        self._headers = headers or {}
         self._aiohttp_session = aiohttp_session
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:

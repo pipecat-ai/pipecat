@@ -36,10 +36,10 @@ class SmartTurnTimeoutException(Exception):
 
 class BaseSmartTurn(BaseTurnAnalyzer):
     def __init__(
-        self, *, sample_rate: Optional[int] = None, params: SmartTurnParams = SmartTurnParams()
+        self, *, sample_rate: Optional[int] = None, params: Optional[SmartTurnParams] = None
     ):
         super().__init__(sample_rate=sample_rate)
-        self._params = params
+        self._params = params or SmartTurnParams()
         # Configuration
         self._stop_ms = self._params.stop_secs * 1000  # silence threshold in ms
         # Inference state

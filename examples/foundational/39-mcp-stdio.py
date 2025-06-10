@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
 import io
 import os
@@ -32,9 +33,8 @@ from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.mcp_service import MCPClient
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -80,20 +80,31 @@ class UrlToImageProcessor(FrameProcessor):
             logger.error(error_msg)
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection):
-    logger.info(f"Starting bot")
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_out_enabled=True,
+        video_out_width=1024,
+        video_out_height=1024,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_out_enabled=True,
+        video_out_width=1024,
+        video_out_height=1024,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            video_out_enabled=True,
-            video_out_width=1024,
-            video_out_height=1024,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     # Create an HTTP session for API calls
     async with aiohttp.ClientSession() as session:
@@ -126,15 +137,15 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         tools = await mcp.register_tools(llm)
 
         system = f"""
-        You are a helpful LLM in a WebRTC call. 
-        Your goal is to demonstrate your capabilities in a succinct way. 
+        You are a helpful LLM in a WebRTC call.
+        Your goal is to demonstrate your capabilities in a succinct way.
         You have access to a number of tools provided by NASA MCP. Use any and all tools to help users.
         When asked for the astronomy picture of the day, PASS in NO date to the API.
         This ensures we get the latest picture available. If as specific date is asked for, you
         can pass in that date to the API.
-        Your output will be converted to audio so don't include special characters in your answers. 
-        Respond to what the user said in a creative and helpful way. 
-        Don't overexplain what you are doing. 
+        Your output will be converted to audio so don't include special characters in your answers.
+        Respond to what the user said in a creative and helpful way.
+        Don't overexplain what you are doing.
         Just respond with short sentences when you are carrying out tool calls.
         """
 
@@ -173,18 +184,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection):
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):
             logger.info(f"Client disconnected")
-
-        @transport.event_handler("on_client_closed")
-        async def on_client_closed(transport, client):
-            logger.info(f"Client closed connection")
             await task.cancel()
 
-        runner = PipelineRunner(handle_sigint=False)
+        runner = PipelineRunner(handle_sigint=handle_sigint)
 
         await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

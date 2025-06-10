@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for LMNT configuration needed
 try:
@@ -39,8 +40,20 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
         Language.EN: "en",
         Language.ES: "es",
         Language.FR: "fr",
+        Language.HI: "hi",
+        Language.ID: "id",
+        Language.IT: "it",
+        Language.JA: "ja",
         Language.KO: "ko",
+        Language.NL: "nl",
+        Language.PL: "pl",
         Language.PT: "pt",
+        Language.RU: "ru",
+        Language.SV: "sv",
+        Language.TH: "th",
+        Language.TR: "tr",
+        Language.UK: "uk",
+        Language.VI: "vi",
         Language.ZH: "zh",
     }
 
@@ -65,6 +78,7 @@ class LmntTTSService(InterruptibleTTSService):
         voice_id: str,
         sample_rate: Optional[int] = None,
         language: Language = Language.EN,
+        model: str = "aurora",
         **kwargs,
     ):
         super().__init__(
@@ -75,7 +89,8 @@ class LmntTTSService(InterruptibleTTSService):
         )
 
         self._api_key = api_key
-        self._voice_id = voice_id
+        self.set_voice(voice_id)
+        self.set_model_name(model)
         self._settings = {
             "language": self.language_to_service_language(language),
             "format": "raw",  # Use raw format for direct PCM data
@@ -134,6 +149,7 @@ class LmntTTSService(InterruptibleTTSService):
                 "format": self._settings["format"],
                 "sample_rate": self.sample_rate,
                 "language": self._settings["language"],
+                "model": self.model_name,
             }
 
             # Connect to LMNT's websocket directly
@@ -198,6 +214,7 @@ class LmntTTSService(InterruptibleTTSService):
                 except json.JSONDecodeError:
                     logger.error(f"Invalid JSON message: {message}")
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate TTS audio from text."""
         logger.debug(f"{self}: Generating TTS [{text}]")
