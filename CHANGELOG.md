@@ -13,8 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Make `PipelineTask.add_observer()` synchronous. This allows callers to call it before doing the
-  work of running the `PipelineTask` (i.e. without invoking `PipelineTask.set_event_loop()` first).
+- Upgraded `daily-python` to 0.19.2.
+
+- Make `PipelineTask.add_observer()` synchronous. This allows callers to call it
+  before doing the work of running the `PipelineTask` (i.e. without invoking
+  `PipelineTask.set_event_loop()` first).
 
 - Pipecat 0.0.69 forced `uvloop` event loop on Linux on macOS. Unfortunately,
   this is causing issue in some systems. So, `uvloop` is not enabled by default
@@ -44,7 +47,9 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 ### Added
 
-- Added `CartesiaSTTService` which is a websocket based implementation to transcribe audio. Added a foundational example in `13f-cartesia-transcription.py`
+- Added `CartesiaSTTService` which is a websocket based implementation to
+  transcribe audio. Added a foundational example in
+  `13f-cartesia-transcription.py`
 
 - Added an `websocket` example, showing how to use the new Pipecat client
   `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or
