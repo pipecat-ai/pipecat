@@ -9,7 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added ExotelFrameSerializer to handle telephony calls via Exotel.
+- Added `ExotelFrameSerializer` to handle telephony calls via Exotel.
+
+- Added the option `informal` to `TranslationConfig` on Gladia config.
+  Allowing to force informal language forms when available.
+
+- Added `CartesiaSTTService` which is a websocket based implementation to
+  transcribe audio. Added a foundational example in
+  `13f-cartesia-transcription.py`
+
+- Added an `websocket` example, showing how to use the new Pipecat client
+  `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or
+  `WebsocketServerTransport`.
 
 ### Changed
 
@@ -44,16 +55,6 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
   audio frame to `write_audio_frame`.
 
 - Fixed a typo in Livekit transport that prevented initialization.
-
-### Added
-
-- Added `CartesiaSTTService` which is a websocket based implementation to
-  transcribe audio. Added a foundational example in
-  `13f-cartesia-transcription.py`
-
-- Added an `websocket` example, showing how to use the new Pipecat client
-  `WebsocketTransport` to connect with Pipecat `FastAPIWebsocketTransport` or
-  `WebsocketServerTransport`.
 
 ## [0.0.69] - 2025-06-02 "AI Engineer World's Fair release" ✨
 
@@ -117,9 +118,6 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 - Added new functions `DailyTransport.start_transcription()` and
   `DailyTransport.stop_transcription()` to be able to start and stop Daily
   transcription dynamically (maybe with different settings).
-
-- Added the option `informal` to `TranslationConfig` on Gladia config.
-  Allowing to force informal language forms when available.
 
 ### Changed
 
