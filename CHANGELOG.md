@@ -118,6 +118,9 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
   `DailyTransport.stop_transcription()` to be able to start and stop Daily
   transcription dynamically (maybe with different settings).
 
+- Added the option `informal` to `TranslationConfig` on Gladia config.
+  Allowing to force informal language forms when available.
+
 ### Changed
 
 - Reverted the default model for `GeminiMultimodalLiveLLMService` back to
