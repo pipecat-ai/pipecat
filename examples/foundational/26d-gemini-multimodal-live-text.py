@@ -22,9 +22,9 @@ from pipecat.services.gemini_multimodal_live.gemini import (
     GeminiMultimodalModalities,
     InputParams,
 )
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -40,26 +40,45 @@ Respond to what the user said in a creative and helpful way. Keep your responses
 """
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting bot")
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events. This doesn't really
+        # matter because we can only use the Multimodal Live API's phrase
+        # endpointing, for now.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events. This doesn't really
+        # matter because we can only use the Multimodal Live API's phrase
+        # endpointing, for now.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events. This doesn't really
+        # matter because we can only use the Multimodal Live API's phrase
+        # endpointing, for now.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+}
 
-    # Initialize the SmallWebRTCTransport with the connection
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            # set stop_secs to something roughly similar to the internal setting
-            # of the Multimodal Live api, just to align events. This doesn't really
-            # matter because we can only use the Multimodal Live API's phrase
-            # endpointing, for now.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
-        ),
-    )
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        transcribe_user_audio=True,
         system_instruction=SYSTEM_INSTRUCTION,
         tools=[{"google_search": {}}, {"code_execution": {}}],
         params=InputParams(modalities=GeminiMultimodalModalities.TEXT),
@@ -115,18 +134,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

@@ -22,6 +22,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from deepgram import (
@@ -77,17 +78,20 @@ class DeepgramSTTService(STTService):
             vad_events=False,
         )
 
-        merged_options = default_options
+        merged_options = default_options.to_dict()
         if live_options:
-            merged_options = LiveOptions(**{**default_options.to_dict(), **live_options.to_dict()})
+            default_model = default_options.model
+            merged_options.update(live_options.to_dict())
+            # NOTE(aleix): Fixes an in deepgram-sdk where `model` is initialized
+            # to the string "None" instead of the value `None`.
+            if "model" in merged_options and merged_options["model"] == "None":
+                merged_options["model"] = default_model
 
-        # deepgram connection requires language to be a string
-        if isinstance(merged_options.language, Language) and hasattr(
-            merged_options.language, "value"
-        ):
-            merged_options.language = merged_options.language.value
+        if "language" in merged_options and isinstance(merged_options["language"], Language):
+            merged_options["language"] = merged_options["language"].value
 
-        self._settings = merged_options.to_dict()
+        self.set_model_name(merged_options["model"])
+        self._settings = merged_options
         self._addons = addons
 
         self._client = DeepgramClient(
@@ -187,6 +191,13 @@ class DeepgramSTTService(STTService):
     async def _on_utterance_end(self, *args, **kwargs):
         await self._call_event_handler("on_utterance_end", *args, **kwargs)
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def _on_message(self, *args, **kwargs):
         result: LiveResultResponse = kwargs["result"]
         if len(result.channel.alternatives) == 0:
@@ -201,12 +212,26 @@ class DeepgramSTTService(STTService):
             await self.stop_ttfb_metrics()
             if is_final:
                 await self.push_frame(
-                    TranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                    TranscriptionFrame(
+                        transcript,
+                        "",
+                        time_now_iso8601(),
+                        language,
+                        result=result,
+                    )
                 )
+                await self._handle_transcription(transcript, is_final, language)
                 await self.stop_processing_metrics()
             else:
+                # For interim transcriptions, just push the frame without tracing
                 await self.push_frame(
-                    InterimTranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                    InterimTranscriptionFrame(
+                        transcript,
+                        "",
+                        time_now_iso8601(),
+                        language,
+                        result=result,
+                    )
                 )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

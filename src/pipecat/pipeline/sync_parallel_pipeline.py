@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.frames.frames import ControlFrame, EndFrame, Frame, SystemFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 
 
 @dataclass
@@ -102,6 +102,12 @@ class SyncParallelPipeline(BasePipeline):
     #
     # Frame processor
     #
+
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await asyncio.gather(*[s["processor"].setup(setup) for s in self._sources])
+        await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
+        await asyncio.gather(*[s["processor"].setup(setup) for s in self._sinks])
 
     async def cleanup(self):
         await super().cleanup()

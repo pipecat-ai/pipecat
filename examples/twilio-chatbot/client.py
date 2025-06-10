@@ -84,6 +84,7 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
     stream_url = get_stream_url_from_twiml(twiml)
 
     stream_sid = str(uuid4())
+    call_sid = str(uuid4())
 
     transport = WebsocketClientTransport(
         uri=stream_url,
@@ -91,18 +92,14 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
             audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=False,
-            serializer=TwilioFrameSerializer(stream_sid),
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=1.5)),
+            serializer=TwilioFrameSerializer(stream_sid=stream_sid, call_sid=call_sid),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=1.0)),
         ),
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    # We let the audio passthrough so we can record the conversation.
-    stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
-        audio_passthrough=True,
-    )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -157,7 +154,12 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
         await transport.output().send_message(message)
 
         message = TransportMessageUrgentFrame(
-            message={"event": "start", "streamSid": stream_sid, "start": {"streamSid": stream_sid}}
+            message={
+                "event": "start",
+                "streamSid": stream_sid,
+                "callSid": call_sid,
+                "start": {"streamSid": stream_sid, "callSid": call_sid},
+            }
         )
         await transport.output().send_message(message)
 
@@ -167,6 +169,7 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
 
     async def end_call():
         await asyncio.sleep(duration_secs)
+        logger.info(f"Client {client_name} finished after {duration_secs} seconds.")
         await task.queue_frame(EndFrame())
 
     runner = PipelineRunner()

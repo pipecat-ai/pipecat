@@ -26,19 +26,19 @@ class MarkdownTextFilter(BaseTextFilter):
         filter_code: Optional[bool] = False
         filter_tables: Optional[bool] = False
 
-    def __init__(self, params: InputParams = InputParams(), **kwargs):
+    def __init__(self, params: Optional[InputParams] = None, **kwargs):
         super().__init__(**kwargs)
-        self._settings = params
+        self._settings = params or MarkdownTextFilter.InputParams()
         self._in_code_block = False
         self._in_table = False
         self._interrupted = False
 
-    def update_settings(self, settings: Mapping[str, Any]):
+    async def update_settings(self, settings: Mapping[str, Any]):
         for key, value in settings.items():
             if hasattr(self._settings, key):
                 setattr(self._settings, key, value)
 
-    def filter(self, text: str) -> str:
+    async def filter(self, text: str) -> str:
         if self._settings.enable_text_filter:
             # Remove newlines and replace with a space only when there's no text before or after
             filtered_text = re.sub(r"^\s*\n", " ", text, flags=re.MULTILINE)
@@ -100,16 +100,19 @@ class MarkdownTextFilter(BaseTextFilter):
             # Restore leading and trailing spaces
             filtered_text = re.sub("§", " ", filtered_text)
 
+            ## Make links more readable
+            filtered_text = re.sub(r"https?://", "", filtered_text)
+
             return filtered_text
         else:
             return text
 
-    def handle_interruption(self):
+    async def handle_interruption(self):
         self._interrupted = True
         self._in_code_block = False
         self._in_table = False
 
-    def reset_interruption(self):
+    async def reset_interruption(self):
         self._interrupted = False
 
     #

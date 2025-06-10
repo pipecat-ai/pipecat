@@ -8,7 +8,8 @@ import asyncio
 import time
 import unittest
 
-from pipecat.frames.frames import EndFrame, HeartbeatFrame, StartFrame, TextFrame
+from pipecat.frames.frames import EndFrame, HeartbeatFrame, StartFrame, StopFrame, TextFrame
+from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -95,7 +96,129 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await task.run()
         assert task.has_finished()
 
-    async def test_task_event_handlers(self):
+    async def test_task_observers(self):
+        frame_received = False
+
+        class CustomObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_received
+
+                if isinstance(data.frame, TextFrame):
+                    frame_received = True
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline, observers=[CustomObserver()])
+        task.set_event_loop(asyncio.get_event_loop())
+
+        await task.queue_frames([TextFrame(text="Hello Downstream!"), EndFrame()])
+        await task.run()
+        assert frame_received
+
+    async def test_task_add_observer(self):
+        frame_received = False
+        frame_count_1 = 0
+        frame_count_2 = 0
+
+        class CustomObserver(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_received
+
+                if isinstance(data.frame, TextFrame):
+                    frame_received = True
+
+        class CustomAddObserver1(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_count_1
+
+                if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
+                    frame_count_1 += 1
+
+        class CustomAddObserver2(BaseObserver):
+            async def on_push_frame(self, data: FramePushed):
+                nonlocal frame_count_2
+
+                if isinstance(data.source, IdentityFilter) and isinstance(data.frame, TextFrame):
+                    frame_count_2 += 1
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline, observers=[CustomObserver()])
+
+        # Add a new observer right away, before doing anything else with the task.
+        observer1 = CustomAddObserver1()
+        task.add_observer(observer1)
+
+        task.set_event_loop(asyncio.get_event_loop())
+
+        async def delayed_add_observer():
+            observer2 = CustomAddObserver2()
+            # Wait after the pipeline is started and add another observer.
+            await asyncio.sleep(0.1)
+            task.add_observer(observer2)
+            # Push a TextFrame and wait for the observer to pick it up.
+            await task.queue_frame(TextFrame(text="Hello Downstream!"))
+            await asyncio.sleep(0.1)
+            # Remove both observers.
+            await task.remove_observer(observer1)
+            await task.remove_observer(observer2)
+            # Push another TextFrame. This time the counter should not
+            # increments since we have removed the observer.
+            await task.queue_frame(TextFrame(text="Hello Downstream!"))
+            await asyncio.sleep(0.1)
+            # Finally end the pipeline.
+            await task.queue_frame(EndFrame())
+
+        await asyncio.gather(task.run(), delayed_add_observer())
+
+        assert frame_received
+        assert frame_count_1 == 1
+        assert frame_count_2 == 1
+
+    async def test_task_started_ended_event_handler(self):
+        start_received = False
+        end_received = False
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline)
+        task.set_event_loop(asyncio.get_event_loop())
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame: StartFrame):
+            nonlocal start_received
+            start_received = True
+
+        @task.event_handler("on_pipeline_ended")
+        async def on_pipeline_ended(task, frame: EndFrame):
+            nonlocal end_received
+            end_received = True
+
+        await task.queue_frame(EndFrame())
+        await task.run()
+
+        assert start_received
+        assert end_received
+
+    async def test_task_stopped_event_handler(self):
+        stop_received = False
+
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline)
+        task.set_event_loop(asyncio.get_event_loop())
+
+        @task.event_handler("on_pipeline_stopped")
+        async def on_pipeline_ended(task, frame: StopFrame):
+            nonlocal stop_received
+            stop_received = True
+
+        await task.queue_frame(StopFrame())
+        await task.run()
+
+        assert stop_received
+
+    async def test_task_frame_reached_event_handlers(self):
         upstream_received = False
         downstream_received = False
 

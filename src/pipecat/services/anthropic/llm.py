@@ -45,7 +45,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
@@ -89,12 +90,13 @@ class AnthropicLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "claude-3-7-sonnet-20250219",
-        params: InputParams = InputParams(),
+        model: str = "claude-sonnet-4-20250514",
+        params: Optional[InputParams] = None,
         client=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+        params = params or AnthropicLLMService.InputParams()
         self._client = client or AsyncAnthropic(
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
@@ -147,6 +149,7 @@ class AnthropicLLMService(LLMService):
         assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text
@@ -199,9 +202,8 @@ class AnthropicLLMService(LLMService):
             tool_use_block = None
             json_accumulator = ""
 
+            function_calls = []
             async for event in response:
-                # logger.debug(f"Anthropic LLM event: {event}")
-
                 # Aggregate streaming content, create frames, trigger events
 
                 if event.type == "content_block_delta":
@@ -223,11 +225,14 @@ class AnthropicLLMService(LLMService):
                     and event.delta.stop_reason == "tool_use"
                 ):
                     if tool_use_block:
-                        await self.call_function(
-                            context=context,
-                            tool_call_id=tool_use_block.id,
-                            function_name=tool_use_block.name,
-                            arguments=json.loads(json_accumulator) if json_accumulator else dict(),
+                        args = json.loads(json_accumulator) if json_accumulator else {}
+                        function_calls.append(
+                            FunctionCallFromLLM(
+                                context=context,
+                                tool_call_id=tool_use_block.id,
+                                function_name=tool_use_block.name,
+                                arguments=args,
+                            )
                         )
 
                 # Calculate usage. Do this here in its own if statement, because there may be usage
@@ -273,6 +278,8 @@ class AnthropicLLMService(LLMService):
                     )
                     if total_input_tokens >= 1024:
                         context.turns_above_cache_threshold += 1
+
+            await self.run_function_calls(function_calls)
 
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the

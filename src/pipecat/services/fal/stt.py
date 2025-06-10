@@ -14,6 +14,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import fal_client
@@ -172,13 +173,15 @@ class FalSTTService(SegmentedSTTService):
         *,
         api_key: Optional[str] = None,
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        params = params or FalSTTService.InputParams()
 
         if api_key:
             os.environ["FAL_KEY"] = api_key
@@ -211,6 +214,14 @@ class FalSTTService(SegmentedSTTService):
         await super().set_model(model)
         logger.info(f"Switching STT model to: [{model}]")
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[str] = None
+    ):
+        """Handle a transcription result with tracing."""
+        await self.stop_ttfb_metrics()
+        await self.stop_processing_metrics()
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes an audio segment using Fal's Wizper API.
 
@@ -225,6 +236,9 @@ class FalSTTService(SegmentedSTTService):
             Only non-empty transcriptions are yielded.
         """
         try:
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
+
             # Send to Fal directly (audio is already in WAV format from base class)
             data_uri = fal_client.encode(audio, "audio/x-wav")
             response = await self._fal_client.run(
@@ -235,9 +249,14 @@ class FalSTTService(SegmentedSTTService):
             if response and "text" in response:
                 text = response["text"].strip()
                 if text:  # Only yield non-empty text
+                    await self._handle_transcription(text, True, self._settings["language"])
                     logger.debug(f"Transcription: [{text}]")
                     yield TranscriptionFrame(
-                        text, "", time_now_iso8601(), Language(self._settings["language"])
+                        text,
+                        "",
+                        time_now_iso8601(),
+                        Language(self._settings["language"]),
+                        result=response,
                     )
 
         except Exception as e:

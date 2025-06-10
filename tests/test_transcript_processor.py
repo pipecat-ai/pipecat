@@ -64,6 +64,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         message = update_frame.messages[0]
         self.assertEqual(message.role, "user")
         self.assertEqual(message.content, "Hello, world!")
+        self.assertEqual(message.user_id, "test_user")
         self.assertEqual(message.timestamp, timestamp)
 
     async def test_event_handler(self):

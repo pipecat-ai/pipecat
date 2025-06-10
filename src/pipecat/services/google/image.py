@@ -10,7 +10,7 @@ import os
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 from loguru import logger
 from PIL import Image
@@ -32,19 +32,19 @@ class GoogleImageGenService(ImageGenService):
     class InputParams(BaseModel):
         number_of_images: int = Field(default=1, ge=1, le=8)
         model: str = Field(default="imagen-3.0-generate-002")
-        negative_prompt: str = Field(default=None)
+        negative_prompt: Optional[str] = Field(default=None)
 
     def __init__(
         self,
         *,
-        params: InputParams = InputParams(),
         api_key: str,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.set_model_name(params.model)
-        self._params = params
+        self._params = params or GoogleImageGenService.InputParams()
         self._client = genai.Client(api_key=api_key)
+        self.set_model_name(self._params.model)
 
     def can_generate_metrics(self) -> bool:
         return True

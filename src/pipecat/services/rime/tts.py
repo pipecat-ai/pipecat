@@ -26,9 +26,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
+from pipecat.transcriptions import language
 from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import websockets
@@ -48,6 +50,8 @@ def language_to_rime_language(language: Language) -> str:
         str: Three-letter language code used by Rime (e.g., 'eng' for English).
     """
     LANGUAGE_MAP = {
+        Language.DE: "ger",
+        Language.FR: "fra",
         Language.EN: "eng",
         Language.ES: "spa",
     }
@@ -79,7 +83,7 @@ class RimeTTSService(AudioContextWordTTSService):
         url: str = "wss://users.rime.ai/ws2",
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
@@ -103,6 +107,8 @@ class RimeTTSService(AudioContextWordTTSService):
             text_aggregator=text_aggregator or SkipTagsAggregator([("spell(", ")")]),
             **kwargs,
         )
+
+        params = params or RimeTTSService.InputParams()
 
         # Store service configuration
         self._api_key = api_key
@@ -310,6 +316,7 @@ class RimeTTSService(AudioContextWordTTSService):
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
 
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text.
 
@@ -348,6 +355,7 @@ class RimeTTSService(AudioContextWordTTSService):
 
 class RimeHttpTTSService(TTSService):
     class InputParams(BaseModel):
+        language: Optional[Language] = Language.EN
         pause_between_brackets: Optional[bool] = False
         phonemize_between_brackets: Optional[bool] = False
         inline_speed_alpha: Optional[str] = None
@@ -362,15 +370,20 @@ class RimeHttpTTSService(TTSService):
         aiohttp_session: aiohttp.ClientSession,
         model: str = "mistv2",
         sample_rate: Optional[int] = None,
-        params: InputParams = InputParams(),
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
+
+        params = params or RimeHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._session = aiohttp_session
         self._base_url = "https://users.rime.ai/v1/rime-tts"
         self._settings = {
+            "lang": self.language_to_service_language(params.language)
+            if params.language
+            else "eng",
             "speedAlpha": params.speed_alpha,
             "reduceLatency": params.reduce_latency,
             "pauseBetweenBrackets": params.pause_between_brackets,
@@ -385,6 +398,11 @@ class RimeHttpTTSService(TTSService):
     def can_generate_metrics(self) -> bool:
         return True
 
+    def language_to_service_language(self, language: Language) -> str | None:
+        """Convert pipecat language to Rime language code."""
+        return language_to_rime_language(language)
+
+    @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
 
@@ -423,8 +441,7 @@ class RimeHttpTTSService(TTSService):
 
                 yield TTSStartedFrame()
 
-                # Process the streaming response
-                CHUNK_SIZE = 1024
+                CHUNK_SIZE = self.chunk_size
 
                 async for chunk in response.content.iter_chunked(CHUNK_SIZE):
                     if need_to_strip_wav_header and chunk.startswith(b"RIFF"):

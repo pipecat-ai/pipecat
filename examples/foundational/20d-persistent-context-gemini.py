@@ -15,6 +15,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_camera
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -25,19 +26,16 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
 
-video_participant_id = None
-
-
 BASE_FILENAME = "/tmp/pipecat_conversation_"
-tts = None
-webrtc_peer_id = ""
+
+# Global variable to store the client ID
+client_id = ""
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
@@ -54,11 +52,11 @@ async def fetch_weather_from_api(params: FunctionCallParams):
 
 async def get_image(params: FunctionCallParams):
     question = params.arguments["question"]
-    logger.debug(f"Requesting image with user_id={webrtc_peer_id}, question={question}")
+    logger.debug(f"Requesting image with user_id={client_id}, question={question}")
 
     # Request the image frame
     await params.llm.request_image_frame(
-        user_id=webrtc_peer_id,
+        user_id=client_id,
         function_name=params.function_name,
         tool_call_id=params.tool_call_id,
         text_content=question,
@@ -96,7 +94,6 @@ async def save_conversation(params: FunctionCallParams):
 
 
 async def load_conversation(params: FunctionCallParams):
-    global tts
     filename = params.arguments["filename"]
     logger.debug(f"loading conversation from {filename}")
     try:
@@ -221,21 +218,27 @@ tools = [
 ]
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    global tts, webrtc_peer_id
-    webrtc_peer_id = webrtc_connection.pc_id
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
+    ),
+}
 
-    logger.info(f"Starting bot with peer_id: {webrtc_peer_id}")
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            video_in_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8)),
-        ),
-    )
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -282,24 +285,26 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+
+        await maybe_capture_participant_camera(transport, client)
+
+        global client_id
+        client_id = get_transport_client_id(transport, client)
+
         # Kick off the conversation.
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)
