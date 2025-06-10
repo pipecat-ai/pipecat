@@ -18,6 +18,7 @@ from pipecat.frames.frames import ErrorFrame, Frame, TranscriptionFrame
 from pipecat.services.stt_service import SegmentedSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 if TYPE_CHECKING:
     try:
@@ -291,6 +292,9 @@ class WhisperSTTService(SegmentedSTTService):
 
         self._settings = {
             "language": language,
+            "device": self._device,
+            "compute_type": self._compute_type,
+            "no_speech_prob": self._no_speech_prob,
         }
 
         self._load()
@@ -343,6 +347,13 @@ class WhisperSTTService(SegmentedSTTService):
             logger.error("In order to use Whisper, you need to `pip install pipecat-ai[whisper]`.")
             self._model = None
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribes given audio using Whisper.
 
@@ -381,6 +392,7 @@ class WhisperSTTService(SegmentedSTTService):
         await self.stop_processing_metrics()
 
         if text:
+            await self._handle_transcription(text, True, self._settings["language"])
             logger.debug(f"Transcription: [{text}]")
             yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
 
@@ -422,6 +434,9 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
         self._settings = {
             "language": language,
+            "no_speech_prob": self._no_speech_prob,
+            "temperature": self._temperature,
+            "engine": "mlx",
         }
 
         # No need to call _load() as MLX Whisper loads models on demand
@@ -429,6 +444,13 @@ class WhisperSTTServiceMLX(WhisperSTTService):
     @override
     def _load(self):
         """MLX Whisper loads models on demand, so this is a no-op."""
+        pass
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
         pass
 
     @override
@@ -479,6 +501,7 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             await self.stop_processing_metrics()
 
             if text:
+                await self._handle_transcription(text, True, self._settings["language"])
                 logger.debug(f"Transcription: [{text}]")
                 yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
 

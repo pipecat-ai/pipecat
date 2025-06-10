@@ -8,6 +8,7 @@ import base64
 import json
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 from loguru import logger
 
@@ -47,9 +48,11 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
+from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt, traced_tts
 
 from . import events
 from .context import (
@@ -75,10 +78,6 @@ class CurrentAudioResponse:
     total_size: int = 0
 
 
-class OpenAIUnhandledFunctionException(Exception):
-    pass
-
-
 class OpenAIRealtimeBetaLLMService(LLMService):
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
     adapter_class = OpenAIRealtimeLLMAdapter
@@ -89,17 +88,21 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         api_key: str,
         model: str = "gpt-4o-realtime-preview-2024-12-17",
         base_url: str = "wss://api.openai.com/v1/realtime",
-        session_properties: events.SessionProperties = events.SessionProperties(),
+        session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
     ):
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
+
         self.api_key = api_key
         self.base_url = full_url
+        self.set_model_name(model)
 
-        self._session_properties: events.SessionProperties = session_properties
+        self._session_properties: events.SessionProperties = (
+            session_properties or events.SessionProperties()
+        )
         self._audio_input_paused = start_audio_paused
         self._send_transcription_frames = send_transcription_frames
         self._websocket = None
@@ -398,6 +401,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                     # errors are fatal, so exit the receive loop
                     return
 
+    @traced_openai_realtime(operation="llm_setup")
     async def _handle_evt_session_created(self, evt):
         # session.created is received right after connecting. Send a message
         # to configure the session properties.
@@ -460,8 +464,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         if self._send_transcription_frames:
             await self.push_frame(
                 # no way to get a language code?
-                InterimTranscriptionFrame(evt.delta, "", time_now_iso8601())
+                InterimTranscriptionFrame(evt.delta, "", time_now_iso8601(), result=evt)
             )
+
+    @traced_stt
+    async def _handle_user_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
 
     async def handle_evt_input_audio_transcription_completed(self, evt):
         await self._call_event_handler("on_conversation_item_updated", evt.item_id, None)
@@ -469,8 +480,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         if self._send_transcription_frames:
             await self.push_frame(
                 # no way to get a language code?
-                TranscriptionFrame(evt.transcript, "", time_now_iso8601())
+                TranscriptionFrame(evt.transcript, "", time_now_iso8601(), result=evt)
             )
+            await self._handle_user_transcription(evt.transcript, True, Language.EN)
         pair = self._user_and_response_message_tuple
         if pair:
             user, assistant = pair
@@ -489,6 +501,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             for future in futures:
                 future.set_result(evt.item)
 
+    @traced_openai_realtime(operation="llm_response")
     async def _handle_evt_response_done(self, evt):
         # todo: figure out whether there's anything we need to do for "cancelled" events
         # usage metrics
@@ -570,25 +583,18 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self._handle_function_call_items(function_calls)
 
     async def _handle_function_call_items(self, items):
-        total_items = len(items)
-        for index, item in enumerate(items):
-            function_name = item.name
-            tool_id = item.call_id
-            arguments = json.loads(item.arguments)
-            if self.has_function(function_name):
-                run_llm = index == total_items - 1
-                if function_name in self._functions.keys() or None in self._functions.keys():
-                    await self.call_function(
-                        context=self._context,
-                        tool_call_id=tool_id,
-                        function_name=function_name,
-                        arguments=arguments,
-                        run_llm=run_llm,
-                    )
-            else:
-                raise OpenAIUnhandledFunctionException(
-                    f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
+        function_calls = []
+        for item in items:
+            args = json.loads(item.arguments)
+            function_calls.append(
+                FunctionCallFromLLM(
+                    context=self._context,
+                    tool_call_id=item.call_id,
+                    function_name=item.name,
+                    arguments=args,
                 )
+            )
+        await self.run_function_calls(function_calls)
 
     #
     # state and client events for the current conversation
@@ -605,6 +611,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             self._context.llm_needs_initial_messages = True
         await self._connect()
 
+    @traced_openai_realtime(operation="llm_request")
     async def _create_response(self):
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True

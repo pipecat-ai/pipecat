@@ -7,7 +7,7 @@
 from abc import abstractmethod
 from typing import List, Mapping, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from pipecat.audio.filters.base_audio_filter import BaseAudioFilter
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
@@ -34,7 +34,7 @@ class TransportParams(BaseModel):
     audio_out_bitrate: int = 96000
     audio_out_10ms_chunks: int = 4
     audio_out_mixer: Optional[BaseAudioMixer | Mapping[Optional[str], BaseAudioMixer]] = None
-    audio_out_destinations: List[str] = []
+    audio_out_destinations: List[str] = Field(default_factory=list)
     audio_in_enabled: bool = False
     audio_in_sample_rate: Optional[int] = None
     audio_in_channels: int = 1
@@ -49,7 +49,7 @@ class TransportParams(BaseModel):
     video_out_bitrate: int = 800000
     video_out_framerate: int = 30
     video_out_color_format: str = "RGB"
-    video_out_destinations: List[str] = []
+    video_out_destinations: List[str] = Field(default_factory=list)
     vad_enabled: bool = False
     vad_audio_passthrough: bool = False
     vad_analyzer: Optional[VADAnalyzer] = None

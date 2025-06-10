@@ -187,7 +187,7 @@ async def main():
 
         @transport.event_handler("on_first_participant_joined")
         async def on_first_participant_joined(transport, participant):
-            await transport.capture_participant_transcription(participant["id"])
+            print(f"Participant joined: {participant}")
 
         @transport.event_handler("on_participant_left")
         async def on_participant_left(transport, participant, reason):

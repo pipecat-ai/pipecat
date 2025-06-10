@@ -34,11 +34,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
-
-
-class OpenAIUnhandledFunctionException(Exception):
-    pass
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.tracing.service_decorators import traced_llm
 
 
 class BaseOpenAILLMService(LLMService):
@@ -76,11 +73,14 @@ class BaseOpenAILLMService(LLMService):
         base_url=None,
         organization=None,
         project=None,
-        default_headers: Mapping[str, str] | None = None,
-        params: InputParams = InputParams(),
+        default_headers: Optional[Mapping[str, str]] = None,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        params = params or BaseOpenAILLMService.InputParams()
+
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
             "presence_penalty": params.presence_penalty,
@@ -176,6 +176,7 @@ class BaseOpenAILLMService(LLMService):
 
         return chunks
 
+    @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []
@@ -238,6 +239,13 @@ class BaseOpenAILLMService(LLMService):
             elif chunk.choices[0].delta.content:
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
 
+            # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
+            # we need to get LLMTextFrame for the transcript
+            elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
+                "transcript"
+            ):
+                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
@@ -248,23 +256,22 @@ class BaseOpenAILLMService(LLMService):
             arguments_list.append(arguments)
             tool_id_list.append(tool_call_id)
 
-            for index, (function_name, arguments, tool_id) in enumerate(
-                zip(functions_list, arguments_list, tool_id_list), start=1
+            function_calls = []
+
+            for function_name, arguments, tool_id in zip(
+                functions_list, arguments_list, tool_id_list
             ):
-                if self.has_function(function_name):
-                    run_llm = False
-                    arguments = json.loads(arguments)
-                    await self.call_function(
+                arguments = json.loads(arguments)
+                function_calls.append(
+                    FunctionCallFromLLM(
                         context=context,
+                        tool_call_id=tool_id,
                         function_name=function_name,
                         arguments=arguments,
-                        tool_call_id=tool_id,
-                        run_llm=run_llm,
                     )
-                else:
-                    raise OpenAIUnhandledFunctionException(
-                        f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
-                    )
+                )
+
+            await self.run_function_calls(function_calls)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)

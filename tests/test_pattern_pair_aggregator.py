@@ -5,7 +5,7 @@
 #
 
 import unittest
-from unittest.mock import Mock
+from unittest.mock import AsyncMock
 
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
 
@@ -13,7 +13,7 @@ from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPair
 class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.aggregator = PatternPairAggregator()
-        self.test_handler = Mock()
+        self.test_handler = AsyncMock()
 
         # Add a test pattern
         self.aggregator.add_pattern_pair(
@@ -28,12 +28,12 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_pattern_match_and_removal(self):
         # First part doesn't complete the pattern
-        result = self.aggregator.aggregate("Hello <test>pattern")
+        result = await self.aggregator.aggregate("Hello <test>pattern")
         self.assertIsNone(result)
         self.assertEqual(self.aggregator.text, "Hello <test>pattern")
 
         # Second part completes the pattern and includes an exclamation point
-        result = self.aggregator.aggregate(" content</test>!")
+        result = await self.aggregator.aggregate(" content</test>!")
 
         # Verify the handler was called with correct PatternMatch object
         self.test_handler.assert_called_once()
@@ -48,7 +48,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "Hello !")
 
         # Next sentence should be processed separately
-        result = self.aggregator.aggregate(" This is another sentence.")
+        result = await self.aggregator.aggregate(" This is another sentence.")
         self.assertEqual(result, " This is another sentence.")
 
         # Buffer should be empty after returning a complete sentence
@@ -56,7 +56,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_incomplete_pattern(self):
         # Add text with incomplete pattern
-        result = self.aggregator.aggregate("Hello <test>pattern content")
+        result = await self.aggregator.aggregate("Hello <test>pattern content")
 
         # No complete pattern yet, so nothing should be returned
         self.assertIsNone(result)
@@ -68,13 +68,13 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.aggregator.text, "Hello <test>pattern content")
 
         # Reset and confirm buffer is cleared
-        self.aggregator.reset()
+        await self.aggregator.reset()
         self.assertEqual(self.aggregator.text, "")
 
     async def test_multiple_patterns(self):
         # Set up multiple patterns and handlers
-        voice_handler = Mock()
-        emphasis_handler = Mock()
+        voice_handler = AsyncMock()
+        emphasis_handler = AsyncMock()
 
         self.aggregator.add_pattern_pair(
             pattern_id="voice", start_pattern="<voice>", end_pattern="</voice>", remove_match=True
@@ -92,7 +92,7 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
         # Test with multiple patterns in one text block
         text = "Hello <voice>female</voice> I am <em>very</em> excited to meet you!"
-        result = self.aggregator.aggregate(text)
+        result = await self.aggregator.aggregate(text)
 
         # Both handlers should be called with correct data
         voice_handler.assert_called_once()
@@ -113,11 +113,11 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_handle_interruption(self):
         # Start with incomplete pattern
-        result = self.aggregator.aggregate("Hello <test>pattern")
+        result = await self.aggregator.aggregate("Hello <test>pattern")
         self.assertIsNone(result)
 
         # Simulate interruption
-        self.aggregator.handle_interruption()
+        await self.aggregator.handle_interruption()
 
         # Buffer should be cleared
         self.assertEqual(self.aggregator.text, "")
@@ -127,13 +127,13 @@ class TestPatternPairAggregator(unittest.IsolatedAsyncioTestCase):
 
     async def test_pattern_across_sentences(self):
         # Test pattern that spans multiple sentences
-        result = self.aggregator.aggregate("Hello <test>This is sentence one.")
+        result = await self.aggregator.aggregate("Hello <test>This is sentence one.")
 
         # First sentence contains start of pattern but no end, so no complete pattern yet
         self.assertIsNone(result)
 
         # Add second part with pattern end
-        result = self.aggregator.aggregate(" This is sentence two.</test> Final sentence.")
+        result = await self.aggregator.aggregate(" This is sentence two.</test> Final sentence.")
 
         # Handler should be called with entire content
         self.test_handler.assert_called_once()
