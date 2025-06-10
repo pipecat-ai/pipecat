@@ -64,7 +64,6 @@ from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_
 
 from . import events
 
-from .audio_transcriber import AudioTranscriber
 from .file_api import GeminiFileAPI
 
 try:
