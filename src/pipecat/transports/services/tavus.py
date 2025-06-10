@@ -161,6 +161,7 @@ class TavusTransportClient:
 
     async def setup(self, setup: FrameProcessorSetup):
         if self._conversation_id is not None:
+            logger.debug(f"Conversation ID already defined: {self._conversation_id}")
             return
         try:
             room_url = await self._initialize()
@@ -202,12 +203,13 @@ class TavusTransportClient:
         except Exception as e:
             logger.error(f"Failed to setup TavusTransportClient: {e}")
             await self._api.end_conversation(self._conversation_id)
+            self._conversation_id = None
 
     async def cleanup(self):
-        if self._client is None:
-            return
-        await self._client.cleanup()
-        self._client = None
+        try:
+            await self._client.cleanup()
+        except Exception as e:
+            logger.exception(f"Exception during cleanup: {e}")
 
     async def _on_joined(self, data):
         logger.debug("TavusTransportClient joined!")
@@ -229,6 +231,7 @@ class TavusTransportClient:
     async def stop(self):
         await self._client.leave()
         await self._api.end_conversation(self._conversation_id)
+        self._conversation_id = None
 
     async def capture_participant_video(
         self,
