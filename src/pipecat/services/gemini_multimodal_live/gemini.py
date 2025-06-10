@@ -72,7 +72,7 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
-from .audio_transcriber import AudioTranscriber
+
 from .file_api import GeminiFileAPI
 
 try:
@@ -243,11 +243,7 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
         message = {"role": "user", "content": parts}
         self.messages.append(message)
         logger.info(f"Added file reference to context: {file_uri}")
-<<<<<<< HEAD
-
-=======
         
->>>>>>> cd4a893c (add FileAPI to gemini.py)
     def get_messages_for_initializing_history(self):
         """Get messages formatted for Gemini history initialization.
 
@@ -274,23 +270,12 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
-<<<<<<< HEAD
-                        parts.append(
-                            {
-                                "fileData": {
-                                    "mimeType": file_data.get("mime_type"),
-                                    "fileUri": file_data.get("file_uri"),
-                                }
-                            }
-                        )
-=======
                         parts.append({
                             "fileData": {
                                 "mimeType": file_data.get("mime_type"),
                                 "fileUri": file_data.get("file_uri")
                             }
                         })
->>>>>>> cd4a893c (add FileAPI to gemini.py)
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
@@ -1015,23 +1000,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
-<<<<<<< HEAD
-                        parts.append(
-                            {
-                                "fileData": {
-                                    "mimeType": file_data.get("mime_type"),
-                                    "fileUri": file_data.get("file_uri"),
-                                }
-                            }
-                        )
-=======
                         parts.append({
                             "fileData": {
                                 "mimeType": file_data.get("mime_type"),
                                 "fileUri": file_data.get("file_uri")
                             }
                         })
->>>>>>> cd4a893c (add FileAPI to gemini.py)
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
