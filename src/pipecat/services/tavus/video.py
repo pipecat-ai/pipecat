@@ -56,8 +56,6 @@ class TavusVideoService(AIService):
         replica_id: str,
         persona_id: str = "pipecat-stream",
         session: aiohttp.ClientSession,
-        # Audio transport destination of the generated frames.
-        transport_destination: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -75,7 +73,8 @@ class TavusVideoService(AIService):
         self._audio_buffer = bytearray()
         self._queue = asyncio.Queue()
         self._send_task: Optional[asyncio.Task] = None
-        self._transport_destination: Optional[str] = transport_destination
+        # This is the custom track destination expected by Tavus
+        self._transport_destination: Optional[str] = "stream"
 
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)

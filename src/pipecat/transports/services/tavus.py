@@ -286,7 +286,6 @@ class TavusTransportClient:
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
         if not self._client:
             return
-
         await self._client.write_audio_frame(frame)
 
     async def register_audio_destination(self, destination: str):
@@ -374,6 +373,8 @@ class TavusOutputTransport(BaseOutputTransport):
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
+        # This is the custom track destination expected by Tavus
+        self._transport_destination: Optional[str] = "stream"
 
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
@@ -392,6 +393,10 @@ class TavusOutputTransport(BaseOutputTransport):
         self._initialized = True
 
         await self._client.start(frame)
+
+        if self._transport_destination:
+            await self._client.register_audio_destination(self._transport_destination)
+
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -415,6 +420,8 @@ class TavusOutputTransport(BaseOutputTransport):
         await self._client.send_interrupt_message()
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        # This is the custom track destination expected by Tavus
+        frame.transport_destination = self._transport_destination
         await self._client.write_audio_frame(frame)
 
     async def register_audio_destination(self, destination: str):

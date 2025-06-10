@@ -40,7 +40,6 @@ async def main():
                 audio_out_enabled=True,
                 microphone_out_enabled=False,
                 vad_analyzer=SileroVADAnalyzer(),
-                audio_out_destinations=["stream"],
             ),
         )
 
@@ -49,7 +48,6 @@ async def main():
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
             voice_id="a167e0f3-df7e-4d52-a9c3-f949145efdab",
-            transport_destination="stream",
         )
 
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
@@ -105,7 +103,7 @@ async def main():
             logger.info(f"Client disconnected")
             await task.cancel()
 
-        runner = PipelineRunner(handle_sigint=True)
+        runner = PipelineRunner()
 
         await runner.run(task)
 
