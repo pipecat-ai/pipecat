@@ -5,7 +5,7 @@
  */
 
 /**
- * RTVI Client Implementation
+ * Pipecat Client Implementation
  *
  * This client connects to an RTVI-compatible bot server using WebSocket.
  *
@@ -14,16 +14,14 @@
  */
 
 import {
-  RTVIClient,
-  RTVIClientOptions,
+  PipecatClient,
+  PipecatClientOptions,
   RTVIEvent,
 } from '@pipecat-ai/client-js';
-import {
-  WebSocketTransport
-} from "@pipecat-ai/websocket-transport";
+import { WebSocketTransport } from '@pipecat-ai/websocket-transport';
 
 class WebsocketClientApp {
-  private rtviClient: RTVIClient | null = null;
+  private pcClient: PipecatClient | null = null;
   private connectBtn: HTMLButtonElement | null = null;
   private disconnectBtn: HTMLButtonElement | null = null;
   private statusSpan: HTMLElement | null = null;
@@ -31,7 +29,7 @@ class WebsocketClientApp {
   private botAudio: HTMLAudioElement;
 
   constructor() {
-    console.log("WebsocketClientApp");
+    console.log('WebsocketClientApp');
     this.botAudio = document.createElement('audio');
     this.botAudio.autoplay = true;
     //this.botAudio.playsInline = true;
@@ -45,8 +43,12 @@ class WebsocketClientApp {
    * Set up references to DOM elements and create necessary media elements
    */
   private setupDOMElements(): void {
-    this.connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
-    this.disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
+    this.connectBtn = document.getElementById(
+      'connect-btn'
+    ) as HTMLButtonElement;
+    this.disconnectBtn = document.getElementById(
+      'disconnect-btn'
+    ) as HTMLButtonElement;
     this.statusSpan = document.getElementById('connection-status');
     this.debugLog = document.getElementById('debug-log');
   }
@@ -91,8 +93,8 @@ class WebsocketClientApp {
    * This is called when the bot is ready or when the transport state changes to ready
    */
   setupMediaTracks() {
-    if (!this.rtviClient) return;
-    const tracks = this.rtviClient.tracks();
+    if (!this.pcClient) return;
+    const tracks = this.pcClient.tracks();
     if (tracks.bot?.audio) {
       this.setupAudioTrack(tracks.bot.audio);
     }
@@ -103,10 +105,10 @@ class WebsocketClientApp {
    * This handles new tracks being added during the session
    */
   setupTrackListeners() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Listen for new tracks starting
-    this.rtviClient.on(RTVIEvent.TrackStarted, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStarted, (track, participant) => {
       // Only handle non-local (bot) tracks
       if (!participant?.local && track.kind === 'audio') {
         this.setupAudioTrack(track);
@@ -114,8 +116,10 @@ class WebsocketClientApp {
     });
 
     // Listen for tracks stopping
-    this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
-      this.log(`Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`);
+    this.pcClient.on(RTVIEvent.TrackStopped, (track, participant) => {
+      this.log(
+        `Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`
+      );
     });
   }
 
@@ -125,7 +129,10 @@ class WebsocketClientApp {
    */
   private setupAudioTrack(track: MediaStreamTrack): void {
     this.log('Setting up audio track');
-    if (this.botAudio.srcObject && "getAudioTracks" in this.botAudio.srcObject) {
+    if (
+      this.botAudio.srcObject &&
+      'getAudioTracks' in this.botAudio.srcObject
+    ) {
       const oldTrack = this.botAudio.srcObject.getAudioTracks()[0];
       if (oldTrack?.id === track.id) return;
     }
@@ -134,21 +141,15 @@ class WebsocketClientApp {
 
   /**
    * Initialize and connect to the bot
-   * This sets up the RTVI client, initializes devices, and establishes the connection
+   * This sets up the Pipecat client, initializes devices, and establishes the connection
    */
   public async connect(): Promise<void> {
     try {
       const startTime = Date.now();
 
       //const transport = new DailyTransport();
-      const transport = new WebSocketTransport();
-      const RTVIConfig: RTVIClientOptions = {
-        transport,
-        params: {
-          // The baseURL and endpoint of your bot server that the client will connect to
-          baseUrl: 'http://localhost:7860',
-          endpoints: { connect: '/connect' },
-        },
+      const PipecatConfig: PipecatClientOptions = {
+        transport: new WebSocketTransport(),
         enableMic: true,
         enableCam: false,
         callbacks: {
@@ -176,15 +177,20 @@ class WebsocketClientApp {
           onMessageError: (error) => console.error('Message error:', error),
           onError: (error) => console.error('Error:', error),
         },
-      }
-      this.rtviClient = new RTVIClient(RTVIConfig);
+      };
+      this.pcClient = new PipecatClient(PipecatConfig);
+      // @ts-ignore
+      window.pcClient = this.pcClient; // Expose for debugging
       this.setupTrackListeners();
 
       this.log('Initializing devices...');
-      await this.rtviClient.initDevices();
+      await this.pcClient.initDevices();
 
       this.log('Connecting to bot...');
-      await this.rtviClient.connect();
+      await this.pcClient.connect({
+        // The baseURL and endpoint of your bot server that the client will connect to
+        endpoint: 'http://localhost:7860/connect',
+      });
 
       const timeTaken = Date.now() - startTime;
       this.log(`Connection complete, timeTaken: ${timeTaken}`);
@@ -192,9 +198,9 @@ class WebsocketClientApp {
       this.log(`Error connecting: ${(error as Error).message}`);
       this.updateStatus('Error');
       // Clean up if there's an error
-      if (this.rtviClient) {
+      if (this.pcClient) {
         try {
-          await this.rtviClient.disconnect();
+          await this.pcClient.disconnect();
         } catch (disconnectError) {
           this.log(`Error during disconnect: ${disconnectError}`);
         }
@@ -206,12 +212,17 @@ class WebsocketClientApp {
    * Disconnect from the bot and clean up media resources
    */
   public async disconnect(): Promise<void> {
-    if (this.rtviClient) {
+    if (this.pcClient) {
       try {
-        await this.rtviClient.disconnect();
-        this.rtviClient = null;
-        if (this.botAudio.srcObject && "getAudioTracks" in this.botAudio.srcObject) {
-          this.botAudio.srcObject.getAudioTracks().forEach((track) => track.stop());
+        await this.pcClient.disconnect();
+        this.pcClient = null;
+        if (
+          this.botAudio.srcObject &&
+          'getAudioTracks' in this.botAudio.srcObject
+        ) {
+          this.botAudio.srcObject
+            .getAudioTracks()
+            .forEach((track) => track.stop());
           this.botAudio.srcObject = null;
         }
       } catch (error) {
@@ -219,7 +230,6 @@ class WebsocketClientApp {
       }
     }
   }
-
 }
 
 declare global {
