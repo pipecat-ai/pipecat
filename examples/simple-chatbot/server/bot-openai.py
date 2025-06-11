@@ -132,6 +132,14 @@ class CustomProcessor(FrameProcessor):
         #             ),
         #         )
         #         return
+        #     else:
+        #         await self.push_frame(
+        #             RTVIServerResponseFrame(
+        #                 client_msg=frame,
+        #                 error="Unknown message type in frame",
+        #             ),
+        #         )
+        #         return
 
         await self.push_frame(frame, direction)
 
@@ -314,6 +322,8 @@ async def main():
             print("RTVI client message:", msg.type, msg.data)
             if msg.type == "get-llm-config":
                 await rtvi.send_server_response(msg, {"model": "your-guess-is-as-good-as-mine"})
+            else:
+                await rtvi.send_error_response(msg, "Unknown message type")
 
         runner = PipelineRunner()
 
