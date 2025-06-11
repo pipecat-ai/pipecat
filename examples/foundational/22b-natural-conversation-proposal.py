@@ -312,9 +312,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     # to start the conversation.
     bot_output_gate = OutputGate(notifier=notifier, start_open=True)
 
-    async def block_user_stopped_speaking(frame):
-        return not isinstance(frame, UserStoppedSpeakingFrame)
-
     async def pass_only_llm_trigger_frames(frame):
         return (
             isinstance(frame, OpenAILLMContextFrame)
@@ -331,11 +328,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             stt,
             context_aggregator.user(),
             ParallelPipeline(
-                [
-                    # Pass everything except UserStoppedSpeaking to the elements after
-                    # this ParallelPipeline
-                    FunctionFilter(filter=block_user_stopped_speaking),
-                ],
                 [
                     # Ignore everything except an OpenAILLMContextFrame. Pass a specially constructed
                     # LLMMessagesFrame to the statement classifier LLM. The only frame this
