@@ -44,7 +44,7 @@ Try the hosted version of the demo here: https://pcc-smart-turn.vercel.app/.
 4. Run the server:
 
    ```bash
-   LOCAL=1 python server.py
+   LOCAL_RUN=1 python server.py
    ```
 
 ### Run the client

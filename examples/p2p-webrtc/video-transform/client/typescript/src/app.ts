@@ -1,9 +1,11 @@
 import { SmallWebRTCTransport } from '@pipecat-ai/small-webrtc-transport';
 import {
+  BotLLMTextData,
   Participant,
-  RTVIClient,
-  RTVIClientOptions,
-  Transport,
+  PipecatClient,
+  PipecatClientOptions,
+  TranscriptData,
+  TransportState,
 } from '@pipecat-ai/client-js';
 
 class WebRTCApp {
@@ -23,26 +25,22 @@ class WebRTCApp {
   private statusSpan: HTMLElement | null = null;
 
   private declare smallWebRTCTransport: SmallWebRTCTransport;
-  private declare rtviClient: RTVIClient;
+  private declare pcClient: PipecatClient;
 
   constructor() {
     this.setupDOMElements();
     this.setupDOMEventListeners();
-    this.initializeRTVIClient();
+    this.initializePipecatClient();
     void this.populateDevices();
   }
 
-  private initializeRTVIClient(): void {
-    const transport = new SmallWebRTCTransport();
-    const RTVIConfig: RTVIClientOptions = {
-      params: {
-        baseUrl: '/api/offer',
-      },
-      transport: transport as Transport,
+  private initializePipecatClient(): void {
+    const opts: PipecatClientOptions = {
+      transport: SmallWebRTCTransport.create({ connectionUrl: '/api/offer' }),
       enableMic: true,
       enableCam: true,
       callbacks: {
-        onTransportStateChanged: (state) => {
+        onTransportStateChanged: (state: TransportState) => {
           this.log(`Transport state: ${state}`);
         },
         onConnected: () => {
@@ -66,13 +64,13 @@ class WebRTCApp {
         onBotStoppedSpeaking: () => {
           this.log('Bot stopped speaking.');
         },
-        onUserTranscript: (transcript) => {
+        onUserTranscript: (transcript: TranscriptData) => {
           if (transcript.final) {
             this.log(`User transcript: ${transcript.text}`);
           }
         },
-        onBotTranscript: (transcript) => {
-          this.log(`Bot transcript: ${transcript.text}`);
+        onBotTranscript: (data: BotLLMTextData) => {
+          this.log(`Bot transcript: ${data.text}`);
         },
         onTrackStarted: (
           track: MediaStreamTrack,
@@ -83,14 +81,13 @@ class WebRTCApp {
           }
           this.onBotTrackStarted(track);
         },
-        onServerMessage: (msg) => {
+        onServerMessage: (msg: unknown) => {
           this.log(`Server message: ${msg}`);
         },
       },
     };
-    RTVIConfig.customConnectHandler = () => Promise.resolve();
-    this.rtviClient = new RTVIClient(RTVIConfig);
-    this.smallWebRTCTransport = transport;
+    this.pcClient = new PipecatClient(opts);
+    this.smallWebRTCTransport = this.pcClient.transport as SmallWebRTCTransport;
   }
 
   private setupDOMElements(): void {
@@ -132,16 +129,16 @@ class WebRTCApp {
     this.audioInput.addEventListener('change', (e) => {
       // @ts-ignore
       let audioDevice = e.target?.value;
-      this.rtviClient.updateMic(audioDevice);
+      this.pcClient.updateMic(audioDevice);
     });
     this.videoInput.addEventListener('change', (e) => {
       // @ts-ignore
       let videoDevice = e.target?.value;
-      this.rtviClient.updateCam(videoDevice);
+      this.pcClient.updateCam(videoDevice);
     });
     this.muteBtn.addEventListener('click', () => {
-      let isCamEnabled = this.rtviClient.isCamEnabled;
-      this.rtviClient.enableCam(!isCamEnabled);
+      let isCamEnabled = this.pcClient.isCamEnabled;
+      this.pcClient.enableCam(!isCamEnabled);
       this.muteBtn.textContent = isCamEnabled ? '📵' : '📷';
     });
   }
@@ -206,9 +203,9 @@ class WebRTCApp {
     };
 
     try {
-      const audioDevices = await this.rtviClient.getAllMics();
+      const audioDevices = await this.pcClient.getAllMics();
       populateSelect(this.audioInput, audioDevices);
-      const videoDevices = await this.rtviClient.getAllCams();
+      const videoDevices = await this.pcClient.getAllCams();
       populateSelect(this.videoInput, videoDevices);
     } catch (e) {
       alert(e);
@@ -224,7 +221,7 @@ class WebRTCApp {
     this.smallWebRTCTransport.setAudioCodec(this.audioCodec.value);
     this.smallWebRTCTransport.setVideoCodec(this.videoCodec.value);
     try {
-      await this.rtviClient.connect();
+      await this.pcClient.connect();
     } catch (e) {
       console.log(`Failed to connect ${e}`);
       this.stop();
@@ -232,7 +229,7 @@ class WebRTCApp {
   }
 
   private stop(): void {
-    void this.rtviClient.disconnect();
+    void this.pcClient.disconnect();
   }
 }
 
