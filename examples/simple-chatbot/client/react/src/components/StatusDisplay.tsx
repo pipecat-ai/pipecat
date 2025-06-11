@@ -1,7 +1,7 @@
-import { useRTVIClientTransportState } from '@pipecat-ai/client-react';
+import { usePipecatClientTransportState } from '@pipecat-ai/client-react';
 
 export function StatusDisplay() {
-  const transportState = useRTVIClientTransportState();
+  const transportState = usePipecatClientTransportState();
 
   return (
     <div className="status">
