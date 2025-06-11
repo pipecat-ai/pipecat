@@ -9,9 +9,12 @@ import base64
 import json
 import uuid
 import warnings
+import io
 from typing import AsyncGenerator, List, Optional, Union
 
 import aiohttp
+import soundfile as sf
+import numpy as np
 
 from loguru import logger
 from pydantic import BaseModel
@@ -93,6 +96,27 @@ class CambAITTSService(TTSService):
         await super().cancel(frame)
         await self._client.close()
 
+    def _convert_flac_to_pcm(self, flac_data: bytes) -> bytes:
+        """Convert FLAC audio data to raw PCM."""
+        try:
+            # Read FLAC data from memory
+            with io.BytesIO(flac_data) as flac_io:
+                data, sample_rate = sf.read(flac_io)
+                
+                # Convert to 16-bit PCM
+                if data.dtype != np.int16:
+                    # Scale float data to int16 range
+                    if data.dtype == np.float32 or data.dtype == np.float64:
+                        data = (data * 32767).astype(np.int16)
+                    else:
+                        data = data.astype(np.int16)
+                
+                # Convert to bytes
+                return data.tobytes()
+        except Exception as e:
+            logger.error(f"Error converting FLAC to PCM: {e}")
+            raise
+
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         logger.debug(f"{self}: Generating TTS [{text}]")
@@ -165,7 +189,17 @@ class CambAITTSService(TTSService):
                     logger.error(f"Camb AI API error: {error_text}")
                     await self.push_error(ErrorFrame(f"Camb AI API error: {error_text}"))
                     return
-                audio_data = await response.read()
+                flac_data = await response.read()
+                
+                # Convert FLAC to PCM
+                try:
+                    audio_data = self._convert_flac_to_pcm(flac_data)
+                    logger.debug(f"Converted FLAC to PCM, size: {len(audio_data)} bytes")
+                except Exception as e:
+                    logger.error(f"Failed to convert FLAC to PCM: {e}")
+                    # Fall back to the original data
+                    audio_data = flac_data
+                    logger.warning("Using original FLAC data as fallback")
 
             await self.start_tts_usage_metrics(text)
             frame = TTSAudioRawFrame(
