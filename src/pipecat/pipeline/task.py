@@ -184,7 +184,9 @@ class PipelineTask(BaseTask):
             the idle timeout is reached.
         enable_turn_tracking: Whether to enable turn tracking.
         enable_turn_tracing: Whether to enable turn tracing.
-
+        conversation_id: Optional custom ID for the conversation.
+        additional_span_attributes: Optional dictionary of attributes to propagate as
+            OpenTelemetry conversation span attributes.
     """
 
     def __init__(
@@ -205,6 +207,7 @@ class PipelineTask(BaseTask):
         enable_turn_tracking: bool = True,
         enable_tracing: bool = False,
         conversation_id: Optional[str] = None,
+        additional_span_attributes: Optional[dict] = None,
     ):
         super().__init__()
         self._pipeline = pipeline
@@ -217,6 +220,7 @@ class PipelineTask(BaseTask):
         self._enable_turn_tracking = enable_turn_tracking
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._conversation_id = conversation_id
+        self._additional_span_attributes = additional_span_attributes or {}
         if self._params.observers:
             import warnings
 
@@ -235,7 +239,9 @@ class PipelineTask(BaseTask):
             observers.append(self._turn_tracking_observer)
         if self._enable_tracing and self._turn_tracking_observer:
             self._turn_trace_observer = TurnTraceObserver(
-                self._turn_tracking_observer, conversation_id=self._conversation_id
+                self._turn_tracking_observer,
+                conversation_id=self._conversation_id,
+                additional_span_attributes=self._additional_span_attributes,
             )
             observers.append(self._turn_trace_observer)
         self._finished = False

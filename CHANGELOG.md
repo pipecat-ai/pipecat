@@ -5,7 +5,18 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.71] - 2025-06-10
+
+### Added
+
+- Adds a parameter called `additional_span_attributes` to PipelineTask that
+  lets you add any additional attributes you'd like to the conversation span.
+
+### Fixed
+
+- Fixed an issue with `CartesiaSTTService` initialization.
+
+## [0.0.70] - 2025-06-10
 
 ### Added
 
