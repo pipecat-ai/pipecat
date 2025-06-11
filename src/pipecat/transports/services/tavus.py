@@ -456,7 +456,7 @@ class TavusTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         replica_id: str,
-        persona_id: str = "pipecat0",  # Use `pipecat0` so that your TTS voice is used in place of the Tavus persona
+        persona_id: str = "pipecat-stream",
         params: TavusParams = TavusParams(),
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
