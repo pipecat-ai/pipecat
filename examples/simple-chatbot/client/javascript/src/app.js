@@ -5,7 +5,7 @@
  */
 
 /**
- * RTVI Client Implementation
+ * Pipecat Client Implementation
  *
  * This client connects to an RTVI-compatible bot server using WebRTC (via Daily).
  * It handles audio/video streaming and manages the connection lifecycle.
@@ -16,7 +16,7 @@
  * - Browser with WebRTC support
  */
 
-import { RTVIClient, RTVIEvent } from '@pipecat-ai/client-js';
+import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
 
 /**
@@ -26,7 +26,7 @@ import { DailyTransport } from '@pipecat-ai/daily-transport';
 class ChatbotClient {
   constructor() {
     // Initialize client state
-    this.rtviClient = null;
+    this.pcClient = null;
     this.setupDOMElements();
     this.initializeClientAndTransport();
   }
@@ -54,11 +54,14 @@ class ChatbotClient {
    * Set up event listeners for connect/disconnect buttons
    */
   setupEventListeners() {
-    this.connectBtn.addEventListener('click', () => this.connect());
+    this.connectBtn.addEventListener('click', () => {
+      console.log('click');
+      this.connect();
+    });
     this.disconnectBtn.addEventListener('click', () => this.disconnect());
 
     // Populate device selector
-    this.rtviClient.getAllMics().then((mics) => {
+    this.pcClient.getAllMics().then((mics) => {
       console.log('Available mics:', mics);
       mics.forEach((device) => {
         const option = document.createElement('option');
@@ -70,33 +73,27 @@ class ChatbotClient {
     this.deviceSelector.addEventListener('change', (event) => {
       const selectedDeviceId = event.target.value;
       console.log('Selected device ID:', selectedDeviceId);
-      this.rtviClient.updateMic(selectedDeviceId);
+      this.pcClient.updateMic(selectedDeviceId);
     });
 
     // Handle mic mute/unmute toggle
     const micToggleBtn = document.getElementById('mic-toggle-btn');
 
     micToggleBtn.addEventListener('click', () => {
-      let micEnabled = this.rtviClient.isMicEnabled;
+      let micEnabled = this.pcClient.isMicEnabled;
       micToggleBtn.textContent = micEnabled ? 'Unmute Mic' : 'Mute Mic';
-      this.rtviClient.enableMic(!micEnabled);
+      this.pcClient.enableMic(!micEnabled);
     });
   }
 
   /**
-   * Set up the RTVI client and Daily transport
+   * Set up the Pipecat client and Daily transport
    */
   async initializeClientAndTransport() {
-    // Initialize the RTVI client with a DailyTransport and our configuration
-    this.rtviClient = new RTVIClient({
+    console.log('Initializing Pipecat client and transport...');
+    // Initialize the Pipecat client with a DailyTransport and our configuration
+    this.pcClient = new PipecatClient({
       transport: new DailyTransport(),
-      params: {
-        // The baseURL and endpoint of your bot server that the client will connect to
-        baseUrl: 'http://localhost:7860',
-        endpoints: {
-          connect: '/connect',
-        },
-      },
       enableMic: true, // Enable microphone for user input
       enableCam: false,
       callbacks: {
@@ -160,7 +157,7 @@ class ChatbotClient {
     // Set up listeners for media track events
     this.setupTrackListeners();
 
-    await this.rtviClient.initDevices();
+    await this.pcClient.initDevices();
     this.setupEventListeners();
   }
 
@@ -196,10 +193,10 @@ class ChatbotClient {
    * This is called when the bot is ready or when the transport state changes to ready
    */
   setupMediaTracks() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Get current tracks from the client
-    const tracks = this.rtviClient.tracks();
+    const tracks = this.pcClient.tracks();
 
     // Set up any available bot tracks
     if (tracks.bot?.audio) {
@@ -215,10 +212,10 @@ class ChatbotClient {
    * This handles new tracks being added during the session
    */
   setupTrackListeners() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Listen for new tracks starting
-    this.rtviClient.on(RTVIEvent.TrackStarted, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStarted, (track, participant) => {
       // Only handle non-local (bot) tracks
       if (!participant?.local) {
         if (track.kind === 'audio') {
@@ -230,7 +227,7 @@ class ChatbotClient {
     });
 
     // Listen for tracks stopping
-    this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStopped, (track, participant) => {
       this.log(
         `Track stopped event: ${track.kind} from ${
           participant?.name || 'unknown'
@@ -284,17 +281,16 @@ class ChatbotClient {
 
   /**
    * Initialize and connect to the bot
-   * This sets up the RTVI client, initializes devices, and establishes the connection
+   * This sets up the Pipecat client, initializes devices, and establishes the connection
    */
   async connect() {
     try {
-      // Initialize audio/video devices
-      this.log('Initializing devices...');
-      await this.rtviClient.initDevices();
-
       // Connect to the bot
       this.log('Connecting to bot...');
-      await this.rtviClient.connect();
+      await this.pcClient.connect({
+        endpoint: 'http://localhost:7860/connect',
+        timeout: 25000,
+      });
 
       this.log('Connection complete');
     } catch (error) {
@@ -304,9 +300,9 @@ class ChatbotClient {
       this.updateStatus('Error');
 
       // Clean up if there's an error
-      if (this.rtviClient) {
+      if (this.pcClient) {
         try {
-          await this.rtviClient.disconnect();
+          await this.pcClient.disconnect();
         } catch (disconnectError) {
           this.log(`Error during disconnect: ${disconnectError.message}`);
         }
@@ -318,10 +314,10 @@ class ChatbotClient {
    * Disconnect from the bot and clean up media resources
    */
   async disconnect() {
-    if (this.rtviClient) {
+    if (this.pcClient) {
       try {
-        // Disconnect the RTVI client
-        await this.rtviClient.disconnect();
+        // Disconnect the Pipecat client
+        await this.pcClient.disconnect();
 
         // Clean up audio
         if (this.botAudio.srcObject) {
