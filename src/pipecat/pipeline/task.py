@@ -6,11 +6,12 @@
 
 import asyncio
 import time
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Sequence, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
@@ -54,10 +55,11 @@ class PipelineParams(BaseModel):
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
-        observers: List of observers for monitoring pipeline execution.
+        observers: [deprecated] Use `observers` arg in `PipelineTask` class.
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
+        interruption_strategies: Strategies for bot interruption behavior.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -73,6 +75,7 @@ class PipelineParams(BaseModel):
     report_only_initial_ttfb: bool = False
     send_initial_empty_metrics: bool = True
     start_metadata: Dict[str, Any] = Field(default_factory=dict)
+    interruption_strategies: List[BaseInterruptionStrategy] = Field(default_factory=list)
 
 
 class PipelineTaskSource(FrameProcessor):
@@ -181,7 +184,9 @@ class PipelineTask(BaseTask):
             the idle timeout is reached.
         enable_turn_tracking: Whether to enable turn tracking.
         enable_turn_tracing: Whether to enable turn tracing.
-
+        conversation_id: Optional custom ID for the conversation.
+        additional_span_attributes: Optional dictionary of attributes to propagate as
+            OpenTelemetry conversation span attributes.
     """
 
     def __init__(
@@ -202,6 +207,7 @@ class PipelineTask(BaseTask):
         enable_turn_tracking: bool = True,
         enable_tracing: bool = False,
         conversation_id: Optional[str] = None,
+        additional_span_attributes: Optional[dict] = None,
     ):
         super().__init__()
         self._pipeline = pipeline
@@ -214,6 +220,7 @@ class PipelineTask(BaseTask):
         self._enable_turn_tracking = enable_turn_tracking
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._conversation_id = conversation_id
+        self._additional_span_attributes = additional_span_attributes or {}
         if self._params.observers:
             import warnings
 
@@ -232,10 +239,13 @@ class PipelineTask(BaseTask):
             observers.append(self._turn_tracking_observer)
         if self._enable_tracing and self._turn_tracking_observer:
             self._turn_trace_observer = TurnTraceObserver(
-                self._turn_tracking_observer, conversation_id=self._conversation_id
+                self._turn_tracking_observer,
+                conversation_id=self._conversation_id,
+                additional_span_attributes=self._additional_span_attributes,
             )
             observers.append(self._turn_trace_observer)
         self._finished = False
+        self._cancelled = False
 
         # This queue receives frames coming from the pipeline upstream.
         self._up_queue = asyncio.Queue()
@@ -306,8 +316,8 @@ class PipelineTask(BaseTask):
         """Return the turn trace observer if enabled."""
         return self._turn_trace_observer
 
-    async def add_observer(self, observer: BaseObserver):
-        await self._observer.add_observer(observer)
+    def add_observer(self, observer: BaseObserver):
+        self._observer.add_observer(observer)
 
     async def remove_observer(self, observer: BaseObserver):
         await self._observer.remove_observer(observer)
@@ -346,7 +356,6 @@ class PipelineTask(BaseTask):
 
     async def cancel(self):
         """Stops the running pipeline immediately."""
-        logger.debug(f"Canceling pipeline task {self}")
         await self._cancel()
 
     async def run(self):
@@ -406,12 +415,15 @@ class PipelineTask(BaseTask):
                 await self.queue_frame(frame)
 
     async def _cancel(self):
-        # Make sure everything is cleaned up downstream. This is sent
-        # out-of-band from the main streaming task which is what we want since
-        # we want to cancel right away.
-        await self._source.push_frame(CancelFrame())
-        # Only cancel the push task. Everything else will be cancelled in run().
-        await self._task_manager.cancel_task(self._process_push_task)
+        if not self._cancelled:
+            logger.debug(f"Canceling pipeline task {self}")
+            self._cancelled = True
+            # Make sure everything is cleaned up downstream. This is sent
+            # out-of-band from the main streaming task which is what we want since
+            # we want to cancel right away.
+            await self._source.push_frame(CancelFrame())
+            # Only cancel the push task. Everything else will be cancelled in run().
+            await self._task_manager.cancel_task(self._process_push_task)
 
     async def _create_tasks(self):
         self._process_up_task = self._task_manager.create_task(
@@ -515,6 +527,7 @@ class PipelineTask(BaseTask):
             enable_metrics=self._params.enable_metrics,
             enable_usage_metrics=self._params.enable_usage_metrics,
             report_only_initial_ttfb=self._params.report_only_initial_ttfb,
+            interruption_strategies=self._params.interruption_strategies,
         )
         start_frame.metadata = self._params.start_metadata
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)

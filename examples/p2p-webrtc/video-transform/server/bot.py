@@ -122,8 +122,8 @@ async def run_bot(webrtc_connection):
         pipeline,
         params=PipelineParams(
             allow_interruptions=True,
-            observers=[RTVIObserver(rtvi)],
         ),
+        observers=[RTVIObserver(rtvi)],
     )
 
     @rtvi.event_handler("on_client_ready")
@@ -140,10 +140,6 @@ async def run_bot(webrtc_connection):
     @pipecat_transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info("Pipecat Client disconnected")
-
-    @pipecat_transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info("Pipecat Client closed")
         await task.cancel()
 
     runner = PipelineRunner(handle_sigint=False)

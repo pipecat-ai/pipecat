@@ -49,14 +49,16 @@ class BaseObject(ABC):
         return decorator
 
     def add_event_handler(self, event_name: str, handler):
-        if event_name not in self._event_handlers:
-            raise Exception(f"Event handler {event_name} not registered")
-        self._event_handlers[event_name].append(handler)
+        if event_name in self._event_handlers:
+            self._event_handlers[event_name].append(handler)
+        else:
+            logger.warning(f"Event handler {event_name} not registered")
 
     def _register_event_handler(self, event_name: str):
-        if event_name in self._event_handlers:
-            raise Exception(f"Event handler {event_name} already registered")
-        self._event_handlers[event_name] = []
+        if event_name not in self._event_handlers:
+            self._event_handlers[event_name] = []
+        else:
+            logger.warning(f"Event handler {event_name} not registered")
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
         # If we haven't registered an event handler, we don't need to do

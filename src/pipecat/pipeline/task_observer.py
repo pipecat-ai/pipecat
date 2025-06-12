@@ -49,21 +49,31 @@ class TaskObserver(BaseObserver):
         super().__init__(**kwargs)
         self._observers = observers or []
         self._task_manager = task_manager
-        self._proxies: Dict[BaseObserver, Proxy] = {}
+        self._proxies: Optional[Dict[BaseObserver, Proxy]] = (
+            None  # Becomes a dict after start() is called
+        )
 
-    async def add_observer(self, observer: BaseObserver):
-        proxy = self._create_proxy(observer)
-        self._proxies[observer] = proxy
+    def add_observer(self, observer: BaseObserver):
+        # Add the observer to the list.
         self._observers.append(observer)
 
+        # If we already started, create a new proxy for the observer.
+        # Otherwise, it will be created in start().
+        if self._started():
+            proxy = self._create_proxy(observer)
+            self._proxies[observer] = proxy
+
     async def remove_observer(self, observer: BaseObserver):
+        # If the observer has a proxy, remove it.
         if observer in self._proxies:
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
             # Cancel the proxy task right away.
             await self._task_manager.cancel_task(proxy.task)
-            # Remove the observer.
+
+        # Remove the observer from the list.
+        if observer in self._observers:
             self._observers.remove(observer)
 
     async def start(self):
@@ -78,6 +88,9 @@ class TaskObserver(BaseObserver):
     async def on_push_frame(self, data: FramePushed):
         for proxy in self._proxies.values():
             await proxy.queue.put(data)
+
+    def _started(self) -> bool:
+        return self._proxies is not None
 
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
         queue = asyncio.Queue()
