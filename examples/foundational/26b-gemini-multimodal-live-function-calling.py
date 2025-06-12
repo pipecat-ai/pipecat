@@ -21,9 +21,9 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -40,30 +40,56 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     )
 
 
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 system_instruction = """
 You are a helpful assistant who can answer questions and use tools.
 
-You have a tool called "get_current_weather" that can be used to get the current weather. If the user asks
-for the weather, call this function.
+You have three tools available to you:
+1. get_current_weather: Use this tool to get the current weather in a specific location.
+2. get_restaurant_recommendation: Use this tool to get a restaurant recommendation in a specific location.
+3. google_search: Use this tool to search the web for information.
 """
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting bot")
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events. This doesn't really
+        # matter because we can only use the Multimodal Live API's phrase
+        # endpointing, for now.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events. This doesn't really
+        # matter because we can only use the Multimodal Live API's phrase
+        # endpointing, for now.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        # set stop_secs to something roughly similar to the internal setting
+        # of the Multimodal Live api, just to align events. This doesn't really
+        # matter because we can only use the Multimodal Live API's phrase
+        # endpointing, for now.
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+}
 
-    # Initialize the SmallWebRTCTransport with the connection
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            # set stop_secs to something roughly similar to the internal setting
-            # of the Multimodal Live api, just to align events. This doesn't really
-            # matter because we can only use the Multimodal Live API's phrase
-            # endpointing, for now.
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
-        ),
-    )
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     weather_function = FunctionSchema(
         name="get_current_weather",
@@ -81,9 +107,21 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         },
         required=["location", "format"],
     )
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
     search_tool = {"google_search": {}}
     tools = ToolsSchema(
-        standard_tools=[weather_function], custom_tools={AdapterType.GEMINI: [search_tool]}
+        standard_tools=[weather_function, restaurant_function],
+        custom_tools={AdapterType.GEMINI: [search_tool]},
     )
 
     llm = GeminiMultimodalLiveLLMService(
@@ -93,6 +131,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     )
 
     llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     context = OpenAILLMContext(
         [{"role": "user", "content": "Say hello."}],
@@ -127,18 +166,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

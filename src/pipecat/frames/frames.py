@@ -15,9 +15,11 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Sequence,
     Tuple,
 )
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -228,14 +230,15 @@ class TTSTextFrame(TextFrame):
 
 @dataclass
 class TranscriptionFrame(TextFrame):
-    """A text frame with transcription-specific data. Will be placed in the
-    transport's receive queue when a participant speaks.
+    """A text frame with transcription-specific data. The `result` field
+    contains the result from the STT service if available.
 
     """
 
     user_id: str
     timestamp: str
     language: Optional[Language] = None
+    result: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -243,14 +246,16 @@ class TranscriptionFrame(TextFrame):
 
 @dataclass
 class InterimTranscriptionFrame(TextFrame):
-    """A text frame with interim transcription-specific data. Will be placed in
-    the transport's receive queue when a participant speaks.
+    """A text frame with interim transcription-specific data. The `result` field
+    contains the result from the STT service if available.
+
     """
 
     text: str
     user_id: str
     timestamp: str
     language: Optional[Language] = None
+    result: Optional[Any] = None
 
     def __str__(self):
         return f"{self.name}(user: {self.user_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
@@ -413,22 +418,19 @@ class TransportMessageFrame(DataFrame):
 
 
 @dataclass
-class DTMFFrame(DataFrame):
+class DTMFFrame:
     """A DTMF button frame"""
 
     button: KeypadEntry
 
 
 @dataclass
-class InputDTMFFrame(DTMFFrame):
-    """A DTMF button input"""
+class OutputDTMFFrame(DTMFFrame, DataFrame):
+    """A DTMF keypress output that will be queued. If your transport supports
+    multiple dial-out destinations, use the `transport_destination` field to
+    specify where the DTMF keypress should be sent.
 
-    pass
-
-
-@dataclass
-class OutputDTMFFrame(DTMFFrame):
-    """A DTMF button output"""
+    """
 
     pass
 
@@ -448,6 +450,7 @@ class StartFrame(SystemFrame):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
+    interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
 
 
 @dataclass
@@ -644,6 +647,32 @@ class MetricsFrame(SystemFrame):
 
 
 @dataclass
+class FunctionCallFromLLM:
+    """Represents a function call returned by the LLM to be registered for execution.
+
+    Attributes:
+        function_name (str): The name of the function.
+        tool_call_id (str): A unique identifier for the function call.
+        arguments (Mapping[str, Any]): The arguments for the function.
+        context (OpenAILLMContext): The LLM context.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+    context: Any
+
+
+@dataclass
+class FunctionCallsStartedFrame(SystemFrame):
+    """A frame signaling that one or more function call execution is going to
+    start."""
+
+    function_calls: Sequence[FunctionCallFromLLM]
+
+
+@dataclass
 class FunctionCallInProgressFrame(SystemFrame):
     """A frame signaling that a function call is in progress."""
 
@@ -677,6 +706,7 @@ class FunctionCallResultFrame(SystemFrame):
     tool_call_id: str
     arguments: Any
     result: Any
+    run_llm: Optional[bool] = None
     properties: Optional[FunctionCallResultProperties] = None
 
 
@@ -775,6 +805,24 @@ class VisionImageRawFrame(InputImageRawFrame):
     def __str__(self):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
+
+
+@dataclass
+class InputDTMFFrame(DTMFFrame, SystemFrame):
+    """A DTMF keypress input."""
+
+    pass
+
+
+@dataclass
+class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
+    """A DTMF keypress output that will be sent right away. If your transport
+    supports multiple dial-out destinations, use the `transport_destination`
+    field to specify where the DTMF keypress should be sent.
+
+    """
+
+    pass
 
 
 #

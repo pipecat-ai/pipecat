@@ -35,7 +35,11 @@ class TurnTraceObserver(BaseObserver):
     """
 
     def __init__(
-        self, turn_tracker: TurnTrackingObserver, conversation_id: Optional[str] = None, **kwargs
+        self,
+        turn_tracker: TurnTrackingObserver,
+        conversation_id: Optional[str] = None,
+        additional_span_attributes: Optional[dict] = None,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self._turn_tracker = turn_tracker
@@ -47,6 +51,7 @@ class TurnTraceObserver(BaseObserver):
         # Conversation tracking properties
         self._conversation_span: Optional["Span"] = None
         self._conversation_id = conversation_id
+        self._additional_span_attributes = additional_span_attributes or {}
 
         if turn_tracker:
 
@@ -89,6 +94,9 @@ class TurnTraceObserver(BaseObserver):
         # Set span attributes
         self._conversation_span.set_attribute("conversation.id", conversation_id)
         self._conversation_span.set_attribute("conversation.type", "voice")
+        # Set custom otel attributes if provided
+        for k, v in (self._additional_span_attributes or {}).items():
+            self._conversation_span.set_attribute(k, v)
 
         # Update the conversation context provider
         context_provider.set_current_conversation_context(

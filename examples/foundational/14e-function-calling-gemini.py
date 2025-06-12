@@ -14,6 +14,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_camera
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -23,30 +24,32 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
 
-# Global variable to store the peer connection ID
-webrtc_peer_id = ""
+# Global variable to store the client ID
+client_id = ""
 
 
 async def get_weather(params: FunctionCallParams):
-    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
     location = params.arguments["location"]
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 async def get_image(params: FunctionCallParams):
     question = params.arguments["question"]
-    logger.debug(f"Requesting image with user_id={webrtc_peer_id}, question={question}")
+    logger.debug(f"Requesting image with user_id={client_id}, question={question}")
 
     # Request the image frame
     await params.llm.request_image_frame(
-        user_id=webrtc_peer_id,
+        user_id=client_id,
         function_name=params.function_name,
         tool_call_id=params.tool_call_id,
         text_content=question,
@@ -61,21 +64,27 @@ async def get_image(params: FunctionCallParams):
     )
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    global webrtc_peer_id
-    webrtc_peer_id = webrtc_connection.pc_id
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
 
-    logger.info(f"Starting bot with peer_id: {webrtc_peer_id}")
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            video_in_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-        ),
-    )
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -87,6 +96,11 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
     llm.register_function("get_weather", get_weather)
     llm.register_function("get_image", get_image)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_weather",
@@ -104,6 +118,17 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         },
         required=["location", "format"],
     )
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
     get_image_function = FunctionSchema(
         name="get_image",
         description="Get an image from the video stream.",
@@ -115,14 +140,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
         },
         required=["question"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function, get_image_function])
+    tools = ToolsSchema(standard_tools=[weather_function, get_image_function, restaurant_function])
 
     system_prompt = """\
 You are a helpful assistant who converses with a user and answers questions. Respond concisely to general questions.
 
 Your response will be turned into speech so use only simple words and punctuation.
 
-You have access to two tools: get_weather and get_image.
+You have access to three tools: get_weather, get_restaurant_recommendation, and get_image.
 
 You can respond to questions about the weather using the get_weather tool.
 
@@ -167,24 +192,26 @@ indicate you should use the get_image tool are:
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected: {client}")
+
+        await maybe_capture_participant_camera(transport, client)
+
+        global client_id
+        client_id = get_transport_client_id(transport, client)
+
         # Kick off the conversation.
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)

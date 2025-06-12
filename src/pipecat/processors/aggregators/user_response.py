@@ -23,4 +23,4 @@ class UserResponseAggregator(LLMUserResponseAggregator):
             await self.push_frame(frame)
 
             # Reset our accumulator state.
-            self.reset()
+            await self.reset()

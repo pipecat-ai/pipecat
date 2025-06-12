@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
     Frame,
     MixerControlFrame,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
+    OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
@@ -132,12 +134,13 @@ class BaseOutputTransport(FrameProcessor):
     async def register_audio_destination(self, destination: str):
         pass
 
-    async def write_raw_video_frame(
-        self, frame: OutputImageRawFrame, destination: Optional[str] = None
-    ):
+    async def write_video_frame(self, frame: OutputImageRawFrame):
         pass
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        pass
+
+    async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
         pass
 
     async def send_audio(self, frame: OutputAudioRawFrame):
@@ -171,6 +174,8 @@ class BaseOutputTransport(FrameProcessor):
             await self._handle_frame(frame)
         elif isinstance(frame, TransportMessageUrgentFrame):
             await self.send_message(frame)
+        elif isinstance(frame, OutputDTMFUrgentFrame):
+            await self.write_dtmf(frame)
         elif isinstance(frame, SystemFrame):
             await self.push_frame(frame, direction)
         # Control frames.
@@ -346,6 +351,7 @@ class BaseOutputTransport(FrameProcessor):
                     sample_rate=self._sample_rate,
                     num_channels=frame.num_channels,
                 )
+                chunk.transport_destination = self._destination
                 await self._audio_queue.put(chunk)
                 self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
 
@@ -425,6 +431,8 @@ class BaseOutputTransport(FrameProcessor):
                 await self._set_video_images(frame.images)
             elif isinstance(frame, TransportMessageFrame):
                 await self._transport.send_message(frame)
+            elif isinstance(frame, OutputDTMFFrame):
+                await self._transport.write_dtmf(frame)
 
         def _next_frame(self) -> AsyncGenerator[Frame, None]:
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
@@ -498,7 +506,7 @@ class BaseOutputTransport(FrameProcessor):
 
                 # Send audio.
                 if isinstance(frame, OutputAudioRawFrame):
-                    await self._transport.write_raw_audio_frames(frame.audio, self._destination)
+                    await self._transport.write_audio_frame(frame)
 
         #
         # Video handling
@@ -581,8 +589,7 @@ class BaseOutputTransport(FrameProcessor):
             frame = await self._transport.get_event_loop().run_in_executor(
                 self._executor, resize_frame, frame
             )
-
-            await self._transport.write_raw_video_frame(frame, self._destination)
+            await self._transport.write_video_frame(frame)
 
         #
         # Clock handling

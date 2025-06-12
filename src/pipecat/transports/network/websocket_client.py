@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
+from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
@@ -34,7 +35,7 @@ from pipecat.utils.asyncio import BaseTaskManager
 
 class WebsocketClientParams(TransportParams):
     add_wav_header: bool = True
-    serializer: FrameSerializer = ProtobufFrameSerializer()
+    serializer: Optional[FrameSerializer] = None
 
 
 class WebsocketClientCallbacks(BaseModel):
@@ -68,10 +69,10 @@ class WebsocketClientSession:
             )
         return self._task_manager
 
-    async def setup(self, frame: StartFrame):
+    async def setup(self, task_manager: BaseTaskManager):
         self._leave_counter += 1
         if not self._task_manager:
-            self._task_manager = frame.task_manager
+            self._task_manager = task_manager
 
     async def connect(self):
         if self._websocket:
@@ -131,10 +132,23 @@ class WebsocketClientInputTransport(BaseInputTransport):
         self._session = session
         self._params = params
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._session.setup(setup.task_manager)
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._params.serializer.setup(frame)
-        await self._session.setup(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
+        if self._params.serializer:
+            await self._params.serializer.setup(frame)
         await self._session.connect()
         await self.set_transport_ready(frame)
 
@@ -151,6 +165,8 @@ class WebsocketClientInputTransport(BaseInputTransport):
         await self._transport.cleanup()
 
     async def on_message(self, websocket, message):
+        if not self._params.serializer:
+            return
         frame = await self._params.serializer.deserialize(message)
         if not frame:
             return
@@ -173,7 +189,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._session = session
         self._params = params
 
-        # write_raw_audio_frames() is called quickly, as soon as we get audio
+        # write_audio_frame() is called quickly, as soon as we get audio
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
@@ -181,11 +197,24 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+        await self._session.setup(setup.task_manager)
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
-        await self._params.serializer.setup(frame)
-        await self._session.setup(frame)
+        if self._params.serializer:
+            await self._params.serializer.setup(frame)
         await self._session.connect()
         await self.set_transport_ready(frame)
 
@@ -204,9 +233,9 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         frame = OutputAudioRawFrame(
-            audio=frames,
+            audio=frame.audio,
             sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
         )
@@ -231,6 +260,8 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         await self._write_audio_sleep()
 
     async def _write_frame(self, frame: Frame):
+        if not self._params.serializer:
+            return
         payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
@@ -255,6 +286,7 @@ class WebsocketClientTransport(BaseTransport):
         super().__init__()
 
         self._params = params or WebsocketClientParams()
+        self._params.serializer = self._params.serializer or ProtobufFrameSerializer()
 
         callbacks = WebsocketClientCallbacks(
             on_connected=self._on_connected,

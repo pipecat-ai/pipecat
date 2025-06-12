@@ -408,7 +408,13 @@ class GladiaSTTService(STTService):
                     if confidence >= self._confidence:
                         if is_final:
                             await self.push_frame(
-                                TranscriptionFrame(transcript, "", time_now_iso8601(), language)
+                                TranscriptionFrame(
+                                    transcript,
+                                    "",
+                                    time_now_iso8601(),
+                                    language,
+                                    result=content,
+                                )
                             )
                             await self._handle_transcription(
                                 transcript=transcript,
@@ -418,7 +424,11 @@ class GladiaSTTService(STTService):
                         else:
                             await self.push_frame(
                                 InterimTranscriptionFrame(
-                                    transcript, "", time_now_iso8601(), language
+                                    transcript,
+                                    "",
+                                    time_now_iso8601(),
+                                    language,
+                                    result=content,
                                 )
                             )
                 elif content["type"] == "translation":
