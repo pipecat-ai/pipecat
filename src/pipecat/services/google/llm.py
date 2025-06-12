@@ -555,10 +555,11 @@ class GoogleLLMService(LLMService):
                 contents=messages,
                 config=generation_config,
             )
-            await self.stop_ttfb_metrics()
 
             function_calls = []
             async for chunk in response:
+                # Stop TTFB metrics after the first chunk
+                await self.stop_ttfb_metrics()
                 if chunk.usage_metadata:
                     prompt_tokens += chunk.usage_metadata.prompt_token_count or 0
                     completion_tokens += chunk.usage_metadata.candidates_token_count or 0
