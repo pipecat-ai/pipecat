@@ -767,6 +767,7 @@ class DailyTransportClient(EventHandler):
         self._client.add_custom_audio_track(
             track_name=track_name,
             audio_track=audio_track,
+            ignore_audio_level=True,
             completion=completion_callback(future),
         )
 
