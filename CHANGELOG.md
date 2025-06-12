@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
 
+### Other
+
+- Rename `14e-function-calling-gemini.py` to `14e-function-calling-google.py`.
+
 ## [0.0.71] - 2025-06-10
 
 ### Added
