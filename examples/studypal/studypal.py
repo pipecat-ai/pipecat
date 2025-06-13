@@ -32,7 +32,13 @@ logger.add(sys.stderr, level="DEBUG")
 
 # Count number of tokens used in model and truncate the content
 def truncate_content(content, model_name):
-    encoding = tiktoken.encoding_for_model(model_name)
+    try:
+        encoding = tiktoken.encoding_for_model(model_name)
+    except KeyError:
+        logger.warning(
+            f"Could not find encoding for model {model_name}. Using cl100k_base instead."
+        )
+        encoding = tiktoken.get_encoding("cl100k_base")
     tokens = encoding.encode(content)
 
     max_tokens = 10000
@@ -103,7 +109,7 @@ async def main():
 
     async with aiohttp.ClientSession() as session:
         article_content = await get_article_content(url, session)
-        article_content = truncate_content(article_content, model_name="gpt-4o-mini")
+        article_content = truncate_content(article_content, model_name=os.getenv("OPENAI_MODEL"))
 
         (room_url, token) = await configure(session)
 
@@ -125,7 +131,7 @@ async def main():
             # British Narration Lady: 4d2fd738-3b3d-4368-957a-bb4805275bd9
         )
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model="gpt-4o-mini")
+        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"), model=os.getenv("OPENAI_MODEL"))
 
         messages = [
             {
@@ -134,7 +140,7 @@ async def main():
 
 {article_content}
 
-Your task is to help the user understand and learn from this article in 2 sentences. THESE RESPONSES SHOULD BE ONLY MAX 2 SENTENCES. THIS INSTRUCTION IS VERY IMPORTANT. RESPONSES SHOULDN'T BE LONG.
+Your task is to help the user understand and learn from this article. Explain concepts one by one, in a maximum of 2 sentences per explanation. After explaining a concept, ask the user if they understand or have any questions before you proceed. THIS INSTRUCTION IS VERY IMPORTANT. RESPONSES SHOULDN'T BE LONG AND SHOULD BE ONLY MAX 2 SENTENCES.
 """,
             },
         ]
