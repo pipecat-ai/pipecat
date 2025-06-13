@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a property called `has_function_calls_in_progress` in
+  `LLMAssistantContextAggregator` that exposes whether a function call is in
+  progress.
+
 ### Fixed
 
 - Fixed an issue with `GroqTTSService` where it was not properly parsing the
   WAV file header.
 
-- Fixed an issue with `GoogleSTTService` where it was constantly reconnecting 
+- Fixed an issue with `GoogleSTTService` where it was constantly reconnecting
+
+- Fixed an issue with `GoogleSTTService` where it was constantly reconnecting
   before starting to receive audio from the user.
 
 - Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
