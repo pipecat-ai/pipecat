@@ -160,14 +160,15 @@ async def rtvi_connect(request: Request) -> Dict[Any, Any]:
     Raises:
         HTTPException: If room creation, token generation, or bot startup fails
     """
-    print("Creating room for RTVI connection")
+    body = await request.json()
+    print("Creating room for RTVI connection", body)
     room_url, token = await create_room_and_token()
     print(f"Room URL: {room_url}")
 
     # Start the bot process
     try:
         proc = subprocess.Popen(
-            [f"python3 -m bot -u {room_url} -t {token}"],
+            [f"python3 -m bot -u {room_url} -t {token} -p {body.get('personality', 'witty')}"],
             shell=True,
             bufsize=1,
             cwd=os.path.dirname(os.path.abspath(__file__)),
