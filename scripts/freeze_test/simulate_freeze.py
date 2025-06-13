@@ -8,11 +8,12 @@ import argparse
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from typing import Dict
+from typing import Any, Dict
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from loguru import logger
 from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
@@ -34,25 +35,34 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import IceServer, SmallWebRTCConnection
+from pipecat.transports.network.fastapi_websocket import (
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
+)
 from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handles FastAPI startup and shutdown."""
+    yield  # Run app
 
-# Store connections by pc_id
-pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
-ice_servers = [
-    IceServer(
-        urls="stun:stun.l.google.com:19302",
-    )
-]
+# Initialize FastAPI app with lifespan manager
+app = FastAPI(lifespan=lifespan)
+
+# Configure CORS to allow requests from any origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Mount the frontend at /
 app.mount("/client", SmallWebRTCPrebuiltUI)
@@ -116,23 +126,25 @@ class SimulateFreezeInput(FrameProcessor):
                     time_now_iso8601(),
                 ))
                 await self.push_frame(UserStoppedSpeakingFrame())
-                # sleeping 100ms before interrupting
-                await asyncio.sleep(0.1)
+                # sleeping 1s before interrupting
+                await asyncio.sleep(3)
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
 
 
-async def run_example(webrtc_connection: SmallWebRTCConnection):
+async def run_example(websocket_client):
     logger.info(f"Starting bot")
 
     # Create a transport using the WebRTC connection
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
+    transport = FastAPIWebsocketTransport(
+        websocket=websocket_client,
+        params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
+            serializer=ProtobufFrameSerializer(),
         ),
     )
 
@@ -198,43 +210,23 @@ async def root_redirect():
     return RedirectResponse(url="/client/")
 
 
-@app.post("/api/offer")
-async def offer(request: dict, background_tasks: BackgroundTasks):
-    pc_id = request.get("pc_id")
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("WebSocket connection accepted")
+    try:
+        await run_example(websocket)
+    except Exception as e:
+        print(f"Exception in run_bot: {e}")
 
-    if pc_id and pc_id in pcs_map:
-        pipecat_connection = pcs_map[pc_id]
-        logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-        await pipecat_connection.renegotiate(
-            sdp=request["sdp"],
-            type=request["type"],
-            restart_pc=request.get("restart_pc", False),
-        )
+@app.post("/connect")
+async def bot_connect(request: Request) -> Dict[Any, Any]:
+    server_mode = os.getenv("WEBSOCKET_SERVER", "fast_api")
+    if server_mode == "websocket_server":
+        ws_url = "ws://localhost:8765"
     else:
-        pipecat_connection = SmallWebRTCConnection(ice_servers)
-        await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
-
-        @pipecat_connection.event_handler("closed")
-        async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
-            logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
-            pcs_map.pop(webrtc_connection.pc_id, None)
-
-        # Run example function with SmallWebRTC transport arguments.
-        background_tasks.add_task(run_example, pipecat_connection)
-
-    answer = pipecat_connection.get_answer()
-    # Updating the peer connection inside the map
-    pcs_map[answer["pc_id"]] = pipecat_connection
-
-    return answer
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    yield  # Run app
-    coros = [pc.disconnect() for pc in pcs_map.values()]
-    await asyncio.gather(*coros)
-    pcs_map.clear()
+        ws_url = "ws://localhost:7860/ws"
+    return {"ws_url": ws_url}
 
 
 if __name__ == "__main__":
