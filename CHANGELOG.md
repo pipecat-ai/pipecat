@@ -5,12 +5,18 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [Unreleased]
 
 ### Fixed
 
 - Fixed an issue with `GoogleSTTService` where it was constantly reconnecting 
   before starting to receive audio from the user.
+
+- Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
+
+### Other
+
+- Rename `14e-function-calling-gemini.py` to `14e-function-calling-google.py`.
 
 ## [0.0.71] - 2025-06-10
 
