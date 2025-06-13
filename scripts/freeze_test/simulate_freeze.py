@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import os
 from contextlib import asynccontextmanager
+import random
 from typing import Any, Dict
 
 import uvicorn
@@ -37,6 +38,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
@@ -127,7 +129,8 @@ class SimulateFreezeInput(FrameProcessor):
                 ))
                 await self.push_frame(UserStoppedSpeakingFrame())
                 # sleeping 1s before interrupting
-                await asyncio.sleep(3)
+                wait_time = random.uniform(1, 10)
+                await asyncio.sleep(wait_time)
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
@@ -150,6 +153,8 @@ async def run_example(websocket_client):
 
     freeze = SimulateFreezeInput()
 
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
@@ -170,6 +175,8 @@ async def run_example(websocket_client):
     pipeline = Pipeline(
         [
             freeze,
+            #transport.input(),
+            #stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
