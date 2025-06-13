@@ -19,8 +19,45 @@ import {
   RTVIEvent,
 } from '@pipecat-ai/client-js';
 import {
+  ProtobufFrameSerializer,
   WebSocketTransport
 } from "@pipecat-ai/websocket-transport";
+
+class RecordingSerializer extends ProtobufFrameSerializer {
+
+  private lastTimestamp: number | null = null;
+  private recordingAudioToSend: boolean = false;
+  private _recordedAudio: { data: ArrayBuffer; delay: number }[] = [];
+
+  public startRecording() {
+    this.recordingAudioToSend = true;
+    this._recordedAudio = [];
+    this.lastTimestamp = null;
+  }
+
+  public stopRecording() {
+    this.recordingAudioToSend = false;
+  }
+
+  // @ts-ignore
+  serializeAudio(data: ArrayBuffer, sampleRate: number, numChannels: number): Uint8Array | null {
+    if (this.recordingAudioToSend) {
+      const now = Date.now();
+      // Compute delay since last packet
+      const delay = this.lastTimestamp ? now - this.lastTimestamp : 0;
+      this.lastTimestamp = now;
+      // Save audio chunk and delay
+      this._recordedAudio.push({ data, delay });
+      return null;
+    } else {
+      return super.serializeAudio(data, sampleRate, numChannels);
+    }
+  }
+
+  public get recordedAudio() {
+    return this._recordedAudio
+  }
+}
 
 class WebsocketClientApp {
   private rtviClient: RTVIClient | null = null;
@@ -29,10 +66,12 @@ class WebsocketClientApp {
   private statusSpan: HTMLElement | null = null;
   private debugLog: HTMLElement | null = null;
   private botAudio: HTMLAudioElement;
+
   private declare websocketTransport: WebSocketTransport;
+  private sendRecordedAudio: boolean = false
+  private declare recordingSerializer: RecordingSerializer;
 
   constructor() {
-    console.log("WebsocketClientApp");
     this.botAudio = document.createElement('audio');
     this.botAudio.autoplay = true;
     //this.botAudio.playsInline = true;
@@ -141,9 +180,10 @@ class WebsocketClientApp {
     try {
       const startTime = Date.now();
 
-      //const transport = new DailyTransport();
-      const transport = new WebSocketTransport();
+      this.recordingSerializer = new RecordingSerializer()
+      const transport = new WebSocketTransport({serializer: this.recordingSerializer});
       this.websocketTransport = transport
+
       const RTVIConfig: RTVIClientOptions = {
         transport,
         params: {
@@ -191,11 +231,14 @@ class WebsocketClientApp {
       const timeTaken = Date.now() - startTime;
       this.log(`Connection complete, timeTaken: ${timeTaken}`);
 
-      // Send audio to the server
-      /*setInterval(() => {
-        this.log("Will send audio")
-        this.websocketTransport.handleUserAudioStream(audio)
-      }, 5000)*/
+      this.log("Starting to recording the next 05s of audio");
+      this.recordingSerializer.startRecording()
+      await this.sleep(5000)
+      this.recordingSerializer.stopRecording()
+      this.log("Recording stopped");
+
+      this.rtviClient.enableMic(false)
+      this.startSendingRecordedAudio()
 
     } catch (error) {
       this.log(`Error connecting: ${(error as Error).message}`);
@@ -217,6 +260,7 @@ class WebsocketClientApp {
   public async disconnect(): Promise<void> {
     if (this.rtviClient) {
       try {
+        this.stopSendingRecordedAudio()
         await this.rtviClient.disconnect();
         this.rtviClient = null;
         if (this.botAudio.srcObject && "getAudioTracks" in this.botAudio.srcObject) {
@@ -227,6 +271,32 @@ class WebsocketClientApp {
         this.log(`Error disconnecting: ${(error as Error).message}`);
       }
     }
+  }
+
+  private startSendingRecordedAudio() {
+    this.sendRecordedAudio = true
+    void this.replayAudio()
+  }
+
+  private stopSendingRecordedAudio() {
+    this.sendRecordedAudio = false
+  }
+
+  private async replayAudio() {
+    if (this.sendRecordedAudio) {
+      this.log("Sending recorded audio")
+      for (const chunk of this.recordingSerializer.recordedAudio) {
+        await this.sleep(chunk.delay);
+        this.websocketTransport.handleUserAudioStream(chunk.data);
+      }
+      // waiting some seconds before sending the same audio again
+      await this.sleep(5000)
+      void this.replayAudio()
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
 }
