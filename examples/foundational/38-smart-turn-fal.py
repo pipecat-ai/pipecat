@@ -27,7 +27,23 @@ from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
-aiohttp_session = aiohttp.ClientSession()
+
+# Lazy session that creates the actual session when first used
+class LazySession:
+    def __init__(self):
+        self._session = None
+
+    def __getattr__(self, name):
+        if self._session is None:
+            self._session = aiohttp.ClientSession()
+        return getattr(self._session, name)
+
+    async def close(self):
+        if self._session:
+            await self._session.close()
+
+
+aiohttp_session = LazySession()
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
