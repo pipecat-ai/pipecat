@@ -36,6 +36,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.frameworks.rtvi import RTVIProcessor, RTVIConfig
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram import DeepgramSTTService
@@ -162,6 +163,8 @@ async def run_example(websocket_client):
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
+    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
     messages = [
         {
             "role": "system",
@@ -174,9 +177,10 @@ async def run_example(websocket_client):
 
     pipeline = Pipeline(
         [
-            freeze,
-            #transport.input(),
-            #stt,
+            #freeze,
+            transport.input(),
+            rtvi,
+            stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
@@ -198,6 +202,11 @@ async def run_example(websocket_client):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+
+    @rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        logger.info(f"Client ready")
+        await rtvi.set_bot_ready()
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
