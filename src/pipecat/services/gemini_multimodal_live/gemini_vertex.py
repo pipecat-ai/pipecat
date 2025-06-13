@@ -5,6 +5,7 @@
 #
 import inspect
 import os
+import re
 
 """Google Gemini Multimodal Live API service implementation.
 
@@ -34,9 +35,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
-    InputTextRawFrame,
-    InterruptionFrame,
-    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -44,6 +42,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
+    StartInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -73,6 +72,7 @@ from pipecat.services.openai.llm import (
 from pipecat.services.google.google import GoogleLLMContext
 
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
@@ -640,49 +640,70 @@ class ContextWindowCompressionParams(BaseModel):
     )  # None = use default (80% of context window)
 
 
-class InputParams(BaseModel):
-    """Input parameters for Gemini Multimodal Live generation.
 
-    Parameters:
-        frequency_penalty: Frequency penalty for generation (0.0-2.0). Defaults to None.
-        max_tokens: Maximum tokens to generate. Must be >= 1. Defaults to 4096.
-        presence_penalty: Presence penalty for generation (0.0-2.0). Defaults to None.
-        temperature: Sampling temperature (0.0-2.0). Defaults to None.
-        top_k: Top-k sampling parameter. Must be >= 0. Defaults to None.
-        top_p: Top-p sampling parameter (0.0-1.0). Defaults to None.
-        modalities: Response modalities. Defaults to AUDIO.
-        language: Language for generation. Defaults to EN_US.
-        media_resolution: Media resolution setting. Defaults to UNSPECIFIED.
-        vad: Voice activity detection parameters. Defaults to None.
-        context_window_compression: Context compression settings. Defaults to None.
-        extra: Additional parameters. Defaults to empty dict.
-    """
-
-    frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-    max_tokens: Optional[int] = Field(default=4096, ge=1)
-    presence_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
-    top_k: Optional[int] = Field(default=None, ge=0)
-    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    modalities: Optional[GeminiMultimodalModalities] = Field(
-        default=GeminiMultimodalModalities.AUDIO
-    )
-    language: Optional[Language] = Field(default=Language.EN_US)
-    media_resolution: Optional[GeminiMediaResolution] = Field(
-        default=GeminiMediaResolution.UNSPECIFIED
-    )
-    vad: Optional[GeminiVADParams] = Field(default=None)
-    context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
-    extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
-
-
-class GeminiMultimodalLiveLLMService(LLMService):
-    """Provides access to Google's Gemini Multimodal Live API.
+class GoogleVertexMultimodalLiveLLMService(LLMService):
+    """Provides access to Google's Gemini Multimodal Live API via Vertex AI.
 
     This service enables real-time conversations with Gemini, supporting both
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
+
+    Args:
+        api_key (str): Google AI API key
+        model (str, optional): Model identifier to use. Defaults to
+            "models/gemini-2.0-flash-live-001".
+        voice_id (str, optional): TTS voice identifier. Defaults to "Charon".
+        start_audio_paused (bool, optional): Whether to start with audio input paused.
+            Defaults to False.
+        start_video_paused (bool, optional): Whether to start with video input paused.
+            Defaults to False.
+        system_instruction (str, optional): System prompt for the model. Defaults to None.
+        tools (Union[List[dict], ToolsSchema], optional): Tools/functions available to the model.
+            Defaults to None.
+        params (InputParams, optional): Configuration parameters for the model.
+            Defaults to InputParams().
+        inference_on_context_initialization (bool, optional): Whether to generate a response
+            when context is first set. Defaults to True.
     """
+
+    class InputParams(BaseModel):
+        """Input parameters for Gemini Multimodal Live generation in Vertex AI.
+
+        Parameters:
+            project_id: [required] Google Cloud project ID. 
+            context_window_compression: Context compression settings. Defaults to None.
+            extra: Additional parameters. Defaults to empty dict.
+            frequency_penalty: Frequency penalty for generation (0.0-2.0). Defaults to None.
+            language: Language for generation. Defaults to EN_US.
+            location: GCP region for Vertex AI endpoint. Defaults to "us-east4". https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
+            max_tokens: Maximum tokens to generate. Must be >= 1. Defaults to 4096.
+            media_resolution: Media resolution setting. Defaults to UNSPECIFIED.
+            modalities: Response modalities. Defaults to AUDIO.
+            presence_penalty: Presence penalty for generation (0.0-2.0). Defaults to None.
+            temperature: Sampling temperature (0.0-2.0). Defaults to None.
+            top_k: Top-k sampling parameter. Must be >= 0. Defaults to None.
+            top_p: Top-p sampling parameter (0.0-1.0). Defaults to None.
+            vad: Voice activity detection parameters. Defaults to None.
+        """
+
+        project_id: str
+        context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
+        extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+        frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+        language: Optional[Language] = Field(default=Language.EN_US)
+        location: str = "us-east4"
+        max_tokens: Optional[int] = Field(default=4096, ge=1)
+        media_resolution: Optional[GeminiMediaResolution] = Field(
+            default=GeminiMediaResolution.UNSPECIFIED
+        )
+        modalities: Optional[GeminiMultimodalModalities] = Field(
+            default=GeminiMultimodalModalities.AUDIO
+        )
+        presence_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+        temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+        top_k: Optional[int] = Field(default=None, ge=0)
+        top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+        vad: Optional[GeminiVADParams] = Field(default=None)
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
@@ -691,7 +712,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self,
         *,
         api_key: str,
-        base_url: str = "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
         model="models/gemini-2.0-flash-live-001",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
@@ -720,13 +740,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
             file_api_base_url: Base URL for the Gemini File API. Defaults to the official endpoint.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(base_url=base_url, **kwargs)
+        super().__init__(**kwargs)
 
         params = params or InputParams()
 
         self._last_sent_time = 0
         self._api_key = api_key
-        self._base_url = base_url
+        self._client = self._create_client(api_key)
         self.set_model_name(model)
         self._voice_id = voice_id
         self._language_code = params.language
@@ -787,6 +807,21 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
+        # self._config = LiveConnectConfig(
+        #     response_modalities=[params.modalities],
+        #         speech_config=SpeechConfig(
+        #         voice_config=VoiceConfig(
+        #             prebuilt_voice_config=PrebuiltVoiceConfig(
+        #             voice_name=self._voice_id,
+        #             )
+        #         ),
+        #     ),
+        # )
+
+    def set_model_name(self, model: str):
+        sanitized_model = re.sub("models/","", model)
+        super().set_model_name(sanitized_model)
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
 
@@ -805,6 +840,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
             True for Google/Gemini services.
         """
         return True
+
+    def _create_client(self, api_key: str):
+        return genai.Client(
+            vertexai=True,
+            project=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
+            location="us-central1",
+            # http_options={"api_version": "v1beta"}
+        )
 
     def set_audio_input_paused(self, paused: bool):
         """Set the audio input pause state.
@@ -828,6 +871,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         Args:
             modalities: The modalities to use for responses.
         """
+        print(f"_____gemini_vertex.py set_model_modalities * modalities: {modalities}")
         self._settings["modalities"] = modalities
 
     def set_language(self, language: Language):
@@ -860,36 +904,26 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._context = GeminiMultimodalLiveContext.upgrade(context)
         await self._create_initial_response()
 
-    #
-    # standard AIService frame handling
-    #
-
     async def start(self, frame: StartFrame):
-        """Start the service and establish websocket connection.
-
-        Args:
-            frame: The start frame.
-        """
         await super().start(frame)
-        await self._connect()
+        # await self._connect()
 
     async def stop(self, frame: EndFrame):
-        """Stop the service and close connections.
-
-        Args:
-            frame: The end frame.
-        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the service and close connections.
-
-        Args:
-            frame: The cancel frame.
-        """
         await super().cancel(frame)
         await self._disconnect()
+
+    async def _disconnect(self):
+        self._disconnecting = True
+        self._api_session_ready = False
+        await self.stop_all_metrics()
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+        self._disconnecting = False
 
     #
     # speech and interruption handling
@@ -915,6 +949,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
             )
             await self.send_client_event(evt)
 
+    async def send_client_event(self, evt):
+        pass
+        # print(f"_____gemini.py * send_client_event evt: {evt}")
+
     #
     # frame processing
     #
@@ -932,15 +970,20 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         if isinstance(frame, TranscriptionFrame):
             await self.push_frame(frame, direction)
+
         elif isinstance(frame, OpenAILLMContextFrame):
+            print(f"_____gemini.py * OpenAILLMContextFrame: {frame.context}")
             context: GeminiMultimodalLiveContext = GeminiMultimodalLiveContext.upgrade(
                 frame.context
             )
+
             # For now, we'll only trigger inference here when either:
             #   1. We have not seen a context frame before
             #   2. The last message is a tool call result
             if not self._context:
                 self._context = context
+                if not self._receive_task:
+                    self._receive_task = self.create_task(self._receive_task_handler(self._context))
                 if frame.context.tools:
                     self._tools = frame.context.tools
                 await self._create_initial_response()
@@ -948,20 +991,24 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
-        elif isinstance(frame, LLMContextFrame):
-            raise NotImplementedError(
-                "Universal LLMContext is not yet supported for Gemini Multimodal Live."
-            )
-        elif isinstance(frame, InputTextRawFrame):
-            await self._send_user_text(frame.text)
+            elif context.messages and context.messages[-1].get("role") == "model":
+                self._context = context
+                # await self.push_frame(frame, direction)
+
+        elif isinstance(frame, LLMMessagesFrame):
+            if frame.messages and frame.messages[-1].get("role") == "system":
+                self._context.add_messages(frame.messages)
+                # self._context.set_messages(frame.messages)
+                self._receive_task = self.create_task(self._receive_task_handler(self._context))
             await self.push_frame(frame, direction)
+
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputImageRawFrame):
             await self._send_user_video(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, InterruptionFrame):
+        elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption()
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
@@ -985,187 +1032,67 @@ class GeminiMultimodalLiveLLMService(LLMService):
         else:
             await self.push_frame(frame, direction)
 
-    #
-    # websocket communication
-    #
+    # https://github.com/google-gemini/cookbook/issues/781
+    # https://github.com/google-gemini/cookbook/blob/cb04a04359ac7937c4b22e8b4c381451ba1e5d93/quickstarts/Get_started_LiveAPI.py
 
-    async def send_client_event(self, event):
-        """Send a client event to the Gemini Live API.
+    async def _receive_task_handler(self, context):
+        print(f"_____gemini.py * _receive_task_handler::::_receive_task_handler")
+        selfsettingsmodal= self._settings["modalities"]
+        print(f"_____gemini_vertex.py * self._settings[modalities]: {selfsettingsmodal}")
 
-        Args:
-            event: The event to send.
-        """
-        await self._ws_send(event.model_dump(exclude_none=True))
+        connfig = LiveConnectConfig(response_modalities=[self._settings["modalities"]])
+        print(f"_____gemini_vertex.py * connfig: {connfig}")
+        print(f"_____gemini_vertex.py * self._model_name: {self._model_name}")
 
-    async def _connect(self):
-        """Establish WebSocket connection to Gemini Live API."""
-        if self._websocket:
-            # Here we assume that if we have a websocket, we are connected. We
-            # handle disconnections in the send/recv code paths.
-            return
+        async with self._client.aio.live.connect(
+            model=self._model_name,
+            # config=self._config,
+            config=connfig,
+        ) as session:
+            lcc = LiveClientContent()
 
-        logger.info("Connecting to Gemini service")
-        try:
-            logger.info(f"Connecting to wss://{self._base_url}")
-            uri = f"wss://{self._base_url}?key={self._api_key}"
-            self._websocket = await websocket_connect(uri=uri)
-            self._receive_task = self.create_task(self._receive_task_handler())
+            print(f"_____gemini_vertex.py * lcc: {lcc}")
 
-            # Create the basic configuration
-            config_data = {
-                "setup": {
-                    "model": self._model_name,
-                    "generation_config": {
-                        "frequency_penalty": self._settings["frequency_penalty"],
-                        "max_output_tokens": self._settings["max_tokens"],
-                        "presence_penalty": self._settings["presence_penalty"],
-                        "temperature": self._settings["temperature"],
-                        "top_k": self._settings["top_k"],
-                        "top_p": self._settings["top_p"],
-                        "response_modalities": self._settings["modalities"].value,
-                        "speech_config": {
-                            "voice_config": {
-                                "prebuilt_voice_config": {"voice_name": self._voice_id}
-                            },
-                            "language_code": self._settings["language"],
-                        },
-                        "media_resolution": self._settings["media_resolution"].value,
-                    },
-                    "input_audio_transcription": {},
-                    "output_audio_transcription": {},
-                }
-            }
+            try:
+                if GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
+                    print(f"_____gemini.py * GeminiMultimodalModalities.TEXT - send_client_content")
+                    await session.send_client_content(turns=self._context.messages)
+                elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
+                    print(f"WIP_____gemini.py * GeminiMultimodalModalities.AUDIO - send")
+                    # await session.send_realtime_input(
+                    #     audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
+                    # )
 
-            # Add context window compression if enabled
-            if self._settings.get("context_window_compression", {}).get("enabled", False):
-                compression_config = {}
-                # Add sliding window (always true if compression is enabled)
-                compression_config["sliding_window"] = {}
+                else:
+                    pass
 
-                # Add trigger_tokens if specified
-                trigger_tokens = self._settings.get("context_window_compression", {}).get(
-                    "trigger_tokens"
-                )
-                if trigger_tokens is not None:
-                    compression_config["trigger_tokens"] = trigger_tokens
+                async for message in session.receive():
+                    if message.text:
+                        print(f"_____gemini.py * message.text: {message.text}")
+                        await self.push_frame(LLMTextFrame(message.text))
 
-                config_data["setup"]["context_window_compression"] = compression_config
+                    ## TODO/WIP audio
+                    # elif message.audio:
+                    # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api#:~:text=Vertex%20AI%20Studio.-,Context%20window,inputs%2C%20model%20outputs%2C%20etc.
+                    # if (
+                    #     message.server_content.model_turn
+                    #     and message.server_content.model_turn.parts
+                    # ):
+                    #     audio_data = []
+                    #     for part in message.server_content.model_turn.parts:
+                    #         if part.inline_data:
+                    #             audio_data.append(
+                    #                 np.frombuffer(part.inline_data.data, dtype=np.int16)
+                    #             )
 
-            # Add VAD configuration if provided
-            if self._settings.get("vad"):
-                vad_config = {}
-                vad_params = self._settings["vad"]
-
-                # Only add parameters that are explicitly set
-                if vad_params.disabled is not None:
-                    vad_config["disabled"] = vad_params.disabled
-
-                if vad_params.start_sensitivity:
-                    vad_config["start_of_speech_sensitivity"] = vad_params.start_sensitivity.value
-
-                if vad_params.end_sensitivity:
-                    vad_config["end_of_speech_sensitivity"] = vad_params.end_sensitivity.value
-
-                if vad_params.prefix_padding_ms is not None:
-                    vad_config["prefix_padding_ms"] = vad_params.prefix_padding_ms
-
-                if vad_params.silence_duration_ms is not None:
-                    vad_config["silence_duration_ms"] = vad_params.silence_duration_ms
-
-                # Only add automatic_activity_detection if we have VAD settings
-                if vad_config:
-                    realtime_config = {"automatic_activity_detection": vad_config}
-
-                    config_data["setup"]["realtime_input_config"] = realtime_config
-
-            config = events.Config.model_validate(config_data)
-
-            # Add system instruction if available
-            system_instruction = self._system_instruction or ""
-            if self._context and hasattr(self._context, "extract_system_instructions"):
-                system_instruction += "\n" + self._context.extract_system_instructions()
-            if system_instruction:
-                logger.debug(f"Setting system instruction: {system_instruction}")
-                config.setup.system_instruction = events.SystemInstruction(
-                    parts=[events.ContentPart(text=system_instruction)]
-                )
-
-            # Add tools if available
-            if self._tools:
-                logger.debug(f"Gemini is configuring to use tools{self._tools}")
-                config.setup.tools = self.get_llm_adapter().from_standard_tools(self._tools)
-
-            # Send the configuration
-            await self.send_client_event(config)
-
-        except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
-            self._websocket = None
-
-    async def _disconnect(self):
-        """Disconnect from Gemini Live API and clean up resources."""
-        logger.info("Disconnecting from Gemini service")
-        try:
-            self._disconnecting = True
-            self._api_session_ready = False
-            await self.stop_all_metrics()
-            if self._websocket:
-                await self._websocket.close()
-                self._websocket = None
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=1.0)
-                self._receive_task = None
-            self._disconnecting = False
-        except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
-
-    async def _ws_send(self, message):
-        """Send a message to the WebSocket connection."""
-        # logger.debug(f"Sending message to websocket: {message}")
-        try:
-            if self._websocket:
-                await self._websocket.send(json.dumps(message))
-        except Exception as e:
-            if self._disconnecting:
-                return
-            logger.error(f"Error sending message to websocket: {e}")
-            # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
-            # it is to recover from a send-side error with proper state management, and that exponential
-            # backoff for retries can have cost/stability implications for a service cluster, let's just
-            # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
-
-    #
-    # inbound server event handling
-    # todo: docs link here
-    #
-
-    async def _receive_task_handler(self):
-        """Handle incoming messages from the WebSocket connection."""
-        async for message in self._websocket:
-            evt = events.parse_server_event(message)
-            # logger.debug(f"Received event: {message[:500]}")
-            # logger.debug(f"Received event: {evt}")
-
-            if evt.setupComplete:
-                await self._handle_evt_setup_complete(evt)
-            elif evt.serverContent and evt.serverContent.modelTurn:
-                await self._handle_evt_model_turn(evt)
-            elif evt.serverContent and evt.serverContent.turnComplete and evt.usageMetadata:
-                await self._handle_evt_turn_complete(evt)
-                await self._handle_evt_usage_metadata(evt)
-            elif evt.serverContent and evt.serverContent.inputTranscription:
-                await self._handle_evt_input_transcription(evt)
-            elif evt.serverContent and evt.serverContent.outputTranscription:
-                await self._handle_evt_output_transcription(evt)
-            elif evt.serverContent and evt.serverContent.groundingMetadata:
-                await self._handle_evt_grounding_metadata(evt)
-            elif evt.toolCall:
-                await self._handle_evt_tool_call(evt)
-            elif False:  # !!! todo: error events?
-                await self._handle_evt_error(evt)
-                # errors are fatal, so exit the receive loop
-                return
+                    elif False:  # !!! todo: error events?
+                        await self._handle_evt_error("evt")
+                        # errors are fatal, so exit the receive loop
+                        return
+                    else:
+                        pass
+            except Exception as e:
+                print(f"___eeee__gemini.py * e: {e}")
 
     #
     #
@@ -1188,23 +1115,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             length = int((frame.sample_rate * frame.num_channels * 2) * 0.5)
             self._user_audio_buffer = self._user_audio_buffer[-length:]
 
-    async def _send_user_text(self, text: str):
-        """Send user text via Gemini Live API's realtime input stream.
-
-        This method sends text through the realtimeInput stream (via TextInputMessage)
-        rather than the clientContent stream. This ensures text input is synchronized
-        with audio and video inputs, preventing temporal misalignment that can occur
-        when different modalities are processed through separate API pathways.
-
-        For realtimeInput, turn completion is automatically inferred by the API based
-        on user activity, so no explicit turnComplete signal is needed.
-
-        Args:
-            text: The text to send as user input.
-        """
-        evt = events.TextInputMessage.from_text(text)
-        await self.send_client_event(evt)
-
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""
         if self._video_input_paused:
@@ -1221,6 +1131,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _create_initial_response(self):
         """Create initial response based on context history."""
+        print(f"_____gemini.py * _create_initial_response:")
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True
             return
@@ -1248,6 +1159,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _create_single_response(self, messages_list):
         """Create a single response from a list of messages."""
         # Refactor to combine this logic with same logic in GeminiMultimodalLiveContext
+        print(f"_____gemini.py * _create_single_response:")
         messages = []
         for item in messages_list:
             role = item.get("role")
@@ -1296,7 +1208,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 }
             }
         )
-        await self.send_client_event(evt)
+        # await self.send_client_event(evt)
 
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(self, tool_result_message):

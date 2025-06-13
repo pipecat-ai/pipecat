@@ -894,6 +894,7 @@ class GoogleLLMService(LLMService):
                 if isinstance(context, OpenAILLMContext)
                 else self._stream_content_universal_context(context)
             )
+            await self.stop_ttfb_metrics()
 
             function_calls = []
             async for chunk in response:

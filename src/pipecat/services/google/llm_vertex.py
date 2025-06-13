@@ -150,3 +150,9 @@ class GoogleVertexLLMService(OpenAILLMService):
         creds.refresh(Request())  # Ensure token is up-to-date, lifetime is 1 hour.
 
         return creds.token
+
+
+
+#### this should live here I think maybe
+# class GoogleVertexMultimodalLiveLLMService(LLMService):
+    
