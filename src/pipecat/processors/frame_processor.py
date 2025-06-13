@@ -299,9 +299,8 @@ class FrameProcessor(BaseObject):
             # Cancel the input task. This will stop processing queued frames.
             await self.__cancel_input_task()
         except Exception as e:
-            logger.exception(f"Uncaught exception in {self}: {e}")
+            logger.exception(f"Uncaught exception in {self} when handling _start_interruption: {e}")
             await self.push_error(ErrorFrame(str(e)))
-            raise
 
         # Create a new input queue and task.
         self.__create_input_task()
