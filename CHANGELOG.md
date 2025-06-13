@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `GoogleSTTService` where it was constantly reconnecting 
+  before starting to receive audio from the user.
+
 - Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
 
 ### Other
