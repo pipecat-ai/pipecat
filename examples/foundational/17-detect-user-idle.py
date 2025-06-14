@@ -24,6 +24,12 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
+from pipecat.services.gemini_multimodal_live.gemini import (
+    GeminiMultimodalLiveLLMService,
+    GeminiMultimodalModalities,
+    InputParams,
+)
+
 load_dotenv(override=True)
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -58,7 +64,15 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # using vertex ai - todo: rename service
+    llm = GeminiMultimodalLiveLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        # params=InputParams(modalities=GeminiMultimodalModalities.AUDIO),
+        params=InputParams(modalities=GeminiMultimodalModalities.TEXT),
+        voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
+        model="gemini-2.0-flash-live-preview-04-09",
+    )
 
     messages = [
         {
@@ -79,6 +93,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                     "content": "The user has been quiet. Politely and briefly ask if they're still there.",
                 }
             )
+            print(f"_____17-detect-user-idle.py * handle_user_idle 1")
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         elif retry_count == 2:
@@ -89,6 +104,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                     "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
                 }
             )
+            print(f"_____17-detect-user-idle.py * handle_user_idle 2")
             await user_idle.push_frame(LLMMessagesFrame(messages))
             return True
         else:
