@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+import os
 
 import base64
 import json
@@ -41,6 +42,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    LLMMessagesFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import (
@@ -57,6 +59,8 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.services.google.google import GoogleLLMContext
+
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
@@ -65,7 +69,8 @@ from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_
 from . import events
 
 try:
-    import websockets
+    from google import genai
+    from google.genai.types import Content, LiveConnectConfig, Part, LiveClientContent, Modality
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -173,8 +178,210 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
             obj._restructure_from_openai_messages()
         return obj
 
+    def set_messages(self, messages: List):
+        self._messages[:] = messages
+        self._restructure_from_openai_messages()
+
+    def add_messages(self, messages: List):
+        # Convert each message individually
+        converted_messages = []
+        for msg in messages:
+            if isinstance(msg, Content):
+                # Already in Gemini format
+                converted_messages.append(msg)
+            else:
+                # Convert from standard format to Gemini format
+                converted = self.from_standard_message(msg)
+                if converted is not None:
+                    converted_messages.append(converted)
+
+        # Add the converted messages to our existing messages
+        # self._messages.append(converted_messages)
+        self._messages.extend(converted_messages)
+        self._restructure_from_openai_messages()
+
+    def from_standard_message(self, message):
+        """Convert standard format message to Google Content object.
+
+        Handles conversion of text, images, and function calls to Google's format.
+
+        Args:
+            message: Message in standard format:
+                {
+                    "role": "user/assistant/system/tool",
+                    "content": str | [{"type": "text/image_url", ...}] | None,
+                    "tool_calls": [{"function": {"name": str, "arguments": str}}]
+                }
+
+        Returns:
+            Content object with:
+                - role: "user" or "model" (converted from "assistant")
+                - parts: List[Part] containing text, inline_data, or function calls
+            Returns None for system messages.
+        """
+        role = message["role"]
+        content = message.get("content", [])
+        if role == "system":
+            # don't think this is needed anymore
+            self.system_message = content
+        elif role == "assistant":
+            role = "model"
+
+        parts = []
+        if message.get("tool_calls"):
+            for tc in message["tool_calls"]:
+                parts.append(
+                    Part(
+                        function_call=FunctionCall(
+                            name=tc["function"]["name"],
+                            args=json.loads(tc["function"]["arguments"]),
+                        )
+                    )
+                )
+        elif role == "tool":
+            role = "model"
+            parts.append(
+                Part(
+                    function_response=FunctionResponse(
+                        name="tool_call_result",  # seems to work to hard-code the same name every time
+                        response=json.loads(message["content"]),
+                    )
+                )
+            )
+        elif isinstance(content, str):
+            parts.append(Part(text=content))
+        elif isinstance(content, list):
+            for c in content:
+                if c["type"] == "text":
+                    parts.append(Part(text=c["text"]))
+                elif c["type"] == "image_url":
+                    parts.append(
+                        Part(
+                            inline_data=Blob(
+                                mime_type="image/jpeg",
+                                data=base64.b64decode(c["image_url"]["url"].split(",")[1]),
+                            )
+                        )
+                    )
+
+        message = Content(role=role, parts=parts)
+        return message
+
+    def to_standard_messages(self, obj) -> list:
+        """Convert Google Content object to standard structured format.
+
+        Handles text, images, and function calls from Google's Content/Part objects.
+
+        Args:
+            obj: Google Content object with:
+                - role: "model" (converted to "assistant") or "user"
+                - parts: List[Part] containing text, inline_data, or function calls
+
+        Returns:
+            List of messages in standard format:
+            [
+                {
+                    "role": "user/assistant/tool",
+                    "content": [
+                        {"type": "text", "text": str} |
+                        {"type": "image_url", "image_url": {"url": str}}
+                    ]
+                }
+            ]
+        """
+        msg = {"role": obj.role, "content": []}
+        if msg["role"] == "model":
+            msg["role"] = "assistant"
+
+        for part in obj.parts:
+            if part.text:
+                msg["content"].append({"type": "text", "text": part.text})
+            elif part.inline_data:
+                encoded = base64.b64encode(part.inline_data.data).decode("utf-8")
+                msg["content"].append(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{part.inline_data.mime_type};base64,{encoded}"},
+                    }
+                )
+            elif part.function_call:
+                args = part.function_call.args if hasattr(part.function_call, "args") else {}
+                msg["tool_calls"] = [
+                    {
+                        "id": part.function_call.name,
+                        "type": "function",
+                        "function": {
+                            "name": part.function_call.name,
+                            "arguments": json.dumps(args),
+                        },
+                    }
+                ]
+
+            elif part.function_response:
+                msg["role"] = "tool"
+                resp = (
+                    part.function_response.response
+                    if hasattr(part.function_response, "response")
+                    else {}
+                )
+                msg["tool_call_id"] = part.function_response.name
+                msg["content"] = json.dumps(resp)
+
+        # there might be no content parts for tool_calls messages
+        if not msg["content"]:
+            del msg["content"]
+        return [msg]
+
     def _restructure_from_openai_messages(self):
-        pass
+        """Restructures messages to ensure proper Google format and message ordering.
+
+        This method handles conversion of OpenAI-formatted messages to Google format,
+        with special handling for function calls, function responses, and system messages.
+        System messages are added back to the context as user messages when needed.
+
+        The final message order is preserved as:
+        1. Function calls (from model)
+        2. Function responses (from user)
+        3. Text messages (converted from system messages)
+
+        Note:
+            System messages are only added back when there are no regular text
+            messages in the context, ensuring proper conversation continuity
+            after function calls.
+        """
+        self.system_message = None
+        converted_messages = []
+
+        # Process each message, preserving Google-formatted messages and converting others
+        for message in self._messages:
+            if isinstance(message, Content):
+                # Keep existing Google-formatted messages (e.g., function calls/responses)
+                converted_messages.append(message)
+                continue
+
+            # Convert OpenAI format to Google format, system messages return None
+            converted = self.from_standard_message(message)
+            if converted is not None:
+                converted_messages.append(converted)
+
+        # Update message list
+        self._messages[:] = converted_messages
+
+        ## this is broken... ?
+        # # Check if we only have function-related messages (no regular text)
+        # has_regular_messages = any(
+        #     len(msg.parts) == 1
+        #     and not getattr(msg.parts[0], "text", None)
+        #     and getattr(msg.parts[0], "function_call", None)
+        #     and getattr(msg.parts[0], "function_response", None)
+        #     for msg in self._messages
+        # )
+        # # Add system message back as a user message if we only have function messages
+        # if self.system_message and not has_regular_messages:
+        #     self._messages.append(Content(role="user", parts=[Part(text=self.system_message)]))
+
+        # Remove any empty messages
+        self._messages = [m for m in self._messages if m.parts]
 
     def extract_system_instructions(self):
         system_instruction = ""
@@ -301,6 +508,8 @@ class InputParams(BaseModel):
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
+# TODO: rename when the prettier generic client bit is in place
+# VertexAIGeminiMultimodalLiveLLMService
 class GeminiMultimodalLiveLLMService(LLMService):
     """Provides access to Google's Gemini Multimodal Live API.
 
@@ -310,8 +519,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     Args:
         api_key (str): Google AI API key
-        base_url (str, optional): API endpoint base URL. Defaults to
-            "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent".
         model (str, optional): Model identifier to use. Defaults to
             "models/gemini-2.0-flash-live-001".
         voice_id (str, optional): TTS voice identifier. Defaults to "Charon".
@@ -335,7 +542,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self,
         *,
         api_key: str,
-        base_url: str = "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
         model="models/gemini-2.0-flash-live-001",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
@@ -346,13 +552,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
         inference_on_context_initialization: bool = True,
         **kwargs,
     ):
-        super().__init__(base_url=base_url, **kwargs)
+        super().__init__(**kwargs)
 
         params = params or InputParams()
 
         self._last_sent_time = 0
         self._api_key = api_key
-        self._base_url = base_url
+        self._client = self._create_client(api_key)
         self.set_model_name(model)
         self._voice_id = voice_id
         self._language_code = params.language
@@ -406,8 +612,27 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
+        # self._config = LiveConnectConfig(
+        #     response_modalities=[params.modalities],
+        #         speech_config=SpeechConfig(
+        #         voice_config=VoiceConfig(
+        #             prebuilt_voice_config=PrebuiltVoiceConfig(
+        #             voice_name=self._voice_id,
+        #             )
+        #         ),
+        #     ),
+        # )
+
     def can_generate_metrics(self) -> bool:
         return True
+
+    def _create_client(self, api_key: str):
+        return genai.Client(
+            vertexai=True,
+            project=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
+            location="us-central1",
+            # http_options={"api_version": "v1beta"}
+        )
 
     def set_audio_input_paused(self, paused: bool):
         self._audio_input_paused = paused
@@ -447,7 +672,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def start(self, frame: StartFrame):
         await super().start(frame)
-        await self._connect()
+        # await self._connect()
 
     async def stop(self, frame: EndFrame):
         await super().stop(frame)
@@ -456,6 +681,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def cancel(self, frame: CancelFrame):
         await super().cancel(frame)
         await self._disconnect()
+
+    async def _disconnect(self):
+        self._disconnecting = True
+        self._api_session_ready = False
+        await self.stop_all_metrics()
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+        self._disconnecting = False
 
     #
     # speech and interruption handling
@@ -481,6 +715,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
             )
             await self.send_client_event(evt)
 
+    async def send_client_event(self, evt):
+        pass
+        # print(f"_____gemini.py * send_client_event evt: {evt}")
+
     #
     # frame processing
     #
@@ -492,15 +730,20 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         if isinstance(frame, TranscriptionFrame):
             await self.push_frame(frame, direction)
+
         elif isinstance(frame, OpenAILLMContextFrame):
+            print(f"_____gemini.py * OpenAILLMContextFrame: {frame.context}")
             context: GeminiMultimodalLiveContext = GeminiMultimodalLiveContext.upgrade(
                 frame.context
             )
+
             # For now, we'll only trigger inference here when either:
             #   1. We have not seen a context frame before
             #   2. The last message is a tool call result
             if not self._context:
                 self._context = context
+                if not self._receive_task:
+                    self._receive_task = self.create_task(self._receive_task_handler(self._context))
                 if frame.context.tools:
                     self._tools = frame.context.tools
                 await self._create_initial_response()
@@ -508,6 +751,17 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
+            elif context.messages and context.messages[-1].get("role") == "model":
+                self._context = context
+                # await self.push_frame(frame, direction)
+
+        elif isinstance(frame, LLMMessagesFrame):
+            if frame.messages and frame.messages[-1].get("role") == "system":
+                self._context.add_messages(frame.messages)
+                # self._context.set_messages(frame.messages)
+                self._receive_task = self.create_task(self._receive_task_handler(self._context))
+            await self.push_frame(frame, direction)
+
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
@@ -538,178 +792,58 @@ class GeminiMultimodalLiveLLMService(LLMService):
         else:
             await self.push_frame(frame, direction)
 
-    #
-    # websocket communication
-    #
+    # https://github.com/google-gemini/cookbook/issues/781
+    # https://github.com/google-gemini/cookbook/blob/cb04a04359ac7937c4b22e8b4c381451ba1e5d93/quickstarts/Get_started_LiveAPI.py
 
-    async def send_client_event(self, event):
-        await self._ws_send(event.model_dump(exclude_none=True))
+    async def _receive_task_handler(self, context):
+        print(f"_____gemini.py * _receive_task_handler::::_receive_task_handler")
+        async with self._client.aio.live.connect(
+            model=self._model_name,
+            # config=self._config,
+            config=LiveConnectConfig(response_modalities=[self._settings["modalities"]]),
+        ) as session:
+            lcc = LiveClientContent()
 
-    async def _connect(self):
-        if self._websocket:
-            # Here we assume that if we have a websocket, we are connected. We
-            # handle disconnections in the send/recv code paths.
-            return
+            try:
+                if GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
+                    print(f"_____gemini.py * GeminiMultimodalModalities.TEXT - send_client_content")
+                    await session.send_client_content(turns=self._context.messages)
+                elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
+                    print(f"WIP_____gemini.py * GeminiMultimodalModalities.AUDIO - send")
+                    # await session.send_realtime_input(
+                    #     audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
+                    # )
 
-        logger.info("Connecting to Gemini service")
-        try:
-            logger.info(f"Connecting to wss://{self._base_url}")
-            uri = f"wss://{self._base_url}?key={self._api_key}"
-            self._websocket = await websockets.connect(uri=uri)
-            self._receive_task = self.create_task(self._receive_task_handler())
+                else:
+                    pass
 
-            # Create the basic configuration
-            config_data = {
-                "setup": {
-                    "model": self._model_name,
-                    "generation_config": {
-                        "frequency_penalty": self._settings["frequency_penalty"],
-                        "max_output_tokens": self._settings["max_tokens"],
-                        "presence_penalty": self._settings["presence_penalty"],
-                        "temperature": self._settings["temperature"],
-                        "top_k": self._settings["top_k"],
-                        "top_p": self._settings["top_p"],
-                        "response_modalities": self._settings["modalities"].value,
-                        "speech_config": {
-                            "voice_config": {
-                                "prebuilt_voice_config": {"voice_name": self._voice_id}
-                            },
-                            "language_code": self._settings["language"],
-                        },
-                        "media_resolution": self._settings["media_resolution"].value,
-                    },
-                    "input_audio_transcription": {},
-                    "output_audio_transcription": {},
-                }
-            }
+                async for message in session.receive():
+                    if message.text:
+                        print(f"_____gemini.py * message.text: {message.text}")
+                        await self.push_frame(LLMTextFrame(message.text))
 
-            # Add context window compression if enabled
-            if self._settings.get("context_window_compression", {}).get("enabled", False):
-                compression_config = {}
-                # Add sliding window (always true if compression is enabled)
-                compression_config["sliding_window"] = {}
+                    ## TODO/WIP audio
+                    # elif message.audio:
+                    # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api#:~:text=Vertex%20AI%20Studio.-,Context%20window,inputs%2C%20model%20outputs%2C%20etc.
+                    # if (
+                    #     message.server_content.model_turn
+                    #     and message.server_content.model_turn.parts
+                    # ):
+                    #     audio_data = []
+                    #     for part in message.server_content.model_turn.parts:
+                    #         if part.inline_data:
+                    #             audio_data.append(
+                    #                 np.frombuffer(part.inline_data.data, dtype=np.int16)
+                    #             )
 
-                # Add trigger_tokens if specified
-                trigger_tokens = self._settings.get("context_window_compression", {}).get(
-                    "trigger_tokens"
-                )
-                if trigger_tokens is not None:
-                    compression_config["trigger_tokens"] = trigger_tokens
-
-                config_data["setup"]["context_window_compression"] = compression_config
-
-            # Add VAD configuration if provided
-            if self._settings.get("vad"):
-                vad_config = {}
-                vad_params = self._settings["vad"]
-
-                # Only add parameters that are explicitly set
-                if vad_params.disabled is not None:
-                    vad_config["disabled"] = vad_params.disabled
-
-                if vad_params.start_sensitivity:
-                    vad_config["start_of_speech_sensitivity"] = vad_params.start_sensitivity.value
-
-                if vad_params.end_sensitivity:
-                    vad_config["end_of_speech_sensitivity"] = vad_params.end_sensitivity.value
-
-                if vad_params.prefix_padding_ms is not None:
-                    vad_config["prefix_padding_ms"] = vad_params.prefix_padding_ms
-
-                if vad_params.silence_duration_ms is not None:
-                    vad_config["silence_duration_ms"] = vad_params.silence_duration_ms
-
-                # Only add automatic_activity_detection if we have VAD settings
-                if vad_config:
-                    realtime_config = {"automatic_activity_detection": vad_config}
-
-                    config_data["setup"]["realtime_input_config"] = realtime_config
-
-            config = events.Config.model_validate(config_data)
-
-            # Add system instruction if available
-            system_instruction = self._system_instruction or ""
-            if self._context and hasattr(self._context, "extract_system_instructions"):
-                system_instruction += "\n" + self._context.extract_system_instructions()
-            if system_instruction:
-                logger.debug(f"Setting system instruction: {system_instruction}")
-                config.setup.system_instruction = events.SystemInstruction(
-                    parts=[events.ContentPart(text=system_instruction)]
-                )
-
-            # Add tools if available
-            if self._tools:
-                logger.debug(f"Gemini is configuring to use tools{self._tools}")
-                config.setup.tools = self.get_llm_adapter().from_standard_tools(self._tools)
-
-            # Send the configuration
-            await self.send_client_event(config)
-
-        except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
-            self._websocket = None
-
-    async def _disconnect(self):
-        logger.info("Disconnecting from Gemini service")
-        try:
-            self._disconnecting = True
-            self._api_session_ready = False
-            await self.stop_all_metrics()
-            if self._websocket:
-                await self._websocket.close()
-                self._websocket = None
-            if self._receive_task:
-                await self.cancel_task(self._receive_task, timeout=1.0)
-                self._receive_task = None
-            self._disconnecting = False
-        except Exception as e:
-            logger.error(f"{self} error disconnecting: {e}")
-
-    async def _ws_send(self, message):
-        # logger.debug(f"Sending message to websocket: {message}")
-        try:
-            if self._websocket:
-                await self._websocket.send(json.dumps(message))
-        except Exception as e:
-            if self._disconnecting:
-                return
-            logger.error(f"Error sending message to websocket: {e}")
-            # In server-to-server contexts, a WebSocket error should be quite rare. Given how hard
-            # it is to recover from a send-side error with proper state management, and that exponential
-            # backoff for retries can have cost/stability implications for a service cluster, let's just
-            # treat a send-side error as fatal.
-            await self.push_error(ErrorFrame(error=f"Error sending client event: {e}", fatal=True))
-
-    #
-    # inbound server event handling
-    # todo: docs link here
-    #
-
-    async def _receive_task_handler(self):
-        async for message in self._websocket:
-            evt = events.parse_server_event(message)
-            # logger.debug(f"Received event: {message[:500]}")
-            # logger.debug(f"Received event: {evt}")
-
-            if evt.setupComplete:
-                await self._handle_evt_setup_complete(evt)
-            elif evt.serverContent and evt.serverContent.modelTurn:
-                await self._handle_evt_model_turn(evt)
-            elif evt.serverContent and evt.serverContent.turnComplete and evt.usageMetadata:
-                await self._handle_evt_turn_complete(evt)
-                await self._handle_evt_usage_metadata(evt)
-            elif evt.serverContent and evt.serverContent.inputTranscription:
-                await self._handle_evt_input_transcription(evt)
-            elif evt.serverContent and evt.serverContent.outputTranscription:
-                await self._handle_evt_output_transcription(evt)
-            elif evt.toolCall:
-                await self._handle_evt_tool_call(evt)
-            elif False:  # !!! todo: error events?
-                await self._handle_evt_error(evt)
-                # errors are fatal, so exit the receive loop
-                return
-            else:
-                pass
+                    elif False:  # !!! todo: error events?
+                        await self._handle_evt_error("evt")
+                        # errors are fatal, so exit the receive loop
+                        return
+                    else:
+                        pass
+            except Exception as e:
+                print(f"___eeee__gemini.py * e: {e}")
 
     #
     #
@@ -808,7 +942,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 }
             }
         )
-        await self.send_client_event(evt)
+        # await self.send_client_event(evt)
 
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(self, tool_result_message):
