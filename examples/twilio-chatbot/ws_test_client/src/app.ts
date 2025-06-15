@@ -187,7 +187,7 @@ class WebsocketClientApp {
       // @ts-ignore
       RTVIConfig.customConnectHandler = () => Promise.resolve(
           {
-              ws_url: "http://localhost:8765/ws",
+              ws_url: "/ws",
           }
       );
       this.rtviClient = new RTVIClient(RTVIConfig);
