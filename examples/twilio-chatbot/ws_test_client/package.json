@@ -12,15 +12,14 @@
   "license": "ISC",
   "description": "",
   "devDependencies": {
-    "@types/node": "^22.15.30",
+    "@types/node": "^22.13.1",
     "@types/protobufjs": "^6.0.0",
-    "@vitejs/plugin-react-swc": "^3.10.1",
-    "typescript": "^5.8.3",
-    "vite": "^6.3.5"
+    "@vitejs/plugin-react-swc": "^3.7.2",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.2"
   },
   "dependencies": {
     "@pipecat-ai/client-js": "^0.4.0",
-    "@pipecat-ai/websocket-transport": "^0.4.2",
-    "protobufjs": "^7.4.0"
+    "@pipecat-ai/websocket-transport": "^0.4.2"
   }
 }
