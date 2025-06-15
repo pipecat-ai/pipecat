@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react-swc';
 
 export default defineConfig({
+    base: "./", //Use relative paths so it works at any mount path
     plugins: [react()],
     server: {
         proxy: {
