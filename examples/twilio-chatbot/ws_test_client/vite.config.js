@@ -6,9 +6,8 @@ export default defineConfig({
     plugins: [react()],
     server: {
         proxy: {
-            // Proxy /api requests to the backend server
             '/ws': {
-                target: 'http://0.0.0.0:8765', // Replace with your backend URL
+                target: 'ws://0.0.0.0:8765', // Replace with your backend URL
                 changeOrigin: true,
             },
         },
