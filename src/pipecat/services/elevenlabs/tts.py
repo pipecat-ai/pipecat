@@ -140,6 +140,8 @@ def build_elevenlabs_voice_settings(
         if key in settings and settings[key] is not None:
             voice_settings[key] = settings[key]
 
+    print(f"Built voice settings: {voice_settings}")
+
     return voice_settings or None
 
 
@@ -249,6 +251,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         return language_to_elevenlabs_language(language)
 
     def _set_voice_settings(self):
+        print(f"Setting voice settings for ElevenLabs TTS: {self._settings}")
         return build_elevenlabs_voice_settings(self._settings)
 
     async def set_model(self, model: str):
@@ -430,15 +433,20 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
     async def _send_text(self, text: str):
         if self._websocket:
             if not self._context_id:
+                # Create new context ID
+                new_context_id = str(uuid.uuid4())
+                # Register the context with the audio context manager
+                await self.create_audio_context(new_context_id)
+
                 # First message for a new context - need a space to initialize
-                msg = {"text": " ", "context_id": str(uuid.uuid4())}
+                msg = {"text": " ", "context_id": new_context_id}
 
                 # Add voice settings only in first message for a context
                 if self._voice_settings:
                     msg["voice_settings"] = self._voice_settings
 
                 await self._websocket.send(json.dumps(msg))
-                self._context_id = msg["context_id"]
+                self._context_id = new_context_id
                 logger.trace(f"Created new context {self._context_id}")
 
                 # Now send the actual text content
@@ -471,9 +479,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
-                    # Create new context ID and register it
-                    self._context_id = str(uuid.uuid4())
-                    await self.create_audio_context(self._context_id)
 
                 await self._send_text(text)
                 await self.start_tts_usage_metrics(text)
