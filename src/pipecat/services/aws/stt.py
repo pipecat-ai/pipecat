@@ -266,6 +266,7 @@ class AWSTranscribeSTTService(STTService):
             Language.JA: "ja-JP",
             Language.KO: "ko-KR",
             Language.ZH: "zh-CN",
+            Language.PL: "pl-PL",
         }
         return language_map.get(language)
 
