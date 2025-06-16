@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Polish support to `AWSTranscribeSTTService`.
+
 - Added new frames `FrameProcessorPauseFrame` and `FrameProcessorResumeFrame`
   which allow pausing and resuming frame processing for a given frame
   processor. These are control frames, so they are ordered. Pausing frame
