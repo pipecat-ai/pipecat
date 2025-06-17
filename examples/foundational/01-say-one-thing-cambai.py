@@ -6,6 +6,7 @@
 
 import argparse
 import os
+import random
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -34,12 +35,15 @@ transport_params = {
 
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting CambAI TTS bot")
-
+    voice_id = os.getenv("CAMBAI_VOICE_ID")
     tts = CambAITTSService(
-        api_key=os.getenv("CAMBAI_API_KEY", "d144c37e-9028-46b2-b23b-3a2ab615959f"),
-        voice_id=int(os.getenv("CAMBAI_VOICE_ID", "20303")),
+        api_key=os.getenv("CAMBAI_API_KEY", ""),
+        voice_id=int(voice_id) if voice_id else None,
         sample_rate=24000,
     )
+    if not voice_id:
+        voice_list = await tts.get_voices()
+        tts._voice_id = str(random.choice(voice_list))
 
     task = PipelineTask(Pipeline([tts, transport.output()]))
 

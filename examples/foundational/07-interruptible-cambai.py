@@ -6,6 +6,7 @@
 
 import argparse
 import os
+import random
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -51,13 +52,21 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     logger.info(f"Starting CambAI interruptible bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
+    voice_id = os.getenv("CAMBAI_VOICE_ID")
     tts = CambAITTSService(
         api_key=os.getenv("CAMBAI_API_KEY", ""),
-        voice_id=int(os.getenv("CAMBAI_VOICE_ID", "20303")),
+        voice_id=int(voice_id) if voice_id else None,
         sample_rate=24000,
     )
-
+    if not voice_id:
+        tts = CambAITTSService(
+            api_key=os.getenv("CAMBAI_API_KEY", ""),
+            sample_rate=24000,
+        )
+        voice_list = await tts.get_voices()
+        voice_id = random.choice(voice_list)
+        print(voice_id)
+        tts._voice_id = str(voice_id)
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [

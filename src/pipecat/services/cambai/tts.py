@@ -7,6 +7,7 @@
 import asyncio
 import base64
 import json
+import time
 import uuid
 import warnings
 import io
@@ -62,7 +63,7 @@ class CambAITTSService(TTSService):
         self,
         *,
         api_key: str,
-        voice_id: int,
+        voice_id: int | None = None,
         base_url: str = "https://client.camb.ai/apis",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -80,6 +81,25 @@ class CambAITTSService(TTSService):
             "output_format": {"sample_rate": sample_rate or 24000}
         }
         self._client = CambAIClient(api_key, base_url)
+
+    async def get_voices(self) -> List[int]:
+        session = await self._client._get_session()
+        headers = {
+            "Accept": "application/json",
+            "x-api-key": self._api_key,
+            "Content-Type": "application/json"
+        }
+        url = f"{self._base_url}/list-voices"
+        async with session.get(url, headers=headers) as response:
+            if response.status != 200:
+                error_text = await response.text()
+                logger.error(f"Camb AI API error: {error_text}")
+                raise Exception(f"Camb AI API error: {error_text}")
+            response_data = await response.json()
+            voice_ids = []
+            for voice in response_data:
+                voice_ids.append(voice["id"])
+            return voice_ids
 
     def can_generate_metrics(self) -> bool:
         return True
@@ -156,10 +176,12 @@ class CambAITTSService(TTSService):
 
             #Step 2: Poll Status for Run_ID
             run_id = None
-            max_attempts = 30
-            attempt = 0
-
-            while attempt < max_attempts:
+            timeout = 60
+            # Set up polling with timeout
+            start_time = time.time()
+        
+            # Poll for results until timeout
+            while time.time() - start_time < timeout:
                 async with session.get(f"{self._base_url}/tts/{task_id}", headers=headers) as response:
                     if response.status != 200:
                         error_text = await response.text()
@@ -175,8 +197,7 @@ class CambAITTSService(TTSService):
                         logger.error(f"Camb AI API error: TTS task failed")
                         await self.push_error(ErrorFrame(f"Camb AI API error: TTS task failed"))
                         return
-                    await asyncio.sleep(1)
-                    attempt += 1
+                    await asyncio.sleep(5)
             if not run_id:
                 logger.error(f"Camb AI API error: Timed out waiting for TTS task to complete")
                 await self.push_error(ErrorFrame(f"Camb AI API error: Timed out waiting for TTS task to complete"))
