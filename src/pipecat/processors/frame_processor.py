@@ -96,6 +96,10 @@ class FrameProcessor(BaseObject):
         self.__input_event = asyncio.Event()
         self.__input_frame_task: Optional[asyncio.Task] = None
 
+        # Handle to cancel the tasks gracefully
+        self.__input_frame_task_cancelling = False
+        self.__push_frame_task_cancelling = False
+
         # Every processor in Pipecat should only output frames from a single
         # task. This avoid problems like audio overlapping. System frames are the
         # exception to this rule. This create this task.
@@ -370,10 +374,12 @@ class FrameProcessor(BaseObject):
             self.__should_block_frames = False
             self.__input_event.clear()
             self.__input_queue = asyncio.Queue()
+            self.__input_frame_task_cancelling = False
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
         if self.__input_frame_task:
+            self.__input_frame_task_cancelling = True
             await self.cancel_task(self.__input_frame_task)
             self.__input_frame_task = None
 
@@ -386,29 +392,42 @@ class FrameProcessor(BaseObject):
                 self.__should_block_frames = False
                 logger.trace(f"{self}: frame processing resumed")
 
+            if self.__input_frame_task_cancelling and self.__input_queue.qsize() == 0:
+                logger.warning(f"{self}: input frame task exiting due to cancellation")
+                self.__input_frame_task_cancelling = False
+                break
+
             (frame, direction, callback) = await self.__input_queue.get()
-
-            # Process the frame.
-            await self.process_frame(frame, direction)
-
-            # If this frame has an associated callback, call it now.
-            if callback:
-                await callback(self, frame, direction)
-
-            self.__input_queue.task_done()
+            try:
+                # Process the frame.
+                await self.process_frame(frame, direction)
+                # If this frame has an associated callback, call it now.
+                if callback:
+                    await callback(self, frame, direction)
+            except Exception as e:
+                logger.exception(f"{self}: error processing frame: {e}")
+                await self.push_error(ErrorFrame(str(e)))
+            finally:
+                self.__input_queue.task_done()
 
     def __create_push_task(self):
         if not self.__push_frame_task:
             self.__push_queue = asyncio.Queue()
+            self.__push_frame_task_cancelling = False
             self.__push_frame_task = self.create_task(self.__push_frame_task_handler())
 
     async def __cancel_push_task(self):
         if self.__push_frame_task:
+            self.__push_frame_task_cancelling = True
             await self.cancel_task(self.__push_frame_task)
             self.__push_frame_task = None
 
     async def __push_frame_task_handler(self):
         while True:
+            if self.__push_frame_task_cancelling and self.__push_queue.qsize() == 0:
+                logger.warning(f"{self} Push frame task is cancelling, exiting handler.")
+                self.__push_frame_task_cancelling = False
+                break
             (frame, direction) = await self.__push_queue.get()
             await self.__internal_push_frame(frame, direction)
             self.__push_queue.task_done()
