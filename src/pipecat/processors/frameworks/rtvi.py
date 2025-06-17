@@ -6,6 +6,7 @@
 
 import asyncio
 import base64
+import time
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -37,6 +38,7 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMMessagesAppendFrame,
     LLMTextFrame,
     MetricsFrame,
     StartFrame,
@@ -64,6 +66,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
+from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
@@ -165,6 +168,65 @@ class RTVIActionFrame(DataFrame):
     message_id: Optional[str] = None
 
 
+class RTVIRawClientMessageData(BaseModel):
+    """Data structure expected from client messages sent to the RTVI server."""
+
+    t: str
+    d: Optional[Any] = None
+
+
+class RTVIClientMessage(BaseModel):
+    """Cleansed data structure for client messages for handling."""
+
+    msg_id: str
+    type: str
+    data: Optional[Any] = None
+
+
+@dataclass
+class RTVIClientMessageFrame(SystemFrame):
+    """A frame for sending messages from the client to the RTVI server.
+
+    This frame is meant for custom messaging from the client to the server
+    and expects a server-response message.
+    """
+
+    msg_id: str
+    type: str
+    data: Optional[Any] = None
+
+
+@dataclass
+class RTVIServerResponseFrame(SystemFrame):
+    """A frame for sending messages from the client to the RTVI server.
+
+    This frame is meant for custom messaging from the client to the server
+    and expects a server-response message.
+    """
+
+    client_msg: RTVIClientMessageFrame
+    data: Optional[Any] = None
+
+
+class RTVIRawServerResponseData(BaseModel):
+    """Data structure for server responses to client messages."""
+
+    t: str
+    d: Optional[Any] = None
+
+
+class RTVIServerResponse(BaseModel):
+    """A response message from the client to the RTVI server.
+
+    This message is used to respond to custom messages sent by the server.
+    """
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["server-response"] = "server-response"
+    id: str
+    data: RTVIRawServerResponseData
+
+
 class RTVIMessage(BaseModel):
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: str
@@ -261,6 +323,18 @@ class RTVILLMFunctionCallMessage(BaseModel):
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
     type: Literal["llm-function-call"] = "llm-function-call"
     data: RTVILLMFunctionCallMessageData
+
+
+class RTVIAppendToContextData(BaseModel):
+    role: Literal["user", "assistant"] | str
+    content: Any
+    run_immediately: bool = False
+
+
+class RTVIAppendToContext(BaseModel):
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["append-to-context"] = "append-to-context"
+    data: RTVIAppendToContextData
 
 
 class RTVILLMFunctionCallStartMessageData(BaseModel):
@@ -508,6 +582,8 @@ class RTVIObserver(BaseObserver):
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVIServerMessage(data=frame.data)
             await self.push_transport_message_urgent(message)
+        elif isinstance(frame, RTVIServerResponseFrame):
+            await self._send_server_response(frame)
 
         if mark_as_seen:
             self._frames_seen.add(frame.id)
@@ -629,6 +705,14 @@ class RTVIObserver(BaseObserver):
         message = RTVIMetricsMessage(data=metrics)
         await self.push_transport_message_urgent(message)
 
+    async def _send_server_response(self, frame: RTVIServerResponseFrame):
+        """Send a response to the client for a specific request."""
+        message = RTVIServerResponse(
+            id=str(frame.client_msg.msg_id),
+            data=RTVIRawServerResponseData(t=frame.client_msg.type, d=frame.data),
+        )
+        await self.push_transport_message_urgent(message)
+
 
 class RTVIProcessor(FrameProcessor):
     def __init__(
@@ -636,6 +720,7 @@ class RTVIProcessor(FrameProcessor):
         *,
         config: Optional[RTVIConfig] = None,
         transport: Optional[BaseTransport] = None,
+        context_aggregator: Optional[OpenAIContextAggregatorPair] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -659,6 +744,7 @@ class RTVIProcessor(FrameProcessor):
 
         self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
+        self._register_event_handler("on_client_message")
 
         self._input_transport = None
         self._transport = transport
@@ -667,12 +753,31 @@ class RTVIProcessor(FrameProcessor):
             if isinstance(input_transport, BaseInputTransport):
                 self._input_transport = input_transport
                 self._input_transport.enable_audio_in_stream_on_start(False)
+        self._context_aggregator = context_aggregator
 
     def register_action(self, action: RTVIAction):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "The actions API is deprecated, use server and client messages instead.",
+                DeprecationWarning,
+            )
+
         id = self._action_id(action.service, action.action)
         self._registered_actions[id] = action
 
     def register_service(self, service: RTVIService):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "The actions API is deprecated, use server and client messages instead.",
+                DeprecationWarning,
+            )
+
         self._registered_services[service.name] = service
 
     async def set_client_ready(self):
@@ -689,6 +794,18 @@ class RTVIProcessor(FrameProcessor):
 
     async def interrupt_bot(self):
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+
+    async def send_server_message(self, data: Any):
+        """Send a server message to the client."""
+        message = RTVIServerMessage(data=data)
+        await self._send_server_message(message)
+
+    async def send_server_response(self, client_msg: RTVIClientMessage, data: Any):
+        """Send a server response for a given client message."""
+        message = RTVIServerResponse(
+            id=client_msg.msg_id, data=RTVIRawServerResponseData(t=client_msg.type, d=data)
+        )
+        await self._send_server_message(message)
 
     async def send_error(self, error: str):
         await self._send_error_frame(ErrorFrame(error=error))
@@ -820,6 +937,9 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_update_config(message.id, update_config)
                 case "disconnect-bot":
                     await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+                case "client-message":
+                    data = RTVIRawClientMessageData.model_validate(message.data)
+                    await self._handle_client_message(message.id, data)
                 case "action":
                     action = RTVIActionRun.model_validate(message.data)
                     action_frame = RTVIActionFrame(message_id=message.id, rtvi_action_run=action)
@@ -827,11 +947,14 @@ class RTVIProcessor(FrameProcessor):
                 case "llm-function-call-result":
                     data = RTVILLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
+                case "append-to-context":
+                    data = RTVIAppendToContextData.model_validate(message.data)
+                    await self._handle_update_context(data)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
 
                 case _:
-                    await self._send_error_response(message.id, f"Unsupported type {message.type}")
+                    await self._send_error_response(message.id, f"UNSUPPORTED type {message.type}")
 
         except ValidationError as e:
             await self._send_error_response(message.id, f"Invalid message: {e}")
@@ -870,16 +993,43 @@ class RTVIProcessor(FrameProcessor):
             logger.error(f"Error processing audio buffer: {e}")
 
     async def _handle_describe_config(self, request_id: str):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
+                DeprecationWarning,
+            )
+
         services = list(self._registered_services.values())
         message = RTVIDescribeConfig(id=request_id, data=RTVIDescribeConfigData(config=services))
         await self._push_transport_message(message)
 
     async def _handle_describe_actions(self, request_id: str):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "The Actions API is deprecated, use custom server and client messages instead.",
+                DeprecationWarning,
+            )
+
         actions = list(self._registered_actions.values())
         message = RTVIDescribeActions(id=request_id, data=RTVIDescribeActionsData(actions=actions))
         await self._push_transport_message(message)
 
     async def _handle_get_config(self, request_id: str):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
+                DeprecationWarning,
+            )
+
         message = RTVIConfigResponse(id=request_id, data=self._config)
         await self._push_transport_message(message)
 
@@ -895,6 +1045,15 @@ class RTVIProcessor(FrameProcessor):
                 service_config.options.append(config)
 
     async def _update_service_config(self, config: RTVIServiceConfig):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
+                DeprecationWarning,
+            )
+
         service = self._registered_services[config.service]
         for option in config.options:
             handler = service._options_dict[option.name].handler
@@ -902,6 +1061,15 @@ class RTVIProcessor(FrameProcessor):
             self._update_config_option(service.name, option)
 
     async def _update_config(self, data: RTVIConfig, interrupt: bool):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "Configuration helpers are deprecated. If your application needs this behavior, use custom server and client messages.",
+                DeprecationWarning,
+            )
+
         if interrupt:
             await self.interrupt_bot()
         for service_config in data.config:
@@ -910,6 +1078,41 @@ class RTVIProcessor(FrameProcessor):
     async def _handle_update_config(self, request_id: str, data: RTVIUpdateConfig):
         await self._update_config(RTVIConfig(config=data.config), data.interrupt)
         await self._handle_get_config(request_id)
+
+    async def _handle_update_context(self, data: RTVIAppendToContextData):
+        if data.run_immediately:
+            await self.interrupt_bot()
+        frame = LLMMessagesAppendFrame(messages=[{"role": data.role, "content": data.content}])
+        await self.push_frame(frame)
+        if data.run_immediately and self._context_aggregator:
+            # If specified, immediately push the full context frame to trigger an LLM run.
+            match data.role:
+                case "user":
+                    frame = self._context_aggregator.user().get_context_frame()
+                    await self.push_frame(frame)
+                case "assistant":
+                    frame = self._context_aggregator.assistant().get_context_frame()
+                    await self.push_frame(frame)
+                case _:
+                    logger.warning(f"Unknown role {data.role} in RTVIAppendToContext")
+
+    async def _handle_client_message(self, msg_id: str, data: RTVIRawClientMessageData):
+        """Handle a client message frame."""
+        if not data:
+            await self._send_error_response(msg_id, "Malformed client message")
+            return
+
+        # Create a RTVIClientMessageFrame to push the message
+        frame = RTVIClientMessageFrame(msg_id=msg_id, type=data.t, data=data.d)
+        await self.push_frame(frame)
+        await self._call_event_handler(
+            "on_client_message",
+            RTVIClientMessage(
+                msg_id=msg_id,
+                type=data.t,
+                data=data.d,
+            ),
+        )
 
     async def _handle_function_call_result(self, data):
         frame = FunctionCallResultFrame(
@@ -942,6 +1145,10 @@ class RTVIProcessor(FrameProcessor):
             id=self._client_ready_id,
             data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, config=self._config.config),
         )
+        await self._push_transport_message(message)
+
+    async def _send_server_message(self, message: RTVIServerMessage | RTVIServerResponse):
+        """Send a message or response to the client."""
         await self._push_transport_message(message)
 
     async def _send_error_frame(self, frame: ErrorFrame):

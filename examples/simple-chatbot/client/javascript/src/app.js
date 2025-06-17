@@ -176,6 +176,7 @@ class ChatbotClient {
         },
       },
     });
+    window.client = this; // Expose client globally for debugging
 
     // Set up listeners for media track events
     this.setupTrackListeners();
@@ -222,6 +223,20 @@ class ChatbotClient {
         return { success: true, weather: weather.current };
       }
     );
+  }
+
+  getLLMConfig() {
+    const logConfig = (config) => {
+      console.log('LLM Config:', JSON.stringify(config, null, 2));
+    };
+    this.pcClient
+      .sendClientRequest('get-llm-config')
+      .then((config) => {
+        logConfig(config);
+      })
+      .catch((error) => {
+        console.error('Error fetching LLM config:', error);
+      });
   }
 
   /**
