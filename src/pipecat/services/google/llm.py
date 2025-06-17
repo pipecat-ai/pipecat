@@ -42,6 +42,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
+from pipecat.services.google.llm_vertex import GoogleVertexLLMService
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
@@ -702,3 +703,28 @@ class GoogleLLMService(LLMService):
         user = GoogleUserContextAggregator(context, params=user_params)
         assistant = GoogleAssistantContextAggregator(context, params=assistant_params)
         return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
+
+
+# # class GoogleGenaiClient:
+# class VertexAIGoogleLLMService(GoogleLLMService):
+#     def __init__(
+#         self,
+#         *,
+#         credentials: Optional[str] = None,
+#         credentials_path: Optional[str] = None,
+#         vertex_params: Optional[GoogleVertexLLMService.InputParams] = None,
+#         model: str = "gemini-2.0-flash",
+#         # params: Optional[InputParams] = None,
+#         # system_instruction: Optional[str] = None,
+#         # tools: Optional[List[Dict[str, Any]]] = None,
+#         # tool_config: Optional[Dict[str, Any]] = None,
+#         **kwargs,
+#     ):
+#         super().__init__(model=model, **kwargs)
+
+#     def _create_client(self, vertex_params: GoogleVertexLLMService.InputParams):
+#         return genai.Client(
+#             vertexai=True,
+#             project=vertex_params.project_id,
+#             location=vertex_params.location,
+#         )

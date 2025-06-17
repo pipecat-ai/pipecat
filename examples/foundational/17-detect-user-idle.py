@@ -19,16 +19,21 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
+from pipecat.services.gemini_multimodal_live.gemini import (
+    GeminiMultimodalModalities,
+    InputParams,
+    VertexAIGeminiMultimodalLiveLLMService,
+)
+from pipecat.services.google.llm_vertex import (
+    GoogleVertexLLMService,
+)
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
-from pipecat.services.gemini_multimodal_live.gemini import (
-    GeminiMultimodalLiveLLMService,
-    GeminiMultimodalModalities,
-    InputParams,
-)
+# from pipecat.services.google.llm import VertexAIGoogleLLMService
+
 
 load_dotenv(override=True)
 
@@ -64,15 +69,25 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-
-    # using vertex ai - todo: rename service
-    llm = GeminiMultimodalLiveLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
+    llm = VertexAIGeminiMultimodalLiveLLMService(
+        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        vertex_params=GoogleVertexLLMService.InputParams(
+            project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"), location="us-central1"
+        ),
         # params=InputParams(modalities=GeminiMultimodalModalities.AUDIO),
         params=InputParams(modalities=GeminiMultimodalModalities.TEXT),
         voice_id="Puck",  # Aoede, Charon, Fenrir, Kore, Puck
         model="gemini-2.0-flash-live-preview-04-09",
     )
+
+    # llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+
+    # llm = VertexAIGoogleLLMService(
+    #     credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+    #     vertex_params=GoogleVertexLLMService.InputParams(
+    #         project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"), location="us-central1"
+    #     ),
+    # )
 
     messages = [
         {

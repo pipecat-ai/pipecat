@@ -3,8 +3,6 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-import os
-
 import base64
 import json
 import time
@@ -29,6 +27,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
+    LLMMessagesFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
@@ -42,7 +41,6 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    LLMMessagesFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import (
@@ -54,13 +52,13 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.google.google import GoogleLLMContext
+from pipecat.services.google.llm_vertex import GoogleVertexLLMService
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
-from pipecat.services.google.google import GoogleLLMContext
-
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
@@ -70,7 +68,7 @@ from . import events
 
 try:
     from google import genai
-    from google.genai.types import Content, LiveConnectConfig, Part, LiveClientContent, Modality
+    from google.genai.types import Content, LiveClientContent, LiveConnectConfig, Modality, Part
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -508,17 +506,19 @@ class InputParams(BaseModel):
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
-# TODO: rename when the prettier generic client bit is in place
-# VertexAIGeminiMultimodalLiveLLMService
+## TODO: GeminiMultimodalLiveLLMService
 class GeminiMultimodalLiveLLMService(LLMService):
-    """Provides access to Google's Gemini Multimodal Live API.
+    pass
+
+
+class VertexAIGeminiMultimodalLiveLLMService(LLMService):
+    """Provides access to Google's Gemini Multimodal Live API via Vertex AI.
 
     This service enables real-time conversations with Gemini, supporting both
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
 
     Args:
-        api_key (str): Google AI API key
         model (str, optional): Model identifier to use. Defaults to
             "models/gemini-2.0-flash-live-001".
         voice_id (str, optional): TTS voice identifier. Defaults to "Charon".
@@ -541,8 +541,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
     def __init__(
         self,
         *,
-        api_key: str,
-        model="models/gemini-2.0-flash-live-001",
+        credentials: Optional[str] = None,
+        credentials_path: Optional[str] = None,
+        vertex_params: Optional[GoogleVertexLLMService.InputParams] = None,
+        model: str = "gemini-2.0-flash-live-preview-04-09",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
@@ -557,8 +559,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         params = params or InputParams()
 
         self._last_sent_time = 0
-        self._api_key = api_key
-        self._client = self._create_client(api_key)
+        self._client = self._create_client(vertex_params)
         self.set_model_name(model)
         self._voice_id = voice_id
         self._language_code = params.language
@@ -626,11 +627,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
     def can_generate_metrics(self) -> bool:
         return True
 
-    def _create_client(self, api_key: str):
+    def _create_client(self, vertex_params: GoogleVertexLLMService.InputParams):
         return genai.Client(
             vertexai=True,
-            project=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-            location="us-central1",
+            project=vertex_params.project_id,
+            location=vertex_params.location,
+            # location="us-central1",
             # http_options={"api_version": "v1beta"}
         )
 
@@ -724,6 +726,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
     # StartFrame, StopFrame, CancelFrame implemented in base class
     #
+    async def _process_context(self, context: OpenAILLMContext):
+        print(f"_____gemini.py * : _process_context")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -732,7 +736,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, OpenAILLMContextFrame):
-            print(f"_____gemini.py * OpenAILLMContextFrame: {frame.context}")
+            print(f"_____gemini.py * Vertex AI : {frame.context}")
             context: GeminiMultimodalLiveContext = GeminiMultimodalLiveContext.upgrade(
                 frame.context
             )
@@ -758,12 +762,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
         elif isinstance(frame, LLMMessagesFrame):
             if frame.messages and frame.messages[-1].get("role") == "system":
                 self._context.add_messages(frame.messages)
-                # self._context.set_messages(frame.messages)
                 self._receive_task = self.create_task(self._receive_task_handler(self._context))
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, InputAudioRawFrame):
-            await self._send_user_audio(frame)
+            # await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, InputImageRawFrame):
             await self._send_user_video(frame)
@@ -771,6 +774,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         elif isinstance(frame, StartInterruptionFrame):
             await self._handle_interruption()
             await self.push_frame(frame, direction)
+
+        # elif isinstance(frame, TranscriptionFrame)
+        # await self.push_frame(frame, direction)
+
         elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
             await self.push_frame(frame, direction)
@@ -796,20 +803,23 @@ class GeminiMultimodalLiveLLMService(LLMService):
     # https://github.com/google-gemini/cookbook/blob/cb04a04359ac7937c4b22e8b4c381451ba1e5d93/quickstarts/Get_started_LiveAPI.py
 
     async def _receive_task_handler(self, context):
-        print(f"_____gemini.py * _receive_task_handler::::_receive_task_handler")
+        print(f"_____gemini.py * _receive_task_handler::  ::_receive_task_handler")
         async with self._client.aio.live.connect(
             model=self._model_name,
             # config=self._config,
             config=LiveConnectConfig(response_modalities=[self._settings["modalities"]]),
         ) as session:
-            lcc = LiveClientContent()
+            text_modality = GeminiMultimodalModalities.TEXT == self._settings["modalities"]
+            audio_modality = GeminiMultimodalModalities.AUDIO == self._settings["modalities"]
 
             try:
-                if GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
+                if text_modality:
                     print(f"_____gemini.py * GeminiMultimodalModalities.TEXT - send_client_content")
                     await session.send_client_content(turns=self._context.messages)
-                elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
-                    print(f"WIP_____gemini.py * GeminiMultimodalModalities.AUDIO - send")
+                elif audio_modality:
+                    print(
+                        f"WIP_____gemini.py * GeminiMultimodalModalities.AUDIO - send_realtime_input"
+                    )
                     # await session.send_realtime_input(
                     #     audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
                     # )
@@ -819,31 +829,58 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
                 async for message in session.receive():
                     if message.text:
-                        print(f"_____gemini.py * message.text: {message.text}")
                         await self.push_frame(LLMTextFrame(message.text))
 
-                    ## TODO/WIP audio
-                    # elif message.audio:
-                    # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api#:~:text=Vertex%20AI%20Studio.-,Context%20window,inputs%2C%20model%20outputs%2C%20etc.
-                    # if (
-                    #     message.server_content.model_turn
-                    #     and message.server_content.model_turn.parts
-                    # ):
-                    #     audio_data = []
-                    #     for part in message.server_content.model_turn.parts:
-                    #         if part.inline_data:
-                    #             audio_data.append(
-                    #                 np.frombuffer(part.inline_data.data, dtype=np.int16)
-                    #             )
+                    elif message.server_content:
+                        if message.server_content.turn_complete:
+                            # if text_modality:
+                            if audio_modality:
+                                await self.push_frame(TTSStoppedFrame())
+                            await self.push_frame(LLMFullResponseEndFrame())
+                            self._bot_is_speaking = False
 
-                    elif False:  # !!! todo: error events?
-                        await self._handle_evt_error("evt")
-                        # errors are fatal, so exit the receive loop
-                        return
+                            ## TODO/WIP audio
+                            # elif message.audio:
+                            # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api#:~:text=Vertex%20AI%20Studio.-,Context%20window,inputs%2C%20model%20outputs%2C%20etc.
+                            # if (
+                            #     message.server_content.model_turn
+                            #     and message.server_content.model_turn.parts
+                            # ):
+                            #     audio_data = []
+                            #     for part in message.server_content.model_turn.parts:
+                            #         if part.inline_data:
+                            #             audio_data.append(
+                            #                 np.frombuffer(part.inline_data.data, dtype=np.int16)
+                            #             )
+
+                            # inline_data = part.inlineData
+                            # if not inline_data:
+                            #     return
+                            # if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
+                            #     logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
+                            #     return
+
+                            # audio = base64.b64decode(inline_data.data)
+                            # if not audio:
+                            #     return
+
+                            # if not self._bot_is_speaking:
+                            #     self._bot_is_speaking = True
+                            #     await self.push_frame(TTSStartedFrame())
+                            #     await self.push_frame(LLMFullResponseStartFrame())
+
+                            # self._bot_audio_buffer.extend(audio)
+                            # frame = TTSAudioRawFrame(
+                            #     audio=audio,
+                            #     sample_rate=self._sample_rate,
+                            #     num_channels=1,
+                            # )
+                            # await self.push_frame(frame)
+
                     else:
                         pass
             except Exception as e:
-                print(f"___eeee__gemini.py * e: {e}")
+                print(f"_____gemini.py * _receive_task_handler error: {e}")
 
     #
     #
