@@ -49,6 +49,7 @@ from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles FastAPI startup and shutdown."""
@@ -70,8 +71,8 @@ app.add_middleware(
 # Mount the frontend at /
 app.mount("/client", SmallWebRTCPrebuiltUI)
 
-class SimulateFreezeInput(FrameProcessor):
 
+class SimulateFreezeInput(FrameProcessor):
     def __init__(
         self,
         **kwargs,
@@ -123,18 +124,19 @@ class SimulateFreezeInput(FrameProcessor):
                 # Emulation as if the user has spoken and the stt transcribed
                 await self.push_frame(UserStartedSpeakingFrame())
                 await self.push_frame(StartInterruptionFrame())
-                await self.push_frame(TranscriptionFrame(
-                    "Count from 01 to 20!",
-                    "",
-                    time_now_iso8601(),
-                ))
+                await self.push_frame(
+                    TranscriptionFrame(
+                        "Count from 01 to 20!",
+                        "",
+                        time_now_iso8601(),
+                    )
+                )
                 await self.push_frame(UserStoppedSpeakingFrame())
                 # sleeping 1s before interrupting
                 wait_time = random.uniform(1, 10)
                 await asyncio.sleep(wait_time)
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
-
 
 
 async def run_example(websocket_client):
@@ -177,7 +179,7 @@ async def run_example(websocket_client):
 
     pipeline = Pipeline(
         [
-            #freeze,
+            # freeze,
             transport.input(),
             rtvi,
             stt,
@@ -197,7 +199,7 @@ async def run_example(websocket_client):
             enable_usage_metrics=True,
             report_only_initial_ttfb=True,
         ),
-        idle_timeout_secs=120
+        idle_timeout_secs=120,
     )
 
     @transport.event_handler("on_client_connected")
@@ -235,6 +237,7 @@ async def websocket_endpoint(websocket: WebSocket):
         await run_example(websocket)
     except Exception as e:
         print(f"Exception in run_bot: {e}")
+
 
 @app.post("/connect")
 async def bot_connect(request: Request) -> Dict[Any, Any]:

@@ -60,6 +60,8 @@ class RecordingSerializer extends ProtobufFrameSerializer {
 }
 
 class WebsocketClientApp {
+  private RECORDING_TIME_MS = 5000
+
   private rtviClient: RTVIClient | null = null;
   private connectBtn: HTMLButtonElement | null = null;
   private disconnectBtn: HTMLButtonElement | null = null;
@@ -240,10 +242,11 @@ class WebsocketClientApp {
 
       this.log("Starting to recording the next 05s of audio");
       this.recordingSerializer.startRecording()
-      await this.sleep(5000)
+      await this.sleep(this.RECORDING_TIME_MS)
       this.recordingSerializer.stopRecording()
       this.log("Recording stopped");
       this.rtviClient.enableMic(false)
+      this.startSendingRecordedAudio()
     } catch (error) {
       this.log(`Error connecting: ${(error as Error).message}`);
       this.updateStatus('Error');
