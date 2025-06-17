@@ -528,6 +528,29 @@ class StopTaskFrame(SystemFrame):
 
 
 @dataclass
+class FrameProcessorPauseUrgentFrame(SystemFrame):
+    """This processor is used to pause frame processing for the given processor
+    as fast as possible. Pausing frame processing will keep frames in the
+    internal queue which will then be processed when frame processing is resumed
+    with `FrameProcessorResumeFrame`.
+
+    """
+
+    processor: str
+
+
+@dataclass
+class FrameProcessorResumeUrgentFrame(SystemFrame):
+    """This processor is used to resume frame processing for the given processor
+    if it was previously paused as fast as possible. After resuming frame
+    processing all queued frames will be processed in the order received.
+
+    """
+
+    processor: str
+
+
+@dataclass
 class StartInterruptionFrame(SystemFrame):
     """Emitted by VAD to indicate that a user has started speaking (i.e. is
     interruption). This is similar to UserStartedSpeakingFrame except that it
@@ -852,6 +875,27 @@ class StopFrame(ControlFrame):
     """
 
     pass
+
+
+@dataclass
+class FrameProcessorPauseFrame(ControlFrame):
+    """This processor is used to pause frame processing for the given
+    processor. Pausing frame processing will keep frames in the internal queue
+    which will then be processed when frame processing is resumed with
+    `FrameProcessorResumeFrame`."""
+
+    processor: str
+
+
+@dataclass
+class FrameProcessorResumeFrame(ControlFrame):
+    """This processor is used to resume frame processing for the given processor
+    if it was previously paused. After resuming frame processing all queued
+    frames will be processed in the order received.
+
+    """
+
+    processor: str
 
 
 @dataclass
