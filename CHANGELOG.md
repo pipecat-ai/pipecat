@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added reconnection logic and audio buffer management to `GladiaSTTService`.
 
+- The `TurnTrackingObserver` now ends a turn upon observing an `EndFrame` or
+  `CancelFrame`.
+
 - Added Polish support to `AWSTranscribeSTTService`.
 
 - Added new frames `FrameProcessorPauseFrame` and `FrameProcessorResumeFrame`
