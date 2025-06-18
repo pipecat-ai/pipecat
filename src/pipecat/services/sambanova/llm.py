@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+
 from pipecat.frames.frames import (
     LLMTextFrame,
 )
@@ -35,37 +36,42 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         self,
         *,
         api_key: str,
-        model: str = 'Llama-4-Maverick-17B-128E-Instruct',
-        base_url: str = 'https://api.sambanova.ai/v1',
+        model: str = "Llama-4-Maverick-17B-128E-Instruct",
+        base_url: str = "https://api.sambanova.ai/v1",
         **kwargs: Dict[Any, Any],
     ) -> None:
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(
-        self, api_key: Optional[str] = None, base_url: Optional[str] = None, **kwargs: Dict[Any, Any]
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        **kwargs: Dict[Any, Any],
     ) -> Any:
         """Create OpenAI-compatible client for SambaNova API endpoint."""
 
-        logger.debug(f'Creating SambaNova client with API {base_url}')
+        logger.debug(f"Creating SambaNova client with API {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    async def get_chat_completions(self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]) -> Any:
+    async def get_chat_completions(
+        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+    ) -> Any:
         """Get chat completions from SambaNova API endpoint."""
 
         params = {
-            'model': self.model_name,
-            'stream': True,
-            'messages': messages,
-            'tools': context.tools,
-            'tool_choice': context.tool_choice,
-            'stream_options': {'include_usage': True},
-            'temperature': self._settings['temperature'],
-            'top_p': self._settings['top_p'],
-            'max_tokens': self._settings['max_tokens'],
-            'max_completion_tokens': self._settings['max_completion_tokens'],
+            "model": self.model_name,
+            "stream": True,
+            "messages": messages,
+            "tools": context.tools,
+            "tool_choice": context.tool_choice,
+            "stream_options": {"include_usage": True},
+            "temperature": self._settings["temperature"],
+            "top_p": self._settings["top_p"],
+            "max_tokens": self._settings["max_tokens"],
+            "max_completion_tokens": self._settings["max_completion_tokens"],
         }
 
-        params.update(self._settings['extra'])
+        params.update(self._settings["extra"])
 
         chunks = await self._client.chat.completions.create(**params)
         return chunks
@@ -78,13 +84,15 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         arguments_list = []
         tool_id_list = []
         func_idx = 0
-        function_name = ''
-        arguments = ''
-        tool_call_id = ''
+        function_name = ""
+        arguments = ""
+        tool_call_id = ""
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(context)
+        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
+            context
+        )
 
         async for chunk in chunk_stream:
             if chunk.usage:
@@ -120,9 +128,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
                     functions_list.append(function_name)
                     arguments_list.append(arguments)
                     tool_id_list.append(tool_call_id)
-                    function_name = ''
-                    arguments = ''
-                    tool_call_id = ''
+                    function_name = ""
+                    arguments = ""
+                    tool_call_id = ""
                     func_idx += 1
                 if tool_call.function and tool_call.function.name:
                     function_name += tool_call.function.name
@@ -135,8 +143,10 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
-            elif hasattr(chunk.choices[0].delta, 'audio') and chunk.choices[0].delta.audio.get('transcript'):
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio['transcript']))
+            elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
+                "transcript"
+            ):
+                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
@@ -150,7 +160,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
             function_calls = []
 
-            for function_name, arguments, tool_id in zip(functions_list, arguments_list, tool_id_list):
+            for function_name, arguments, tool_id in zip(
+                functions_list, arguments_list, tool_id_list
+            ):
                 # This allows compatibility until SambaNova API introduces indexing in tool calls.
                 if len(arguments) < 1:
                     continue
