@@ -27,9 +27,9 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
     def __init__(
         self,
         *,
-        model: str = 'Whisper-Large-v3',
+        model: str = "Whisper-Large-v3",
         api_key: Optional[str] = None,
-        base_url: str = 'https://api.sambanova.ai/v1',
+        base_url: str = "https://api.sambanova.ai/v1",
         language: Optional[Language] = Language.EN,
         prompt: Optional[str] = None,
         temperature: Optional[float] = None,
@@ -50,16 +50,16 @@ class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
 
         # Build kwargs dict with only set parameters
         kwargs = {
-            'file': ('audio.wav', audio, 'audio/wav'),
-            'model': self.model_name,
-            'response_format': 'json',
-            'language': self._language,
+            "file": ("audio.wav", audio, "audio/wav"),
+            "model": self.model_name,
+            "response_format": "json",
+            "language": self._language,
         }
 
         if self._prompt is not None:
-            kwargs['prompt'] = self._prompt
+            kwargs["prompt"] = self._prompt
 
         if self._temperature is not None:
-            kwargs['temperature'] = self._temperature
+            kwargs["temperature"] = self._temperature
 
         return await self._client.audio.transcriptions.create(**kwargs)
