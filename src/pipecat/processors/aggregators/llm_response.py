@@ -404,7 +404,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             # is received (e.g., due to a glitch), this safeguard ensures
             # the bot doesn't hang indefinitely while waiting to speak again.
             if not self._bot_speaking:
-                logger.debug("User stopped speaking but no new aggregation received. Forcing aggregation processing to resume bot response.")
+                logger.debug(
+                    "User stopped speaking but no new aggregation received. Forcing aggregation processing to resume bot response."
+                )
                 await self._process_aggregation()
 
     async def _handle_bot_started_speaking(self, _: BotStartedSpeakingFrame):
