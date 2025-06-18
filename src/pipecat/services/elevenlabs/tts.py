@@ -428,26 +428,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 break
 
     async def _send_text(self, text: str):
-        if self._websocket:
-            if not self._context_id:
-                # First message for a new context - need a space to initialize
-                msg = {"text": " ", "context_id": str(uuid.uuid4())}
-
-                # Add voice settings only in first message for a context
-                if self._voice_settings:
-                    msg["voice_settings"] = self._voice_settings
-
-                await self._websocket.send(json.dumps(msg))
-                self._context_id = msg["context_id"]
-                logger.trace(f"Created new context {self._context_id}")
-
-                # Now send the actual text content
-                msg = {"text": text, "context_id": self._context_id}
-                await self._websocket.send(json.dumps(msg))
-            else:
-                # Continuing with an existing context
-                msg = {"text": text, "context_id": self._context_id}
-                await self._websocket.send(json.dumps(msg))
+        if self._websocket and self._context_id:
+            msg = {"text": text, "context_id": self._context_id}
+            await self._websocket.send(json.dumps(msg))
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -475,8 +458,17 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     self._context_id = str(uuid.uuid4())
                     await self.create_audio_context(self._context_id)
 
-                await self._send_text(text)
-                await self.start_tts_usage_metrics(text)
+                    # Initialize context with voice settings
+                    msg = {"text": " ", "context_id": self._context_id}
+                    if self._voice_settings:
+                        msg["voice_settings"] = self._voice_settings
+                    await self._websocket.send(json.dumps(msg))
+                    logger.trace(f"Created new context {self._context_id} with voice settings")
+
+                    await self._send_text(text)
+                    await self.start_tts_usage_metrics(text)
+                else:
+                    await self._send_text(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
