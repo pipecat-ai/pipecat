@@ -77,6 +77,7 @@ class TranslationConfig(BaseModel):
         lipsync: Whether to enable lip-sync optimization for translations
         context_adaptation: Whether to enable context-aware translation adaptation
         context: Additional context to help with translation accuracy
+        informal: Force informal language forms when available
     """
 
     target_languages: Optional[List[str]] = None
@@ -85,6 +86,7 @@ class TranslationConfig(BaseModel):
     lipsync: Optional[bool] = None
     context_adaptation: Optional[bool] = None
     context: Optional[str] = None
+    informal: Optional[bool] = None
 
 
 class RealtimeProcessingConfig(BaseModel):

@@ -15,9 +15,11 @@ from typing import (
     Literal,
     Mapping,
     Optional,
+    Sequence,
     Tuple,
 )
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -448,6 +450,7 @@ class StartFrame(SystemFrame):
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
     report_only_initial_ttfb: bool = False
+    interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
 
 
 @dataclass
@@ -522,6 +525,29 @@ class StopTaskFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class FrameProcessorPauseUrgentFrame(SystemFrame):
+    """This processor is used to pause frame processing for the given processor
+    as fast as possible. Pausing frame processing will keep frames in the
+    internal queue which will then be processed when frame processing is resumed
+    with `FrameProcessorResumeFrame`.
+
+    """
+
+    processor: str
+
+
+@dataclass
+class FrameProcessorResumeUrgentFrame(SystemFrame):
+    """This processor is used to resume frame processing for the given processor
+    if it was previously paused as fast as possible. After resuming frame
+    processing all queued frames will be processed in the order received.
+
+    """
+
+    processor: str
 
 
 @dataclass
@@ -644,6 +670,32 @@ class MetricsFrame(SystemFrame):
 
 
 @dataclass
+class FunctionCallFromLLM:
+    """Represents a function call returned by the LLM to be registered for execution.
+
+    Attributes:
+        function_name (str): The name of the function.
+        tool_call_id (str): A unique identifier for the function call.
+        arguments (Mapping[str, Any]): The arguments for the function.
+        context (OpenAILLMContext): The LLM context.
+
+    """
+
+    function_name: str
+    tool_call_id: str
+    arguments: Mapping[str, Any]
+    context: Any
+
+
+@dataclass
+class FunctionCallsStartedFrame(SystemFrame):
+    """A frame signaling that one or more function call execution is going to
+    start."""
+
+    function_calls: Sequence[FunctionCallFromLLM]
+
+
+@dataclass
 class FunctionCallInProgressFrame(SystemFrame):
     """A frame signaling that a function call is in progress."""
 
@@ -677,6 +729,7 @@ class FunctionCallResultFrame(SystemFrame):
     tool_call_id: str
     arguments: Any
     result: Any
+    run_llm: Optional[bool] = None
     properties: Optional[FunctionCallResultProperties] = None
 
 
@@ -822,6 +875,27 @@ class StopFrame(ControlFrame):
     """
 
     pass
+
+
+@dataclass
+class FrameProcessorPauseFrame(ControlFrame):
+    """This processor is used to pause frame processing for the given
+    processor. Pausing frame processing will keep frames in the internal queue
+    which will then be processed when frame processing is resumed with
+    `FrameProcessorResumeFrame`."""
+
+    processor: str
+
+
+@dataclass
+class FrameProcessorResumeFrame(ControlFrame):
+    """This processor is used to resume frame processing for the given processor
+    if it was previously paused. After resuming frame processing all queued
+    frames will be processed in the order received.
+
+    """
+
+    processor: str
 
 
 @dataclass

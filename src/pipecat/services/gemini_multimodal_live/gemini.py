@@ -52,7 +52,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -60,6 +60,7 @@ from pipecat.services.openai.llm import (
 from pipecat.transcriptions.language import Language
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt, traced_tts
 
 from . import events
 
@@ -335,7 +336,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         *,
         api_key: str,
         base_url: str = "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
-        model="models/gemini-2.5-flash-preview-native-audio-dialog",
+        model="models/gemini-2.0-flash-live-001",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
         start_video_paused: bool = False,
@@ -378,6 +379,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._last_transcription_sent = ""
         self._bot_audio_buffer = bytearray()
         self._bot_text_buffer = ""
+        self._llm_output_buffer = ""
 
         self._sample_rate = 24000
 
@@ -471,6 +473,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _handle_user_stopped_speaking(self, frame):
         self._user_is_speaking = False
         self._user_audio_buffer = bytearray()
+        await self.start_ttfb_metrics()
         if self._needs_turn_complete_message:
             self._needs_turn_complete_message = False
             evt = events.ClientContentMessage.model_validate(
@@ -752,6 +755,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         logger.debug(f"Creating initial response: {messages}")
 
+        await self.start_ttfb_metrics()
+
         evt = events.ClientContentMessage.model_validate(
             {
                 "clientContent": {
@@ -793,6 +798,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
             return
         logger.debug(f"Creating response: {messages}")
 
+        await self.start_ttfb_metrics()
+
         evt = events.ClientContentMessage.model_validate(
             {
                 "clientContent": {
@@ -803,6 +810,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
         await self.send_client_event(evt)
 
+    @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(self, tool_result_message):
         # For now we're shoving the name into the tool_call_id field, so this
         # will work until we revisit that.
@@ -827,6 +835,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         await self._websocket.send(response_message)
         # await self._websocket.send(json.dumps({"clientContent": {"turnComplete": True}}))
 
+    @traced_gemini_live(operation="llm_setup")
     async def _handle_evt_setup_complete(self, evt):
         # If this is our first context frame, run the LLM
         self._api_session_ready = True
@@ -839,6 +848,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
         part = evt.serverContent.modelTurn.parts[0]
         if not part:
             return
+
+        await self.stop_ttfb_metrics()
 
         # part.text is added when `modalities` is set to TEXT; otherwise, it's None
         text = part.text
@@ -873,32 +884,61 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
         await self.push_frame(frame)
 
+    @traced_gemini_live(operation="llm_tool_call")
     async def _handle_evt_tool_call(self, evt):
         function_calls = evt.toolCall.functionCalls
         if not function_calls:
             return
         if not self._context:
             logger.error("Function calls are not supported without a context object.")
-        for call in function_calls:
-            await self.call_function(
-                context=self._context,
-                tool_call_id=call.id,
-                function_name=call.name,
-                arguments=call.args,
-            )
 
+        function_calls_llm = [
+            FunctionCallFromLLM(
+                context=self._context,
+                tool_call_id=f.id,
+                function_name=f.name,
+                arguments=f.args,
+            )
+            for f in function_calls
+        ]
+
+        await self.run_function_calls(function_calls_llm)
+
+    @traced_gemini_live(operation="llm_response")
     async def _handle_evt_turn_complete(self, evt):
         self._bot_is_speaking = False
         text = self._bot_text_buffer
-        self._bot_text_buffer = ""
 
-        # Only push the TTSStoppedFrame the bot is outputting audio
+        # Determine output and modality for tracing
+        if text:
+            # TEXT modality
+            output_text = text
+            output_modality = "TEXT"
+        else:
+            # AUDIO modality
+            output_text = self._llm_output_buffer
+            output_modality = "AUDIO"
+
+        # Trace the complete LLM response (this will be handled by the decorator)
+        # The decorator will extract the output text and usage metadata from the event
+
+        self._bot_text_buffer = ""
+        self._llm_output_buffer = ""
+
+        # Only push the TTSStoppedFrame if the bot is outputting audio
         # when text is found, modalities is set to TEXT and no audio
         # is produced.
         if not text:
             await self.push_frame(TTSStoppedFrame())
 
         await self.push_frame(LLMFullResponseEndFrame())
+
+    @traced_stt
+    async def _handle_user_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
 
     async def _handle_evt_input_transcription(self, evt):
         """Handle the input transcription event.
@@ -935,6 +975,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
             # Send a TranscriptionFrame with the complete sentence
             logger.debug(f"[Transcription:user] [{complete_sentence}]")
+            await self._handle_user_transcription(
+                complete_sentence, True, self._settings["language"]
+            )
             await self.push_frame(
                 TranscriptionFrame(
                     text=complete_sentence,
@@ -956,6 +999,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         if not text:
             return
+
+        # Collect text for tracing
+        self._llm_output_buffer += text
 
         await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
