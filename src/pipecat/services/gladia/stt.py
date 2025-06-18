@@ -361,7 +361,11 @@ class GladiaSTTService(STTService):
 
         # Send audio if connected
         if self._connection_active and self._websocket and not self._websocket.closed:
-            await self._send_audio(audio)
+            try:
+                await self._send_audio(audio)
+            except websockets.exceptions.ConnectionClosed as e:
+                logger.warning(f"Websocket closed while sending audio chunk: {e}")
+                self._connection_active = False
 
         yield None
 
@@ -377,7 +381,7 @@ class GladiaSTTService(STTService):
                     self._reconnection_attempts = 0
 
                 # Connect with automatic reconnection
-                async for websocket in websockets.connect(self._session_url):
+                async with websockets.connect(self._session_url) as websocket:
                     try:
                         self._websocket = websocket
                         self._connection_active = True
@@ -387,62 +391,25 @@ class GladiaSTTService(STTService):
                         await self._send_buffered_audio()
 
                         # Start tasks
-                        receive_task = asyncio.create_task(self._receive_task_handler())
-                        keepalive_task = asyncio.create_task(self._keepalive_task_handler())
+                        self._receive_task = asyncio.create_task(self._receive_task_handler())
+                        self._keepalive_task = asyncio.create_task(self._keepalive_task_handler())
 
                         # Wait for tasks to complete
-                        await asyncio.gather(receive_task, keepalive_task)
+                        await asyncio.gather(self._receive_task, self._keepalive_task)
 
                     except websockets.exceptions.ConnectionClosed as e:
                         logger.warning(f"WebSocket connection closed: {e}")
                         self._connection_active = False
 
                         # Clean up tasks
-                        if "receive_task" in locals():
-                            receive_task.cancel()
-                        if "keepalive_task" in locals():
-                            keepalive_task.cancel()
+                        if self._receive_task:
+                            self._receive_task.cancel()
+                        if self._keepalive_task:
+                            self._keepalive_task.cancel()
 
-                        # Check if we should reconnect
-                        if not self._should_reconnect:
+                        # Attempt reconnect using helper
+                        if not await self._maybe_reconnect():
                             break
-
-                        # Implement exponential backoff
-                        self._reconnection_attempts += 1
-                        if self._reconnection_attempts > self._max_reconnection_attempts:
-                            logger.error(
-                                f"Max reconnection attempts ({self._max_reconnection_attempts}) reached"
-                            )
-                            self._should_reconnect = False
-                            break
-
-                        delay = self._reconnection_delay * (2 ** (self._reconnection_attempts - 1))
-                        logger.info(
-                            f"Reconnecting in {delay} seconds (attempt {self._reconnection_attempts}/{self._max_reconnection_attempts})"
-                        )
-                        await asyncio.sleep(delay)
-
-                    except Exception as e:
-                        logger.error(f"Error in WebSocket connection: {e}")
-                        self._connection_active = False
-
-                        # Same reconnection logic as above
-                        if not self._should_reconnect:
-                            break
-
-                        self._reconnection_attempts += 1
-                        if self._reconnection_attempts > self._max_reconnection_attempts:
-                            logger.error(
-                                f"Max reconnection attempts ({self._max_reconnection_attempts}) reached"
-                            )
-                            self._should_reconnect = False
-                            break
-
-                        delay = self._reconnection_delay * (2 ** (self._reconnection_attempts - 1))
-                        logger.info(
-                            f"Reconnecting in {delay} seconds (attempt {self._reconnection_attempts}/{self._max_reconnection_attempts})"
-                        )
-                        await asyncio.sleep(delay)
 
             except Exception as e:
                 logger.error(f"Error in connection handler: {e}")
@@ -597,3 +564,19 @@ class GladiaSTTService(STTService):
             pass
         except Exception as e:
             logger.error(f"Error in Gladia WebSocket handler: {e}")
+
+    async def _maybe_reconnect(self) -> bool:
+        """Handle exponential backoff reconnection logic."""
+        if not self._should_reconnect:
+            return False
+        self._reconnection_attempts += 1
+        if self._reconnection_attempts > self._max_reconnection_attempts:
+            logger.error(f"Max reconnection attempts ({self._max_reconnection_attempts}) reached")
+            self._should_reconnect = False
+            return False
+        delay = self._reconnection_delay * (2 ** (self._reconnection_attempts - 1))
+        logger.info(
+            f"Reconnecting in {delay} seconds (attempt {self._reconnection_attempts}/{self._max_reconnection_attempts})"
+        )
+        await asyncio.sleep(delay)
+        return True
