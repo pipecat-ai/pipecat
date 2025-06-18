@@ -1,6 +1,4 @@
-import asyncio
-import base64
-import time
+import os
 from functools import partial
 from typing import Any, Awaitable, Callable, Mapping, Optional
 
@@ -11,8 +9,6 @@ from pydantic import BaseModel
 
 from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
-    BotStartedSpeakingFrame,
-    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -40,6 +36,8 @@ class TavusApi:
     """
 
     BASE_URL = "https://tavusapi.com/v2"
+    MOCK_CONVERSATION_ID = "dev-conversation"
+    MOCK_PERSONA_NAME = "TestTavusTransport"
 
     def __init__(self, api_key: str, session: aiohttp.ClientSession):
         """
@@ -52,8 +50,16 @@ class TavusApi:
         self._api_key = api_key
         self._session = session
         self._headers = {"Content-Type": "application/json", "x-api-key": self._api_key}
+        # Only for development
+        self._dev_room_url = os.getenv("TAVUS_SAMPLE_ROOM_URL")
 
     async def create_conversation(self, replica_id: str, persona_id: str) -> dict:
+        if self._dev_room_url:
+            return {
+                "conversation_id": self.MOCK_CONVERSATION_ID,
+                "conversation_url": self._dev_room_url,
+            }
+
         logger.debug(f"Creating Tavus conversation: replica={replica_id}, persona={persona_id}")
         url = f"{self.BASE_URL}/conversations"
         payload = {
@@ -67,7 +73,7 @@ class TavusApi:
             return response
 
     async def end_conversation(self, conversation_id: str):
-        if conversation_id is None:
+        if conversation_id is None or conversation_id == self.MOCK_CONVERSATION_ID:
             return
 
         url = f"{self.BASE_URL}/conversations/{conversation_id}/end"
@@ -76,6 +82,9 @@ class TavusApi:
             logger.debug(f"Ended Tavus conversation {conversation_id}")
 
     async def get_persona_name(self, persona_id: str) -> str:
+        if self._dev_room_url is not None:
+            return self.MOCK_PERSONA_NAME
+
         url = f"{self.BASE_URL}/personas/{persona_id}"
         async with self._session.get(url, headers=self._headers) as r:
             r.raise_for_status()
@@ -119,7 +128,7 @@ class TavusTransportClient:
         callbacks (TavusCallbacks): Callback handlers for Tavus-related events.
         api_key (str): API key for authenticating with Tavus API.
         replica_id (str): ID of the replica to use in the Tavus conversation.
-        persona_id (str): ID of the Tavus persona. Defaults to "pipecat0", which signals Tavus to use
+        persona_id (str): ID of the Tavus persona. Defaults to "pipecat-stream", which signals Tavus to use
                           the TTS voice of the Pipecat bot instead of a Tavus persona voice.
         session (aiohttp.ClientSession): The aiohttp session for making async HTTP requests.
         sample_rate: Audio sample rate to be used by the client.
@@ -133,7 +142,7 @@ class TavusTransportClient:
         callbacks: TavusCallbacks,
         api_key: str,
         replica_id: str,
-        persona_id: str = "pipecat0",  # Use `pipecat0` so that your TTS voice is used in place of the Tavus persona
+        persona_id: str = "pipecat-stream",
         session: aiohttp.ClientSession,
     ) -> None:
         self._bot_name = bot_name
@@ -141,7 +150,6 @@ class TavusTransportClient:
         self._replica_id = replica_id
         self._persona_id = persona_id
         self._conversation_id: Optional[str] = None
-        self._other_participant_has_joined = False
         self._client: Optional[DailyTransportClient] = None
         self._callbacks = callbacks
         self._params = params
@@ -153,6 +161,7 @@ class TavusTransportClient:
 
     async def setup(self, setup: FrameProcessorSetup):
         if self._conversation_id is not None:
+            logger.debug(f"Conversation ID already defined: {self._conversation_id}")
             return
         try:
             room_url = await self._initialize()
@@ -194,12 +203,13 @@ class TavusTransportClient:
         except Exception as e:
             logger.error(f"Failed to setup TavusTransportClient: {e}")
             await self._api.end_conversation(self._conversation_id)
+            self._conversation_id = None
 
     async def cleanup(self):
-        if self._client is None:
-            return
-        await self._client.cleanup()
-        self._client = None
+        try:
+            await self._client.cleanup()
+        except Exception as e:
+            logger.exception(f"Exception during cleanup: {e}")
 
     async def _on_joined(self, data):
         logger.debug("TavusTransportClient joined!")
@@ -221,6 +231,7 @@ class TavusTransportClient:
     async def stop(self):
         await self._client.leave()
         await self._api.end_conversation(self._conversation_id)
+        self._conversation_id = None
 
     async def capture_participant_video(
         self,
@@ -257,34 +268,12 @@ class TavusTransportClient:
     def in_sample_rate(self) -> int:
         return self._client.in_sample_rate
 
-    async def encode_audio_and_send(self, audio: bytes, done: bool, inference_id: str):
-        """Encodes audio to base64 and sends it to Tavus"""
-        audio_base64 = base64.b64encode(audio).decode("utf-8")
-        await self._send_audio_message(audio_base64, done=done, inference_id=inference_id)
-
     async def send_interrupt_message(self) -> None:
         transport_frame = TransportMessageUrgentFrame(
             message={
                 "message_type": "conversation",
                 "event_type": "conversation.interrupt",
                 "conversation_id": self._conversation_id,
-            }
-        )
-        await self.send_message(transport_frame)
-
-    async def _send_audio_message(self, audio_base64: str, done: bool, inference_id: str):
-        transport_frame = TransportMessageUrgentFrame(
-            message={
-                "message_type": "conversation",
-                "event_type": "conversation.echo",
-                "conversation_id": self._conversation_id,
-                "properties": {
-                    "modality": "audio",
-                    "inference_id": inference_id,
-                    "audio": audio_base64,
-                    "done": done,
-                    "sample_rate": self.out_sample_rate,
-                },
             }
         )
         await self.send_message(transport_frame)
@@ -300,8 +289,13 @@ class TavusTransportClient:
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
         if not self._client:
             return
-
         await self._client.write_audio_frame(frame)
+
+    async def register_audio_destination(self, destination: str):
+        if not self._client:
+            return
+
+        await self._client.register_audio_destination(destination)
 
 
 class TavusInputTransport(BaseInputTransport):
@@ -379,12 +373,11 @@ class TavusOutputTransport(BaseOutputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._samples_sent = 0
-        self._start_time = None
-        self._current_idx_str: Optional[str] = None
 
         # Whether we have seen a StartFrame already.
         self._initialized = False
+        # This is the custom track destination expected by Tavus
+        self._transport_destination: Optional[str] = "stream"
 
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
@@ -403,6 +396,10 @@ class TavusOutputTransport(BaseOutputTransport):
         self._initialized = True
 
         await self._client.start(frame)
+
+        if self._transport_destination:
+            await self._client.register_audio_destination(self._transport_destination)
+
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
@@ -417,23 +414,6 @@ class TavusOutputTransport(BaseOutputTransport):
         logger.info(f"TavusOutputTransport sending message {frame}")
         await self._client.send_message(frame)
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        # The BotStartedSpeakingFrame and BotStoppedSpeakingFrame are created inside BaseOutputTransport
-        # so TavusOutputTransport never receives these frames.
-        # This is a workaround, so we can more reliably be aware when the bot has started or stopped speaking
-        if direction == FrameDirection.DOWNSTREAM:
-            if isinstance(frame, BotStartedSpeakingFrame):
-                if self._current_idx_str is not None:
-                    logger.warning("TavusOutputTransport self._current_idx_str is already defined!")
-                self._current_idx_str = str(frame.id)
-                self._start_time = time.time()
-                self._samples_sent = 0
-            elif isinstance(frame, BotStoppedSpeakingFrame):
-                silence = b"\x00" * self.audio_chunk_size
-                await self._client.encode_audio_and_send(silence, True, self._current_idx_str)
-                self._current_idx_str = None
-        await super().push_frame(frame, direction)
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         if isinstance(frame, StartInterruptionFrame):
@@ -443,20 +423,12 @@ class TavusOutputTransport(BaseOutputTransport):
         await self._client.send_interrupt_message()
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
-        # Compute wait time for synchronization
-        wait = self._start_time + (self._samples_sent / self.sample_rate) - time.time()
-        if wait > 0:
-            logger.trace(f"TavusOutputTransport write_audio_frame wait: {wait}")
-            await asyncio.sleep(wait)
+        # This is the custom track destination expected by Tavus
+        frame.transport_destination = self._transport_destination
+        await self._client.write_audio_frame(frame)
 
-        if self._current_idx_str is None:
-            logger.warning("TavusOutputTransport self._current_idx_str not defined yet!")
-            return
-
-        await self._client.encode_audio_and_send(frame.audio, False, self._current_idx_str)
-
-        # Update timestamp based on number of samples sent
-        self._samples_sent += len(frame.audio) // 2  # 2 bytes per sample (16-bit)
+    async def register_audio_destination(self, destination: str):
+        await self._client.register_audio_destination(destination)
 
 
 class TavusTransport(BaseTransport):
@@ -472,7 +444,7 @@ class TavusTransport(BaseTransport):
         session (aiohttp.ClientSession): aiohttp session used for async HTTP requests.
         api_key (str): Tavus API key for authentication.
         replica_id (str): ID of the replica model used for voice generation.
-        persona_id (str): ID of the Tavus persona. Defaults to "pipecat0" to use the Pipecat TTS voice.
+        persona_id (str): ID of the Tavus persona. Defaults to "pipecat-stream" to use the Pipecat TTS voice.
         params (TavusParams): Optional Tavus-specific configuration parameters.
         input_name (Optional[str]): Optional name for the input transport.
         output_name (Optional[str]): Optional name for the output transport.
@@ -484,18 +456,13 @@ class TavusTransport(BaseTransport):
         session: aiohttp.ClientSession,
         api_key: str,
         replica_id: str,
-        persona_id: str = "pipecat0",  # Use `pipecat0` so that your TTS voice is used in place of the Tavus persona
+        persona_id: str = "pipecat-stream",
         params: TavusParams = TavusParams(),
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ):
         super().__init__(input_name=input_name, output_name=output_name)
         self._params = params
-
-        # TODO: Filipi - We can remove this if we stop sending the audio through app messages
-        # Limiting this so we don't go over 20 messages per second
-        # each message is going to have 50ms of audio
-        self._params.audio_out_10ms_chunks = 5
 
         callbacks = TavusCallbacks(
             on_participant_joined=self._on_participant_joined,
@@ -527,6 +494,7 @@ class TavusTransport(BaseTransport):
     async def _on_participant_joined(self, participant):
         # get persona, look up persona_name, set this as the bot name to ignore
         persona_name = await self._client.get_persona_name()
+
         # Ignore the Tavus replica's microphone
         if participant.get("info", {}).get("userName", "") == persona_name:
             self._tavus_participant_id = participant["id"]

@@ -64,7 +64,7 @@ async def maybe_capture_participant_screen(
 def run_example_daily(
     run_example: Callable,
     args: argparse.Namespace,
-    params: DailyParams,
+    transport_params: Mapping[str, Callable] = {},
 ):
     logger.info("Running example with DailyTransport...")
 
@@ -75,6 +75,7 @@ def run_example_daily(
             (room_url, token) = await configure(session)
 
             # Run example function with DailyTransport transport arguments.
+            params: DailyParams = transport_params[args.transport]()
             transport = DailyTransport(room_url, token, "Pipecat", params=params)
             await run_example(transport, args, True)
 
@@ -84,7 +85,7 @@ def run_example_daily(
 def run_example_webrtc(
     run_example: Callable,
     args: argparse.Namespace,
-    params: TransportParams,
+    transport_params: Mapping[str, Callable] = {},
 ):
     logger.info("Running example with SmallWebRTCTransport...")
 
@@ -130,6 +131,7 @@ def run_example_webrtc(
                 pcs_map.pop(webrtc_connection.pc_id, None)
 
             # Run example function with SmallWebRTC transport arguments.
+            params: TransportParams = transport_params[args.transport]()
             transport = SmallWebRTCTransport(params=params, webrtc_connection=pipecat_connection)
             background_tasks.add_task(run_example, transport, args, False)
 
@@ -152,7 +154,7 @@ def run_example_webrtc(
 def run_example_twilio(
     run_example: Callable,
     args: argparse.Namespace,
-    params: FastAPIWebsocketParams,
+    transport_params: Mapping[str, Callable] = {},
 ):
     logger.info("Running example with FastAPIWebsocketTransport (Twilio)...")
 
@@ -195,6 +197,7 @@ def run_example_twilio(
         call_sid = call_data["start"]["callSid"]
 
         # Create websocket transport and update params.
+        params: FastAPIWebsocketParams = transport_params[args.transport]()
         params.add_wav_header = False
         params.serializer = TwilioFrameSerializer(
             stream_sid=stream_sid,
@@ -217,14 +220,13 @@ def run_main(
         logger.error(f"Transport '{args.transport}' not supported by this example")
         return
 
-    params = transport_params[args.transport]()
     match args.transport:
         case "daily":
-            run_example_daily(run_example, args, params)
+            run_example_daily(run_example, args, transport_params)
         case "webrtc":
-            run_example_webrtc(run_example, args, params)
+            run_example_webrtc(run_example, args, transport_params)
         case "twilio":
-            run_example_twilio(run_example, args, params)
+            run_example_twilio(run_example, args, transport_params)
 
 
 def main(

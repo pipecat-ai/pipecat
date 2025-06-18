@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMAssistantContextAggregator` that exposes whether a function call is in
   progress.
 
+### Changed
+
+- `TavusTransport` and `TavusVideoService` now send audio to Tavus using WebRTC 
+  audio tracks instead of `app-messages` over WebSocket. This should improve the 
+  overall audio quality.
+
+- Upgraded `daily-python` to 0.19.3.
+
 ### Fixed
 
 - Fixed an issue with `GroqTTSService` where it was not properly parsing the
