@@ -388,12 +388,13 @@ class BaseInputTransport(FrameProcessor):
                 self._audio_in_queue.task_done()
             except asyncio.TimeoutError:
                 if self._user_speaking:
-                    logger.info("Forcing user stopped speaking due to timeout to receive audio frame!")
+                    logger.info(
+                        "Forcing user stopped speaking due to timeout to receive audio frame!"
+                    )
                     vad_state = VADState.QUIET
                     if self._params.turn_analyzer:
                         self._params.turn_analyzer.clear()
                     await self._handle_user_interruption(UserStoppedSpeakingFrame())
-
 
     async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer.
