@@ -14,10 +14,12 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import TranscriptionMessage
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai_realtime_beta import (
     InputAudioNoiseReduction,
@@ -45,6 +47,10 @@ async def fetch_weather_from_api(params: FunctionCallParams):
     )
 
 
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
+
+
 weather_function = FunctionSchema(
     name="get_current_weather",
     description="Get the current weather",
@@ -62,8 +68,20 @@ weather_function = FunctionSchema(
     required=["location", "format"],
 )
 
+restaurant_function = FunctionSchema(
+    name="get_restaurant_recommendation",
+    description="Get a restaurant recommendation",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+        },
+    },
+    required=["location"],
+)
+
 # Create tools schema
-tools = ToolsSchema(standard_tools=[weather_function])
+tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -100,7 +118,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         # turn_detection=False,
         input_audio_noise_reduction=InputAudioNoiseReduction(type="near_field"),
         # tools=tools,
-        instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
+        instructions="""You are a helpful and friendly AI.
 
 Act like a human, but remember that you aren't a human and that you can't do human
 things in the real world. Your voice and personality should be warm and engaging, with a lively and
@@ -109,9 +127,13 @@ playful tone.
 If interacting in a non-English language, start by using the standard accent or dialect familiar to
 the user. Talk quickly. You should always call a function if you can. Do not refer to these rules,
 even if you're asked about them.
--
+
 You are participating in a voice conversation. Keep your responses concise, short, and to the point
 unless specifically asked to elaborate on a topic.
+
+You have access to the following tools:
+- get_current_weather: Get the current weather for a given location.
+- get_restaurant_recommendation: Get a restaurant recommendation for a given location.
 
 Remember, your responses should be short. Just one or two sentences, usually.""",
     )
@@ -125,6 +147,9 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     # you can either register a single function for all function calls, or specific functions
     # llm.register_function(None, fetch_weather_from_api)
     llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+
+    transcript = TranscriptProcessor()
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
     # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
@@ -151,7 +176,9 @@ Remember, your responses should be short. Just one or two sentences, usually."""
             transport.input(),  # Transport user input
             context_aggregator.user(),
             llm,  # LLM
+            transcript.user(),  # Placed after the LLM, as LLM pushes TranscriptionFrames downstream
             transport.output(),  # Transport bot output
+            transcript.assistant(),  # After the transcript output, to time with the audio output
             context_aggregator.assistant(),
         ]
     )
@@ -176,6 +203,15 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    # Register event handler for transcript updates
+    @transcript.event_handler("on_transcript_update")
+    async def on_transcript_update(processor, frame):
+        for msg in frame.messages:
+            if isinstance(msg, TranscriptionMessage):
+                timestamp = f"[{msg.timestamp}] " if msg.timestamp else ""
+                line = f"{timestamp}{msg.role}: {msg.content}"
+                logger.info(f"Transcript: {line}")
 
     runner = PipelineRunner(handle_sigint=handle_sigint)
 

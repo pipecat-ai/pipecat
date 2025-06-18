@@ -92,7 +92,7 @@ class FastAPIWebsocketClient:
     async def trigger_client_connected(self):
         await self._callbacks.on_client_connected(self._websocket)
 
-    async def trigger_client_timout(self):
+    async def trigger_client_timeout(self):
         await self._callbacks.on_session_timeout(self._websocket)
 
     def _can_send(self):
@@ -188,7 +188,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _monitor_websocket(self):
         """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
         await asyncio.sleep(self._params.session_timeout)
-        await self._client.trigger_client_timout()
+        await self._client.trigger_client_timeout()
 
 
 class FastAPIWebsocketOutputTransport(BaseOutputTransport):

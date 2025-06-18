@@ -125,7 +125,7 @@ class OpenAITTSService(TTSService):
 
                 await self.start_tts_usage_metrics(text)
 
-                CHUNK_SIZE = 1024
+                CHUNK_SIZE = self.chunk_size
 
                 yield TTSStartedFrame()
                 async for chunk in r.iter_bytes(CHUNK_SIZE):

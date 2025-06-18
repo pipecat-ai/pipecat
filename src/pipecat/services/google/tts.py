@@ -362,8 +362,8 @@ class GoogleHttpTTSService(TTSService):
             # Skip the first 44 bytes to remove the WAV header
             audio_content = response.audio_content[44:]
 
-            # Read and yield audio data in chunks
-            CHUNK_SIZE = 1024
+            CHUNK_SIZE = self.chunk_size
+
             for i in range(0, len(audio_content), CHUNK_SIZE):
                 chunk = audio_content[i : i + CHUNK_SIZE]
                 if not chunk:
@@ -505,8 +505,9 @@ class GoogleTTSService(TTSService):
             yield TTSStartedFrame()
 
             audio_buffer = b""
-            CHUNK_SIZE = 1024
             first_chunk_for_ttfb = False
+
+            CHUNK_SIZE = self.chunk_size
 
             async for response in streaming_responses:
                 chunk = response.audio_content

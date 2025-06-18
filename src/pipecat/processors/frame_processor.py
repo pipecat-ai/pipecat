@@ -7,15 +7,20 @@
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Awaitable, Callable, Coroutine, Optional
+from typing import Awaitable, Callable, Coroutine, List, Optional, Sequence
 
 from loguru import logger
 
+from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
     Frame,
+    FrameProcessorPauseFrame,
+    FrameProcessorPauseUrgentFrame,
+    FrameProcessorResumeFrame,
+    FrameProcessorResumeUrgentFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -67,6 +72,7 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = False
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
+        self._interruption_strategies: List[BaseInterruptionStrategy] = []
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -118,6 +124,10 @@ class FrameProcessor(BaseObject):
     @property
     def report_only_initial_ttfb(self):
         return self._report_only_initial_ttfb
+
+    @property
+    def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
+        return self._interruption_strategies
 
     def can_generate_metrics(self) -> bool:
         return False
@@ -253,6 +263,10 @@ class FrameProcessor(BaseObject):
             self._should_report_ttfb = True
         elif isinstance(frame, CancelFrame):
             await self.__cancel(frame)
+        elif isinstance(frame, (FrameProcessorPauseFrame, FrameProcessorPauseUrgentFrame)):
+            await self.__pause(frame)
+        elif isinstance(frame, (FrameProcessorResumeFrame, FrameProcessorResumeUrgentFrame)):
+            await self.__resume(frame)
 
     async def push_error(self, error: ErrorFrame):
         await self.push_frame(error, FrameDirection.UPSTREAM)
@@ -272,6 +286,7 @@ class FrameProcessor(BaseObject):
         self._enable_metrics = frame.enable_metrics
         self._enable_usage_metrics = frame.enable_usage_metrics
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
+        self._interruption_strategies = frame.interruption_strategies
         self.__create_input_task()
         self.__create_push_task()
 
@@ -279,6 +294,14 @@ class FrameProcessor(BaseObject):
         self._cancelling = True
         await self.__cancel_input_task()
         await self.__cancel_push_task()
+
+    async def __pause(self, frame: FrameProcessorPauseFrame | FrameProcessorPauseUrgentFrame):
+        if frame.name == self.name:
+            await self.pause_processing_frames()
+
+    async def __resume(self, frame: FrameProcessorResumeFrame | FrameProcessorResumeUrgentFrame):
+        if frame.name == self.name:
+            await self.resume_processing_frames()
 
     #
     # Handle interruptions
