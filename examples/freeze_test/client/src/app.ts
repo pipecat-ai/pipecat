@@ -60,7 +60,7 @@ class RecordingSerializer extends ProtobufFrameSerializer {
 }
 
 class WebsocketClientApp {
-  private RECORDING_TIME_MS = 5000
+  private RECORDING_TIME_MS = 10000
 
   private rtviClient: RTVIClient | null = null;
   private connectBtn: HTMLButtonElement | null = null;
@@ -301,7 +301,7 @@ class WebsocketClientApp {
         this.websocketTransport.handleUserAudioStream(chunk.data);
       }
       // waiting a random time between 500ms and 10000ms before sending the same audio again
-      const randomDelay = 500 + Math.random() * (10000 - 500);
+      const randomDelay = 1000 + Math.random() * (10000 - 500);
       await this.sleep(randomDelay);
 
       void this.replayAudio()
