@@ -12,6 +12,8 @@ from loguru import logger
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
+    CancelFrame,
+    EndFrame,
     StartFrame,
     UserStartedSpeakingFrame,
 )
@@ -73,6 +75,8 @@ class TurnTrackingObserver(BaseObserver):
         # We only want to end the turn if the bot was previously speaking
         elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._is_bot_speaking:
             await self._handle_bot_stopped_speaking(data)
+        elif isinstance(data.frame, (EndFrame, CancelFrame)):
+            await self._handle_pipeline_end(data)
 
     def _schedule_turn_end(self, data: FramePushed):
         """Schedule turn end with a timeout."""
@@ -133,6 +137,14 @@ class TurnTrackingObserver(BaseObserver):
         # This is needed to handle cases where the bot's speech ends and then resumes
         # This can happen with HTTP TTS services or function calls
         self._schedule_turn_end(data)
+
+    async def _handle_pipeline_end(self, data: FramePushed):
+        """Handle pipeline end or cancellation by flushing any active turn."""
+        if self._is_turn_active:
+            # Cancel any pending turn end timer
+            self._cancel_turn_end_timer()
+            # End the current turn
+            await self._end_turn(data, was_interrupted=True)
 
     async def _start_turn(self, data: FramePushed):
         """Start a new turn."""
