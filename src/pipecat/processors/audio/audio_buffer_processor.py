@@ -237,6 +237,12 @@ class AudioBufferProcessor(FrameProcessor):
             # Add bot audio.
             resampled = await self._resample_audio(frame)
             self._bot_audio_buffer.extend(resampled)
+            # Sync the user's buffer to the bot's buffer by adding silence if needed
+            # This is needed when using the mute filter since it stop the InputAudioRawFrame
+            if len(self._bot_audio_buffer) > len(self._user_audio_buffer):
+                silence_size = len(self._bot_audio_buffer) - len(self._user_audio_buffer)
+                silence = b"\x00" * silence_size
+                self._user_audio_buffer.extend(silence)
 
     async def _handle_intermittent_stream(self, frame: Frame):
         if isinstance(frame, InputAudioRawFrame):
