@@ -391,10 +391,21 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def _handle_user_stopped_speaking(self, _: UserStoppedSpeakingFrame):
         self._user_speaking = False
         # We just stopped speaking. Let's see if there's some aggregation to
-        # push. If the last thing we saw is an interim transcription, let's wait
-        # pushing the aggregation as we will probably get a final transcription.
-        if not self._seen_interim_results:
-            await self.push_aggregation()
+        # push.
+        if len(self._aggregation) > 0:
+            # If the last thing we saw is an interim transcription, let's wait
+            # pushing the aggregation as we will probably get a final transcription.
+            if not self._seen_interim_results:
+                await self.push_aggregation()
+        else:
+            # Handles the case where both the user and the bot are not speakin.
+            # Normally, when the user stops speaking, new text is expected,
+            # which triggers the bot to respond. However, if no new text
+            # is received (e.g., due to a glitch), this safeguard ensures
+            # the bot doesn't hang indefinitely while waiting to speak again.
+            if not self._bot_speaking:
+                logger.debug("User stopped speaking but no new aggregation received. Forcing aggregation processing to resume bot response.")
+                await self._process_aggregation()
 
     async def _handle_bot_started_speaking(self, _: BotStartedSpeakingFrame):
         self._bot_speaking = True
