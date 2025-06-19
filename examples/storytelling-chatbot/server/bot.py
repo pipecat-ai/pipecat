@@ -106,7 +106,6 @@ async def main(room_url, token=None):
         main_task = PipelineTask(
             main_pipeline,
             params=PipelineParams(
-                allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
             ),

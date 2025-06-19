@@ -101,7 +101,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     task = PipelineTask(
         pipeline,
-        params=PipelineParams(allow_interruptions=True),
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
     )
 
     @transport.event_handler("on_client_connected")

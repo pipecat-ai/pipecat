@@ -695,7 +695,6 @@ Important guidelines:
         pipeline,
         params=PipelineParams(
             audio_out_sample_rate=8000,
-            allow_interruptions=False,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

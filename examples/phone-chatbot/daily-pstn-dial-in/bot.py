@@ -148,7 +148,8 @@ async def run_bot(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True  # Enable barge-in so callers can interrupt the bot
+            enable_metrics=True,
+            enable_usage_metrics=True,
         ),
     )
     logger.debug("setup task")
