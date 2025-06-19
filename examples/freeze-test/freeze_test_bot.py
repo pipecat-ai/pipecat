@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
+    LLMFullResponseEndFrame,
     LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -38,7 +39,10 @@ from pipecat.observers.loggers.debug_log_observer import DebugLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
@@ -209,8 +213,10 @@ async def run_example(websocket_client):
                 frame_types={
                     InterimTranscriptionFrame: None,
                     TranscriptionFrame: None,
-                    TTSTextFrame: None,
+                    # TTSTextFrame: None,
                     LLMTextFrame: None,
+                    OpenAILLMContextFrame: None,
+                    LLMFullResponseEndFrame: None,
                 },
                 exclude_fields={
                     "result",
