@@ -388,8 +388,8 @@ class BaseInputTransport(FrameProcessor):
                 self._audio_in_queue.task_done()
             except asyncio.TimeoutError:
                 if self._user_speaking:
-                    logger.info(
-                        "Forcing user stopped speaking due to timeout to receive audio frame!"
+                    logger.warning(
+                        "Forcing user stopped speaking due to timeout receiving audio frame!"
                     )
                     vad_state = VADState.QUIET
                     if self._params.turn_analyzer:

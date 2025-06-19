@@ -7,7 +7,7 @@
 import asyncio
 import time
 from collections import deque
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Sequence, Tuple, Type
+from typing import Any, AsyncIterable, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -676,7 +676,7 @@ class PipelineTask(BaseTask):
             except asyncio.TimeoutError:
                 running = await self._idle_timeout_detected(frame_buffer)
 
-    async def _idle_timeout_detected(self, last_frames) -> bool:
+    async def _idle_timeout_detected(self, last_frames: Deque[Frame]) -> bool:
         """Logic for when the pipeline is idle.
 
         Returns:

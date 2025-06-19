@@ -174,19 +174,13 @@ class TaskManager(BaseTaskManager):
         except asyncio.CancelledError:
             # Here are sure the task is cancelled properly.
             pass
-        except GeneratorExit as e:
-            logger.exception(f"{name}: generator exit error while cancelling task: {e}")
-            raise
         except Exception as e:
             logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
         except BaseException as e:
             logger.critical(f"{name}: fatal base exception while cancelling task: {e}")
             raise
         finally:
-            try:
-                self._remove_task(task)
-            except Exception as e:
-                logger.warning(f"{name}: failed to remove task: {e}")
+            self._remove_task(task)
 
     def current_tasks(self) -> Sequence[asyncio.Task]:
         """Returns the list of currently created/registered tasks."""

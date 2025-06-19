@@ -83,7 +83,7 @@ class FastAPIWebsocketClient:
             # For some reason the websocket is disconnected, and we are not able to send data
             # So let's properly handle it and disconnect the transport
             if self._websocket.application_state == WebSocketState.DISCONNECTED:
-                logger.info("Closing already disconnected websocket!")
+                logger.warning("Closing already disconnected websocket!")
                 self._closing = True
                 await self.trigger_client_disconnected()
 
