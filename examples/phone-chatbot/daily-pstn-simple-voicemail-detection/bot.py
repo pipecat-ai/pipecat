@@ -107,7 +107,6 @@ async def run_bot(
         params: FunctionCallParams,
     ):
         """Function the bot can call to terminate the call."""
-
         await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     tools = [
@@ -211,7 +210,13 @@ async def run_bot(
     )
 
     # Create pipeline task
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
     # ------------ RETRY LOGIC VARIABLES ------------
     max_retries = 5
