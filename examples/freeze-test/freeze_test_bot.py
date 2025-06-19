@@ -24,13 +24,17 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
+    LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
     StopFrame,
     TranscriptionFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.observers.loggers.debug_log_observer import DebugLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -200,6 +204,23 @@ async def run_example(websocket_client):
             report_only_initial_ttfb=True,
         ),
         idle_timeout_secs=120,
+        observers=[
+            DebugLogObserver(
+                frame_types={
+                    InterimTranscriptionFrame: None,
+                    TranscriptionFrame: None,
+                    TTSTextFrame: None,
+                    LLMTextFrame: None,
+                },
+                exclude_fields={
+                    "result",
+                    "metadata",
+                    "audio",
+                    "image",
+                    "images",
+                },
+            ),
+        ],
     )
 
     @transport.event_handler("on_client_connected")
