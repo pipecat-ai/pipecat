@@ -41,7 +41,6 @@ class AudioBufferProcessor(FrameProcessor):
         sample_rate (Optional[int]): Desired output sample rate. If None, uses source rate
         num_channels (int): Number of channels (1 for mono, 2 for stereo). Defaults to 1
         buffer_size (int): Size of buffer before triggering events. 0 for no buffering
-        user_continuous_stream (bool): Whether user audio is continuous or speech-only
         enable_turn_audio (bool): Whether turn audio event handlers should be triggered
 
     Audio handling:
@@ -50,10 +49,6 @@ class AudioBufferProcessor(FrameProcessor):
         - Automatic resampling of incoming audio to match desired sample_rate
         - Silence insertion for non-continuous audio streams
         - Buffer synchronization between user and bot audio
-
-    Note:
-        When user_continuous_stream is False, the processor expects only speech
-        segments and will handle silence insertion between segments automatically.
     """
 
     def __init__(
@@ -62,7 +57,7 @@ class AudioBufferProcessor(FrameProcessor):
         sample_rate: Optional[int] = None,
         num_channels: int = 1,
         buffer_size: int = 0,
-        user_continuous_stream: bool = True,
+        user_continuous_stream: Optional[bool] = None,
         enable_turn_audio: bool = False,
         **kwargs,
     ):
@@ -72,8 +67,17 @@ class AudioBufferProcessor(FrameProcessor):
         self._audio_buffer_size_1s = 0
         self._num_channels = num_channels
         self._buffer_size = buffer_size
-        self._user_continuous_stream = user_continuous_stream
         self._enable_turn_audio = enable_turn_audio
+
+        if user_continuous_stream is not None:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter `user_continuous_stream` is deprecated.",
+                    DeprecationWarning,
+                )
 
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
@@ -181,10 +185,24 @@ class AudioBufferProcessor(FrameProcessor):
         self._audio_buffer_size_1s = self._sample_rate * 2
 
     async def _process_recording(self, frame: Frame):
-        if self._user_continuous_stream:
-            await self._handle_continuous_stream(frame)
-        else:
-            await self._handle_intermittent_stream(frame)
+        if isinstance(frame, InputAudioRawFrame):
+            # Add silence if we need to.
+            silence = self._compute_silence(self._last_user_frame_at)
+            self._user_audio_buffer.extend(silence)
+            # Add user audio.
+            resampled = await self._resample_audio(frame)
+            self._user_audio_buffer.extend(resampled)
+            # Save time of frame so we can compute silence.
+            self._last_user_frame_at = time.time()
+        elif self._recording and isinstance(frame, OutputAudioRawFrame):
+            # Add silence if we need to.
+            silence = self._compute_silence(self._last_bot_frame_at)
+            self._bot_audio_buffer.extend(silence)
+            # Add bot audio.
+            resampled = await self._resample_audio(frame)
+            self._bot_audio_buffer.extend(resampled)
+            # Save time of frame so we can compute silence.
+            self._last_bot_frame_at = time.time()
 
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
             await self._call_on_audio_data_handler()
@@ -222,41 +240,6 @@ class AudioBufferProcessor(FrameProcessor):
         elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame):
             resampled = await self._resample_audio(frame)
             self._bot_turn_audio_buffer += resampled
-
-    async def _handle_continuous_stream(self, frame: Frame):
-        if isinstance(frame, InputAudioRawFrame):
-            # Add user audio.
-            resampled = await self._resample_audio(frame)
-            self._user_audio_buffer.extend(resampled)
-            # Sync the bot's buffer to the user's buffer by adding silence if needed
-            if len(self._user_audio_buffer) > len(self._bot_audio_buffer):
-                silence_size = len(self._user_audio_buffer) - len(self._bot_audio_buffer)
-                silence = b"\x00" * silence_size
-                self._bot_audio_buffer.extend(silence)
-        elif self._recording and isinstance(frame, OutputAudioRawFrame):
-            # Add bot audio.
-            resampled = await self._resample_audio(frame)
-            self._bot_audio_buffer.extend(resampled)
-
-    async def _handle_intermittent_stream(self, frame: Frame):
-        if isinstance(frame, InputAudioRawFrame):
-            # Add silence if we need to.
-            silence = self._compute_silence(self._last_user_frame_at)
-            self._user_audio_buffer.extend(silence)
-            # Add user audio.
-            resampled = await self._resample_audio(frame)
-            self._user_audio_buffer.extend(resampled)
-            # Save time of frame so we can compute silence.
-            self._last_user_frame_at = time.time()
-        elif self._recording and isinstance(frame, OutputAudioRawFrame):
-            # Add silence if we need to.
-            silence = self._compute_silence(self._last_bot_frame_at)
-            self._bot_audio_buffer.extend(silence)
-            # Add bot audio.
-            resampled = await self._resample_audio(frame)
-            self._bot_audio_buffer.extend(resampled)
-            # Save time of frame so we can compute silence.
-            self._last_bot_frame_at = time.time()
 
     async def _call_on_audio_data_handler(self):
         if not self.has_audio() or not self._recording:
