@@ -37,15 +37,15 @@ class SpeechmaticsSTTService(STTService):
         language: Language code for transcription (default: Language.EN).
         base_url: Base URL for Speechmatics API (default: eu2.rt.speechmatics.com).
         enable_partials: Enable partial transcription results (default: True).
-        max_delay: Maximum delay for transcription in seconds (default: 5).
+        max_delay: Maximum delay for transcription in seconds (default: 2.0).
         sample_rate: Audio sample rate in Hz (default: None, inferred from pipeline).
         chunk_size: Audio chunk size for streaming (default: 256).
-        audio_encoding: Audio encoding format (default: "pcm_f32le").
+        audio_encoding: Audio encoding format (default: "pcm_s16le").
         end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection (default: None, disabled).
         operating_point: Operating point for transcription accuracy vs. latency tradeoff (default: "enhanced").
         enable_speaker_diarization: Enable speaker diarization to identify different speakers (default: False).
         max_speakers: Maximum number of speakers to detect (default: None, auto-detect).
-        transcription_config: Custom transcription configuration.
+        transcription_config: Custom transcription configuration (other set parameters are merged).
         **kwargs: Additional arguments passed to STTService.
     """
 
@@ -54,9 +54,9 @@ class SpeechmaticsSTTService(STTService):
         *,
         api_key: str,
         language: Language = Language.EN,
-        base_url: str = "preview.rt.speechmatics.com",
+        base_url: str = "eu2.rt.speechmatics.com",
         enable_partials: bool = True,
-        max_delay: float = 1.5,
+        max_delay: float = 2.0,
         sample_rate: Optional[int] = None,
         chunk_size: int = 256,
         audio_encoding: str = "pcm_s16le",

@@ -49,9 +49,12 @@ transport_params = {
 
 
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    """Run example using Speechmatics STT."""
     logger.info(f"Starting bot")
 
-    stt = SpeechmaticsSTTService(api_key=os.getenv("SPEECHMATICS_API_KEY"))
+    stt = SpeechmaticsSTTService(
+        api_key=os.getenv("SPEECHMATICS_API_KEY"), base_url="preview.rt.speechmatics.com"
+    )
 
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
