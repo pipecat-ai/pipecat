@@ -95,7 +95,7 @@ async def run_bot(websocket_client: WebSocket, stream_sid: str, call_sid: str, t
 
     # NOTE: Watch out! This will save all the conversation in memory. You can
     # pass `buffer_size` to get periodic callbacks.
-    audiobuffer = AudioBufferProcessor(user_continuous_stream=not testing)
+    audiobuffer = AudioBufferProcessor()
 
     pipeline = Pipeline(
         [

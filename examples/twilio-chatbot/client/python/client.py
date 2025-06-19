@@ -119,7 +119,7 @@ async def run_client(client_name: str, server_url: str, duration_secs: int):
 
     # NOTE: Watch out! This will save all the conversation in memory. You can
     # pass `buffer_size` to get periodic callbacks.
-    audiobuffer = AudioBufferProcessor(user_continuous_stream=False)
+    audiobuffer = AudioBufferProcessor()
 
     pipeline = Pipeline(
         [
