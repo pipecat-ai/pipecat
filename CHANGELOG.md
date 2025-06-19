@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that was causing user and bot speech to not be synchronized
+  during recordings.
+
 - Fixed an issue where voice settings weren't applied to ElevenLabsTTSService.
 
 - Fixed an issue with `GroqTTSService` where it was not properly parsing the
@@ -46,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before starting to receive audio from the user.
 
 - Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
+
+### Deprecated
+
+- `AudioBufferProcessor` parameter `user_continuos_stream` is deprecated.
 
 ### Other
 
