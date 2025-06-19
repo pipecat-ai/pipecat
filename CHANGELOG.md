@@ -37,13 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Upgraded `daily-python` to 0.19.3.
 
+### Deprecated
+
+- `AudioBufferProcessor` parameter `user_continuos_stream` is deprecated.
+
 ### Fixed
+
+- Fixed an `AudioBufferProcessor` issue that was causing crackling on the audio
+  stream with lower sample rate (due to upsampling the other stream). We now
+  record with the lowest sample rate to avoid upsampling.
 
 - Fixed an issue that would cause multiple `PipelineTask.on_idle_timeout`
   events to be triggered repeatedly.
 
-- Fixed an issue that was causing user and bot speech to not be synchronized
-  during recordings.
+- Fixed an `AudioBufferProcessor` issue that was causing user and bot speech to
+  not be synchronized during recordings.
 
 - Fixed an issue where voice settings weren't applied to ElevenLabsTTSService.
 
@@ -54,10 +62,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before starting to receive audio from the user.
 
 - Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
-
-### Deprecated
-
-- `AudioBufferProcessor` parameter `user_continuos_stream` is deprecated.
 
 ### Other
 

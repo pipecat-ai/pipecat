@@ -7,6 +7,8 @@
 import time
 from typing import Optional
 
+from loguru import logger
+
 from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -181,7 +183,14 @@ class AudioBufferProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
     def _update_sample_rate(self, frame: StartFrame):
-        self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
+        # Record to the minimum sample rate to avoid possible downsampling
+        # artifacts.
+        min_sample_rate = min(frame.audio_in_sample_rate, frame.audio_out_sample_rate)
+        if frame.audio_in_sample_rate != frame.audio_out_sample_rate:
+            logger.debug(
+                f"{self} Input and output sample rates don't match, recording with smaller sample rate: {min_sample_rate} (this might get fixed in the future)"
+            )
+        self._sample_rate = self._init_sample_rate or min_sample_rate
         self._audio_buffer_size_1s = self._sample_rate * 2
 
     async def _process_recording(self, frame: Frame):
