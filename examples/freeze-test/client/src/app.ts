@@ -240,7 +240,7 @@ class WebsocketClientApp {
       const timeTaken = Date.now() - startTime;
       this.log(`Connection complete, timeTaken: ${timeTaken}`);
 
-      this.log("Starting to recording the next 05s of audio");
+      this.log(`Starting to recording the next ${(this.RECORDING_TIME_MS/1000)}s of audio`);
       this.recordingSerializer.startRecording()
       await this.sleep(this.RECORDING_TIME_MS)
       this.recordingSerializer.stopRecording()
@@ -300,7 +300,6 @@ class WebsocketClientApp {
         await this.sleep(chunk.delay);
         this.websocketTransport.handleUserAudioStream(chunk.data);
       }
-      // waiting a random time between 500ms and 10000ms before sending the same audio again
       const randomDelay = 1000 + Math.random() * (10000 - 500);
       await this.sleep(randomDelay);
 
