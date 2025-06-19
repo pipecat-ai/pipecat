@@ -98,6 +98,9 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         logger.debug(f"End of Turn result: {state}")
         return state, result
 
+    def clear(self):
+        self._clear(EndOfTurnState.COMPLETE)
+
     def _clear(self, turn_state: EndOfTurnState):
         # If the state is still incomplete, keep the _speech_triggered as True
         self._speech_triggered = turn_state == EndOfTurnState.INCOMPLETE
