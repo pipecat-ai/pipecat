@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallFromLLM,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
@@ -804,12 +805,16 @@ class AWSNovaSonicLLMService(LLMService):
         # Call tool function
         if self.has_function(function_name):
             if function_name in self._functions.keys() or None in self._functions.keys():
-                await self.call_function(
-                    context=self._context,
-                    tool_call_id=tool_call_id,
-                    function_name=function_name,
-                    arguments=arguments,
-                )
+                function_calls_llm = [
+                    FunctionCallFromLLM(
+                        context=self._context,
+                        tool_call_id=tool_call_id,
+                        function_name=function_name,
+                        arguments=arguments,
+                    )
+                ]
+
+                await self.run_function_calls(function_calls_llm)
         else:
             raise AWSNovaSonicUnhandledFunctionException(
                 f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
