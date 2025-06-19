@@ -64,7 +64,7 @@ class PipelineParams(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    allow_interruptions: bool = False
+    allow_interruptions: bool = True
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     enable_heartbeats: bool = False
