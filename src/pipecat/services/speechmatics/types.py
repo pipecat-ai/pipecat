@@ -137,6 +137,9 @@ class AudioSettings:
     sample_rate: int = 16000
     """Sampling rate in hertz."""
 
+    chunk_size: int = 256
+    """Chunk size in bytes."""
+
     def asdict(self) -> dict[str, Any]:
         """Returns model as a dict while excluding None values recursively."""
         return {

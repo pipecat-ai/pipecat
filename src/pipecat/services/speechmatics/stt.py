@@ -4,8 +4,16 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
+from loguru import logger
+
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    Frame,
+    StartFrame,
+)
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 
@@ -77,25 +85,60 @@ class SpeechmaticsSTTService(STTService):
         self._audio_settings: AudioSettings = None
 
         self._process_config(transcription_config)
-        
-        print(self._transcription_config)
-        
+
+    async def start(self, frame: StartFrame):
+        """Called when the new session starts."""
+        await super().start(frame)
+        logger.info("start")
+        await self._connect()
+
+    async def stop(self, frame: EndFrame):
+        """Called when the session ends."""
+        await super().stop(frame)
+        logger.info("stop")
+        await self._disconnect()
+
+    async def cancel(self, frame: CancelFrame):
+        """Called when the session is cancelled."""
+        await super().cancel(frame)
+        logger.info("cancel")
+        await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Returns transcript as a string."""
+        logger.debug("frame")
+        yield None
+
+    async def _connect(self):
+        """Connect to the STT service."""
+        pass
+
+    async def _disconnect(self):
+        """Disconnect from the STT service."""
         pass
 
     def _process_config(self, transcription_config: Optional[TranscriptionConfig] = None) -> None:
         """Create a formatted STT transcription config."""
         # Transcription config
-        transcription_config = TranscriptionConfig(
-            language=self._language,
-            operating_point=self._operating_point,
-            diarization="speaker" if self._enable_speaker_diarization else None,
-            enable_partials=self._enable_partials,
-            max_delay=self._max_delay or 2.0,
-            **transcription_config,
-        )
+        if not transcription_config:
+            transcription_config = TranscriptionConfig(
+                language=self._language,
+                operating_point=self._operating_point,
+                diarization="speaker" if self._enable_speaker_diarization else None,
+                enable_partials=self._enable_partials,
+                max_delay=self._max_delay or 2.0,
+            )
+        else:
+            if self._language:
+                transcription_config.language = self._language
+            if self._operating_point:
+                transcription_config.operating_point = self._operating_point
+            if self._enable_speaker_diarization:
+                transcription_config.diarization = "speaker"
+            if self._enable_partials:
+                transcription_config.enable_partials = self._enable_partials
+            if self._max_delay:
+                transcription_config.max_delay = self._max_delay
 
         # Diarization
         if self._enable_speaker_diarization and self._max_speakers:
