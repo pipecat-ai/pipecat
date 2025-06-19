@@ -5,7 +5,8 @@
 #
 
 import asyncio
-from typing import AsyncGenerator, Optional
+from dataclasses import asdict, dataclass
+from typing import Any, AsyncGenerator, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from loguru import logger
@@ -14,6 +15,7 @@ from speechmatics.rt import (
     AudioEncoding,
     AudioFormat,
     ConnectionConfig,
+    OperatingPoint,
     ServerMessageType,
     TranscriptionConfig,
     TranscriptResult,
@@ -40,18 +42,30 @@ class SpeechmaticsSTTService(STTService):
 
     Args:
         api_key: Speechmatics API key for authentication.
-        language: Language code for transcription (default: Language.EN).
-        base_url: Base URL for Speechmatics API (default: eu2.rt.speechmatics.com).
-        enable_partials: Enable partial transcription results (default: True).
-        max_delay: Maximum delay for transcription in seconds (default: 2.0).
-        sample_rate: Audio sample rate in Hz (default: None, inferred from pipeline).
-        chunk_size: Audio chunk size for streaming (default: 256).
-        audio_encoding: Audio encoding format (default: "pcm_s16le").
-        end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection (default: None, disabled).
-        operating_point: Operating point for transcription accuracy vs. latency tradeoff (default: "enhanced").
-        enable_speaker_diarization: Enable speaker diarization to identify different speakers (default: False).
-        max_speakers: Maximum number of speakers to detect (default: None, auto-detect).
+        language: Language code for transcription.
+            Defaults to `en`.
+        base_url: Base URL for Speechmatics API.
+            Defaults to `eu2.rt.speechmatics.com`.
+        enable_partials: Enable partial transcription results.
+            Defaults to `True`.
+        max_delay: Maximum delay for transcription in seconds.
+            Defaults to `2.0`.
+        sample_rate: Audio sample rate in Hz.
+            Defaults to `16000`.
+        chunk_size: Audio chunk size for streaming.
+            Defaults to `256`.
+        audio_encoding: Audio encoding format.
+            Defaults to `pcm_s16le`.
+        end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection.
+            Defaults to `None`.
+        operating_point: Operating point for transcription accuracy vs. latency tradeoff.
+            Defaults to `enhanced`.
+        enable_speaker_diarization: Enable speaker diarization to identify different speakers.
+            Defaults to `False`.
+        max_speakers: Maximum number of speakers to detect.
+            Defaults to `None` (auto-detect).
         transcription_config: Custom transcription configuration (other set parameters are merged).
+            Defaults to `None`.
         **kwargs: Additional arguments passed to STTService.
     """
 
@@ -67,7 +81,7 @@ class SpeechmaticsSTTService(STTService):
         chunk_size: int = 256,
         audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
         end_of_utterance_silence_trigger: Optional[float] = None,
-        operating_point: str = "enhanced",
+        operating_point: OperatingPoint = OperatingPoint.ENHANCED,
         enable_speaker_diarization: bool = False,
         max_speakers: Optional[int] = None,
         transcription_config: Optional[TranscriptionConfig] = None,
@@ -85,7 +99,7 @@ class SpeechmaticsSTTService(STTService):
         self._chunk_size: int = chunk_size
         self._audio_encoding: AudioEncoding = audio_encoding
         self._end_of_utterance_silence_trigger: Optional[float] = end_of_utterance_silence_trigger
-        self._operating_point: str = operating_point
+        self._operating_point: OperatingPoint = operating_point
         self._enable_speaker_diarization: bool = enable_speaker_diarization
         self._max_speakers: Optional[int] = max_speakers
 
@@ -113,12 +127,12 @@ class SpeechmaticsSTTService(STTService):
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Returns an async generator to consume the STT results."""
+        """Adds audio to the audio buffer and yields None."""
         self._audio_buffer.write_audio(audio)
         yield None
 
     async def _run_client(self):
-        """Run the Speechmatics client in a thread."""
+        """Runs the Speechmatics client in a thread."""
         await self._client.transcribe(
             self._audio_buffer,
             transcription_config=self._transcription_config,
@@ -139,25 +153,23 @@ class SpeechmaticsSTTService(STTService):
 
         # Recognition started event
         @self._client.on(ServerMessageType.RECOGNITION_STARTED)
-        def on_recognition_started(message):
-            logger.info(f"Recognition started: {message}")
+        def on_recognition_started(message: dict[str, Any]):
+            logger.debug(f"Recognition started (session: {message.get('id')})")
 
         # Partial transcript event
         @self._client.on(ServerMessageType.ADD_PARTIAL_TRANSCRIPT)
-        def on_partial_transcript(message):
-            result = TranscriptResult.from_message(message)
-            logger.info(f"Partial: {result.transcript}")
+        def on_partial_transcript(message: dict[str, Any]):
+            asyncio.create_task(self._handle_transcript(message, is_final=False))
 
         # Final transcript event
         @self._client.on(ServerMessageType.ADD_TRANSCRIPT)
-        def on_final_transcript(message):
-            result = TranscriptResult.from_message(message)
-            logger.info(f"Final: {result.transcript}")
+        def on_final_transcript(message: dict[str, Any]):
+            asyncio.create_task(self._handle_transcript(message, is_final=True))
 
         # End of Utterance
         @self._client.on(ServerMessageType.END_OF_UTTERANCE)
-        def on_end_of_utterance(message):
-            logger.info(f"End of utterance: {message}")
+        def on_end_of_utterance(message: dict[str, Any]):
+            logger.debug("End of utterance received from STT")
 
         # Start the client in a thread
         asyncio.create_task(self._run_client())
@@ -217,6 +229,10 @@ class SpeechmaticsSTTService(STTService):
         # Set config
         self._transcription_config = transcription_config
 
+    async def _handle_transcript(self, message: dict[str, Any], is_final: bool = False):
+        """Handle the partial and final transcript events."""
+        logger.debug(f"transcript: {message}")
+
 
 class AudioBuffer:
     """Audio buffer for STT clients."""
@@ -266,6 +282,40 @@ class AudioBuffer:
     def stop(self):
         """Close the audio buffer."""
         self._closed = True
+
+
+@dataclass
+class SpeechFragment:
+    """Fragment of an utterance.
+
+    Attributes:
+        start_time: Start time of the fragment in seconds (from session start).
+        end_time: End time of the fragment in seconds (from session start).
+        language: Language of the fragment.
+            Defaults to `en`.
+        is_eos: Whether the fragment is the end of a sentence.
+            Defaults to `False`.
+        is_final: Whether the fragment is the final fragment.
+            Defaults to `False`.
+        attaches_to: Whether the fragment attaches to the previous or next fragment (punctuation).
+            Defaults to empty string.
+        content: Content of the fragment.
+            Defaults to empty string.
+        speaker: Speaker of the fragment (if diarization is enabled).
+            Defaults to `None`.
+        confidence: Confidence of the fragment (0.0 to 1.0).
+            Defaults to `1.0`.
+    """
+
+    start_time: float
+    end_time: float
+    language: str = "en"
+    is_eos: bool = False
+    is_final: bool = False
+    attaches_to: str = ""
+    content: str = ""
+    speaker: Optional[str] = None
+    confidence: float = 1.0
 
 
 def _get_endpoint_url(url: str) -> str:
