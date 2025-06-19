@@ -84,11 +84,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             audio_out_sample_rate=24000,
             enable_metrics=True,
             enable_usage_metrics=True,
-            report_only_initial_ttfb=True,
         ),
     )
 
