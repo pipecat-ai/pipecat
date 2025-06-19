@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that would cause multiple `PipelineTask.on_idle_timeout`
+  events to be triggered repeatedly.
+
 - Fixed an issue that was causing user and bot speech to not be synchronized
   during recordings.
 
