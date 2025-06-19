@@ -15,7 +15,6 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -53,7 +52,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     logger.info(f"Starting bot")
 
     stt = SpeechmaticsSTTService(
-        api_key=os.getenv("SPEECHMATICS_API_KEY"), base_url="preview.rt.speechmatics.com"
+        api_key=os.getenv("SPEECHMATICS_API_KEY"),
+        base_url=os.getenv("SPEECHMATICS_URL", None),
+        end_of_utterance_silence_trigger=0.5,
     )
 
     tts = ElevenLabsTTSService(
