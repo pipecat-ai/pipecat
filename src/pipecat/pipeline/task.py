@@ -663,6 +663,11 @@ class PipelineTask(BaseTask):
                     diff_time = time.time() - last_frame_time
                     if diff_time >= self._idle_timeout_secs:
                         running = await self._idle_timeout_detected()
+                        # Reset `last_frame_time` so we don't trigger another
+                        # immediate idle timeout if we are not cancelling. For
+                        # example, we might want to force the bot to say goodbye
+                        # and then clean nicely with an `EndFrame`.
+                        last_frame_time = time.time()
 
                 self._idle_queue.task_done()
             except asyncio.TimeoutError:
