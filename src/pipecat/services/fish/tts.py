@@ -42,6 +42,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     class InputParams(BaseModel):
         language: Optional[Language] = Language.EN
         latency: Optional[str] = "normal"  # "normal" or "balanced"
+        normalize: False
         prosody_speed: Optional[float] = 1.0  # Speech speed (0.5-2.0)
         prosody_volume: Optional[int] = 0  # Volume adjustment in dB
 
@@ -50,6 +51,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         *,
         api_key: str,
         model: str,  # This is the reference_id
+        control_model : str = None,
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -65,6 +67,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         params = params or FishAudioTTSService.InputParams()
 
         self._api_key = api_key
+        self._control_model = control_model
         self._base_url = "wss://api.fish.audio/v1/tts/live"
         self._websocket = None
         self._receive_task = None
@@ -75,6 +78,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             "sample_rate": 0,
             "latency": params.latency,
             "format": output_format,
+            "normalize" : params.normalize,
             "prosody": {
                 "speed": params.prosody_speed,
                 "volume": params.prosody_volume,
@@ -124,7 +128,7 @@ class FishAudioTTSService(InterruptibleTTSService):
                 return
 
             logger.debug("Connecting to Fish Audio")
-            headers = {"Authorization": f"Bearer {self._api_key}"}
+            headers = {"Authorization": f"Bearer {self._api_key}", "model": self._control_model}
             self._websocket = await websockets.connect(self._base_url, extra_headers=headers)
 
             # Send initial start message with ormsgpack
