@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
+
 - Added reconnection logic and audio buffer management to `GladiaSTTService`.
 
 - Added Polish support to `AWSTranscribeSTTService`.
@@ -29,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `PipelineParams` arg `allow_interruptions` now defaults to `True`.
+
 - `TavusTransport` and `TavusVideoService` now send audio to Tavus using WebRTC
   audio tracks instead of `app-messages` over WebSocket. This should improve the
   overall audio quality.
@@ -36,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `daily-python` to 0.19.3.
 
 ### Fixed
+
+- Fixed function calling in `AWSNovaSonicLLMService`.
+
+- Fixed an issue that would cause multiple `PipelineTask.on_idle_timeout`
+  events to be triggered repeatedly.
 
 - Fixed an issue that was causing user and bot speech to not be synchronized
   during recordings.
