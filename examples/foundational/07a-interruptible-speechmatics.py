@@ -75,7 +75,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "You are a helpful British assistant called Alfred. "
                 "Your goal is to demonstrate your capabilities in a succinct way. "
                 "Your output will be converted to audio so don't include special characters in your answers. "
-                "Respond to what the user said in a funny, creative and helpful way."
+                "Respond to what the user said in a funny, creative and helpful way. "
+                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
             ),
         },
     ]

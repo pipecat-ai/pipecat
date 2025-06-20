@@ -151,6 +151,8 @@ class SpeechmaticsSTTService(STTService):
             Defaults to `enhanced`.
         enable_speaker_diarization: Enable speaker diarization to identify different speakers.
             Defaults to `False`.
+        speaker_id_wrapper: Wrapper for speaker ID.
+            Defaults to `<{user_id}>{text}</{user_id}>`.
         max_speakers: Maximum number of speakers to detect.
             Defaults to `None` (auto-detect).
         transcription_config: Custom transcription configuration (other set parameters are merged).
@@ -172,6 +174,7 @@ class SpeechmaticsSTTService(STTService):
         end_of_utterance_silence_trigger: Optional[float] = None,
         operating_point: OperatingPoint = OperatingPoint.ENHANCED,
         enable_speaker_diarization: bool = False,
+        speaker_id_wrapper: str = "<{user_id}>{text}</{user_id}>",
         max_speakers: Optional[int] = None,
         transcription_config: Optional[TranscriptionConfig] = None,
         **kwargs,
@@ -190,6 +193,7 @@ class SpeechmaticsSTTService(STTService):
         self._end_of_utterance_silence_trigger: Optional[float] = end_of_utterance_silence_trigger
         self._operating_point: OperatingPoint = operating_point
         self._enable_speaker_diarization: bool = enable_speaker_diarization
+        self._speaker_id_wrapper: str = speaker_id_wrapper
         self._max_speakers: Optional[int] = max_speakers
 
         # Complete configuration objects
@@ -352,6 +356,9 @@ class SpeechmaticsSTTService(STTService):
         # Skip if no frames
         if not frames:
             return
+
+        # Wrap frames with speaker ID
+        frames = [self._wrap_frames_with_speaker(frame) for frame in frames]
 
         # If final, then re=parse into TranscriptionFrame
         if finalized:
@@ -522,6 +529,39 @@ class SpeechmaticsSTTService(STTService):
             user_id=group[0].speaker,
             timestamp=ts,
             language=group[0].language,
+        )
+
+    def _wrap_frames_with_speaker(
+        self, frame: InterimTranscriptionFrame
+    ) -> InterimTranscriptionFrame:
+        """Wrap the frame with the speaker ID.
+
+        This takes an InterimTranscriptionFrame object and returns a new
+        object wieh the speaker id wrapping the text. The format for the
+        wrapping is defined by the `speaker_id_wrapper` parameter.
+
+        Args:
+            frame: The InterimTranscriptionFrame object to wrap.
+
+        Returns:
+            InterimTranscriptionFrame: The wrapped frame.
+        """
+        # Check for speaker
+        if not frame.user_id and self._speaker_id_wrapper:
+            return frame
+
+        # Get the text
+        text = frame.text
+
+        # Format, as per the spec
+        text = self._speaker_id_wrapper.format(**{"user_id": frame.user_id, "text": text})
+
+        # Return the new frame
+        return InterimTranscriptionFrame(
+            text=text,
+            user_id=frame.user_id,
+            timestamp=frame.timestamp,
+            language=frame.language,
         )
 
 
