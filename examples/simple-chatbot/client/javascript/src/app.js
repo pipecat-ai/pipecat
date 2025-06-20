@@ -5,7 +5,7 @@
  */
 
 /**
- * RTVI Client Implementation
+ * Pipecat Client Implementation
  *
  * This client connects to an RTVI-compatible bot server using WebRTC (via Daily).
  * It handles audio/video streaming and manages the connection lifecycle.
@@ -16,8 +16,24 @@
  * - Browser with WebRTC support
  */
 
-import { RTVIClient, RTVIEvent } from '@pipecat-ai/client-js';
+import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
+
+function _generateRandomWeather() {
+  const temperature = Math.random() * 200 - 80;
+  const humidity = Math.random() * 100;
+  const conditions = ['sunny', 'cloudy', 'rainy', 'snowy'];
+  const condition = conditions[Math.floor(Math.random() * conditions.length)];
+  const windSpeed = Math.random() * 50;
+  const windGusts = windSpeed + Math.random() * 20;
+  return {
+    temperature,
+    humidity,
+    condition,
+    windSpeed,
+    windGusts,
+  };
+}
 
 /**
  * ChatbotClient handles the connection and media management for a real-time
@@ -26,9 +42,8 @@ import { DailyTransport } from '@pipecat-ai/daily-transport';
 class ChatbotClient {
   constructor() {
     // Initialize client state
-    this.rtviClient = null;
+    this.pcClient = null;
     this.setupDOMElements();
-    this.setupEventListeners();
     this.initializeClientAndTransport();
   }
 
@@ -42,6 +57,7 @@ class ChatbotClient {
     this.statusSpan = document.getElementById('connection-status');
     this.debugLog = document.getElementById('debug-log');
     this.botVideoContainer = document.getElementById('bot-video-container');
+    this.deviceSelector = document.getElementById('device-selector');
 
     // Create an audio element for bot's voice output
     this.botAudio = document.createElement('audio');
@@ -54,24 +70,54 @@ class ChatbotClient {
    * Set up event listeners for connect/disconnect buttons
    */
   setupEventListeners() {
-    this.connectBtn.addEventListener('click', () => this.connect());
+    this.connectBtn.addEventListener('click', () => {
+      console.log('click');
+      this.connect();
+    });
     this.disconnectBtn.addEventListener('click', () => this.disconnect());
+
+    // Populate device selector
+    this.pcClient.getAllMics().then((mics) => {
+      console.log('Available mics:', mics);
+      mics.forEach((device) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `Microphone ${device.deviceId}`;
+        this.deviceSelector.appendChild(option);
+      });
+    });
+    this.deviceSelector.addEventListener('change', (event) => {
+      const selectedDeviceId = event.target.value;
+      console.log('Selected device ID:', selectedDeviceId);
+      this.pcClient.updateMic(selectedDeviceId);
+    });
+
+    // Handle mic mute/unmute toggle
+    const micToggleBtn = document.getElementById('mic-toggle-btn');
+
+    micToggleBtn.addEventListener('click', () => {
+      let micEnabled = this.pcClient.isMicEnabled;
+      micToggleBtn.textContent = micEnabled ? 'Unmute Mic' : 'Mute Mic';
+      this.pcClient.enableMic(!micEnabled);
+      // Add logic to mute/unmute the mic
+      if (micEnabled) {
+        console.log('Mic muted');
+        // Add code to mute the mic
+      } else {
+        console.log('Mic unmuted');
+        // Add code to unmute the mic
+      }
+    });
   }
 
   /**
-   * Set up the RTVI client and Daily transport
+   * Set up the Pipecat client and Daily transport
    */
-  initializeClientAndTransport() {
-    // Initialize the RTVI client with a DailyTransport and our configuration
-    this.rtviClient = new RTVIClient({
-      transport: new DailyTransport(),
-      params: {
-        // The baseURL and endpoint of your bot server that the client will connect to
-        baseUrl: 'http://localhost:7860',
-        endpoints: {
-          connect: '/connect',
-        },
-      },
+  async initializeClientAndTransport() {
+    console.log('Initializing Pipecat client and transport...');
+    // Initialize the Pipecat client with a DailyTransport and our configuration
+    this.pcClient = new PipecatClient({
+      transport: DailyTransport.create(),
       enableMic: true, // Enable microphone for user input
       enableCam: false,
       callbacks: {
@@ -121,14 +167,76 @@ class ChatbotClient {
         onMessageError: (error) => {
           console.log('Message error:', error);
         },
+        onMicUpdated: (data) => {
+          console.log('Mic updated:', data);
+          this.deviceSelector.value = data.deviceId;
+        },
         onError: (error) => {
           console.log('Error:', JSON.stringify(error));
         },
       },
     });
+    window.client = this; // Expose client globally for debugging
 
     // Set up listeners for media track events
     this.setupTrackListeners();
+
+    await this.pcClient.initDevices();
+    this.setupEventListeners();
+    this.registerFunctionCallHandlers();
+  }
+
+  registerFunctionCallHandlers() {
+    this.pcClient.registerFunctionCallHandler(
+      'changeBackgroundColor',
+      (data) => {
+        const color = data.color;
+        console.log('[EVENT] LLMFunctionCall', functionName, data);
+        console.log('changing background color to', color);
+        document.body.style.backgroundColor = color;
+        return { success: true, color };
+      }
+    );
+    this.pcClient.registerFunctionCallHandler(
+      'get_current_weather',
+      async (params) => {
+        const data = params.arguments;
+        const location = data.location;
+        console.log('[EVENT] LLMFunctionCall', params.functionName, data);
+        console.log('getting weather for', data, location);
+        const key = import.meta.env.VITE_DANGEROUS_OPENWEATHER_API_KEY;
+        if (!key) {
+          const ret = { success: true, weather: _generateRandomWeather() };
+          console.log('returning weather', ret);
+          return ret;
+        }
+        const locationReq = await fetch(
+          `http://api.openweathermap.org/geo/1.0/direct?q=${location}&limit=1&appid=${key}`
+        );
+        const locJson = await locationReq.json();
+        const loc = { lat: locJson[0].lat, lon: locJson[0].lon };
+        const exclude = ['minutely', 'hourly', 'daily'].join(',');
+        const weatherRec = await fetch(
+          `https://api.openweathermap.org/data/3.0/onecall?lat=${loc.lat}&lon=${loc.lon}&exclude=${exclude}&appid=${key}`
+        );
+        const weather = await weatherRec.json();
+        return { success: true, weather: weather.current };
+      }
+    );
+  }
+
+  getLLMConfig() {
+    const logConfig = (config) => {
+      console.log('LLM Config:', JSON.stringify(config, null, 2));
+    };
+    this.pcClient
+      .sendClientRequest('get-llm-config')
+      .then((config) => {
+        logConfig(config);
+      })
+      .catch((error) => {
+        console.error('Error fetching LLM config:', error);
+      });
   }
 
   /**
@@ -163,10 +271,10 @@ class ChatbotClient {
    * This is called when the bot is ready or when the transport state changes to ready
    */
   setupMediaTracks() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Get current tracks from the client
-    const tracks = this.rtviClient.tracks();
+    const tracks = this.pcClient.tracks();
 
     // Set up any available bot tracks
     if (tracks.bot?.audio) {
@@ -182,10 +290,10 @@ class ChatbotClient {
    * This handles new tracks being added during the session
    */
   setupTrackListeners() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Listen for new tracks starting
-    this.rtviClient.on(RTVIEvent.TrackStarted, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStarted, (track, participant) => {
       // Only handle non-local (bot) tracks
       if (!participant?.local) {
         if (track.kind === 'audio') {
@@ -197,7 +305,7 @@ class ChatbotClient {
     });
 
     // Listen for tracks stopping
-    this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStopped, (track, participant) => {
       this.log(
         `Track stopped event: ${track.kind} from ${
           participant?.name || 'unknown'
@@ -251,17 +359,16 @@ class ChatbotClient {
 
   /**
    * Initialize and connect to the bot
-   * This sets up the RTVI client, initializes devices, and establishes the connection
+   * This sets up the Pipecat client, initializes devices, and establishes the connection
    */
   async connect() {
     try {
-      // Initialize audio/video devices
-      this.log('Initializing devices...');
-      await this.rtviClient.initDevices();
-
       // Connect to the bot
       this.log('Connecting to bot...');
-      await this.rtviClient.connect();
+      await this.pcClient.connect({
+        endpoint: 'http://localhost:7860/connect',
+        timeout: 25000,
+      });
 
       this.log('Connection complete');
     } catch (error) {
@@ -271,9 +378,9 @@ class ChatbotClient {
       this.updateStatus('Error');
 
       // Clean up if there's an error
-      if (this.rtviClient) {
+      if (this.pcClient) {
         try {
-          await this.rtviClient.disconnect();
+          await this.pcClient.disconnect();
         } catch (disconnectError) {
           this.log(`Error during disconnect: ${disconnectError.message}`);
         }
@@ -285,10 +392,10 @@ class ChatbotClient {
    * Disconnect from the bot and clean up media resources
    */
   async disconnect() {
-    if (this.rtviClient) {
+    if (this.pcClient) {
       try {
-        // Disconnect the RTVI client
-        await this.rtviClient.disconnect();
+        // Disconnect the Pipecat client
+        await this.pcClient.disconnect();
 
         // Clean up audio
         if (this.botAudio.srcObject) {

@@ -45,7 +45,7 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 load_dotenv(override=True)
 
 # Check if we're in local development mode
-LOCAL = os.getenv("LOCAL")
+LOCAL = os.getenv("LOCAL_RUN")
 
 logger.remove()
 logger.add(sys.stderr, level="DEBUG")
