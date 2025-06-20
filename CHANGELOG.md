@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
+
 - Added reconnection logic and audio buffer management to `GladiaSTTService`.
 
 - Added Polish support to `AWSTranscribeSTTService`.
