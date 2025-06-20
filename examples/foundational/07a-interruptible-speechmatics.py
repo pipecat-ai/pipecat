@@ -15,8 +15,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -63,12 +63,20 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        params=BaseOpenAILLMService.InputParams(temperature=0.75),
+    )
 
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": (
+                "You are a helpful British assistant called Alfred. "
+                "Your goal is to demonstrate your capabilities in a succinct way. "
+                "Your output will be converted to audio so don't include special characters in your answers. "
+                "Respond to what the user said in a funny, creative and helpful way."
+            ),
         },
     ]
 
