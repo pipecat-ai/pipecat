@@ -6,6 +6,7 @@
 
 import asyncio
 import datetime
+import re
 from dataclasses import asdict, dataclass
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    TranscriptionFrame,
 )
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
@@ -262,6 +264,7 @@ class SpeechmaticsSTTService(STTService):
         @self._client.on(ServerMessageType.END_OF_UTTERANCE)
         def on_end_of_utterance(message: dict[str, Any]):
             logger.debug("End of utterance received from STT")
+            asyncio.create_task(self._send_frames(finalized=True))
 
         # Start the client in a thread
         asyncio.create_task(self._run_client())
@@ -338,11 +341,38 @@ class SpeechmaticsSTTService(STTService):
         if not has_changed:
             return
 
-        # Get speech frames
-        speech_frames = self._get_speech_data_from_fragments()
+        # Send frames
+        asyncio.create_task(self._send_frames())
 
-        # Yield the speech frames
-        logger.warning(speech_frames)
+    async def _send_frames(self, finalized: bool = False) -> None:
+        """Send frames to the pipeline."""
+        # Get speech frames (InterimTranscriptionFrame)
+        frames = self._get_frames_from_fragments()
+
+        # Skip if no frames
+        if not frames:
+            return
+
+        # If final, then re=parse into TranscriptionFrame
+        if finalized:
+            # Transform
+            frames = [
+                TranscriptionFrame(
+                    text=frame.text,
+                    user_id=frame.user_id,
+                    timestamp=frame.timestamp,
+                    language=frame.language,
+                    result=frame.result,
+                )
+                for frame in frames
+            ]
+
+            # Reset the speech fragments
+            self._speech_fragments.clear()
+
+        # Send the frames back to pipecat
+        for frame in frames:
+            await self.push_frame(frame)
 
     def _add_speech_fragments(self, message: dict[str, Any], is_final: bool = False) -> bool:
         """Takes a new Partial or Final from the STT engine.
@@ -404,7 +434,7 @@ class SpeechmaticsSTTService(STTService):
         # Data was updated
         return True
 
-    def _get_speech_data_from_fragments(self) -> list[InterimTranscriptionFrame]:
+    def _get_frames_from_fragments(self) -> list[InterimTranscriptionFrame]:
         """Get speech data objects for the current fragment list.
 
         Each speech fragments is grouped by contiguous speaker and then
