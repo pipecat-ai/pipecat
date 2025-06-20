@@ -12,7 +12,7 @@ source .venv/bin/activate
 # install deps
 pip install -r dev-requirements.txt
 pip install -e .
-pip install -e ".[daily,deepgram,openai,silero,speechmatics]"
+pip install -e ".[daily,elevenlabs,openai,silero,speechmatics]"
 
 # module
 ruff check --fix --select I001 src/pipecat/services/speechmatics

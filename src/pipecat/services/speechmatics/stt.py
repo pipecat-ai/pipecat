@@ -355,7 +355,10 @@ class SpeechmaticsSTTService(STTService):
 
         # If final, then re=parse into TranscriptionFrame
         if finalized:
-            # Transform
+            # Reset the speech fragments
+            self._speech_fragments.clear()
+
+            # Transform frames
             frames = [
                 TranscriptionFrame(
                     text=frame.text,
@@ -366,9 +369,6 @@ class SpeechmaticsSTTService(STTService):
                 )
                 for frame in frames
             ]
-
-            # Reset the speech fragments
-            self._speech_fragments.clear()
 
         # Send the frames back to pipecat
         for frame in frames:
