@@ -400,6 +400,8 @@ class RTVIObserverParams:
     """
     Parameters for configuring RTVI Observer behavior.
 
+    Protip: Set these all to `False` if the bot will talk to another bot.
+
     Attributes:
         bot_llm_enabled (bool): Indicates if the bot's LLM messages should be sent.
         bot_tts_enabled (bool): Indicates if the bot's TTS messages should be sent.
@@ -802,7 +804,7 @@ class RTVIProcessor(FrameProcessor):
             await self._message_queue.put(message)
         except ValidationError as e:
             await self.send_error(f"Invalid RTVI transport message: {e}")
-            logger.warning(f"Invalid RTVI transport message: {e}")
+            logger.warning(f"Invalid RTVI transport message '{transport_message}': {e}")
 
     async def _handle_message(self, message: RTVIMessage):
         try:
