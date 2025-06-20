@@ -5,6 +5,7 @@
 #
 
 import asyncio
+import datetime
 from dataclasses import asdict, dataclass
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -27,10 +28,96 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
 )
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.time import time_now_iso8601
+
+
+class AudioBuffer:
+    """Audio buffer for STT clients."""
+
+    def __init__(self, maxsize: int = 0):
+        self._queue = asyncio.Queue(maxsize=maxsize)
+        self._current_chunk = b""
+        self._position = 0
+        self._closed = False
+
+    def write_audio(self, data: bytes) -> None:
+        """Write audio data to the buffer (thread-safe)."""
+        if data:
+            try:
+                self._queue.put_nowait(data)
+            except asyncio.QueueFull:
+                pass
+
+    async def read(self, size: int) -> bytes:
+        """Read exactly `size` bytes from the buffer."""
+        result = b""
+        bytes_needed = size
+
+        while bytes_needed > 0 and not self._closed:
+            # Use data from current chunk if available
+            if self._position < len(self._current_chunk):
+                available = len(self._current_chunk) - self._position
+                take = min(bytes_needed, available)
+                result += self._current_chunk[self._position : self._position + take]
+                self._position += take
+                bytes_needed -= take
+                continue
+
+            # Get next chunk
+            try:
+                chunk = await asyncio.wait_for(self._queue.get(), timeout=0.1)
+                if chunk is None:
+                    continue
+                self._current_chunk = chunk
+                self._position = 0
+            except asyncio.TimeoutError:
+                await asyncio.sleep(0)
+                continue
+
+        return result
+
+    def stop(self) -> None:
+        """Close the audio buffer."""
+        self._closed = True
+
+
+@dataclass
+class SpeechFragment:
+    """Fragment of an utterance.
+
+    Attributes:
+        start_time: Start time of the fragment in seconds (from session start).
+        end_time: End time of the fragment in seconds (from session start).
+        language: Language of the fragment.
+            Defaults to `en`.
+        is_eos: Whether the fragment is the end of a sentence.
+            Defaults to `False`.
+        is_final: Whether the fragment is the final fragment.
+            Defaults to `False`.
+        attaches_to: Whether the fragment attaches to the previous or next fragment (punctuation).
+            Defaults to empty string.
+        content: Content of the fragment.
+            Defaults to empty string.
+        speaker: Speaker of the fragment (if diarization is enabled).
+            Defaults to `None`.
+        confidence: Confidence of the fragment (0.0 to 1.0).
+            Defaults to `1.0`.
+    """
+
+    start_time: float
+    end_time: float
+    language: str = "en"
+    is_eos: bool = False
+    is_final: bool = False
+    attaches_to: str = ""
+    content: str = ""
+    speaker: Optional[str] = None
+    confidence: float = 1.0
 
 
 class SpeechmaticsSTTService(STTService):
@@ -108,8 +195,12 @@ class SpeechmaticsSTTService(STTService):
         self._process_config(transcription_config)
 
         # STT client
-        self._client: AsyncClient = None
+        self._client: Optional[AsyncClient] = None
         self._audio_buffer: AudioBuffer = AudioBuffer(maxsize=10)
+        self._start_time: Optional[datetime.datetime] = None
+
+        # Current utterance speech data
+        self._speech_fragments: list[SpeechFragment] = []
 
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
@@ -131,7 +222,7 @@ class SpeechmaticsSTTService(STTService):
         self._audio_buffer.write_audio(audio)
         yield None
 
-    async def _run_client(self):
+    async def _run_client(self) -> None:
         """Runs the Speechmatics client in a thread."""
         await self._client.transcribe(
             self._audio_buffer,
@@ -143,7 +234,7 @@ class SpeechmaticsSTTService(STTService):
             ),
         )
 
-    async def _connect(self):
+    async def _connect(self) -> None:
         """Connect to the STT service."""
         # Create new STT RT client
         self._client = AsyncClient(
@@ -155,16 +246,17 @@ class SpeechmaticsSTTService(STTService):
         @self._client.on(ServerMessageType.RECOGNITION_STARTED)
         def on_recognition_started(message: dict[str, Any]):
             logger.debug(f"Recognition started (session: {message.get('id')})")
+            self._start_time = datetime.datetime.now(datetime.timezone.utc)
 
         # Partial transcript event
         @self._client.on(ServerMessageType.ADD_PARTIAL_TRANSCRIPT)
         def on_partial_transcript(message: dict[str, Any]):
-            asyncio.create_task(self._handle_transcript(message, is_final=False))
+            self._handle_transcript(message, is_final=False)
 
         # Final transcript event
         @self._client.on(ServerMessageType.ADD_TRANSCRIPT)
         def on_final_transcript(message: dict[str, Any]):
-            asyncio.create_task(self._handle_transcript(message, is_final=True))
+            self._handle_transcript(message, is_final=True)
 
         # End of Utterance
         @self._client.on(ServerMessageType.END_OF_UTTERANCE)
@@ -174,7 +266,7 @@ class SpeechmaticsSTTService(STTService):
         # Start the client in a thread
         asyncio.create_task(self._run_client())
 
-    async def _disconnect(self):
+    async def _disconnect(self) -> None:
         """Disconnect from the STT service."""
         # Stop the audio buffer
         self._audio_buffer.stop()
@@ -229,93 +321,178 @@ class SpeechmaticsSTTService(STTService):
         # Set config
         self._transcription_config = transcription_config
 
-    async def _handle_transcript(self, message: dict[str, Any], is_final: bool = False):
-        """Handle the partial and final transcript events."""
-        logger.debug(f"transcript: {message}")
+    def _handle_transcript(self, message: dict[str, Any], is_final: bool) -> None:
+        """Handle the partial and final transcript events.
 
+        Args:
+            message: The new Partial or Final from the STT engine.
+            is_final: Whether the data is final or partial.
+        """
+        # Add the speech fragments
+        has_changed = self._add_speech_fragments(
+            message=message,
+            is_final=is_final,
+        )
 
-class AudioBuffer:
-    """Audio buffer for STT clients."""
+        # Skip if unchanged
+        if not has_changed:
+            return
 
-    def __init__(self, maxsize: int = 0):
-        self._queue = asyncio.Queue(maxsize=maxsize)
-        self._current_chunk = b""
-        self._position = 0
-        self._closed = False
+        # Get speech frames
+        speech_frames = self._get_speech_data_from_fragments()
 
-    def write_audio(self, data: bytes) -> None:
-        """Write audio data to the buffer (thread-safe)."""
-        if data:
-            try:
-                self._queue.put_nowait(data)
-            except asyncio.QueueFull:
-                pass
+        # Yield the speech frames
+        logger.warning(speech_frames)
 
-    async def read(self, size: int) -> bytes:
-        """Read exactly `size` bytes from the buffer."""
-        result = b""
-        bytes_needed = size
+    def _add_speech_fragments(self, message: dict[str, Any], is_final: bool = False) -> bool:
+        """Takes a new Partial or Final from the STT engine.
 
-        while bytes_needed > 0 and not self._closed:
-            # Use data from current chunk if available
-            if self._position < len(self._current_chunk):
-                available = len(self._current_chunk) - self._position
-                take = min(bytes_needed, available)
-                result += self._current_chunk[self._position : self._position + take]
-                self._position += take
-                bytes_needed -= take
-                continue
+        Accumulates it into the _speech_data list. As new final data is added, all
+        partials are removed from the list.
 
-            # Get next chunk
-            try:
-                chunk = await asyncio.wait_for(self._queue.get(), timeout=0.1)
-                if chunk is None:
+        Note: If a known speaker is `__[A-Z0-9_]{2,}__`, then the words are skipped,
+        as this is used to protect against self-interruption by the assistant or to
+        block out specific known voices.
+
+        Args:
+            message: The new Partial or Final from the STT engine.
+            is_final: Whether the data is final or partial.
+
+        Returns:
+            bool: True if the speech data was updated, False otherwise.
+        """
+        # Parsed new speech data from the STT engine
+        fragments: list[SpeechFragment] = []
+
+        # Current length of the speech data
+        current_length = len(self._speech_fragments)
+
+        # Iterate over the results in the payload
+        for result in message.get("results", []):
+            alt = result.get("alternatives", [{}])[0]
+            if alt.get("content", None):
+                # Create the new fragment
+                fragment = SpeechFragment(
+                    start_time=result.get("start_time", 0),
+                    end_time=result.get("end_time", 0),
+                    language=alt.get("language", "en"),
+                    is_eos=alt.get("is_eos", False),
+                    is_final=is_final,
+                    attaches_to=result.get("attaches_to", ""),
+                    content=alt.get("content", ""),
+                    speaker=alt.get("speaker", None),
+                    confidence=alt.get("confidence", 1.0),
+                )
+
+                # Drop `__XX__` speakers
+                if fragment.speaker and re.match(r"^__[A-Z0-9_]{2,}__$", fragment.speaker):
                     continue
-                self._current_chunk = chunk
-                self._position = 0
-            except asyncio.TimeoutError:
-                await asyncio.sleep(0)
-                continue
 
-        return result
+                # Add the fragment
+                fragments.append(fragment)
 
-    def stop(self):
-        """Close the audio buffer."""
-        self._closed = True
+        # Remove existing partials, as new partials and finals are provided
+        self._speech_fragments = [frag for frag in self._speech_fragments if frag.is_final]
 
+        # Return if no new fragments and length of the existing data is unchanged
+        if not fragments and len(self._speech_fragments) == current_length:
+            return False
 
-@dataclass
-class SpeechFragment:
-    """Fragment of an utterance.
+        # Add the fragments to the speech data
+        self._speech_fragments.extend(fragments)
 
-    Attributes:
-        start_time: Start time of the fragment in seconds (from session start).
-        end_time: End time of the fragment in seconds (from session start).
-        language: Language of the fragment.
-            Defaults to `en`.
-        is_eos: Whether the fragment is the end of a sentence.
-            Defaults to `False`.
-        is_final: Whether the fragment is the final fragment.
-            Defaults to `False`.
-        attaches_to: Whether the fragment attaches to the previous or next fragment (punctuation).
-            Defaults to empty string.
-        content: Content of the fragment.
-            Defaults to empty string.
-        speaker: Speaker of the fragment (if diarization is enabled).
-            Defaults to `None`.
-        confidence: Confidence of the fragment (0.0 to 1.0).
-            Defaults to `1.0`.
-    """
+        # Data was updated
+        return True
 
-    start_time: float
-    end_time: float
-    language: str = "en"
-    is_eos: bool = False
-    is_final: bool = False
-    attaches_to: str = ""
-    content: str = ""
-    speaker: Optional[str] = None
-    confidence: float = 1.0
+    def _get_speech_data_from_fragments(self) -> list[InterimTranscriptionFrame]:
+        """Get speech data objects for the current fragment list.
+
+        Each speech fragments is grouped by contiguous speaker and then
+        returned as a InterimTranscriptionFrame object with the `speaker_id` field
+        set to the current speaker (string). An utterance may contain speech from
+        more than one speaker (e.g. S1, S2, S1, S3, ...), so they are kept
+        in strict order for the context of the conversation.
+
+        Returns:
+            list[InterimTranscriptionFrame]: The list of objects.
+        """
+        # Speaker groups
+        current_speaker: str | None = None
+        speaker_groups: list[list[SpeechFragment]] = [[]]
+
+        # Group by speakers
+        for frag in self._speech_fragments:
+            if frag.speaker != current_speaker:
+                current_speaker = frag.speaker
+                if speaker_groups[-1]:
+                    speaker_groups.append([])
+            speaker_groups[-1].append(frag)
+
+        # Create SpeechData objects
+        speech_data: list[InterimTranscriptionFrame] = []
+        for group in speaker_groups:
+            sd = self._get_speech_data_from_fragment_group(group)
+            if sd:
+                speech_data.append(sd)
+
+        # Return the grouped SpeechData objects
+        return speech_data
+
+    def _get_speech_data_from_fragment_group(
+        self,
+        group: list[SpeechFragment],
+    ) -> InterimTranscriptionFrame | None:
+        """Take a group of fragments and piece together into a InterimTranscriptionFrame.
+
+        Each fragment for a given speaker is assembled into a string,
+        taking into consideration whether words are attached to the
+        previous or next word (notably punctuation). This ensures that
+        the text does not have extra spaces. This will also check for
+        any straggling punctuation from earlier utterances that should
+        be removed.
+
+        Returns:
+            InterimTranscriptionFrame: The object for the group.
+        """
+        # Check for starting fragments that are attached to previous
+        if group and group[0].attaches_to == "previous":
+            group = group[1:]
+
+        # Check for trailing fragments that are attached to next
+        if group and group[-1].attaches_to == "next":
+            group = group[:-1]
+
+        # Check there are results
+        if not group:
+            return None
+
+        # Get the timing extremes
+        start_time = min(frag.start_time for frag in group)
+        end_time = max(frag.end_time for frag in group)
+        avg_confidence = sum(frag.confidence for frag in group) / len(group)
+
+        # Cumulative contents
+        content = ""
+
+        # Assemble the text
+        for frag in group:
+            if content == "" or frag.attaches_to == "previous":
+                content += frag.content
+            else:
+                content += " " + frag.content
+
+        # Timestamp
+        ts = (self._start_time + datetime.timedelta(seconds=start_time)).isoformat(
+            timespec="milliseconds"
+        )
+
+        # Return the SpeechData object
+        return InterimTranscriptionFrame(
+            text=content,
+            user_id=group[0].speaker,
+            timestamp=ts,
+            language=group[0].language,
+        )
 
 
 def _get_endpoint_url(url: str) -> str:
