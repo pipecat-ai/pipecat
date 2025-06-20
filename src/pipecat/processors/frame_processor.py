@@ -296,11 +296,11 @@ class FrameProcessor(BaseObject):
         await self.__cancel_push_task()
 
     async def __pause(self, frame: FrameProcessorPauseFrame | FrameProcessorPauseUrgentFrame):
-        if frame.name == self.name:
+        if frame.processor.name == self.name:
             await self.pause_processing_frames()
 
     async def __resume(self, frame: FrameProcessorResumeFrame | FrameProcessorResumeUrgentFrame):
-        if frame.name == self.name:
+        if frame.processor.name == self.name:
             await self.resume_processing_frames()
 
     #
