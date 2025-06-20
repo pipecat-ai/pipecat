@@ -547,7 +547,7 @@ class SpeechmaticsSTTService(STTService):
             InterimTranscriptionFrame: The wrapped frame.
         """
         # Check for speaker
-        if not frame.user_id and self._speaker_id_wrapper:
+        if not frame.user_id or not self._speaker_id_wrapper:
             return frame
 
         # Get the text
