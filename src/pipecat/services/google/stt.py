@@ -747,6 +747,11 @@ class GoogleSTTService(STTService):
         try:
             while True:
                 try:
+                    if self._request_queue.empty():
+                        # wait for 10ms in case we don't have audio
+                        await asyncio.sleep(0.01)
+                        continue
+
                     # Start bi-directional streaming
                     streaming_recognize = await self._client.streaming_recognize(
                         requests=self._request_generator()

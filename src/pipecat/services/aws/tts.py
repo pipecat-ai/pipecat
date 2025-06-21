@@ -6,7 +6,7 @@
 
 import asyncio
 import os
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 
 from loguru import logger
 from pydantic import BaseModel
@@ -115,6 +115,7 @@ class AWSPollyTTSService(TTSService):
         pitch: Optional[str] = None
         rate: Optional[str] = None
         volume: Optional[str] = None
+        lexicon_names: Optional[List[str]] = None
 
     def __init__(
         self,
@@ -147,6 +148,7 @@ class AWSPollyTTSService(TTSService):
             "pitch": params.pitch,
             "rate": params.rate,
             "volume": params.volume,
+            "lexicon_names": params.lexicon_names,
         }
 
         self._resampler = create_default_resampler()
@@ -235,6 +237,7 @@ class AWSPollyTTSService(TTSService):
                 "Engine": self._settings["engine"],
                 # AWS only supports 8000 and 16000 for PCM. We select 16000.
                 "SampleRate": "16000",
+                "LexiconNames": self._settings["lexicon_names"],
             }
 
             # Filter out None values

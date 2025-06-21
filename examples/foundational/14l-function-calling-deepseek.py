@@ -126,10 +126,8 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            report_only_initial_ttfb=True,
         ),
     )
 
