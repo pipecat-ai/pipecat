@@ -183,7 +183,6 @@ indicate you should use the get_image tool are:
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

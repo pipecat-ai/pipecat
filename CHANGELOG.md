@@ -7,12 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
+
+- Added reconnection logic and audio buffer management to `GladiaSTTService`.
+
+- Added Polish support to `AWSTranscribeSTTService`.
+
+- Added new frames `FrameProcessorPauseFrame` and `FrameProcessorResumeFrame`
+  which allow pausing and resuming frame processing for a given frame
+  processor. These are control frames, so they are ordered. Pausing frame
+  processor will keep old frames in the internal queues until resume takes
+  place. Frames being pushed while a frame processor is paused will be pushed to
+  the queues. When frame processing is resumed all queued frames will be
+  processed in order. Also added `FrameProcessorPauseUrgentFrame` and
+  `FrameProcessorResumeUrgentFrame` which are system frames and therefore they
+  have high priority.
+
+- Added a property called `has_function_calls_in_progress` in
+  `LLMAssistantContextAggregator` that exposes whether a function call is in
+  progress.
+
+### Changed
+
+- The `PipelineParams` arg `allow_interruptions` now defaults to `True`.
+
+- `TavusTransport` and `TavusVideoService` now send audio to Tavus using WebRTC
+  audio tracks instead of `app-messages` over WebSocket. This should improve the
+  overall audio quality.
+
+- Upgraded `daily-python` to 0.19.3.
+
 ### Fixed
 
-- Fixed an issue with `GoogleSTTService` where it was constantly reconnecting 
+- Fixed function calling in `AWSNovaSonicLLMService`.
+
+- Fixed an issue that would cause multiple `PipelineTask.on_idle_timeout`
+  events to be triggered repeatedly.
+
+- Fixed an issue that was causing user and bot speech to not be synchronized
+  during recordings.
+
+- Fixed an issue where voice settings weren't applied to ElevenLabsTTSService.
+
+- Fixed an issue with `GroqTTSService` where it was not properly parsing the
+  WAV file header.
+
+- Fixed an issue with `GoogleSTTService` where it was constantly reconnecting
   before starting to receive audio from the user.
 
 - Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
+
+### Deprecated
+
+- `AudioBufferProcessor` parameter `user_continuos_stream` is deprecated.
 
 ### Other
 

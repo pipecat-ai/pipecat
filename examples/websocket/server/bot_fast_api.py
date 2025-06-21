@@ -85,7 +85,8 @@ async def run_bot(websocket_client):
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
         ),
         observers=[RTVIObserver(rtvi)],
     )

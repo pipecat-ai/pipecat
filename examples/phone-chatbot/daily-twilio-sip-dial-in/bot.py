@@ -95,7 +95,8 @@ async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True  # Enable barge-in so callers can interrupt the bot
+            enable_metrics=True,
+            enable_usage_metrics=True,
         ),
     )
 
