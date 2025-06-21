@@ -73,6 +73,8 @@ from .audio_transcriber import AudioTranscriber
 from .file_api import GeminiFileAPI
 
 
+from .file_api import GeminiFileAPI
+
 try:
     import websockets
 except ModuleNotFoundError as e:
