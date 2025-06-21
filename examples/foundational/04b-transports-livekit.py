@@ -158,7 +158,8 @@ async def main():
             ],
         ),
         params=PipelineParams(
-            allow_interruptions=True, enable_metrics=True, enable_usage_metrics=True
+            enable_metrics=True,
+            enable_usage_metrics=True,
         ),
     )
 

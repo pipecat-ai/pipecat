@@ -17,6 +17,10 @@ from pipecat.frames.frames import (
     CancelFrame,
     ErrorFrame,
     Frame,
+    FrameProcessorPauseFrame,
+    FrameProcessorPauseUrgentFrame,
+    FrameProcessorResumeFrame,
+    FrameProcessorResumeUrgentFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -259,6 +263,10 @@ class FrameProcessor(BaseObject):
             self._should_report_ttfb = True
         elif isinstance(frame, CancelFrame):
             await self.__cancel(frame)
+        elif isinstance(frame, (FrameProcessorPauseFrame, FrameProcessorPauseUrgentFrame)):
+            await self.__pause(frame)
+        elif isinstance(frame, (FrameProcessorResumeFrame, FrameProcessorResumeUrgentFrame)):
+            await self.__resume(frame)
 
     async def push_error(self, error: ErrorFrame):
         await self.push_frame(error, FrameDirection.UPSTREAM)
@@ -286,6 +294,14 @@ class FrameProcessor(BaseObject):
         self._cancelling = True
         await self.__cancel_input_task()
         await self.__cancel_push_task()
+
+    async def __pause(self, frame: FrameProcessorPauseFrame | FrameProcessorPauseUrgentFrame):
+        if frame.name == self.name:
+            await self.pause_processing_frames()
+
+    async def __resume(self, frame: FrameProcessorResumeFrame | FrameProcessorResumeUrgentFrame):
+        if frame.name == self.name:
+            await self.resume_processing_frames()
 
     #
     # Handle interruptions
