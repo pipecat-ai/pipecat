@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `OpenAIRealtimeBetaLLMService` to accept `language` in the
+  `InputAudioTranscription` class for all models.
+
 - The `PipelineParams` arg `allow_interruptions` now defaults to `True`.
 
 - `TavusTransport` and `TavusVideoService` now send audio to Tavus using WebRTC
