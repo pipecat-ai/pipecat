@@ -482,8 +482,19 @@ class PipelineTask(BaseTask):
         return MetricsFrame(data=data)
 
     async def _wait_for_pipeline_end(self):
-        await self._pipeline_end_event.wait()
-        self._pipeline_end_event.clear()
+        """Wait for pipeline end with timeout protection."""
+        try:
+            # Add timeout to prevent indefinite blocking during cancellation
+            await asyncio.wait_for(
+                self._pipeline_end_event.wait(), 
+                timeout=10.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"{self}: Timeout waiting for pipeline end, forcing completion")
+            # Force set the event to unblock waiting tasks
+            self._pipeline_end_event.set()
+        finally:
+            self._pipeline_end_event.clear()
 
     async def _setup(self):
         setup = FrameProcessorSetup(

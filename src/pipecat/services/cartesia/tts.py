@@ -8,6 +8,7 @@ import base64
 import json
 import uuid
 import warnings
+import asyncio
 from typing import AsyncGenerator, List, Optional, Union
 
 from loguru import logger
@@ -201,11 +202,42 @@ class CartesiaTTSService(AudioContextWordTTSService):
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
-        if self._receive_task:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
+        # Enhanced disconnect with timeout and proper cleanup
+        try:
+            # Cancel receive task with timeout
+            if self._receive_task:
+                try:
+                    await asyncio.wait_for(
+                        self.cancel_task(self._receive_task), 
+                        timeout=3.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"{self}: Timeout cancelling receive task during disconnect")
+                    # Force cancel if timeout
+                    if self._receive_task and not self._receive_task.done():
+                        self._receive_task.cancel()
+                        try:
+                            await asyncio.wait_for(self._receive_task, timeout=1.0)
+                        except (asyncio.TimeoutError, asyncio.CancelledError):
+                            pass
+                finally:
+                    self._receive_task = None
 
-        await self._disconnect_websocket()
+            # Disconnect websocket with timeout
+            await asyncio.wait_for(
+                self._disconnect_websocket(), 
+                timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"{self}: Timeout during disconnect, forcing cleanup")
+            # Force cleanup
+            self._context_id = None
+            self._websocket = None
+        except Exception as e:
+            logger.error(f"{self}: Error during disconnect: {e}")
+            # Ensure cleanup even on error
+            self._context_id = None
+            self._websocket = None
 
     async def _connect_websocket(self):
         try:
@@ -226,12 +258,39 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
             if self._websocket:
                 logger.debug("Disconnecting from Cartesia")
-                await self._websocket.close()
+                
+                # Check if websocket is still open before trying to close
+                if not self._websocket.closed:
+                    try:
+                        # Send close frame with timeout
+                        await asyncio.wait_for(
+                            self._websocket.close(code=1000, reason="Normal closure"), 
+                            timeout=3.0
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"{self}: Timeout closing websocket, forcing termination")
+                    except Exception as close_error:
+                        logger.warning(f"{self}: Error during websocket close: {close_error}")
+                
+                # Wait for websocket to be fully closed with timeout
+                if not self._websocket.closed:
+                    try:
+                        await asyncio.wait_for(
+                            self._websocket.wait_closed(), 
+                            timeout=2.0
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(f"{self}: Timeout waiting for websocket closure")
+                    except Exception as wait_error:
+                        logger.debug(f"{self}: Error waiting for websocket closure: {wait_error}")
+                        
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
         finally:
+            # Always clean up state
             self._context_id = None
             self._websocket = None
+            logger.debug(f"{self}: Websocket cleanup completed")
 
     def _get_websocket(self):
         if self._websocket:

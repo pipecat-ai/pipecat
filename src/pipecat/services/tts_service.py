@@ -101,6 +101,11 @@ class TTSService(AIService):
         self._stop_frame_queue: asyncio.Queue = asyncio.Queue()
 
         self._processing_text: bool = False
+        
+        # Fix for race condition: Add synchronization for pause/resume operations
+        self._pause_resume_lock = asyncio.Lock()
+        self._pause_resume_timeout = 5.0  # Timeout for pause/resume operations
+        self._force_resume_on_cancel = True  # Force resume during cancellation
 
     @property
     def sample_rate(self) -> int:
@@ -152,6 +157,15 @@ class TTSService(AIService):
             self._stop_frame_task = None
 
     async def cancel(self, frame: CancelFrame):
+        # Force resume frame processing before cancellation to prevent deadlock
+        if self._force_resume_on_cancel and self._pause_frame_processing:
+            try:
+                await asyncio.wait_for(self._force_resume_processing(), timeout=1.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"{self}: Timeout during force resume on cancel")
+            except Exception as e:
+                logger.warning(f"{self}: Error during force resume on cancel: {e}")
+        
         await super().cancel(frame)
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
@@ -252,12 +266,50 @@ class TTSService(AIService):
             await filter.handle_interruption()
 
     async def _maybe_pause_frame_processing(self):
-        if self._processing_text and self._pause_frame_processing:
-            await self.pause_processing_frames()
+        """Pause frame processing with race condition protection."""
+        if not self._processing_text or not self._pause_frame_processing:
+            return
+            
+        async with self._pause_resume_lock:
+            try:
+                # Double-check condition inside lock
+                if self._processing_text and self._pause_frame_processing:
+                    logger.trace(f"{self}: pausing frame processing (with lock)")
+                    await asyncio.wait_for(
+                        self.pause_processing_frames(), 
+                        timeout=self._pause_resume_timeout
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(f"{self}: Timeout during pause frame processing")
+            except Exception as e:
+                logger.error(f"{self}: Error during pause frame processing: {e}")
 
     async def _maybe_resume_frame_processing(self):
-        if self._pause_frame_processing:
+        """Resume frame processing with race condition protection."""
+        if not self._pause_frame_processing:
+            return
+            
+        async with self._pause_resume_lock:
+            try:
+                logger.trace(f"{self}: resuming frame processing (with lock)")
+                await asyncio.wait_for(
+                    self.resume_processing_frames(), 
+                    timeout=self._pause_resume_timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"{self}: Timeout during resume frame processing")
+            except Exception as e:
+                logger.error(f"{self}: Error during resume frame processing: {e}")
+
+    async def _force_resume_processing(self):
+        """Force resume frame processing during cancellation."""
+        logger.debug(f"{self}: force resuming frame processing for cancellation")
+        try:
+            # Bypass the lock and force resume
             await self.resume_processing_frames()
+        except Exception as e:
+            logger.error(f"{self}: Error during force resume: {e}")
+            raise
 
     async def _process_text_frame(self, frame: TextFrame):
         text: Optional[str] = None

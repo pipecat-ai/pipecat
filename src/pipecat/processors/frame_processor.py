@@ -292,6 +292,16 @@ class FrameProcessor(BaseObject):
 
     async def __cancel(self, frame: CancelFrame):
         self._cancelling = True
+        
+        # Force resume frame processing if paused to prevent deadlock during cancellation
+        if self.__should_block_frames:
+            try:
+                logger.debug(f"{self}: Force resuming paused frame processing for cancellation")
+                self.__should_block_frames = False
+                self.__input_event.set()
+            except Exception as e:
+                logger.warning(f"{self}: Error force resuming during cancellation: {e}")
+        
         await self.__cancel_input_task()
         await self.__cancel_push_task()
 
@@ -376,8 +386,21 @@ class FrameProcessor(BaseObject):
 
     async def __cancel_input_task(self):
         if self.__input_frame_task:
-            await self.cancel_task(self.__input_frame_task)
-            self.__input_frame_task = None
+            try:
+                # Add timeout to prevent indefinite blocking during cancellation
+                await asyncio.wait_for(
+                    self.cancel_task(self.__input_frame_task), 
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"{self}: Timeout cancelling input task, forcing termination")
+                # Force cancel the task if timeout occurs
+                if self.__input_frame_task and not self.__input_frame_task.done():
+                    self.__input_frame_task.cancel()
+            except Exception as e:
+                logger.error(f"{self}: Error cancelling input task: {e}")
+            finally:
+                self.__input_frame_task = None
 
     async def __input_frame_task_handler(self):
         while True:
