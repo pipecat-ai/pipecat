@@ -45,7 +45,13 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.processors.frameworks.rtvi import (
+    RTVIClientMessageFrame,
+    RTVIConfig,
+    RTVIObserver,
+    RTVIProcessor,
+    RTVIServerResponseFrame,
+)
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
@@ -78,10 +84,10 @@ talking_frame = SpriteFrame(images=sprites)  # Animation sequence for when bot i
 #
 # RTVI events for Pipecat client UI
 #
-rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+# rtvi = None
 
 
-class WeatherProcessor(FrameProcessor):
+class CustomProcessor(FrameProcessor):
     """Processes weather-related function calls.
 
     This processor handles the function call to fetch weather data and
@@ -115,6 +121,17 @@ class WeatherProcessor(FrameProcessor):
                 frame.result["weather"]["condition"] = "hazy"
             if frame.tool_call_id in self.waiting_calls:
                 del self.waiting_calls[frame.tool_call_id]
+        # elif isinstance(frame, RTVIClientMessageFrame):
+        #     print("RTVI client message:", frame.msg_id, frame.type, frame.data)
+        #     if frame.type == "get-llm-config":
+        #         config = {"model": "your-guess-is-as-good-as-mine"}
+        #         await self.push_frame(
+        #             RTVIServerResponseFrame(
+        #                 client_msg=frame,
+        #                 data=config,
+        #             ),
+        #         )
+        #         return
 
         await self.push_frame(frame, direction)
 
@@ -207,8 +224,8 @@ async def main():
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
         # Set up function calling
-        wp = WeatherProcessor()
-        llm.register_function("get_current_weather", wp.fetch_weather)
+        cp = CustomProcessor()
+        llm.register_function("get_current_weather", cp.fetch_weather)
         # llm.register_function("get_current_weather", fetch_weather_from_api)
 
         weather_function = FunctionSchema(
@@ -248,6 +265,8 @@ async def main():
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
+        rtvi = RTVIProcessor(config=RTVIConfig(config=[]), context_aggregator=context_aggregator)
+
         ta = TalkingAnimation()
 
         pipeline = Pipeline(
@@ -258,7 +277,7 @@ async def main():
                 llm,
                 tts,
                 ta,
-                wp,
+                cp,
                 transport.output(),
                 context_aggregator.assistant(),
             ]
@@ -289,6 +308,12 @@ async def main():
         async def on_participant_left(transport, participant, reason):
             print(f"Participant left: {participant}")
             await task.cancel()
+
+        @rtvi.event_handler("on_client_message")
+        async def on_client_message(rtvi, msg):
+            print("RTVI client message:", msg.type, msg.data)
+            if msg.type == "get-llm-config":
+                await rtvi.send_server_response(msg, {"model": "your-guess-is-as-good-as-mine"})
 
         runner = PipelineRunner()
 
