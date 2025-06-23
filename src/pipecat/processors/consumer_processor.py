@@ -61,5 +61,7 @@ class ConsumerProcessor(FrameProcessor):
     async def _consumer_task_handler(self):
         while True:
             frame = await self._queue.get()
+            self.start_watchdog()
             new_frame = await self._transformer(frame)
             await self.push_frame(new_frame, self._direction)
+            self.reset_watchdog()
