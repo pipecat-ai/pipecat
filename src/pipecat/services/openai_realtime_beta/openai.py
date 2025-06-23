@@ -86,7 +86,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-4o-realtime-preview-2024-12-17",
+        model: str = "gpt-4o-realtime-preview-2025-06-03",
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
