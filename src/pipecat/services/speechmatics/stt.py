@@ -155,7 +155,12 @@ class SpeechFrame(TranscriptionFrame):
         return f"{self.name}(user: {self.user_id}, speaker_id: {self.speaker_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
 
     def _as_transcription_frame(self, format: Optional[str] = None) -> TranscriptionFrame:
-        """Convert to TranscriptionFrame."""
+        """Convert to TranscriptionFrame.
+
+        If format is provided and there is a valid speaker id, then the
+        text is wrapped with the speaker id. This will help the LLM understand
+        who spoke what in a multi-speaker conversation.
+        """
         return TranscriptionFrame(
             text=self._wrap_text(format),
             user_id=self.user_id,
@@ -167,7 +172,11 @@ class SpeechFrame(TranscriptionFrame):
     def _as_interim_transcription_frame(
         self, format: Optional[str] = None
     ) -> InterimTranscriptionFrame:
-        """Convert to InterimTranscriptionFrame."""
+        """Convert to InterimTranscriptionFrame.
+
+        Interim transcriptions do not include the speaker id, as this can
+        skew any end of utterance detection (e.g. when including XML tags).
+        """
         return InterimTranscriptionFrame(
             text=self.text,
             user_id=self.user_id,
