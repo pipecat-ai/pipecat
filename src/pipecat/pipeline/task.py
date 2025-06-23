@@ -64,7 +64,7 @@ class PipelineParams(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    allow_interruptions: bool = False
+    allow_interruptions: bool = True
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
     enable_heartbeats: bool = False
@@ -663,6 +663,11 @@ class PipelineTask(BaseTask):
                     diff_time = time.time() - last_frame_time
                     if diff_time >= self._idle_timeout_secs:
                         running = await self._idle_timeout_detected()
+                        # Reset `last_frame_time` so we don't trigger another
+                        # immediate idle timeout if we are not cancelling. For
+                        # example, we might want to force the bot to say goodbye
+                        # and then clean nicely with an `EndFrame`.
+                        last_frame_time = time.time()
 
                 self._idle_queue.task_done()
             except asyncio.TimeoutError:

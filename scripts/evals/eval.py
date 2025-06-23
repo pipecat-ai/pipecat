@@ -262,7 +262,6 @@ async def run_eval_pipeline(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             audio_in_sample_rate=16000,
             audio_out_sample_rate=16000,
         ),
