@@ -222,7 +222,7 @@ class SpeechmaticsSTTService(STTService):
         enable_speaker_diarization: Enable speaker diarization to identify different speakers.
             Defaults to `False`.
         text_format: Wrapper for speaker ID.
-            Defaults to `<{user_id}>{text}</{user_id}>`.
+            Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
         max_speakers: Maximum number of speakers to detect.
             Defaults to `None` (auto-detect).
         transcription_config: Custom transcription configuration (other set parameters are merged).

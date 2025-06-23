@@ -56,6 +56,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         base_url=os.getenv("SPEECHMATICS_ENDPOINT", None),
         end_of_utterance_silence_trigger=0.5,
         enable_speaker_diarization=True,
+        text_format="<{speaker_id}>{text}</{speaker_id}>",
     )
 
     tts = ElevenLabsTTSService(
