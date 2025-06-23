@@ -136,7 +136,7 @@ class SpeechFrame(TranscriptionFrame):
 
     Attributes:
         text: The text of the frame.
-        user_id: The ID of the user who spoke.
+        user_id: The ID string.
         timestamp: The timestamp of the frame.
         language: The language of the frame.
         result: The result of the frame.
@@ -169,7 +169,7 @@ class SpeechFrame(TranscriptionFrame):
     ) -> InterimTranscriptionFrame:
         """Convert to InterimTranscriptionFrame."""
         return InterimTranscriptionFrame(
-            text=self._wrap_text(format),
+            text=self.text,
             user_id=self.user_id,
             timestamp=self.timestamp,
             language=self.language,
