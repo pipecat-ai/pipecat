@@ -109,6 +109,8 @@ class SpeechFragment:
             Defaults to `None`.
         confidence: Confidence of the fragment (0.0 to 1.0).
             Defaults to `1.0`.
+        result: Raw result of the fragment.
+            Defaults to `None`.
     """
 
     start_time: float
@@ -120,6 +122,65 @@ class SpeechFragment:
     content: str = ""
     speaker: Optional[str] = None
     confidence: float = 1.0
+    result: Optional[Any] = None
+
+
+@dataclass
+class SpeechFrame(TranscriptionFrame):
+    """TranscriptionFrame with speaker_id.
+
+    This class extends the TranscriptionFrame class with an additional speaker_id
+    attribute used to identify the speaker of the transcription. This is used to
+    add custom markup for the speaker within the transcript for the LLM to use
+    to identify different speakers in a multi-speaker conversation.
+
+    Attributes:
+        text: The text of the frame.
+        user_id: The ID of the user who spoke.
+        timestamp: The timestamp of the frame.
+        language: The language of the frame.
+        result: The result of the frame.
+        speaker_id: The ID of the speaker.
+    """
+
+    text: str
+    user_id: str
+    timestamp: str
+    language: Optional[Language] = None
+    result: Optional[Any] = None
+    speaker_id: Optional[str] = None
+
+    def __str__(self):
+        """Return a string representation of the object."""
+        return f"{self.name}(user: {self.user_id}, speaker_id: {self.speaker_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+
+    def _as_transcription_frame(self, format: Optional[str] = None) -> TranscriptionFrame:
+        """Convert to TranscriptionFrame."""
+        return TranscriptionFrame(
+            text=self._wrap_text(format),
+            user_id=self.user_id,
+            timestamp=self.timestamp,
+            language=self.language,
+            result=self.result,
+        )
+
+    def _as_interim_transcription_frame(
+        self, format: Optional[str] = None
+    ) -> InterimTranscriptionFrame:
+        """Convert to InterimTranscriptionFrame."""
+        return InterimTranscriptionFrame(
+            text=self._wrap_text(format),
+            user_id=self.user_id,
+            timestamp=self.timestamp,
+            language=self.language,
+            result=self.result,
+        )
+
+    def _wrap_text(self, format: Optional[str] = None) -> str:
+        """Wrap text with speaker ID."""
+        if format is None or self.speaker_id is None:
+            return self.text
+        return format.format(**{"speaker_id": self.speaker_id, "text": self.text})
 
 
 class SpeechmaticsSTTService(STTService):
@@ -151,7 +212,7 @@ class SpeechmaticsSTTService(STTService):
             Defaults to `enhanced`.
         enable_speaker_diarization: Enable speaker diarization to identify different speakers.
             Defaults to `False`.
-        speaker_id_wrapper: Wrapper for speaker ID.
+        text_format: Wrapper for speaker ID.
             Defaults to `<{user_id}>{text}</{user_id}>`.
         max_speakers: Maximum number of speakers to detect.
             Defaults to `None` (auto-detect).
@@ -174,7 +235,7 @@ class SpeechmaticsSTTService(STTService):
         end_of_utterance_silence_trigger: Optional[float] = None,
         operating_point: OperatingPoint = OperatingPoint.ENHANCED,
         enable_speaker_diarization: bool = False,
-        speaker_id_wrapper: str = "<{user_id}>{text}</{user_id}>",
+        text_format: str = "<{speaker_id}>{text}</{speaker_id}>",
         max_speakers: Optional[int] = None,
         transcription_config: Optional[TranscriptionConfig] = None,
         **kwargs,
@@ -193,7 +254,7 @@ class SpeechmaticsSTTService(STTService):
         self._end_of_utterance_silence_trigger: Optional[float] = end_of_utterance_silence_trigger
         self._operating_point: OperatingPoint = operating_point
         self._enable_speaker_diarization: bool = enable_speaker_diarization
-        self._speaker_id_wrapper: str = speaker_id_wrapper
+        self._text_format: str = text_format
         self._max_speakers: Optional[int] = max_speakers
 
         # Complete configuration objects
@@ -357,25 +418,17 @@ class SpeechmaticsSTTService(STTService):
         if not frames:
             return
 
-        # Wrap frames with speaker ID
-        frames = [self._wrap_frames_with_speaker(frame) for frame in frames]
-
         # If final, then re=parse into TranscriptionFrame
         if finalized:
             # Reset the speech fragments
             self._speech_fragments.clear()
 
             # Transform frames
-            frames = [
-                TranscriptionFrame(
-                    text=frame.text,
-                    user_id=frame.user_id,
-                    timestamp=frame.timestamp,
-                    language=frame.language,
-                    result=frame.result,
-                )
-                for frame in frames
-            ]
+            frames = [frame._as_transcription_frame(self._text_format) for frame in frames]
+
+        # Return as interim results
+        else:
+            frames = [frame._as_interim_transcription_frame(self._text_format) for frame in frames]
 
         # Send the frames back to pipecat
         for frame in frames:
@@ -419,6 +472,7 @@ class SpeechmaticsSTTService(STTService):
                     content=alt.get("content", ""),
                     speaker=alt.get("speaker", None),
                     confidence=alt.get("confidence", 1.0),
+                    result=result,
                 )
 
                 # Drop `__XX__` speakers
@@ -441,17 +495,17 @@ class SpeechmaticsSTTService(STTService):
         # Data was updated
         return True
 
-    def _get_frames_from_fragments(self) -> list[InterimTranscriptionFrame]:
+    def _get_frames_from_fragments(self) -> list[SpeechFrame]:
         """Get speech data objects for the current fragment list.
 
         Each speech fragments is grouped by contiguous speaker and then
-        returned as a InterimTranscriptionFrame object with the `speaker_id` field
+        returned as internal SpeechFrame objects with the `speaker_id` field
         set to the current speaker (string). An utterance may contain speech from
         more than one speaker (e.g. S1, S2, S1, S3, ...), so they are kept
         in strict order for the context of the conversation.
 
         Returns:
-            list[InterimTranscriptionFrame]: The list of objects.
+            list[SpeechFrame]: The list of objects.
         """
         # Speaker groups
         current_speaker: str | None = None
@@ -466,7 +520,7 @@ class SpeechmaticsSTTService(STTService):
             speaker_groups[-1].append(frag)
 
         # Create SpeechData objects
-        speech_data: list[InterimTranscriptionFrame] = []
+        speech_data: list[SpeechFrame] = []
         for group in speaker_groups:
             sd = self._get_speech_data_from_fragment_group(group)
             if sd:
@@ -478,8 +532,8 @@ class SpeechmaticsSTTService(STTService):
     def _get_speech_data_from_fragment_group(
         self,
         group: list[SpeechFragment],
-    ) -> InterimTranscriptionFrame | None:
-        """Take a group of fragments and piece together into a InterimTranscriptionFrame.
+    ) -> SpeechFrame | None:
+        """Take a group of fragments and piece together into a SpeechFrame.
 
         Each fragment for a given speaker is assembled into a string,
         taking into consideration whether words are attached to the
@@ -489,7 +543,7 @@ class SpeechmaticsSTTService(STTService):
         be removed.
 
         Returns:
-            InterimTranscriptionFrame: The object for the group.
+            SpeechFrame: The object for the group.
         """
         # Check for starting fragments that are attached to previous
         if group and group[0].attaches_to == "previous":
@@ -510,6 +564,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Cumulative contents
         content = ""
+        results: list[Any] = []
 
         # Assemble the text
         for frag in group:
@@ -517,6 +572,7 @@ class SpeechmaticsSTTService(STTService):
                 content += frag.content
             else:
                 content += " " + frag.content
+            results.append(frag.result)
 
         # Timestamp
         ts = (self._start_time + datetime.timedelta(seconds=start_time)).isoformat(
@@ -524,44 +580,13 @@ class SpeechmaticsSTTService(STTService):
         )
 
         # Return the SpeechData object
-        return InterimTranscriptionFrame(
+        return SpeechFrame(
             text=content,
-            user_id=group[0].speaker,
+            user_id="",
+            speaker_id=group[0].speaker,
             timestamp=ts,
             language=group[0].language,
-        )
-
-    def _wrap_frames_with_speaker(
-        self, frame: InterimTranscriptionFrame
-    ) -> InterimTranscriptionFrame:
-        """Wrap the frame with the speaker ID.
-
-        This takes an InterimTranscriptionFrame object and returns a new
-        object wieh the speaker id wrapping the text. The format for the
-        wrapping is defined by the `speaker_id_wrapper` parameter.
-
-        Args:
-            frame: The InterimTranscriptionFrame object to wrap.
-
-        Returns:
-            InterimTranscriptionFrame: The wrapped frame.
-        """
-        # Check for speaker
-        if not frame.user_id or not self._speaker_id_wrapper:
-            return frame
-
-        # Get the text
-        text = frame.text
-
-        # Format, as per the spec
-        text = self._speaker_id_wrapper.format(**{"user_id": frame.user_id, "text": text})
-
-        # Return the new frame
-        return InterimTranscriptionFrame(
-            text=text,
-            user_id=frame.user_id,
-            timestamp=frame.timestamp,
-            language=frame.language,
+            result=results,
         )
 
 
