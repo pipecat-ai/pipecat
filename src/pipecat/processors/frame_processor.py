@@ -412,6 +412,8 @@ class FrameProcessor(BaseObject):
 
             (frame, direction, callback) = await self.__input_queue.get()
 
+            self.start_watchdog()
+
             # Process the frame.
             await self.process_frame(frame, direction)
 
@@ -420,6 +422,8 @@ class FrameProcessor(BaseObject):
                 await callback(self, frame, direction)
 
             self.__input_queue.task_done()
+
+            self.reset_watchdog()
 
     def __create_push_task(self):
         if not self.__push_frame_task:
@@ -434,5 +438,7 @@ class FrameProcessor(BaseObject):
     async def __push_frame_task_handler(self):
         while True:
             (frame, direction) = await self.__push_queue.get()
+            self.start_watchdog()
             await self.__internal_push_frame(frame, direction)
             self.__push_queue.task_done()
+            self.reset_watchdog()
