@@ -6,7 +6,8 @@
 
 import asyncio
 import time
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Sequence, Tuple, Type
+from collections import deque
+from typing import Any, AsyncIterable, Deque, Dict, Iterable, List, Optional, Sequence, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -23,6 +24,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
+    InputAudioRawFrame,
     LLMFullResponseEndFrame,
     MetricsFrame,
     StartFrame,
@@ -646,11 +648,16 @@ class PipelineTask(BaseTask):
         """
         running = True
         last_frame_time = 0
+        frame_buffer = deque(maxlen=10)  # Store last 10 frames
+
         while running:
             try:
                 frame = await asyncio.wait_for(
                     self._idle_queue.get(), timeout=self._idle_timeout_secs
                 )
+
+                if not isinstance(frame, InputAudioRawFrame):
+                    frame_buffer.append(frame)
 
                 if isinstance(frame, StartFrame) or isinstance(frame, self._idle_timeout_frames):
                     # If we find a StartFrame or one of the frames that prevents a
@@ -662,7 +669,7 @@ class PipelineTask(BaseTask):
                     # valid frames.
                     diff_time = time.time() - last_frame_time
                     if diff_time >= self._idle_timeout_secs:
-                        running = await self._idle_timeout_detected()
+                        running = await self._idle_timeout_detected(frame_buffer)
                         # Reset `last_frame_time` so we don't trigger another
                         # immediate idle timeout if we are not cancelling. For
                         # example, we might want to force the bot to say goodbye
@@ -670,15 +677,20 @@ class PipelineTask(BaseTask):
                         last_frame_time = time.time()
 
                 self._idle_queue.task_done()
-            except asyncio.TimeoutError:
-                running = await self._idle_timeout_detected()
 
-    async def _idle_timeout_detected(self) -> bool:
+            except asyncio.TimeoutError:
+                running = await self._idle_timeout_detected(frame_buffer)
+
+    async def _idle_timeout_detected(self, last_frames: Deque[Frame]) -> bool:
         """Logic for when the pipeline is idle.
 
         Returns:
             bool: Whther the pipeline task is being cancelled or not.
         """
+        logger.warning("Idle timeout detected. Last 10 frames received:")
+        for i, frame in enumerate(last_frames, 1):
+            logger.warning(f"Frame {i}: {frame}")
+
         await self._call_event_handler("on_idle_timeout")
         if self._cancel_on_idle_timeout:
             logger.warning(f"Idle pipeline detected, cancelling pipeline task...")
