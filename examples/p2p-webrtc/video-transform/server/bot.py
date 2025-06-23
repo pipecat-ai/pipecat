@@ -121,7 +121,8 @@ async def run_bot(webrtc_connection):
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
         ),
         observers=[RTVIObserver(rtvi)],
     )

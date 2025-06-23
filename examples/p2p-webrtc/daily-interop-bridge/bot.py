@@ -97,7 +97,8 @@ async def run_bot(webrtc_connection):
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=False,
+            enable_metrics=True,
+            enable_usage_metrics=True,
         ),
     )
 

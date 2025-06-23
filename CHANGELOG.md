@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
+
+- Added reconnection logic and audio buffer management to `GladiaSTTService`.
+
+- The `TurnTrackingObserver` now ends a turn upon observing an `EndFrame` or
+  `CancelFrame`.
+
 - Added Polish support to `AWSTranscribeSTTService`.
 
 - Added new frames `FrameProcessorPauseFrame` and `FrameProcessorResumeFrame`
@@ -25,7 +32,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMAssistantContextAggregator` that exposes whether a function call is in
   progress.
 
+### Changed
+
+- The `PipelineParams` arg `allow_interruptions` now defaults to `True`.
+
+- `TavusTransport` and `TavusVideoService` now send audio to Tavus using WebRTC
+  audio tracks instead of `app-messages` over WebSocket. This should improve the
+  overall audio quality.
+
+- Upgraded `daily-python` to 0.19.3.
+
 ### Fixed
+
+- Fixed function calling in `AWSNovaSonicLLMService`.
+
+- Fixed an issue that would cause multiple `PipelineTask.on_idle_timeout`
+  events to be triggered repeatedly.
+
+- Fixed an issue that was causing user and bot speech to not be synchronized
+  during recordings.
+
+- Fixed an issue where voice settings weren't applied to ElevenLabsTTSService.
 
 - Fixed an issue with `GroqTTSService` where it was not properly parsing the
   WAV file header.
@@ -34,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before starting to receive audio from the user.
 
 - Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
+
+### Deprecated
+
+- `AudioBufferProcessor` parameter `user_continuos_stream` is deprecated.
 
 ### Other
 
