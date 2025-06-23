@@ -300,6 +300,7 @@ class DailyRESTHelper:
         Args:
             room_url: Daily room URL
             expiry_time: Token validity duration in seconds (default: 1 hour)
+            eject_at_token_exp: Whether to eject user when token expires
             owner: Whether token has owner privileges
             params: Optional additional token properties. Note that room_name,
                 exp, and is_owner will be set based on the other function
