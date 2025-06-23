@@ -176,13 +176,15 @@ class SonioxSTTService(STTService):
             await self._websocket.close()
             self._websocket = None
 
-        if self._receive_task:
-            await self.wait_for_task(self._receive_task)
-            self._receive_task = None
-
         if self._finalize_if_no_tokens_task:
             await self.cancel_task(self._finalize_if_no_tokens_task)
             self._finalize_if_no_tokens_task = None
+
+        if self._receive_task:
+            # Task cannot cancel itself. If task called _cleanup() we expect it to cancel itself.
+            if self._receive_task != asyncio.current_task():
+                await self.wait_for_task(self._receive_task)
+            self._receive_task = None
 
     async def stop(self, frame: EndFrame):
         """Stop the Soniox STT websocket connection.
@@ -323,6 +325,7 @@ class SonioxSTTService(STTService):
                     await send_endpoint_transcript()
                     logger.debug("Transcription finished.")
                     await self._cleanup()
+                    return
 
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection.
