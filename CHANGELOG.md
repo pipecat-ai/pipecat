@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added logging and improved error handling to help diagnose and prevent potential 
+  Pipeline freezes.
+
 - Introduce task watchdog timers. Watchdog timers are used to detect if a
   Pipecat task is taking longer than expected (by default 5 seconds). It is
   possible to change the default watchdog timer timeout by using the
@@ -71,6 +74,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `daily-python` to 0.19.3.
 
 ### Fixed
+
+- Fixed an issue in `FastAPIWebsocketClient` to ensure proper disconnection 
+  when the websocket is already closed.
+
+- Fixed an issue where the `UserStoppedSpeakingFrame` was not received if the
+  transport was not receiving new audio frames.
+
+- Fixed an edge case where if the user interrupted the bot but no new aggregation 
+  was received, the bot would not resume speaking.
 
 - Fixed an issue with `ElevenLabsTTSService` where the context was not being
   closed.

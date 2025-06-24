@@ -261,6 +261,9 @@ class TaskManager(BaseTaskManager):
             pass
         except Exception as e:
             logger.exception(f"{name}: unexpected exception while cancelling task: {e}")
+        except BaseException as e:
+            logger.critical(f"{name}: fatal base exception while cancelling task: {e}")
+            raise
         finally:
             self._remove_task(task)
 

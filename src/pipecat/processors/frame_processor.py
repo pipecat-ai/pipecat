@@ -337,9 +337,8 @@ class FrameProcessor(BaseObject):
             # Cancel the input task. This will stop processing queued frames.
             await self.__cancel_input_task()
         except Exception as e:
-            logger.exception(f"Uncaught exception in {self}: {e}")
+            logger.exception(f"Uncaught exception in {self} when handling _start_interruption: {e}")
             await self.push_error(ErrorFrame(str(e)))
-            raise
 
         # Create a new input queue and task.
         self.__create_input_task()
@@ -382,7 +381,6 @@ class FrameProcessor(BaseObject):
         except Exception as e:
             logger.exception(f"Uncaught exception in {self}: {e}")
             await self.push_error(ErrorFrame(str(e)))
-            raise
 
     def _check_started(self, frame: Frame):
         if not self.__started:
@@ -411,19 +409,19 @@ class FrameProcessor(BaseObject):
                 logger.trace(f"{self}: frame processing resumed")
 
             (frame, direction, callback) = await self.__input_queue.get()
-
-            self.start_watchdog()
-
-            # Process the frame.
-            await self.process_frame(frame, direction)
-
-            # If this frame has an associated callback, call it now.
-            if callback:
-                await callback(self, frame, direction)
-
-            self.__input_queue.task_done()
-
-            self.reset_watchdog()
+            try:
+                self.start_watchdog()
+                # Process the frame.
+                await self.process_frame(frame, direction)
+                # If this frame has an associated callback, call it now.
+                if callback:
+                    await callback(self, frame, direction)
+            except Exception as e:
+                logger.exception(f"{self}: error processing frame: {e}")
+                await self.push_error(ErrorFrame(str(e)))
+            finally:
+                self.__input_queue.task_done()
+                self.reset_watchdog()
 
     def __create_push_task(self):
         if not self.__push_frame_task:
