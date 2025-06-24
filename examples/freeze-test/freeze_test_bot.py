@@ -7,7 +7,6 @@
 import argparse
 import asyncio
 import os
-import random
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
@@ -26,13 +25,11 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
-    LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
     StopFrame,
     StopInterruptionFrame,
     TranscriptionFrame,
-    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -49,7 +46,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.deepgram import DeepgramSTTService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,

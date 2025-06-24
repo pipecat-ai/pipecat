@@ -220,11 +220,15 @@ class FrameProcessor(BaseObject):
         self._clock = setup.clock
         self._task_manager = setup.task_manager
         self._observer = setup.observer
+        if self._metrics is not None:
+            await self._metrics.setup(self._task_manager)
 
     async def cleanup(self):
         await super().cleanup()
         await self.__cancel_input_task()
         await self.__cancel_push_task()
+        if self._metrics is not None:
+            await self._metrics.cleanup()
 
     def link(self, processor: "FrameProcessor"):
         self._next = processor
