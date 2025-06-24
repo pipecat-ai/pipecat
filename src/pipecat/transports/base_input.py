@@ -357,6 +357,8 @@ class BaseInputTransport(FrameProcessor):
         while True:
             frame: InputAudioRawFrame = await self._audio_in_queue.get()
 
+            self.start_watchdog()
+
             # If an audio filter is available, run it before VAD.
             if self._params.audio_in_filter:
                 frame.audio = await self._params.audio_in_filter.filter(frame.audio)
@@ -375,6 +377,8 @@ class BaseInputTransport(FrameProcessor):
                 await self.push_frame(frame)
 
             self._audio_in_queue.task_done()
+
+            self.reset_watchdog()
 
     async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer.

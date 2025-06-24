@@ -62,6 +62,7 @@ class SimliVideoService(FrameProcessor):
     async def _consume_and_process_audio(self):
         await self._pipecat_resampler_event.wait()
         async for audio_frame in self._simli_client.getAudioStreamIterator():
+            self.start_watchdog()
             resampled_frames = self._pipecat_resampler.resample(audio_frame)
             for resampled_frame in resampled_frames:
                 audio_array = resampled_frame.to_ndarray()
@@ -74,10 +75,12 @@ class SimliVideoService(FrameProcessor):
                             num_channels=1,
                         ),
                     )
+            self.reset_watchdog()
 
     async def _consume_and_process_video(self):
         await self._pipecat_resampler_event.wait()
         async for video_frame in self._simli_client.getVideoStreamIterator(targetFormat="rgb24"):
+            self.start_watchdog()
             # Process the video frame
             convertedFrame: OutputImageRawFrame = OutputImageRawFrame(
                 image=video_frame.to_rgb().to_image().tobytes(),
@@ -86,6 +89,7 @@ class SimliVideoService(FrameProcessor):
             )
             convertedFrame.pts = video_frame.pts
             await self.push_frame(convertedFrame)
+            self.reset_watchdog()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
