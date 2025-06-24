@@ -5,8 +5,8 @@
 #
 
 import argparse
-import time
 import os
+import time
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -75,10 +75,9 @@ transport_params = {
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
 
-    
     stt = SambaNovaSTTService(
-        model='Whisper-Large-v3',
-        api_key=os.getenv('SAMBANOVA_API_KEY'),
+        model="Whisper-Large-v3",
+        api_key=os.getenv("SAMBANOVA_API_KEY"),
     )
 
     tl = TranscriptionLogger()
