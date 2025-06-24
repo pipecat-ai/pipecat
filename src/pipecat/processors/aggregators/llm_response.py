@@ -364,13 +364,13 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         # is received, this safeguard ensures
         # the bot doesn't hang indefinitely while waiting to speak again.
         elif not self._seen_interim_results and self._was_bot_speaking and not self._bot_speaking:
-            logger.warning(
-                "User stopped speaking but no new aggregation received. Forcing aggregation processing to resume bot response."
-            )
+            logger.warning("User stopped speaking but no new aggregation received.")
             # Resetting it so we don't trigger this twice
             self._was_bot_speaking = False
+            # TODO: we are not enabling this for now, due to some STT services which can take as long as 2 seconds two return a transcription
+            # So we need more tests and probably make this feature configurable, disabled it by default.
             # We are just pushing the same previous context to be processed again in this case
-            await self.push_frame(OpenAILLMContextFrame(self._context))
+            # await self.push_frame(OpenAILLMContextFrame(self._context))
 
     async def _should_interrupt_based_on_strategies(self) -> bool:
         """Check if interruption should occur based on configured strategies."""
@@ -410,8 +410,15 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         # We just stopped speaking. Let's see if there's some aggregation to
         # push. If the last thing we saw is an interim transcription, let's wait
         # pushing the aggregation as we will probably get a final transcription.
-        if len(self._aggregation) > 0 and not self._seen_interim_results:
-            await self.push_aggregation()
+        if len(self._aggregation) > 0:
+            if not self._seen_interim_results:
+                await self.push_aggregation()
+        # Handles the case where both the user and the bot are not speaking,
+        # and the bot was previously speaking before the user interruption.
+        # So in this case we are resetting the aggregation timer
+        elif not self._seen_interim_results and self._was_bot_speaking and not self._bot_speaking:
+            # Reset aggregation timer.
+            self._aggregation_event.set()
 
     async def _handle_bot_started_speaking(self, _: BotStartedSpeakingFrame):
         self._bot_speaking = True
