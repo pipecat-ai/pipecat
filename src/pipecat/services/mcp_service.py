@@ -94,7 +94,7 @@ class MCPClient(BaseObject):
                     url=self._server_params.url,
                     headers=self._server_params.headers,
                     timeout=self._server_params.timeout,
-                    sse_read_timeout=self._server_params.sse_read_timeout
+                    sse_read_timeout=self._server_params.sse_read_timeout,
                 ) as (read, write):
                     async with self._session(read, write) as session:
                         await session.initialize()
@@ -103,15 +103,15 @@ class MCPClient(BaseObject):
                 error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
                 logger.error(error_msg)
                 logger.exception("Full exception details:")
-                await result_callback(error_msg)\
-            
+                await result_callback(error_msg)
+
         logger.debug(f"SSE server parameters: {self._server_params}")
-        
+
         async with self._client(
             url=self._server_params.url,
             headers=self._server_params.headers,
             timeout=self._server_params.timeout,
-            sse_read_timeout=self._server_params.sse_read_timeout
+            sse_read_timeout=self._server_params.sse_read_timeout,
         ) as (read, write):
             async with self._session(read, write) as session:
                 await session.initialize()
