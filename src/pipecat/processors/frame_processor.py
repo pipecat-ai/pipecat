@@ -31,6 +31,9 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
+from pipecat.utils.watchdog_event import WatchdogEvent
+from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 
 class FrameDirection(Enum):
@@ -45,13 +48,13 @@ class FrameProcessorSetup:
     observer: Optional[BaseObserver] = None
 
 
-class FrameProcessor(BaseObject):
+class FrameProcessor(WatchdogReseter, BaseObject):
     def __init__(
         self,
         *,
         name: Optional[str] = None,
-        metrics: Optional[FrameProcessorMetrics] = None,
         enable_watchdog_logging: Optional[bool] = None,
+        metrics: Optional[FrameProcessorMetrics] = None,
         watchdog_timeout_secs: Optional[float] = None,
         **kwargs,
     ):
@@ -101,7 +104,7 @@ class FrameProcessor(BaseObject):
         # is called. To resume processing frames we need to call
         # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
-        self.__input_event = asyncio.Event()
+        self.__input_event = WatchdogEvent(self)
         self.__input_frame_task: Optional[asyncio.Task] = None
 
         # Every processor in Pipecat should only output frames from a single
@@ -209,9 +212,6 @@ class FrameProcessor(BaseObject):
 
     async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         await self.get_task_manager().wait_for_task(task, timeout)
-
-    def start_watchdog(self):
-        self.get_task_manager().start_watchdog(asyncio.current_task())
 
     def reset_watchdog(self):
         self.get_task_manager().reset_watchdog(asyncio.current_task())
@@ -397,7 +397,7 @@ class FrameProcessor(BaseObject):
         if not self.__input_frame_task:
             self.__should_block_frames = False
             self.__input_event.clear()
-            self.__input_queue = asyncio.Queue()
+            self.__input_queue = WatchdogQueue(self)
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
@@ -416,7 +416,6 @@ class FrameProcessor(BaseObject):
 
             (frame, direction, callback) = await self.__input_queue.get()
             try:
-                self.start_watchdog()
                 # Process the frame.
                 await self.process_frame(frame, direction)
                 # If this frame has an associated callback, call it now.
@@ -427,11 +426,10 @@ class FrameProcessor(BaseObject):
                 await self.push_error(ErrorFrame(str(e)))
             finally:
                 self.__input_queue.task_done()
-                self.reset_watchdog()
 
     def __create_push_task(self):
         if not self.__push_frame_task:
-            self.__push_queue = asyncio.Queue()
+            self.__push_queue = WatchdogQueue(self)
             self.__push_frame_task = self.create_task(self.__push_frame_task_handler())
 
     async def __cancel_push_task(self):
@@ -442,7 +440,5 @@ class FrameProcessor(BaseObject):
     async def __push_frame_task_handler(self):
         while True:
             (frame, direction) = await self.__push_queue.get()
-            self.start_watchdog()
             await self.__internal_push_frame(frame, direction)
             self.__push_queue.task_done()
-            self.reset_watchdog()

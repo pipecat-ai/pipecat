@@ -48,6 +48,7 @@ from pipecat.services.openai.llm import (
     OpenAIUserContextAggregator,
 )
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -557,7 +558,7 @@ class GoogleLLMService(LLMService):
             )
 
             function_calls = []
-            async for chunk in response:
+            async for chunk in WatchdogAsyncIterator(response, reseter=self):
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
                 if chunk.usage_metadata:

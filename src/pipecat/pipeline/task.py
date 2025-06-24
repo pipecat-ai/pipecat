@@ -41,6 +41,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, F
 from pipecat.utils.asyncio import WATCHDOG_TIMEOUT, BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
+from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 HEARTBEAT_SECONDS = 1.0
 HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 10
@@ -131,7 +133,7 @@ class PipelineTaskSink(FrameProcessor):
         await self._down_queue.put(frame)
 
 
-class PipelineTask(BasePipelineTask):
+class PipelineTask(WatchdogReseter, BasePipelineTask):
     """Manages the execution of a pipeline, handling frame processing and task lifecycle.
 
     It has a couple of event handlers `on_frame_reached_upstream` and
@@ -261,18 +263,18 @@ class PipelineTask(BasePipelineTask):
         self._cancelled = False
 
         # This queue receives frames coming from the pipeline upstream.
-        self._up_queue = asyncio.Queue()
+        self._up_queue = WatchdogQueue(self)
         # This queue receives frames coming from the pipeline downstream.
-        self._down_queue = asyncio.Queue()
+        self._down_queue = WatchdogQueue(self)
         # This queue is the queue used to push frames to the pipeline.
-        self._push_queue = asyncio.Queue()
+        self._push_queue = WatchdogQueue(self)
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
-        self._heartbeat_queue = asyncio.Queue()
+        self._heartbeat_queue = WatchdogQueue(self)
         # This is the idle queue. When frames are received downstream they are
         # put in the queue. If no frame is received the pipeline is considered
         # idle.
-        self._idle_queue = asyncio.Queue()
+        self._idle_queue = WatchdogQueue(self)
         # This event is used to indicate a finalize frame (e.g. EndFrame,
         # StopFrame) has been received in the down queue.
         self._pipeline_end_event = asyncio.Event()
@@ -424,6 +426,9 @@ class PipelineTask(BasePipelineTask):
             for frame in frames:
                 await self.queue_frame(frame)
 
+    def reset_watchdog(self):
+        self._task_manager.reset_watchdog(asyncio.current_task())
+
     async def _cancel(self):
         if not self._cancelled:
             logger.debug(f"Canceling pipeline task {self}")
@@ -525,8 +530,6 @@ class PipelineTask(BasePipelineTask):
         if cleanup_pipeline:
             await self._pipeline.cleanup()
         await self._sink.cleanup()
-
-        await self._task_manager.cleanup()
 
     async def _process_push_queue(self):
         """This is the task that runs the pipeline for the first time by sending

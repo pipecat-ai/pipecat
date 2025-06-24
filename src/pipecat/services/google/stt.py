@@ -10,6 +10,7 @@ import os
 import time
 
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -747,8 +748,6 @@ class GoogleSTTService(STTService):
         try:
             while True:
                 try:
-                    self.start_watchdog()
-
                     if self._request_queue.empty():
                         # wait for 10ms in case we don't have audio
                         await asyncio.sleep(0.01)
@@ -762,8 +761,6 @@ class GoogleSTTService(STTService):
 
                     # Process responses
                     await self._process_responses(streaming_recognize)
-
-                    self.reset_watchdog()
 
                     # If we're here, check if we need to reconnect
                     if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
@@ -779,8 +776,6 @@ class GoogleSTTService(STTService):
 
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
-                finally:
-                    self.reset_watchdog()
 
         except Exception as e:
             logger.error(f"Error in streaming task: {e}")
@@ -804,17 +799,13 @@ class GoogleSTTService(STTService):
     async def _process_responses(self, streaming_recognize):
         """Process streaming recognition responses."""
         try:
-            async for response in streaming_recognize:
-                self.start_watchdog()
-
+            async for response in WatchdogAsyncIterator(streaming_recognize, reseter=self):
                 # Check streaming limit
                 if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
                     logger.debug("Stream timeout reached in response processing")
-                    self.reset_watchdog()
                     break
 
                 if not response.results:
-                    self.reset_watchdog()
                     continue
 
                 for result in response.results:
@@ -856,11 +847,8 @@ class GoogleSTTService(STTService):
                                 result=result,
                             )
                         )
-
-                self.reset_watchdog()
         except Exception as e:
             logger.error(f"Error processing Google STT responses: {e}")
-            self.reset_watchdog()
             # Re-raise the exception to let it propagate (e.g. in the case of a
             # timeout, propagate to _stream_audio to reconnect)
             raise

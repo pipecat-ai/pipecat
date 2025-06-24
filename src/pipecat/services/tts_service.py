@@ -39,6 +39,7 @@ from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
 from pipecat.utils.time import seconds_to_nanoseconds
+from pipecat.utils.watchdog_queue import WatchdogQueue
 
 
 class TTSService(AIService):
@@ -315,6 +316,8 @@ class TTSService(AIService):
                 if has_started:
                     await self.push_frame(TTSStoppedFrame())
                     has_started = False
+            finally:
+                self.reset_watchdog()
 
 
 class WordTTSService(TTSService):
@@ -327,7 +330,7 @@ class WordTTSService(TTSService):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1
-        self._words_queue = asyncio.Queue()
+        self._words_queue = WatchdogQueue(self)
         self._words_task = None
         self._llm_response_started: bool = False
 
@@ -578,7 +581,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._contexts_queue = asyncio.Queue()
+            self._contexts_queue = WatchdogQueue(self)
             self._contexts: Dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
@@ -620,10 +623,12 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         while running:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
+                self.reset_watchdog()
                 if frame:
                     await self.push_frame(frame)
                 running = frame is not None
             except asyncio.TimeoutError:
+                self.reset_watchdog()
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break

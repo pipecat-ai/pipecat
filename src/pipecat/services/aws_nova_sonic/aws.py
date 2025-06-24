@@ -697,9 +697,9 @@ class AWSNovaSonicLLMService(LLMService):
         try:
             while self._stream and not self._disconnecting:
                 output = await self._stream.await_output()
-                result = await output[1].receive()
+                result = await asyncio.wait_for(output[1].receive(), timeout=1.0)
 
-                self.start_watchdog()
+                self.reset_watchdog()
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
@@ -728,13 +728,12 @@ class AWSNovaSonicLLMService(LLMService):
                         elif "completionEnd" in event_json:
                             # Handle the LLM completion ending
                             await self._handle_completion_end_event(event_json)
-
+        except asyncio.TimeoutError:
+            self.reset_watchdog()
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
             if self._wants_connection:
                 await self.reset_conversation()
-        finally:
-            self.reset_watchdog()
 
     async def _handle_completion_start_event(self, event_json):
         pass

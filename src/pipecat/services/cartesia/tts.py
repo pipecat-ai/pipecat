@@ -30,6 +30,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 # See .env.example for Cartesia configuration needed
 try:
@@ -255,7 +256,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._context_id = None
 
     async def _receive_messages(self):
-        async for message in self._get_websocket():
+        async for message in WatchdogAsyncIterator(self._get_websocket(), reseter=self):
             msg = json.loads(message)
             if not msg or not self.audio_context_available(msg["context_id"]):
                 continue
