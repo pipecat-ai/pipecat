@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added logging and improved error handling to help diagnose and prevent potential 
+  Pipeline freezes.
+
 - Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
 
 - Added reconnection logic and audio buffer management to `GladiaSTTService`.
@@ -54,6 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `daily-python` to 0.19.3.
 
 ### Fixed
+
+- Fixed an issue in `FastAPIWebsocketClient` to ensure proper disconnection 
+  when the websocket is already closed.
+
+- Fixed an issue where the `UserStoppedSpeakingFrame` was not received if the
+  transport was not receiving new audio frames.
+
+- Fixed an edge case where if the user interrupted the bot but no new aggregation 
+  was received, the bot would not resume speaking.
 
 - Fixed an issue with `ElevenLabsTTSService` where the context was not being
   closed.
