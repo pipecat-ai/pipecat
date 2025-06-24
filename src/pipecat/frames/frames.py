@@ -490,16 +490,6 @@ class FatalErrorFrame(ErrorFrame):
 
 
 @dataclass
-class HeartbeatFrame(SystemFrame):
-    """This frame is used by the pipeline task as a mechanism to know if the
-    pipeline is running properly.
-
-    """
-
-    timestamp: int
-
-
-@dataclass
 class EndTaskFrame(SystemFrame):
     """This is used to notify the pipeline task that the pipeline should be
     closed nicely (flushing all the queued frames) by pushing an EndFrame
@@ -879,6 +869,16 @@ class StopFrame(ControlFrame):
     """
 
     pass
+
+
+@dataclass
+class HeartbeatFrame(ControlFrame):
+    """This frame is used by the pipeline task as a mechanism to know if the
+    pipeline is running properly.
+
+    """
+
+    timestamp: int
 
 
 @dataclass
