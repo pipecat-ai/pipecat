@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with `ElevenLabsTTSService` where the context was not being
+  closed.
+
 - Fixed function calling in `AWSNovaSonicLLMService`.
 
 - Fixed an issue that would cause multiple `PipelineTask.on_idle_timeout`
