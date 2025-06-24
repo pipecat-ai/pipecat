@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added logging and improved error handling to help diagnose and prevent potential 
+- Added logging and improved error handling to help diagnose and prevent potential
   Pipeline freezes.
 
 - Introduce task watchdog timers. Watchdog timers are used to detect if a
@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMAssistantContextAggregator` that exposes whether a function call is in
   progress.
 
-- Added `SambaNovaLLMService` which provides llm api integration with an 
+- Added `SambaNovaLLMService` which provides llm api integration with an
   OpenAI-compatible interface.
 
 - Added `SambaNovaTTSService` which provides speech-to-text functionality using
@@ -84,14 +84,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed an issue in `FastAPIWebsocketClient` to ensure proper disconnection 
+- Fixed an issue in `FastAPIWebsocketClient` to ensure proper disconnection
   when the websocket is already closed.
 
 - Fixed an issue where the `UserStoppedSpeakingFrame` was not received if the
   transport was not receiving new audio frames.
 
-- Fixed an edge case where if the user interrupted the bot but no new aggregation 
+- Fixed an edge case where if the user interrupted the bot but no new aggregation
   was received, the bot would not resume speaking.
+
+- Fixed an issue with `TelnyxFrameSerializer` where it would throw an exception
+  when the user hung up the call.
 
 - Fixed an issue with `ElevenLabsTTSService` where the context was not being
   closed.
