@@ -50,8 +50,9 @@ class FrameProcessor(BaseObject):
         self,
         *,
         name: Optional[str] = None,
-        metrics: Optional[FrameProcessorMetrics] = None,
+        enable_process_frame_watchdog: bool = True,
         enable_watchdog_logging: Optional[bool] = None,
+        metrics: Optional[FrameProcessorMetrics] = None,
         watchdog_timeout_secs: Optional[float] = None,
         **kwargs,
     ):
@@ -59,6 +60,9 @@ class FrameProcessor(BaseObject):
         self._parent: Optional["FrameProcessor"] = None
         self._prev: Optional["FrameProcessor"] = None
         self._next: Optional["FrameProcessor"] = None
+
+        # Enable watchdog timers for the frame processing task.
+        self._enable_process_frame_watchdog = enable_process_frame_watchdog
 
         # Enable watchdog logging for all tasks created by this frame processor.
         self._enable_watchdog_logging = enable_watchdog_logging
@@ -416,7 +420,8 @@ class FrameProcessor(BaseObject):
 
             (frame, direction, callback) = await self.__input_queue.get()
             try:
-                self.start_watchdog()
+                if self._enable_process_frame_watchdog:
+                    self.start_watchdog()
                 # Process the frame.
                 await self.process_frame(frame, direction)
                 # If this frame has an associated callback, call it now.
@@ -427,7 +432,8 @@ class FrameProcessor(BaseObject):
                 await self.push_error(ErrorFrame(str(e)))
             finally:
                 self.__input_queue.task_done()
-                self.reset_watchdog()
+                if self._enable_process_frame_watchdog:
+                    self.reset_watchdog()
 
     def __create_push_task(self):
         if not self.__push_frame_task:

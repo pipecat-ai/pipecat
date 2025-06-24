@@ -288,14 +288,15 @@ class TaskManager(BaseTaskManager):
             logger.warning(f"Unable to start watchdog timer: task {name} does not exist")
 
     def reset_watchdog(self, task: asyncio.Task):
-        """Resets the given task watchdog timer. If not reset, a warning will be
-        logged indicating the task is stalling.
+        """Resets the given task watchdog timer. If not reset on time, a warning
+        will be logged indicating the task is stalling.
 
         """
         name = task.get_name()
         if name in self._tasks:
-            self._tasks[name].watchdog_start.clear()
-            self._tasks[name].watchdog_timer.set()
+            if self._tasks[name].watchdog_start.is_set():
+                self._tasks[name].watchdog_start.clear()
+                self._tasks[name].watchdog_timer.set()
         else:
             logger.warning(f"Unable to reset watchdog timer: task {name} does not exist")
 

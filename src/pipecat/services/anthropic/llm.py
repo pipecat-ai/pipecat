@@ -95,7 +95,7 @@ class AnthropicLLMService(LLMService):
         client=None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(enable_process_frame_watchdog=False, **kwargs)
         params = params or AnthropicLLMService.InputParams()
         self._client = client or AsyncAnthropic(
             api_key=api_key
@@ -206,6 +206,8 @@ class AnthropicLLMService(LLMService):
             async for event in response:
                 # Aggregate streaming content, create frames, trigger events
 
+                self.start_watchdog()
+
                 if event.type == "content_block_delta":
                     if hasattr(event.delta, "text"):
                         await self.push_frame(LLMTextFrame(event.delta.text))
@@ -279,6 +281,8 @@ class AnthropicLLMService(LLMService):
                     if total_input_tokens >= 1024:
                         context.turns_above_cache_threshold += 1
 
+                self.reset_watchdog()
+
             await self.run_function_calls(function_calls)
 
         except asyncio.CancelledError:
@@ -292,6 +296,7 @@ class AnthropicLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
+            self.reset_watchdog()
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
             comp_tokens = (

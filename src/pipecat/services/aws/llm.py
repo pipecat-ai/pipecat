@@ -540,7 +540,7 @@ class AWSBedrockLLMService(LLMService):
         client_config: Optional[Config] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(enable_process_frame_watchdog=False, **kwargs)
 
         params = params or AWSBedrockLLMService.InputParams()
 
@@ -711,6 +711,8 @@ class AWSBedrockLLMService(LLMService):
 
             function_calls = []
             for event in response["stream"]:
+                self.start_watchdog()
+
                 # Handle text content
                 if "contentBlockDelta" in event:
                     delta = event["contentBlockDelta"]["delta"]
@@ -762,6 +764,9 @@ class AWSBedrockLLMService(LLMService):
                     completion_tokens += usage.get("outputTokens", 0)
                     cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
                     cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
+
+                self.reset_watchdog()
+
             await self.run_function_calls(function_calls)
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
@@ -774,6 +779,7 @@ class AWSBedrockLLMService(LLMService):
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
+            self.reset_watchdog()
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
             comp_tokens = (

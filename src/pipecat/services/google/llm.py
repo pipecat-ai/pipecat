@@ -475,7 +475,7 @@ class GoogleLLMService(LLMService):
         tool_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(enable_process_frame_watchdog=False, **kwargs)
 
         params = params or GoogleLLMService.InputParams()
 
@@ -558,6 +558,8 @@ class GoogleLLMService(LLMService):
 
             function_calls = []
             async for chunk in response:
+                self.start_watchdog()
+
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
                 if chunk.usage_metadata:
@@ -566,6 +568,7 @@ class GoogleLLMService(LLMService):
                     total_tokens += chunk.usage_metadata.total_token_count or 0
 
                 if not chunk.candidates:
+                    self.reset_watchdog()
                     continue
 
                 for candidate in chunk.candidates:
@@ -626,12 +629,15 @@ class GoogleLLMService(LLMService):
                             "origins": origins,
                         }
 
+                self.reset_watchdog()
+
             await self.run_function_calls(function_calls)
         except DeadlineExceeded:
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
         finally:
+            self.reset_watchdog()
             if grounding_metadata and isinstance(grounding_metadata, dict):
                 llm_search_frame = LLMSearchResponseFrame(
                     search_result=search_result,

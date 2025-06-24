@@ -77,7 +77,7 @@ class BaseOpenAILLMService(LLMService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__(enable_process_frame_watchdog=False, **kwargs)
 
         params = params or BaseOpenAILLMService.InputParams()
 
@@ -193,6 +193,8 @@ class BaseOpenAILLMService(LLMService):
         )
 
         async for chunk in chunk_stream:
+            self.start_watchdog()
+
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
@@ -202,11 +204,13 @@ class BaseOpenAILLMService(LLMService):
                 await self.start_llm_usage_metrics(tokens)
 
             if chunk.choices is None or len(chunk.choices) == 0:
+                self.reset_watchdog()
                 continue
 
             await self.stop_ttfb_metrics()
 
             if not chunk.choices[0].delta:
+                self.reset_watchdog()
                 continue
 
             if chunk.choices[0].delta.tool_calls:
@@ -245,6 +249,8 @@ class BaseOpenAILLMService(LLMService):
                 "transcript"
             ):
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+
+            self.reset_watchdog()
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
@@ -301,3 +307,4 @@ class BaseOpenAILLMService(LLMService):
             finally:
                 await self.stop_processing_metrics()
                 await self.push_frame(LLMFullResponseEndFrame())
+                self.reset_watchdog()
