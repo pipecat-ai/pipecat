@@ -20,9 +20,9 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import LLMUserAggregatorParams
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.sambanova.llm import SambaNovaLLMService
 from pipecat.services.sambanova.stt import SambaNovaSTTService
-from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
@@ -60,8 +60,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     logger.info(f"Starting bot")
 
     stt = SambaNovaSTTService(
-        model='Whisper-Large-v3',
-        api_key=os.getenv('SAMBANOVA_API_KEY'),
+        model="Whisper-Large-v3",
+        api_key=os.getenv("SAMBANOVA_API_KEY"),
     )
 
     tts = CartesiaTTSService(
@@ -70,8 +70,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     )
 
     llm = SambaNovaLLMService(
-        api_key=os.getenv('SAMBANOVA_API_KEY'),
-        model='Llama-4-Maverick-17B-128E-Instruct',
+        api_key=os.getenv("SAMBANOVA_API_KEY"),
+        model="Llama-4-Maverick-17B-128E-Instruct",
     )
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
