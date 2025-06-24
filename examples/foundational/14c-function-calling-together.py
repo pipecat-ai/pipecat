@@ -16,7 +16,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -30,7 +30,6 @@ load_dotenv(override=True)
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
-    await params.llm.push_frame(TTSSpeakFrame("Let me check on that."))
     await params.result_callback({"conditions": "nice", "temperature": "75"})
 
 
@@ -74,6 +73,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+
     weather_function = FunctionSchema(
         name="get_current_weather",
         description="Get the current weather",
@@ -113,7 +116,13 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -132,6 +141,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)

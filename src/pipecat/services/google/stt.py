@@ -747,6 +747,11 @@ class GoogleSTTService(STTService):
         try:
             while True:
                 try:
+                    if self._request_queue.empty():
+                        # wait for 10ms in case we don't have audio
+                        await asyncio.sleep(0.01)
+                        continue
+
                     # Start bi-directional streaming
                     streaming_recognize = await self._client.streaming_recognize(
                         requests=self._request_generator()
@@ -816,7 +821,13 @@ class GoogleSTTService(STTService):
                     if result.is_final:
                         self._last_transcript_was_final = True
                         await self.push_frame(
-                            TranscriptionFrame(transcript, "", time_now_iso8601(), primary_language)
+                            TranscriptionFrame(
+                                transcript,
+                                "",
+                                time_now_iso8601(),
+                                primary_language,
+                                result=result,
+                            )
                         )
                         await self.stop_processing_metrics()
                         await self._handle_transcription(
@@ -829,7 +840,11 @@ class GoogleSTTService(STTService):
                         await self.stop_ttfb_metrics()
                         await self.push_frame(
                             InterimTranscriptionFrame(
-                                transcript, "", time_now_iso8601(), primary_language
+                                transcript,
+                                "",
+                                time_now_iso8601(),
+                                primary_language,
+                                result=result,
                             )
                         )
 

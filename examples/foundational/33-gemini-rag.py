@@ -239,7 +239,6 @@ Your response will be turned into speech so use only simple words and punctuatio
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
@@ -261,6 +260,6 @@ Your response will be turned into speech so use only simple words and punctuatio
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)

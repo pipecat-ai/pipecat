@@ -93,10 +93,8 @@ async def run_example(webrtc_connection: SmallWebRTCConnection):
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            report_only_initial_ttfb=True,
         ),
     )
 
@@ -156,7 +154,7 @@ async def offer(request: dict, background_tasks: BackgroundTasks):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield  # Run app
-    coros = [pc.close() for pc in pcs_map.values()]
+    coros = [pc.disconnect() for pc in pcs_map.values()]
     await asyncio.gather(*coros)
     pcs_map.clear()
 

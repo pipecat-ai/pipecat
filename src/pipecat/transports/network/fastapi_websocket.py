@@ -92,7 +92,7 @@ class FastAPIWebsocketClient:
     async def trigger_client_connected(self):
         await self._callbacks.on_client_connected(self._websocket)
 
-    async def trigger_client_timout(self):
+    async def trigger_client_timeout(self):
         await self._callbacks.on_session_timeout(self._websocket)
 
     def _can_send(self):
@@ -122,8 +122,17 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         self._receive_task = None
         self._monitor_websocket_task = None
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(frame)
         if self._params.serializer:
             await self._params.serializer.setup(frame)
@@ -179,7 +188,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _monitor_websocket(self):
         """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
         await asyncio.sleep(self._params.session_timeout)
-        await self._client.trigger_client_timout()
+        await self._client.trigger_client_timeout()
 
 
 class FastAPIWebsocketOutputTransport(BaseOutputTransport):
@@ -196,7 +205,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._client = client
         self._params = params
 
-        # write_raw_audio_frames() is called quickly, as soon as we get audio
+        # write_audio_frame() is called quickly, as soon as we get audio
         # (e.g. from the TTS), and since this is just a network connection we
         # would be sending it to quickly. Instead, we want to block to emulate
         # an audio device, this is what the send interval is. It will be
@@ -204,8 +213,17 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         self._send_interval = 0
         self._next_send_time = 0
 
+        # Whether we have seen a StartFrame already.
+        self._initialized = False
+
     async def start(self, frame: StartFrame):
         await super().start(frame)
+
+        if self._initialized:
+            return
+
+        self._initialized = True
+
         await self._client.setup(frame)
         if self._params.serializer:
             await self._params.serializer.setup(frame)
@@ -236,7 +254,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         await self._write_frame(frame)
 
-    async def write_raw_audio_frames(self, frames: bytes, destination: Optional[str] = None):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame):
         if self._client.is_closing:
             return
 
@@ -246,7 +264,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             return
 
         frame = OutputAudioRawFrame(
-            audio=frames,
+            audio=frame.audio,
             sample_rate=self.sample_rate,
             num_channels=self._params.audio_out_channels,
         )

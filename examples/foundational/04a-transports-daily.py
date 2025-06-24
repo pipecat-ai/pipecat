@@ -9,11 +9,11 @@ import os
 import sys
 
 import aiohttp
-from daily_runner import configure
 from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.examples.daily_runner import configure
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -75,10 +75,8 @@ async def main():
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
-                allow_interruptions=True,
                 enable_metrics=True,
                 enable_usage_metrics=True,
-                report_only_initial_ttfb=True,
             ),
         )
 

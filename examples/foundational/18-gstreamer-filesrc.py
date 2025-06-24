@@ -66,7 +66,7 @@ async def run_example(transport: BaseTransport, args: argparse.Namespace, handle
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
     parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
     parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
