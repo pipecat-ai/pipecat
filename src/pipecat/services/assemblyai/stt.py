@@ -190,6 +190,7 @@ class AssemblyAISTTService(STTService):
             while self._connected:
                 try:
                     message = await self._websocket.recv()
+                    self.start_watchdog()
                     data = json.loads(message)
                     await self._handle_message(data)
                 except websockets.exceptions.ConnectionClosedOK:
@@ -197,6 +198,8 @@ class AssemblyAISTTService(STTService):
                 except Exception as e:
                     logger.error(f"Error processing WebSocket message: {e}")
                     break
+                finally:
+                    self.reset_watchdog()
 
         except Exception as e:
             logger.error(f"Fatal error in receive handler: {e}")

@@ -423,8 +423,10 @@ class SmallWebRTCInputTransport(BaseInputTransport):
     async def _receive_audio(self):
         try:
             async for audio_frame in self._client.read_audio_frame():
+                self.start_watchdog()
                 if audio_frame:
                     await self.push_audio_frame(audio_frame)
+                self.reset_watchdog()
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
@@ -432,6 +434,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
     async def _receive_video(self):
         try:
             async for video_frame in self._client.read_video_frame():
+                self.start_watchdog()
                 if video_frame:
                     await self.push_video_frame(video_frame)
 
@@ -450,6 +453,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                             await self.push_video_frame(image_frame)
                             # Remove from pending requests
                             del self._image_requests[req_id]
+                self.reset_watchdog()
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")

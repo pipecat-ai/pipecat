@@ -203,11 +203,10 @@ class ResponseCancelEvent(ClientEvent):
 
 
 class ServerEvent(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     event_id: str
     type: str
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class SessionCreatedEvent(ServerEvent):

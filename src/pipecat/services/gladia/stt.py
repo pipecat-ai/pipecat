@@ -502,6 +502,8 @@ class GladiaSTTService(STTService):
     async def _receive_task_handler(self):
         try:
             async for message in self._websocket:
+                self.start_watchdog()
+
                 content = json.loads(message)
 
                 # Handle audio chunk acknowledgments
@@ -559,11 +561,15 @@ class GladiaSTTService(STTService):
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
+
+                self.reset_watchdog()
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection
             pass
         except Exception as e:
             logger.error(f"Error in Gladia WebSocket handler: {e}")
+        finally:
+            self.reset_watchdog()
 
     async def _maybe_reconnect(self) -> bool:
         """Handle exponential backoff reconnection logic."""

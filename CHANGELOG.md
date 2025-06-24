@@ -12,6 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added logging and improved error handling to help diagnose and prevent potential 
   Pipeline freezes.
 
+- Introduce task watchdog timers. Watchdog timers are used to detect if a
+  Pipecat task is taking longer than expected (by default 5 seconds). It is
+  possible to change the default watchdog timer timeout by using the
+  `watchdog_timeout` constructor argument when creating a `PipelineTask`. With
+  watchdog timers it is also possible to log how long each processing step is
+  taking (e.g. processing an element from a queue inside a task). This is done
+  with the `enable_watchdog_logging` constructor argument when creating a
+  `PipelineTask.` It is also possible to control these two values per each frame
+  processor. That is, you can set set `enable_watchdog_logging` and
+  `watchdog_timeout` when creating any frame processor through their constructor
+  arguments. Finally, you can also set these values per task. So, if you are
+  writing a frame processor that creates multiple tasks and you only want to
+  enable logging for one of them, you can do so by passing the same argument
+  names to the `FrameProcessor.create_task()` function. Note that watchdog
+  timers only work with Pipecat tasks but not if you use `asycio.create_task()`
+  or similar.
+
 - Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
 
 - Added reconnection logic and audio buffer management to `GladiaSTTService`.
