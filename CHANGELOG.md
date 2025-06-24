@@ -84,6 +84,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an event loop blocking issue when using `SentryMetrics`.
+
 - Fixed an issue in `FastAPIWebsocketClient` to ensure proper disconnection
   when the websocket is already closed.
 
