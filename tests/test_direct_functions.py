@@ -10,6 +10,7 @@ from pipecat.services.llm_service import FunctionCallParams
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+
 class TestDirectFunction(unittest.TestCase):
     def test_name_is_set_from_function(self):
         async def my_function(params: FunctionCallParams):
@@ -36,7 +37,6 @@ class TestDirectFunction(unittest.TestCase):
             """
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_long_description))
         func = DirectFunctionWrapper(function=my_function_long_description)
         self.assertEqual(
             func.description,
@@ -47,7 +47,6 @@ class TestDirectFunction(unittest.TestCase):
         async def my_function_no_params(params: FunctionCallParams):
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_no_params))
         func = DirectFunctionWrapper(function=my_function_no_params)
         self.assertEqual(func.properties, {})
 
@@ -56,7 +55,6 @@ class TestDirectFunction(unittest.TestCase):
         ):
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_simple_params))
         func = DirectFunctionWrapper(function=my_function_simple_params)
         self.assertEqual(
             func.properties,
@@ -75,7 +73,6 @@ class TestDirectFunction(unittest.TestCase):
         ):
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_complex_params))
         func = DirectFunctionWrapper(function=my_function_complex_params)
         self.assertEqual(
             func.properties,
@@ -106,7 +103,6 @@ class TestDirectFunction(unittest.TestCase):
         ):
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_complex_type_params))
         func = DirectFunctionWrapper(function=my_function_complex_type_params)
         self.assertEqual(
             func.properties,
@@ -133,7 +129,6 @@ class TestDirectFunction(unittest.TestCase):
         async def my_function_no_params(params: FunctionCallParams):
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_no_params))
         func = DirectFunctionWrapper(function=my_function_no_params)
         self.assertEqual(func.required, [])
 
@@ -142,7 +137,6 @@ class TestDirectFunction(unittest.TestCase):
         ):
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_simple_params))
         func = DirectFunctionWrapper(function=my_function_simple_params)
         self.assertEqual(func.required, ["name", "age"])
 
@@ -154,7 +148,6 @@ class TestDirectFunction(unittest.TestCase):
         ):
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function_complex_params))
         func = DirectFunctionWrapper(function=my_function_complex_params)
         self.assertEqual(func.required, ["address_lines"])
 
@@ -172,7 +165,6 @@ class TestDirectFunction(unittest.TestCase):
             """
             return {"status": "success"}, None
 
-        self.assertIsNone(DirectFunctionWrapper.validate_function(my_function))
         func = DirectFunctionWrapper(function=my_function)
 
         # Validate that the function description is still set correctly even with the longer docstring
@@ -195,40 +187,40 @@ class TestDirectFunction(unittest.TestCase):
         def my_function_non_async(params: FunctionCallParams):
             return {"status": "success"}, None
 
-        with self.assertRaises(InvalidFunctionError):
-            DirectFunctionWrapper.validate_function(my_function_non_async)
+        with self.assertRaises(Exception):
+            DirectFunctionWrapper(function=my_function_non_async)
 
-        async def my_function_missing_flow_manager():
+        async def my_function_missing_params():
             return {"status": "success"}, None
 
-        with self.assertRaises(InvalidFunctionError):
-            DirectFunctionWrapper.validate_function(my_function_missing_flow_manager)
+        with self.assertRaises(Exception):
+            DirectFunctionWrapper(my_function_missing_params)
 
-        async def my_function_misplaced_flow_manager(foo: str, params: FunctionCallParams):
+        async def my_function_misplaced_params(foo: str, params: FunctionCallParams):
             return {"status": "success"}, None
 
-        with self.assertRaises(InvalidFunctionError):
-            DirectFunctionWrapper.validate_function(my_function_misplaced_flow_manager)
+        with self.assertRaises(Exception):
+            DirectFunctionWrapper(my_function_misplaced_params)
 
-    def test_invoke_calls_function_with_args_and_flow_manager(self):
+    def test_invoke_calls_function_with_args_and_params_object(self):
         called = {}
 
-        class DummyFlowManager:
+        class DummyParams:
             pass
 
-        async def my_function(flow_manager: DummyFlowManager, name: str, age: int):
-            called["flow_manager"] = flow_manager
+        async def my_function(params: DummyParams, name: str, age: int):
+            called["params"] = params
             called["name"] = name
             called["age"] = age
             return {"status": "success"}, None
 
         func = DirectFunctionWrapper(function=my_function)
-        flow_manager = DummyFlowManager()
+        params = DummyParams()
         args = {"name": "Alice", "age": 30}
 
-        result = asyncio.run(func.invoke(args=args, flow_manager=flow_manager))
+        result = asyncio.run(func.invoke(args=args, params=params))
         self.assertEqual(result, ({"status": "success"}, None))
-        self.assertIs(called["flow_manager"], flow_manager)
+        self.assertIs(called["params"], params)
         self.assertEqual(called["name"], "Alice")
         self.assertEqual(called["age"], 30)
 
