@@ -182,6 +182,8 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 if not self._params.serializer:
                     continue
 
+                self.start_watchdog()
+
                 frame = await self._params.serializer.deserialize(message)
 
                 if not frame:
@@ -191,8 +193,12 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                     await self.push_audio_frame(frame)
                 else:
                     await self.push_frame(frame)
+
+                self.reset_watchdog()
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
+
+        self.reset_watchdog()
 
         await self._client.trigger_client_disconnected()
 

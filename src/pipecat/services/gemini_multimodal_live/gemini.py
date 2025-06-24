@@ -687,6 +687,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _receive_task_handler(self):
         async for message in self._websocket:
+            self.start_watchdog()
+
             evt = events.parse_server_event(message)
             # logger.debug(f"Received event: {message[:500]}")
             # logger.debug(f"Received event: {evt}")
@@ -708,8 +710,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_error(evt)
                 # errors are fatal, so exit the receive loop
                 return
-            else:
-                pass
+
+            self.reset_watchdog()
 
     #
     #

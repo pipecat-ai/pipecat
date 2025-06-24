@@ -368,6 +368,8 @@ class BaseInputTransport(FrameProcessor):
                     self._audio_in_queue.get(), timeout=AUDIO_INPUT_TIMEOUT_SECS
                 )
 
+                self.start_watchdog()
+
                 # If an audio filter is available, run it before VAD.
                 if self._params.audio_in_filter:
                     frame.audio = await self._params.audio_in_filter.filter(frame.audio)
@@ -395,6 +397,8 @@ class BaseInputTransport(FrameProcessor):
                     if self._params.turn_analyzer:
                         self._params.turn_analyzer.clear()
                     await self._handle_user_interruption(UserStoppedSpeakingFrame())
+
+            self.reset_watchdog()
 
     async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer.
