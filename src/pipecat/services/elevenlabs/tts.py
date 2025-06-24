@@ -284,7 +284,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         logger.trace(f"{self}: flushing audio")
         msg = {"context_id": self._context_id, "flush": True}
         await self._websocket.send(json.dumps(msg))
-        self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         await super().push_frame(frame, direction)
@@ -380,6 +379,12 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         if self._context_id and self._websocket:
             logger.trace(f"Closing context {self._context_id} due to interruption")
             try:
+                # ElevenLabs requires that Pipecat manages the contexts and closes them
+                # when they're not longer in use. Since a StartInterruptionFrame is pushed
+                # every time the user speaks, we'll use this as a trigger to close the context
+                # and reset the state.
+                # Note: We do not need to call remove_audio_context here, as the context is
+                # automatically reset when super ()._handle_interruption is called.
                 await self._websocket.send(
                     json.dumps({"context_id": self._context_id, "close_context": True})
                 )
@@ -391,10 +396,20 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
     async def _receive_messages(self):
         async for message in self._get_websocket():
             msg = json.loads(message)
-            # Check if this message belongs to the current context
+
             received_ctx_id = msg.get("contextId")
+
+            # Handle final messages first, regardless of context availability
+            # At the moment, this message is received AFTER the close_context message is
+            # sent, so it doesn't serve any functional purpose. For now, we'll just log it.
+            if msg.get("isFinal") is True:
+                logger.trace(f"Received final message for context {received_ctx_id}")
+                continue
+
+            # Check if this message belongs to the current context.
+            # This should never happen, so warn about it.
             if not self.audio_context_available(received_ctx_id):
-                logger.trace(f"Ignoring message from unavailable context: {received_ctx_id}")
+                logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
                 continue
 
             if msg.get("audio"):
@@ -408,21 +423,26 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
                 await self.add_word_timestamps(word_times)
                 self._cumulative_time = word_times[-1][1]
-            if msg.get("isFinal"):
-                logger.trace(f"Received final message for context {received_ctx_id}")
-                await self.remove_audio_context(received_ctx_id)
-                # Reset context tracking if this was our active context
-                if self._context_id == received_ctx_id:
-                    self._context_id = None
-                    self._started = False
 
     async def _keepalive_task_handler(self):
         while True:
             await asyncio.sleep(10)
             try:
-                # Send an empty message to keep the connection alive
                 if self._websocket and self._websocket.open:
-                    await self._websocket.send(json.dumps({}))
+                    if self._context_id:
+                        # Send keepalive with context ID to keep the connection alive
+                        keepalive_message = {
+                            "text": "",
+                            "context_id": self._context_id,
+                        }
+                        logger.trace(f"Sending keepalive for context {self._context_id}")
+                    else:
+                        # It's possible to have a user interruption which clears the context
+                        # without generating a new TTS response. In this case, we'll just send
+                        # an empty message to keep the connection alive.
+                        keepalive_message = {"text": ""}
+                        logger.trace("Sending keepalive without context")
+                    await self._websocket.send(json.dumps(keepalive_message))
             except websockets.ConnectionClosed as e:
                 logger.warning(f"{self} keepalive error: {e}")
                 break
@@ -441,14 +461,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 await self._connect()
 
             try:
-                # Close previous context if there was one
-                if self._context_id and not self._started:
-                    await self._websocket.send(
-                        json.dumps({"context_id": self._context_id, "close_context": True})
-                    )
-                    await self.remove_audio_context(self._context_id)
-                    self._context_id = None
-
                 if not self._started:
                     await self.start_ttfb_metrics()
                     yield TTSStartedFrame()
@@ -473,9 +485,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
                 self._started = False
-                if self._context_id:
-                    await self.remove_audio_context(self._context_id)
-                    self._context_id = None
                 return
             yield None
         except Exception as e:
