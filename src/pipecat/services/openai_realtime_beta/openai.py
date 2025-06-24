@@ -52,7 +52,8 @@ from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt, traced_tts
+from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 from . import events
 from .context import (
@@ -369,8 +370,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     #
 
     async def _receive_task_handler(self):
-        async for message in self._websocket:
-            self.start_watchdog()
+        async for message in WatchdogAsyncIterator(self._websocket, reseter=self):
             evt = events.parse_server_event(message)
             if evt.type == "session.created":
                 await self._handle_evt_session_created(evt)
@@ -401,7 +401,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                     await self._handle_evt_error(evt)
                     # errors are fatal, so exit the receive loop
                     return
-            self.reset_watchdog()
 
     @traced_openai_realtime(operation="llm_setup")
     async def _handle_evt_session_created(self, evt):

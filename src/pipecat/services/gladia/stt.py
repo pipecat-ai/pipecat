@@ -27,6 +27,7 @@ from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     import websockets
@@ -501,9 +502,7 @@ class GladiaSTTService(STTService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in self._websocket:
-                self.start_watchdog()
-
+            async for message in WatchdogAsyncIterator(self._websocket, reseter=self):
                 content = json.loads(message)
 
                 # Handle audio chunk acknowledgments
@@ -568,8 +567,6 @@ class GladiaSTTService(STTService):
             pass
         except Exception as e:
             logger.error(f"Error in Gladia WebSocket handler: {e}")
-        finally:
-            self.reset_watchdog()
 
     async def _maybe_reconnect(self) -> bool:
         """Handle exponential backoff reconnection logic."""

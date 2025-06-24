@@ -40,6 +40,8 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 try:
     from daily import (
@@ -250,7 +252,7 @@ class DailyAudioTrack:
     track: CustomAudioTrack
 
 
-class DailyTransportClient(EventHandler):
+class DailyTransportClient(WatchdogReseter, EventHandler):
     """Core client for interacting with Daily's API.
 
     Manages the connection to Daily rooms and handles all low-level API interactions.
@@ -320,9 +322,9 @@ class DailyTransportClient(EventHandler):
         # waits for it to finish using completions (and a future) we will
         # deadlock because completions use event handlers (which are holding the
         # GIL).
-        self._event_queue = asyncio.Queue()
-        self._audio_queue = asyncio.Queue()
-        self._video_queue = asyncio.Queue()
+        self._event_queue = WatchdogQueue(self)
+        self._audio_queue = WatchdogQueue(self)
+        self._video_queue = WatchdogQueue(self)
         self._event_task = None
         self._audio_task = None
         self._video_task = None
@@ -394,6 +396,10 @@ class DailyTransportClient(EventHandler):
     async def write_video_frame(self, frame: OutputImageRawFrame):
         if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
+
+    def reset_watchdog(self):
+        if self._task_manager:
+            self._task_manager.reset_watchdog(asyncio.current_task())
 
     async def setup(self, setup: FrameProcessorSetup):
         if self._task_manager:
@@ -934,6 +940,7 @@ class DailyTransportClient(EventHandler):
             await self._joined_event.wait()
             (callback, *args) = await queue.get()
             await callback(*args)
+            queue.task_done()
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         if not self._task_manager:

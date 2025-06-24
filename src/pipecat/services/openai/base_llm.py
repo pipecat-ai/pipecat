@@ -36,6 +36,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 
 class BaseOpenAILLMService(LLMService):
@@ -192,7 +193,7 @@ class BaseOpenAILLMService(LLMService):
             context
         )
 
-        async for chunk in chunk_stream:
+        async for chunk in WatchdogAsyncIterator(chunk_stream, reseter=self):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

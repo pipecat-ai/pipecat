@@ -368,8 +368,6 @@ class BaseInputTransport(FrameProcessor):
                     self._audio_in_queue.get(), timeout=AUDIO_INPUT_TIMEOUT_SECS
                 )
 
-                self.start_watchdog()
-
                 # If an audio filter is available, run it before VAD.
                 if self._params.audio_in_filter:
                     frame.audio = await self._params.audio_in_filter.filter(frame.audio)
