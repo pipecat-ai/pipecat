@@ -169,9 +169,7 @@ class SpeechFrame(TranscriptionFrame):
             result=self.result,
         )
 
-    def _as_interim_transcription_frame(
-        self, format: Optional[str] = None
-    ) -> InterimTranscriptionFrame:
+    def _as_interim_transcription_frame(self) -> InterimTranscriptionFrame:
         """Convert to InterimTranscriptionFrame.
 
         Interim transcriptions do not include the speaker id, as this can
@@ -437,7 +435,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Return as interim results
         else:
-            frames = [frame._as_interim_transcription_frame(self._text_format) for frame in frames]
+            frames = [frame._as_interim_transcription_frame() for frame in frames]
 
         # Send the frames back to pipecat
         for frame in frames:
