@@ -52,7 +52,7 @@ class FrameProcessor(BaseObject):
         name: Optional[str] = None,
         metrics: Optional[FrameProcessorMetrics] = None,
         enable_watchdog_logging: Optional[bool] = None,
-        watchdog_timeout: Optional[bool] = None,
+        watchdog_timeout_secs: Optional[float] = None,
         **kwargs,
     ):
         super().__init__(name=name)
@@ -64,7 +64,7 @@ class FrameProcessor(BaseObject):
         self._enable_watchdog_logging = enable_watchdog_logging
 
         # Allow this frame processor to control their tasks timeout.
-        self._watchdog_timeout = watchdog_timeout
+        self._watchdog_timeout = watchdog_timeout_secs
 
         # Clock
         self._clock: Optional[BaseClock] = None
@@ -185,7 +185,7 @@ class FrameProcessor(BaseObject):
         name: Optional[str] = None,
         *,
         enable_watchdog_logging: Optional[bool] = None,
-        watchdog_timeout: Optional[float] = None,
+        watchdog_timeout_secs: Optional[float] = None,
     ) -> asyncio.Task:
         if name:
             name = f"{self}::{name}"
@@ -199,7 +199,9 @@ class FrameProcessor(BaseObject):
                 if enable_watchdog_logging
                 else self._enable_watchdog_logging
             ),
-            watchdog_timeout=watchdog_timeout if watchdog_timeout else self._watchdog_timeout,
+            watchdog_timeout=(
+                watchdog_timeout_secs if watchdog_timeout_secs else self._watchdog_timeout
+            ),
         )
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
