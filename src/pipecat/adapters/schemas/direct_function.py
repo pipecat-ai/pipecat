@@ -217,6 +217,7 @@ class DirectFunctionWrapper(BaseDirectFunctionWrapper):
     Wrapper around a DirectFunction that:
     - extracts metadata from the function signature and docstring
     - generates a corresponding FunctionSchema
+    - helps with function invocation
     """
 
     @classmethod
