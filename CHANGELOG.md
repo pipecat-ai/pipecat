@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `HeartbeatFrame`s are now control frames. This will make it easier to detect
+  pipeline freezes. Previously, heartbeat frames were system frames which meant
+  they were not get queued with other frames, making it difficult to detect
+  pipeline stalls.
+
 - Updated `OpenAIRealtimeBetaLLMService` to accept `language` in the
   `InputAudioTranscription` class for all models.
 
@@ -49,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `daily-python` to 0.19.3.
 
 ### Fixed
+
+- Fixed an issue with `ElevenLabsTTSService` where the context was not being
+  closed.
 
 - Fixed function calling in `AWSNovaSonicLLMService`.
 

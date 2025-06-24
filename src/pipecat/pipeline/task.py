@@ -43,7 +43,7 @@ from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
 HEARTBEAT_SECONDS = 1.0
-HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 5
+HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 10
 
 
 class PipelineParams(BaseModel):
