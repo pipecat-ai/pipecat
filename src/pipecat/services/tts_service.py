@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Base classes for Text-to-speech services."""
+
 import asyncio
 from abc import abstractmethod
 from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -42,6 +44,28 @@ from pipecat.utils.time import seconds_to_nanoseconds
 
 
 class TTSService(AIService):
+    """Base class for text-to-speech services.
+
+    Provides common functionality for TTS services including text aggregation,
+    filtering, audio generation, and frame management. Supports configurable
+    sentence aggregation, silence insertion, and frame processing control.
+
+    Args:
+        aggregate_sentences: Whether to aggregate text into sentences before synthesis.
+        push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
+        push_stop_frames: Whether to automatically push TTSStoppedFrames.
+        stop_frame_timeout_s: Idle time before pushing TTSStoppedFrame when push_stop_frames is True.
+        push_silence_after_stop: Whether to push silence audio after TTSStoppedFrame.
+        silence_time_s: Duration of silence to push when push_silence_after_stop is True.
+        pause_frame_processing: Whether to pause frame processing during audio generation.
+        sample_rate: Output sample rate for generated audio.
+        text_aggregator: Custom text aggregator for processing incoming text.
+        text_filters: Sequence of text filters to apply after aggregation.
+        text_filter: Single text filter (deprecated, use text_filters).
+        transport_destination: Destination for generated audio frames.
+        **kwargs: Additional arguments passed to the parent AIService.
+    """
+
     def __init__(
         self,
         *,
@@ -104,54 +128,113 @@ class TTSService(AIService):
 
     @property
     def sample_rate(self) -> int:
+        """Get the current sample rate for audio output.
+
+        Returns:
+            The sample rate in Hz.
+        """
         return self._sample_rate
 
     @property
     def chunk_size(self) -> int:
-        """This property indicates how much audio we download (from TTS services
+        """Get the recommended chunk size for audio streaming.
+
+        This property indicates how much audio we download (from TTS services
         that require chunking) before we start pushing the first audio
         frame. This will make sure we download the rest of the audio while audio
         is being played without causing audio glitches (specially at the
         beginning). Of course, this will also depend on how fast the TTS service
         generates bytes.
 
+        Returns:
+            The recommended chunk size in bytes.
         """
         CHUNK_SECONDS = 0.5
         return int(self.sample_rate * CHUNK_SECONDS * 2)  # 2 bytes/sample
 
     async def set_model(self, model: str):
+        """Set the TTS model to use.
+
+        Args:
+            model: The name of the TTS model.
+        """
         self.set_model_name(model)
 
     def set_voice(self, voice: str):
+        """Set the voice for speech synthesis.
+
+        Args:
+            voice: The voice identifier or name.
+        """
         self._voice_id = voice
 
     # Converts the text to audio.
     @abstractmethod
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Run text-to-speech synthesis on the provided text.
+
+        This method must be implemented by subclasses to provide actual TTS functionality.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         pass
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a language to the service-specific language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The service-specific language identifier, or None if not supported.
+        """
         return Language(language)
 
     async def update_setting(self, key: str, value: Any):
+        """Update a service-specific setting.
+
+        Args:
+            key: The setting key to update.
+            value: The new value for the setting.
+        """
         pass
 
     async def flush_audio(self):
+        """Flush any buffered audio data."""
         pass
 
     async def start(self, frame: StartFrame):
+        """Start the TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_out_sample_rate
         if self._push_stop_frames and not self._stop_frame_task:
             self._stop_frame_task = self.create_task(self._stop_frame_handler())
 
     async def stop(self, frame: EndFrame):
+        """Stop the TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
             self._stop_frame_task = None
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         if self._stop_frame_task:
             await self.cancel_task(self._stop_frame_task)
@@ -175,9 +258,23 @@ class TTSService(AIService):
                 logger.warning(f"Unknown setting for TTS service: {key}")
 
     async def say(self, text: str):
+        """Immediately speak the provided text.
+
+        Args:
+            text: The text to speak.
+        """
         await self.queue_frame(TTSSpeakFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames for text-to-speech conversion.
+
+        Handles TextFrames for synthesis, interruption frames, settings updates,
+        and various control frames.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         if (
@@ -222,6 +319,12 @@ class TTSService(AIService):
             await self.push_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with TTS-specific handling.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
         if self._push_silence_after_stop and isinstance(frame, TTSStoppedFrame):
             silence_num_bytes = int(self._silence_time_s * self.sample_rate * 2)  # 16-bit
             silence_frame = TTSAudioRawFrame(
@@ -318,10 +421,13 @@ class TTSService(AIService):
 
 
 class WordTTSService(TTSService):
-    """This is a base class for TTS services that support word timestamps. Word
-    timestamps are useful to synchronize audio with text of the spoken
+    """Base class for TTS services that support word timestamps.
+
+    Word timestamps are useful to synchronize audio with text of the spoken
     words. This way only the spoken words are added to the conversation context.
 
+    Args:
+        **kwargs: Additional arguments passed to the parent TTSService.
     """
 
     def __init__(self, **kwargs):
@@ -332,29 +438,57 @@ class WordTTSService(TTSService):
         self._llm_response_started: bool = False
 
     def start_word_timestamps(self):
+        """Start tracking word timestamps from the current time."""
         if self._initial_word_timestamp == -1:
             self._initial_word_timestamp = self.get_clock().get_time()
 
     def reset_word_timestamps(self):
+        """Reset word timestamp tracking."""
         self._initial_word_timestamp = -1
 
     async def add_word_timestamps(self, word_times: List[Tuple[str, float]]):
+        """Add word timestamps to the processing queue.
+
+        Args:
+            word_times: List of (word, timestamp) tuples where timestamp is in seconds.
+        """
         for word, timestamp in word_times:
             await self._words_queue.put((word, seconds_to_nanoseconds(timestamp)))
 
     async def start(self, frame: StartFrame):
+        """Start the word TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._create_words_task()
 
     async def stop(self, frame: EndFrame):
+        """Stop the word TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._stop_words_task()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the word TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._stop_words_task()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with word timestamp awareness.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMFullResponseStartFrame):
@@ -400,15 +534,24 @@ class WordTTSService(TTSService):
 
 
 class WebsocketTTSService(TTSService, WebsocketService):
-    """This is a base class for websocket-based TTS services.
+    """Base class for websocket-based TTS services.
 
-    If an error occurs with the websocket, an "on_connection_error" event will
-    be triggered:
+    Combines TTS functionality with websocket connectivity, providing automatic
+    error handling and reconnection capabilities.
 
-       @tts.event_handler("on_connection_error")
-       async def on_connection_error(tts: TTSService, error: str):
-           ...
+    Args:
+        reconnect_on_error: Whether to automatically reconnect on websocket errors.
+        **kwargs: Additional arguments passed to parent classes.
 
+    Event handlers:
+        on_connection_error: Called when a websocket connection error occurs.
+
+    Example:
+        ```python
+        @tts.event_handler("on_connection_error")
+        async def on_connection_error(tts: TTSService, error: str):
+            logger.error(f"TTS connection error: {error}")
+        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -422,10 +565,13 @@ class WebsocketTTSService(TTSService, WebsocketService):
 
 
 class InterruptibleTTSService(WebsocketTTSService):
-    """This is a base class for websocket-based TTS services that don't support
-    word timestamps and that don't offer a way to correlate the generated audio
-    to the requested text.
+    """Websocket-based TTS service that handles interruptions without word timestamps.
 
+    Designed for TTS services that don't support word timestamps. Handles interruptions
+    by reconnecting the websocket when the bot is speaking and gets interrupted.
+
+    Args:
+        **kwargs: Additional arguments passed to the parent WebsocketTTSService.
     """
 
     def __init__(self, **kwargs):
@@ -443,6 +589,12 @@ class InterruptibleTTSService(WebsocketTTSService):
             await self._connect()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with bot speaking state tracking.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, BotStartedSpeakingFrame):
@@ -452,16 +604,23 @@ class InterruptibleTTSService(WebsocketTTSService):
 
 
 class WebsocketWordTTSService(WordTTSService, WebsocketService):
-    """This is a base class for websocket-based TTS services that support word
-    timestamps.
+    """Base class for websocket-based TTS services that support word timestamps.
 
-    If an error occurs with the websocket a "on_connection_error" event will be
-    triggered:
+    Combines word timestamp functionality with websocket connectivity.
 
-       @tts.event_handler("on_connection_error")
-       async def on_connection_error(tts: TTSService, error: str):
-           ...
+    Args:
+        reconnect_on_error: Whether to automatically reconnect on websocket errors.
+        **kwargs: Additional arguments passed to parent classes.
 
+    Event handlers:
+        on_connection_error: Called when a websocket connection error occurs.
+
+    Example:
+        ```python
+        @tts.event_handler("on_connection_error")
+        async def on_connection_error(tts: TTSService, error: str):
+            logger.error(f"TTS connection error: {error}")
+        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -475,10 +634,13 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
 
 
 class InterruptibleWordTTSService(WebsocketWordTTSService):
-    """This is a base class for websocket-based TTS services that support word
-    timestamps but don't offer a way to correlate the generated audio to the
-    requested text.
+    """Websocket-based TTS service with word timestamps that handles interruptions.
 
+    For TTS services that support word timestamps but can't correlate generated
+    audio with requested text. Handles interruptions by reconnecting when needed.
+
+    Args:
+        **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
     """
 
     def __init__(self, **kwargs):
@@ -496,6 +658,12 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             await self._connect()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with bot speaking state tracking.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, BotStartedSpeakingFrame):
@@ -505,7 +673,9 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
 
 
 class AudioContextWordTTSService(WebsocketWordTTSService):
-    """This is a base class for websocket-based TTS services that support word
+    """Websocket-based TTS service with word timestamps and audio context management.
+
+    This is a base class for websocket-based TTS services that support word
     timestamps and also allow correlating the generated audio with the requested
     text.
 
@@ -517,6 +687,8 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
     we requested audio for a context "A" and then audio for context "B", the
     audio from context ID "A" will be played first.
 
+    Args:
+        **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
     """
 
     def __init__(self, **kwargs):
@@ -526,13 +698,22 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         self._audio_context_task = None
 
     async def create_audio_context(self, context_id: str):
-        """Create a new audio context."""
+        """Create a new audio context for grouping related audio.
+
+        Args:
+            context_id: Unique identifier for the audio context.
+        """
         await self._contexts_queue.put(context_id)
         self._contexts[context_id] = asyncio.Queue()
         logger.trace(f"{self} created audio context {context_id}")
 
     async def append_to_audio_context(self, context_id: str, frame: TTSAudioRawFrame):
-        """Append audio to an existing context."""
+        """Append audio to an existing context.
+
+        Args:
+            context_id: The context to append audio to.
+            frame: The audio frame to append.
+        """
         if self.audio_context_available(context_id):
             logger.trace(f"{self} appending audio {frame} to audio context {context_id}")
             await self._contexts[context_id].put(frame)
@@ -540,7 +721,11 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
             logger.warning(f"{self} unable to append audio to context {context_id}")
 
     async def remove_audio_context(self, context_id: str):
-        """Remove an existing audio context."""
+        """Remove an existing audio context.
+
+        Args:
+            context_id: The context to remove.
+        """
         if self.audio_context_available(context_id):
             # We just mark the audio context for deletion by appending
             # None. Once we reach None while handling audio we know we can
@@ -551,14 +736,31 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
             logger.warning(f"{self} unable to remove context {context_id}")
 
     def audio_context_available(self, context_id: str) -> bool:
-        """Checks whether the given audio context is registered."""
+        """Check whether the given audio context is registered.
+
+        Args:
+            context_id: The context ID to check.
+
+        Returns:
+            True if the context exists and is available.
+        """
         return context_id in self._contexts
 
     async def start(self, frame: StartFrame):
+        """Start the audio context TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._create_audio_context_task()
 
     async def stop(self, frame: EndFrame):
+        """Stop the audio context TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         if self._audio_context_task:
             # Indicate no more audio contexts are available. this will end the
@@ -568,6 +770,11 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
             self._audio_context_task = None
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the audio context TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._stop_audio_context_task()
 
