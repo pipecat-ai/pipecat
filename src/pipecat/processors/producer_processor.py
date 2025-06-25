@@ -44,7 +44,7 @@ class ProducerProcessor(FrameProcessor):
         Returns:
             asyncio.Queue: The queue for the newly added consumer.
         """
-        queue = WatchdogQueue(consumer)
+        queue = WatchdogQueue(consumer, watchdog_enabled=self.watchdog_timers_enabled)
         self._consumers.append(queue)
         return queue
 

@@ -16,12 +16,25 @@ class WatchdogEvent(asyncio.Event):
 
     """
 
-    def __init__(self, reseter: WatchdogReseter, timeout: float = 2.0) -> None:
+    def __init__(
+        self,
+        reseter: WatchdogReseter,
+        *,
+        timeout: float = 2.0,
+        watchdog_enabled: bool = False,
+    ) -> None:
         super().__init__()
         self._reseter = reseter
         self._timeout = timeout
+        self._watchdog_enabled = watchdog_enabled
 
     async def wait(self):
+        if self._watchdog_enabled:
+            return await self._watchdog_wait()
+        else:
+            return await super().wait()
+
+    async def _watchdog_wait(self):
         while True:
             try:
                 await asyncio.wait_for(super().wait(), timeout=self._timeout)

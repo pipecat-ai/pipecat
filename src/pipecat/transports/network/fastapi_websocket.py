@@ -179,7 +179,9 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def _receive_messages(self):
         try:
-            async for message in WatchdogAsyncIterator(self._client.receive(), reseter=self):
+            async for message in WatchdogAsyncIterator(
+                self._client.receive(), reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+            ):
                 if not self._params.serializer:
                     continue
 

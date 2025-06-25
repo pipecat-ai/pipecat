@@ -18,6 +18,7 @@ WATCHDOG_TIMEOUT = 5.0
 @dataclass
 class TaskManagerParams:
     loop: asyncio.AbstractEventLoop
+    enable_watchdog_timers: bool = False
     enable_watchdog_logging: bool = False
     watchdog_timeout: float = WATCHDOG_TIMEOUT
 
@@ -255,6 +256,9 @@ class TaskManager(BaseTaskManager):
         will be logged indicating the task is stalling.
 
         """
+        if self._params and not self._params.enable_watchdog_timers:
+            return
+
         name = task.get_name()
         if name in self._tasks:
             self._tasks[name].watchdog_timer.set()
@@ -264,8 +268,11 @@ class TaskManager(BaseTaskManager):
     def _add_task(self, task_data: TaskData):
         name = task_data.task.get_name()
         self._tasks[name] = task_data
-        watchdog_task = self.get_event_loop().create_task(self._watchdog_task_handler(task_data))
-        task_data.watchdog_task = watchdog_task
+        if self._params and self._params.enable_watchdog_timers:
+            watchdog_task = self.get_event_loop().create_task(
+                self._watchdog_task_handler(task_data)
+            )
+            task_data.watchdog_task = watchdog_task
 
     async def _remove_task(self, task: asyncio.Task):
         name = task.get_name()

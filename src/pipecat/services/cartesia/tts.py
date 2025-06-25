@@ -256,7 +256,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._context_id = None
 
     async def _receive_messages(self):
-        async for message in WatchdogAsyncIterator(self._get_websocket(), reseter=self):
+        async for message in WatchdogAsyncIterator(
+            self._get_websocket(), reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+        ):
             msg = json.loads(message)
             if not msg or not self.audio_context_available(msg["context_id"]):
                 continue

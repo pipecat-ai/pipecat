@@ -602,7 +602,9 @@ class BaseOutputTransport(FrameProcessor):
 
         def _create_clock_task(self):
             if not self._clock_task:
-                self._clock_queue = WatchdogPriorityQueue(self._transport)
+                self._clock_queue = WatchdogPriorityQueue(
+                    self._transport, watchdog_enabled=self._transport.watchdog_timers_enabled
+                )
                 self._clock_task = self._transport.create_task(self._clock_task_handler())
 
         async def _cancel_clock_task(self):

@@ -46,6 +46,7 @@ class FrameProcessorSetup:
     clock: BaseClock
     task_manager: BaseTaskManager
     observer: Optional[BaseObserver] = None
+    watchdog_timers_enabled: bool = False
 
 
 class FrameProcessor(WatchdogReseter, BaseObject):
@@ -84,6 +85,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
         self._interruption_strategies: List[BaseInterruptionStrategy] = []
+        self._watchdog_timers_enabled = False
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -104,7 +106,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         # is called. To resume processing frames we need to call
         # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
-        self.__input_event = WatchdogEvent(self)
+        self.__input_event = None
         self.__input_frame_task: Optional[asyncio.Task] = None
 
         # Every processor in Pipecat should only output frames from a single
@@ -139,6 +141,10 @@ class FrameProcessor(WatchdogReseter, BaseObject):
     @property
     def interruption_strategies(self) -> Sequence[BaseInterruptionStrategy]:
         return self._interruption_strategies
+
+    @property
+    def watchdog_timers_enabled(self):
+        return self._watchdog_timers_enabled
 
     def can_generate_metrics(self) -> bool:
         return False
@@ -220,8 +226,9 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         self._clock = setup.clock
         self._task_manager = setup.task_manager
         self._observer = setup.observer
+        self._watchdog_timers_enabled = setup.watchdog_timers_enabled
         if self._metrics is not None:
-            await self._metrics.setup(self._task_manager)
+            await self._metrics.setup(self._task_manager, self.watchdog_timers_enabled)
 
     async def cleanup(self):
         await super().cleanup()
@@ -313,8 +320,8 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         self._allow_interruptions = frame.allow_interruptions
         self._enable_metrics = frame.enable_metrics
         self._enable_usage_metrics = frame.enable_usage_metrics
-        self._report_only_initial_ttfb = frame.report_only_initial_ttfb
         self._interruption_strategies = frame.interruption_strategies
+        self._report_only_initial_ttfb = frame.report_only_initial_ttfb
         self.__create_input_task()
         self.__create_push_task()
 
@@ -396,8 +403,12 @@ class FrameProcessor(WatchdogReseter, BaseObject):
     def __create_input_task(self):
         if not self.__input_frame_task:
             self.__should_block_frames = False
+            if not self.__input_event:
+                self.__input_event = WatchdogEvent(
+                    self, watchdog_enabled=self.watchdog_timers_enabled
+                )
             self.__input_event.clear()
-            self.__input_queue = WatchdogQueue(self)
+            self.__input_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
@@ -407,7 +418,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
 
     async def __input_frame_task_handler(self):
         while True:
-            if self.__should_block_frames:
+            if self.__should_block_frames and self.__input_event:
                 logger.trace(f"{self}: frame processing paused")
                 await self.__input_event.wait()
                 self.__input_event.clear()
@@ -429,7 +440,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
 
     def __create_push_task(self):
         if not self.__push_frame_task:
-            self.__push_queue = WatchdogQueue(self)
+            self.__push_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
             self.__push_frame_task = self.create_task(self.__push_frame_task_handler())
 
     async def __cancel_push_task(self):
