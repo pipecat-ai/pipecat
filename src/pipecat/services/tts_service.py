@@ -524,7 +524,6 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._contexts_queue = asyncio.Queue()
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
 

@@ -55,6 +55,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         *,
         name: Optional[str] = None,
         enable_watchdog_logging: Optional[bool] = None,
+        enable_watchdog_timers: Optional[bool] = None,
         metrics: Optional[FrameProcessorMetrics] = None,
         watchdog_timeout_secs: Optional[float] = None,
         **kwargs,
@@ -64,11 +65,14 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         self._prev: Optional["FrameProcessor"] = None
         self._next: Optional["FrameProcessor"] = None
 
+        # Enable watchdog timers for all tasks created by this frame processor.
+        self._enable_watchdog_timers = enable_watchdog_timers
+
         # Enable watchdog logging for all tasks created by this frame processor.
         self._enable_watchdog_logging = enable_watchdog_logging
 
         # Allow this frame processor to control their tasks timeout.
-        self._watchdog_timeout = watchdog_timeout_secs
+        self._watchdog_timeout_secs = watchdog_timeout_secs
 
         # Clock
         self._clock: Optional[BaseClock] = None
@@ -194,6 +198,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         name: Optional[str] = None,
         *,
         enable_watchdog_logging: Optional[bool] = None,
+        enable_watchdog_timers: Optional[bool] = None,
         watchdog_timeout_secs: Optional[float] = None,
     ) -> asyncio.Task:
         if name:
@@ -208,8 +213,11 @@ class FrameProcessor(WatchdogReseter, BaseObject):
                 if enable_watchdog_logging
                 else self._enable_watchdog_logging
             ),
+            enable_watchdog_timers=(
+                enable_watchdog_timers if enable_watchdog_timers else self.watchdog_timers_enabled
+            ),
             watchdog_timeout=(
-                watchdog_timeout_secs if watchdog_timeout_secs else self._watchdog_timeout
+                watchdog_timeout_secs if watchdog_timeout_secs else self._watchdog_timeout_secs
             ),
         )
 
@@ -226,9 +234,13 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         self._clock = setup.clock
         self._task_manager = setup.task_manager
         self._observer = setup.observer
-        self._watchdog_timers_enabled = setup.watchdog_timers_enabled
+        self._watchdog_timers_enabled = (
+            self._enable_watchdog_timers
+            if self._enable_watchdog_timers
+            else setup.watchdog_timers_enabled
+        )
         if self._metrics is not None:
-            await self._metrics.setup(self._task_manager, self.watchdog_timers_enabled)
+            await self._metrics.setup(self._task_manager, self._watchdog_timers_enabled)
 
     async def cleanup(self):
         await super().cleanup()
@@ -286,7 +298,8 @@ class FrameProcessor(WatchdogReseter, BaseObject):
 
     async def resume_processing_frames(self):
         logger.trace(f"{self}: resuming frame processing")
-        self.__input_event.set()
+        if self.__input_event:
+            self.__input_event.set()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         if isinstance(frame, StartFrame):

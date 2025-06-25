@@ -39,6 +39,7 @@ class BaseTaskManager(ABC):
         name: str,
         *,
         enable_watchdog_logging: Optional[bool] = None,
+        enable_watchdog_timers: Optional[bool] = None,
         watchdog_timeout: Optional[float] = None,
     ) -> asyncio.Task:
         """
@@ -51,6 +52,7 @@ class BaseTaskManager(ABC):
             coroutine (Coroutine): The coroutine to be executed within the task.
             name (str): The name to assign to the task for identification.
             enable_watchdog_logging(bool): whether this task should log watchdog processing times.
+            enable_watchdog_timers(bool): whether this task should have a watchdog timer.
             watchdog_timeout(float): watchdog timer timeout for this task.
 
         Returns:
@@ -108,6 +110,7 @@ class TaskData:
     task: asyncio.Task
     watchdog_timer: asyncio.Event
     enable_watchdog_logging: bool
+    enable_watchdog_timers: bool
     watchdog_timeout: float
     watchdog_task: Optional[asyncio.Task]
 
@@ -132,6 +135,7 @@ class TaskManager(BaseTaskManager):
         name: str,
         *,
         enable_watchdog_logging: Optional[bool] = None,
+        enable_watchdog_timers: Optional[bool] = None,
         watchdog_timeout: Optional[float] = None,
     ) -> asyncio.Task:
         """
@@ -144,6 +148,7 @@ class TaskManager(BaseTaskManager):
             coroutine (Coroutine): The coroutine to be executed within the task.
             name (str): The name to assign to the task for identification.
             enable_watchdog_logging(bool): whether this task should log watchdog processing time.
+            enable_watchdog_timers(bool): whether this task should have a watchdog timer.
             watchdog_timeout(float): watchdog timer timeout for this task.
 
         Returns:
@@ -175,11 +180,16 @@ class TaskManager(BaseTaskManager):
                     if enable_watchdog_logging
                     else self._params.enable_watchdog_logging
                 ),
+                enable_watchdog_timers=(
+                    enable_watchdog_timers
+                    if enable_watchdog_timers
+                    else self._params.enable_watchdog_timers
+                ),
                 watchdog_timeout=(
                     watchdog_timeout if watchdog_timeout else self._params.watchdog_timeout
                 ),
                 watchdog_task=None,
-            )
+            ),
         )
         logger.trace(f"{name}: task created")
         return task
@@ -256,19 +266,17 @@ class TaskManager(BaseTaskManager):
         will be logged indicating the task is stalling.
 
         """
-        if self._params and not self._params.enable_watchdog_timers:
-            return
-
         name = task.get_name()
         if name in self._tasks:
-            self._tasks[name].watchdog_timer.set()
+            if self._tasks[name].enable_watchdog_timers:
+                self._tasks[name].watchdog_timer.set()
         else:
             logger.warning(f"Unable to reset watchdog timer: task {name} does not exist")
 
     def _add_task(self, task_data: TaskData):
         name = task_data.task.get_name()
         self._tasks[name] = task_data
-        if self._params and self._params.enable_watchdog_timers:
+        if self._params and task_data.enable_watchdog_timers:
             watchdog_task = self.get_event_loop().create_task(
                 self._watchdog_task_handler(task_data)
             )
