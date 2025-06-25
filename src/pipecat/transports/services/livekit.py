@@ -415,6 +415,7 @@ class LiveKitInputTransport(BaseInputTransport):
         logger.info("Audio input task started")
         while True:
             audio_data = await self._client.get_next_audio_frame()
+            self.start_watchdog()
             if audio_data:
                 audio_frame_event, participant_id = audio_data
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
@@ -427,6 +428,7 @@ class LiveKitInputTransport(BaseInputTransport):
                     num_channels=pipecat_audio_frame.num_channels,
                 )
                 await self.push_audio_frame(input_audio_frame)
+            self.reset_watchdog()
 
     async def _convert_livekit_audio_to_pipecat(
         self, audio_frame_event: rtc.AudioFrameEvent

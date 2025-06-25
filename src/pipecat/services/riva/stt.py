@@ -224,11 +224,13 @@ class RivaSTTService(STTService):
             streaming_config=self._config,
         )
         for response in responses:
+            self.start_watchdog()
             if not response.results:
                 continue
             asyncio.run_coroutine_threadsafe(
                 self._response_queue.put(response), self.get_event_loop()
             )
+            self.reset_watchdog()
 
     async def _thread_task_handler(self):
         try:
@@ -283,7 +285,9 @@ class RivaSTTService(STTService):
     async def _response_task_handler(self):
         while True:
             response = await self._response_queue.get()
+            self.start_watchdog()
             await self._handle_response(response)
+            self.reset_watchdog()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_ttfb_metrics()

@@ -36,10 +36,6 @@ class InputAudioTranscription(BaseModel):
         prompt: Optional[str] = None,
     ):
         super().__init__(model=model, language=language, prompt=prompt)
-        if self.model != "gpt-4o-transcribe" and (self.language or self.prompt):
-            raise ValueError(
-                "Fields 'language' and 'prompt' are only supported when model is 'gpt-4o-transcribe'"
-            )
 
 
 class TurnDetection(BaseModel):
@@ -207,11 +203,10 @@ class ResponseCancelEvent(ClientEvent):
 
 
 class ServerEvent(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     event_id: str
     type: str
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class SessionCreatedEvent(ServerEvent):
