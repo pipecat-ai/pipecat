@@ -149,7 +149,7 @@ class WebsocketClientApp {
 
       //const transport = new DailyTransport();
       const PipecatConfig: PipecatClientOptions = {
-        transport: WebSocketTransport.create(),
+        transport: new WebSocketTransport(),
         enableMic: true,
         enableCam: false,
         callbacks: {
