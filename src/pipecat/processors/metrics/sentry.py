@@ -32,10 +32,10 @@ class SentryMetrics(WatchdogReseter, FrameProcessorMetrics):
             logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
         self._sentry_task = None
 
-    async def setup(self, task_manager: TaskManager):
-        await super().setup(task_manager)
+    async def setup(self, task_manager: TaskManager, watchdog_timers_enabled: bool = False):
+        await super().setup(task_manager, watchdog_timers_enabled)
         if self._sentry_available:
-            self._sentry_queue = WatchdogQueue(self)
+            self._sentry_queue = WatchdogQueue(self, watchdog_enabled=watchdog_timers_enabled)
             self._sentry_task = self.task_manager.create_task(
                 self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
             )

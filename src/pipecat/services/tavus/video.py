@@ -72,7 +72,6 @@ class TavusVideoService(AIService):
         self._resampler = create_default_resampler()
 
         self._audio_buffer = bytearray()
-        self._queue = WatchdogQueue(self)
         self._send_task: Optional[asyncio.Task] = None
         # This is the custom track destination expected by Tavus
         self._transport_destination: Optional[str] = "stream"
@@ -189,7 +188,7 @@ class TavusVideoService(AIService):
 
     async def _create_send_task(self):
         if not self._send_task:
-            self._queue = WatchdogQueue(self)
+            self._queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
             self._send_task = self.create_task(self._send_task_handler())
 
     async def _cancel_send_task(self):

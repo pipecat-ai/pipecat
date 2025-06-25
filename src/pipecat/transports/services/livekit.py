@@ -416,7 +416,9 @@ class LiveKitInputTransport(BaseInputTransport):
     async def _audio_in_task_handler(self):
         logger.info("Audio input task started")
         audio_iterator = self._client.get_next_audio_frame()
-        async for audio_data in WatchdogAsyncIterator(audio_iterator, reseter=self):
+        async for audio_data in WatchdogAsyncIterator(
+            audio_iterator, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+        ):
             if audio_data:
                 audio_frame_event, participant_id = audio_data
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(

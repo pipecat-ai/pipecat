@@ -95,7 +95,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             context
         )
 
-        async for chunk in WatchdogAsyncIterator(chunk_stream, reseter=self):
+        async for chunk in WatchdogAsyncIterator(
+            chunk_stream, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+        ):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

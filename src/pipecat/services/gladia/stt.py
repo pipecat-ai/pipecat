@@ -502,7 +502,9 @@ class GladiaSTTService(STTService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in WatchdogAsyncIterator(self._websocket, reseter=self):
+            async for message in WatchdogAsyncIterator(
+                self._websocket, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+            ):
                 content = json.loads(message)
 
                 # Handle audio chunk acknowledgments

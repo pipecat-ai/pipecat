@@ -370,7 +370,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     #
 
     async def _receive_task_handler(self):
-        async for message in WatchdogAsyncIterator(self._websocket, reseter=self):
+        async for message in WatchdogAsyncIterator(
+            self._websocket, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+        ):
             evt = events.parse_server_event(message)
             if evt.type == "session.created":
                 await self._handle_evt_session_created(evt)

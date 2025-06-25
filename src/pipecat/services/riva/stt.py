@@ -199,7 +199,9 @@ class RivaSTTService(STTService):
             self._thread_task = self.create_task(self._thread_task_handler())
 
         if not self._response_task:
-            self._response_queue = WatchdogQueue(self)
+            self._response_queue = WatchdogQueue(
+                self, watchdog_enabled=self.watchdog_timers_enabled
+            )
             self._response_task = self.create_task(self._response_task_handler())
 
     async def stop(self, frame: EndFrame):

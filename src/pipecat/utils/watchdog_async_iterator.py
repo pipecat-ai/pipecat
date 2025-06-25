@@ -17,12 +17,20 @@ class WatchdogAsyncIterator:
 
     """
 
-    def __init__(self, async_iterable, *, reseter: WatchdogReseter, timeout: float = 2.0):
+    def __init__(
+        self,
+        async_iterable,
+        *,
+        reseter: WatchdogReseter,
+        timeout: float = 2.0,
+        watchdog_enabled: bool = False,
+    ):
         self._async_iterable = async_iterable
         self._reseter = reseter
         self._timeout = timeout
         self._iter: Optional[AsyncIterator] = None
         self._current_anext_task: Optional[asyncio.Task] = None
+        self._watchdog_enabled = watchdog_enabled
 
     def __aiter__(self):
         return self
@@ -31,6 +39,12 @@ class WatchdogAsyncIterator:
         if not self._iter:
             self._iter = await self._ensure_async_iterator(self._async_iterable)
 
+        if self._watchdog_enabled:
+            return await self._watchdog_anext()
+        else:
+            return await self._iter.__anext__()
+
+    async def _watchdog_anext(self):
         while True:
             try:
                 if not self._current_anext_task:

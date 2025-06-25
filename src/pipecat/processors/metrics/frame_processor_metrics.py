@@ -31,7 +31,7 @@ class FrameProcessorMetrics(BaseObject):
         self._last_ttfb_time = 0
         self._should_report_ttfb = True
 
-    async def setup(self, task_manager: TaskManager):
+    async def setup(self, task_manager: TaskManager, watchdog_timers_enabled: bool = False):
         self._task_manager = task_manager
 
     async def cleanup(self):

@@ -784,7 +784,9 @@ class GoogleSTTService(STTService):
     async def _process_responses(self, streaming_recognize):
         """Process streaming recognition responses."""
         try:
-            async for response in WatchdogAsyncIterator(streaming_recognize, reseter=self):
+            async for response in WatchdogAsyncIterator(
+                streaming_recognize, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+            ):
                 # Check streaming limit
                 if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
                     logger.debug("Stream timeout reached in response processing")

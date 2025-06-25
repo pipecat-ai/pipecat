@@ -204,7 +204,9 @@ class AnthropicLLMService(LLMService):
             json_accumulator = ""
 
             function_calls = []
-            async for event in WatchdogAsyncIterator(response, reseter=self):
+            async for event in WatchdogAsyncIterator(
+                response, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+            ):
                 # Aggregate streaming content, create frames, trigger events
 
                 if event.type == "content_block_delta":
