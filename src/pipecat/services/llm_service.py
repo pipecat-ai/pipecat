@@ -353,7 +353,7 @@ class LLMService(AIService):
             else:
                 await self._sequential_runner_queue.put(runner_item)
 
-    async def call_start_function(self, context: OpenAILLMContext, function_name: str):
+    async def _call_start_function(self, context: OpenAILLMContext, function_name: str):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():
@@ -424,7 +424,7 @@ class LLMService(AIService):
         )
 
         # NOTE(aleix): This needs to be removed after we remove the deprecation.
-        await self.call_start_function(runner_item.context, runner_item.function_name)
+        await self._call_start_function(runner_item.context, runner_item.function_name)
 
         # Push a function call in-progress downstream. This frame will let our
         # assistant context aggregator know that we are in the middle of a
