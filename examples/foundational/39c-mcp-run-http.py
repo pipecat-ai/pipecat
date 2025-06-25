@@ -63,6 +63,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     )
 
     try:
+        # Github MCP docs: https://github.com/github/github-mcp-server
+        # Enable Github Copilot on your GitHub account. Free tier is ok. (https://github.com/settings/copilot)
+        # Generate a personal access token. It must be a Fine-grained token, classic tokens are not supported. (https://github.com/settings/personal-access-tokens)
+        # Set permissions you want to use (eg. "all repositories", "profile: read/write", etc)
         mcp = MCPClient(
             server_params=StreamableHttpParameters(
                 url="https://api.githubcopilot.com/mcp/",
