@@ -8,7 +8,7 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Coroutine, Dict, List, Optional, Sequence
+from typing import Coroutine, Dict, Optional, Sequence
 
 from loguru import logger
 
@@ -164,6 +164,7 @@ class TaskManager(BaseTaskManager):
 
         task = self._params.loop.create_task(run_coroutine())
         task.set_name(name)
+        task.add_done_callback(self._task_done_handler)
         self._add_task(
             TaskData(
                 task=task,
@@ -269,14 +270,6 @@ class TaskManager(BaseTaskManager):
     async def _remove_task(self, task: asyncio.Task):
         name = task.get_name()
         try:
-            task_data = self._tasks[name]
-            if task_data.watchdog_task:
-                try:
-                    task_data.watchdog_task.cancel()
-                    await task_data.watchdog_task
-                except asyncio.CancelledError:
-                    pass
-                task_data.watchdog_task = None
             del self._tasks[name]
         except KeyError as e:
             logger.trace(f"{name}: unable to remove task (already removed?): {e}")
@@ -293,10 +286,20 @@ class TaskManager(BaseTaskManager):
                 await asyncio.wait_for(timer.wait(), timeout=watchdog_timeout)
                 total_time = time.time() - start_time
                 if enable_watchdog_logging:
-                    logger.debug(f"{name} task processing time: {total_time:.20f}")
+                    logger.debug(f"{name} time between watchdog timer resets: {total_time:.20f}")
             except asyncio.TimeoutError:
                 logger.warning(
                     f"{name}: task is taking too long {WATCHDOG_TIMEOUT} second(s) (forgot to reset watchdog?)"
                 )
             finally:
                 timer.clear()
+
+    def _task_done_handler(self, task: asyncio.Task):
+        name = task.get_name()
+        try:
+            task_data = self._tasks[name]
+            if task_data.watchdog_task:
+                task_data.watchdog_task.cancel()
+                task_data.watchdog_task = None
+        except KeyError as e:
+            logger.trace(f"{name}: unable to find task (already removed?): {e}")
