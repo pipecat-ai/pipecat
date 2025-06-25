@@ -19,16 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Introduce task watchdog timers. Watchdog timers are used to detect if a
   Pipecat task is taking longer than expected (by default 5 seconds). Watchdog
-  timers are disabled by default and can be enabled by passing
+  timers are disabled by default and can be enabled globally by passing
   `enable_watchdog_timers` argument to `PipelineTask` constructor. It is
   possible to change the default watchdog timer timeout by using the
   `watchdog_timeout` argument. You can also log how long it takes to reset the
   watchdog timers which is done with the `enable_watchdog_logging`. You can
-  control these settings per each frame processor or even per task. That is, you
-  can set set `enable_watchdog_logging` and `watchdog_timeout` when creating any
-  frame processor through their constructor arguments or when you create a task
-  with `FrameProcessor.create_task()`. Note that watchdog timers only work with
-  Pipecat tasks and will not work if you use `asycio.create_task()` or similar.
+  control all these settings per each frame processor or even per task. That is,
+  you can set `enable_watchdog_timers`, `enable_watchdog_logging` and
+  `watchdog_timeout` when creating any frame processor through their constructor
+  arguments or when you create a task with `FrameProcessor.create_task()`. Note
+  that watchdog timers only work with Pipecat tasks and will not work if you use
+  `asycio.create_task()` or similar.
 
 - Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
 
