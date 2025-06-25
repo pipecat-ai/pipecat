@@ -428,9 +428,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 self._cumulative_time = word_times[-1][1]
 
     async def _keepalive_task_handler(self):
+        KEEPALIVE_SLEEP = 10 if self.watchdog_timers_enabled else 3
         while True:
             self.reset_watchdog()
-            await asyncio.sleep(4)
+            await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.open:
                     if self._context_id:
