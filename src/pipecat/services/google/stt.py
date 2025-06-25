@@ -437,7 +437,6 @@ class GoogleSTTService(STTService):
         self._location = location
         self._stream = None
         self._config = None
-        self._request_queue = asyncio.Queue()
         self._streaming_task = None
 
         # Used for keep-alive logic
@@ -684,23 +683,15 @@ class GoogleSTTService(STTService):
             ),
         )
 
+        self._request_queue = asyncio.Queue()
         self._streaming_task = self.create_task(self._stream_audio())
 
     async def _disconnect(self):
         """Clean up streaming recognition resources."""
         if self._streaming_task:
             logger.debug("Disconnecting from Google Speech-to-Text")
-            # Send sentinel value to stop request generator
-            await self._request_queue.put(None)
             await self.cancel_task(self._streaming_task)
             self._streaming_task = None
-            # Clear any remaining items in the queue
-            while not self._request_queue.empty():
-                try:
-                    self._request_queue.get_nowait()
-                    self._request_queue.task_done()
-                except asyncio.QueueEmpty:
-                    break
 
     async def _request_generator(self):
         """Generates requests for the streaming recognize method."""
@@ -715,29 +706,23 @@ class GoogleSTTService(STTService):
             )
 
             while True:
-                try:
-                    audio_data = await self._request_queue.get()
-                    if audio_data is None:  # Sentinel value to stop
-                        break
+                audio_data = await self._request_queue.get()
 
-                    # Check streaming limit
-                    if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
-                        logger.debug("Streaming limit reached, initiating graceful reconnection")
-                        # Instead of immediate reconnection, we'll break and let the stream close naturally
-                        self._last_audio_input = self._audio_input
-                        self._audio_input = []
-                        self._restart_counter += 1
-                        # Put the current audio chunk back in the queue
-                        await self._request_queue.put(audio_data)
-                        break
+                self._request_queue.task_done()
 
-                    self._audio_input.append(audio_data)
-                    yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
-
-                except asyncio.CancelledError:
+                # Check streaming limit
+                if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
+                    logger.debug("Streaming limit reached, initiating graceful reconnection")
+                    # Instead of immediate reconnection, we'll break and let the stream close naturally
+                    self._last_audio_input = self._audio_input
+                    self._audio_input = []
+                    self._restart_counter += 1
+                    # Put the current audio chunk back in the queue
+                    await self._request_queue.put(audio_data)
                     break
-                finally:
-                    self._request_queue.task_done()
+
+                self._audio_input.append(audio_data)
+                yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
 
         except Exception as e:
             logger.error(f"Error in request generator: {e}")
