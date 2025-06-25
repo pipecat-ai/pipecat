@@ -30,6 +30,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     import websockets
@@ -221,7 +222,9 @@ class NeuphonicTTSService(InterruptibleTTSService):
             self._websocket = None
 
     async def _receive_messages(self):
-        async for message in self._websocket:
+        async for message in WatchdogAsyncIterator(
+            self._websocket, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+        ):
             if isinstance(message, str):
                 msg = json.loads(message)
                 if msg.get("data", {}).get("audio") is not None:
@@ -232,8 +235,10 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     await self.push_frame(frame)
 
     async def _keepalive_task_handler(self):
+        KEEPALIVE_SLEEP = 10 if self.watchdog_timers_enabled else 3
         while True:
-            await asyncio.sleep(10)
+            self.reset_watchdog()
+            await asyncio.sleep(KEEPALIVE_SLEEP)
             await self._send_text("")
 
     async def _send_text(self, text: str):

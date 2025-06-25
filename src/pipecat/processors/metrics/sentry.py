@@ -9,6 +9,8 @@ import asyncio
 from loguru import logger
 
 from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 try:
     import sentry_sdk
@@ -20,7 +22,7 @@ except ModuleNotFoundError as e:
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
 
-class SentryMetrics(FrameProcessorMetrics):
+class SentryMetrics(WatchdogReseter, FrameProcessorMetrics):
     def __init__(self):
         super().__init__()
         self._ttfb_metrics_tx = None
@@ -28,13 +30,12 @@ class SentryMetrics(FrameProcessorMetrics):
         self._sentry_available = sentry_sdk.is_initialized()
         if not self._sentry_available:
             logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
-        self._sentry_queue = asyncio.Queue()
         self._sentry_task = None
 
-    async def setup(self, task_manager: TaskManager):
-        await super().setup(task_manager)
+    async def setup(self, task_manager: TaskManager, watchdog_timers_enabled: bool = False):
+        await super().setup(task_manager, watchdog_timers_enabled)
         if self._sentry_available:
-            self._sentry_queue = asyncio.Queue()
+            self._sentry_queue = WatchdogQueue(self, watchdog_enabled=watchdog_timers_enabled)
             self._sentry_task = self.task_manager.create_task(
                 self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
             )
@@ -47,6 +48,10 @@ class SentryMetrics(FrameProcessorMetrics):
             self._sentry_task = None
             logger.trace(f"{self} Flushing Sentry metrics")
             sentry_sdk.flush(timeout=5.0)
+
+    def reset_watchdog(self):
+        if self._task_manager:
+            self._task_manager.reset_watchdog(asyncio.current_task())
 
     async def start_ttfb_metrics(self, report_only_initial_ttfb):
         await super().start_ttfb_metrics(report_only_initial_ttfb)
@@ -93,3 +98,4 @@ class SentryMetrics(FrameProcessorMetrics):
             if tx:
                 await self.task_manager.get_event_loop().run_in_executor(None, tx.finish)
             running = tx is not None
+            self._sentry_queue.task_done()

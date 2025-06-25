@@ -119,6 +119,7 @@ class DTMFAggregator(FrameProcessor):
                 await asyncio.wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
                 self._digit_event.clear()
             except asyncio.TimeoutError:
+                self.reset_watchdog()
                 if self._aggregation:
                     await self._flush_aggregation()
 

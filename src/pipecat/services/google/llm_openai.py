@@ -11,6 +11,7 @@ from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
 from pipecat.services.llm_service import FunctionCallFromLLM
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -53,7 +54,9 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             context
         )
 
-        async for chunk in chunk_stream:
+        async for chunk in WatchdogAsyncIterator(
+            chunk_stream, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+        ):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

@@ -33,6 +33,7 @@ from pipecat.services.tts_service import (
 )
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
+from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 # See .env.example for ElevenLabs configuration needed
 try:
@@ -394,7 +395,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             self._started = False
 
     async def _receive_messages(self):
-        async for message in self._get_websocket():
+        async for message in WatchdogAsyncIterator(
+            self._get_websocket(), reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+        ):
             msg = json.loads(message)
 
             received_ctx_id = msg.get("contextId")
@@ -425,8 +428,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 self._cumulative_time = word_times[-1][1]
 
     async def _keepalive_task_handler(self):
+        KEEPALIVE_SLEEP = 10 if self.watchdog_timers_enabled else 3
         while True:
-            await asyncio.sleep(10)
+            self.reset_watchdog()
+            await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.open:
                     if self._context_id:

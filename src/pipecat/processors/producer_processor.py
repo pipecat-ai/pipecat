@@ -9,6 +9,7 @@ from typing import Awaitable, Callable, List
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.watchdog_queue import WatchdogQueue
 
 
 async def identity_transformer(frame: Frame):
@@ -36,14 +37,14 @@ class ProducerProcessor(FrameProcessor):
         self._passthrough = passthrough
         self._consumers: List[asyncio.Queue] = []
 
-    def add_consumer(self):
+    def add_consumer(self, consumer: FrameProcessor):
         """
         Adds a new consumer and returns its associated queue.
 
         Returns:
             asyncio.Queue: The queue for the newly added consumer.
         """
-        queue = asyncio.Queue()
+        queue = WatchdogQueue(consumer, watchdog_enabled=self.watchdog_timers_enabled)
         self._consumers.append(queue)
         return queue
 

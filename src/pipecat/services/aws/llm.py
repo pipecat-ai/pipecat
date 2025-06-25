@@ -711,6 +711,8 @@ class AWSBedrockLLMService(LLMService):
 
             function_calls = []
             for event in response["stream"]:
+                self.reset_watchdog()
+
                 # Handle text content
                 if "contentBlockDelta" in event:
                     delta = event["contentBlockDelta"]["delta"]
@@ -762,6 +764,7 @@ class AWSBedrockLLMService(LLMService):
                     completion_tokens += usage.get("outputTokens", 0)
                     cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
                     cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
+
             await self.run_function_calls(function_calls)
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
