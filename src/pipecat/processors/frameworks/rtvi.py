@@ -68,6 +68,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.utils.string import match_endofsentence
+from pipecat.utils.watchdog_queue import WatchdogQueue
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
 
@@ -650,11 +651,9 @@ class RTVIProcessor(FrameProcessor):
         self._registered_services: Dict[str, RTVIService] = {}
 
         # A task to process incoming action frames.
-        self._action_queue = asyncio.Queue()
         self._action_task: Optional[asyncio.Task] = None
 
         # A task to process incoming transport messages.
-        self._message_queue = asyncio.Queue()
         self._message_task: Optional[asyncio.Task] = None
 
         self._register_event_handler("on_bot_started")
@@ -756,8 +755,10 @@ class RTVIProcessor(FrameProcessor):
 
     async def _start(self, frame: StartFrame):
         if not self._action_task:
+            self._action_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
             self._action_task = self.create_task(self._action_task_handler())
         if not self._message_task:
+            self._message_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
             self._message_task = self.create_task(self._message_task_handler())
         await self._call_event_handler("on_bot_started")
 
@@ -783,18 +784,14 @@ class RTVIProcessor(FrameProcessor):
     async def _action_task_handler(self):
         while True:
             frame = await self._action_queue.get()
-            self.start_watchdog()
             await self._handle_action(frame.message_id, frame.rtvi_action_run)
             self._action_queue.task_done()
-            self.reset_watchdog()
 
     async def _message_task_handler(self):
         while True:
             message = await self._message_queue.get()
-            self.start_watchdog()
             await self._handle_message(message)
             self._message_queue.task_done()
-            self.reset_watchdog()
 
     async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
         try:

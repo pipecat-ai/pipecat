@@ -12,6 +12,8 @@ from attr import dataclass
 
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 
 @dataclass
@@ -26,7 +28,7 @@ class Proxy:
     observer: BaseObserver
 
 
-class TaskObserver(BaseObserver):
+class TaskObserver(WatchdogReseter, BaseObserver):
     """This is a pipeline frame observer that is meant to be used as a proxy to
     the user provided observers. That is, this is the observer that should be
     passed to the frame processors. Then, every time a frame is pushed this
@@ -52,6 +54,7 @@ class TaskObserver(BaseObserver):
         self._proxies: Optional[Dict[BaseObserver, Proxy]] = (
             None  # Becomes a dict after start() is called
         )
+        self._watchdog_timers_enabled = False
 
     def add_observer(self, observer: BaseObserver):
         # Add the observer to the list.
@@ -76,12 +79,16 @@ class TaskObserver(BaseObserver):
         if observer in self._observers:
             self._observers.remove(observer)
 
-    async def start(self):
+    async def start(self, watchdog_timers_enabled: bool = False):
         """Starts all proxy observer tasks."""
+        self._watchdog_timers_enabled = watchdog_timers_enabled
         self._proxies = self._create_proxies(self._observers)
 
     async def stop(self):
         """Stops all proxy observer tasks."""
+        if not self._proxies:
+            return
+
         for proxy in self._proxies.values():
             await self._task_manager.cancel_task(proxy.task)
 
@@ -89,11 +96,14 @@ class TaskObserver(BaseObserver):
         for proxy in self._proxies.values():
             await proxy.queue.put(data)
 
+    def reset_watchdog(self):
+        self._task_manager.reset_watchdog(asyncio.current_task())
+
     def _started(self) -> bool:
         return self._proxies is not None
 
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
-        queue = asyncio.Queue()
+        queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
         task = self._task_manager.create_task(
             self._proxy_task_handler(queue, observer),
             f"TaskObserver::{observer}::_proxy_task_handler",

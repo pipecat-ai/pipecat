@@ -40,6 +40,8 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 try:
     from daily import (
@@ -250,7 +252,7 @@ class DailyAudioTrack:
     track: CustomAudioTrack
 
 
-class DailyTransportClient(EventHandler):
+class DailyTransportClient(WatchdogReseter, EventHandler):
     """Core client for interacting with Daily's API.
 
     Manages the connection to Daily rooms and handles all low-level API interactions.
@@ -304,6 +306,7 @@ class DailyTransportClient(EventHandler):
         self._leave_counter = 0
 
         self._task_manager: Optional[BaseTaskManager] = None
+        self._watchdog_timers_enabled = False
 
         # We use the executor to cleanup the client. We just do it from one
         # place, so only one thread is really needed.
@@ -320,9 +323,6 @@ class DailyTransportClient(EventHandler):
         # waits for it to finish using completions (and a future) we will
         # deadlock because completions use event handlers (which are holding the
         # GIL).
-        self._event_queue = asyncio.Queue()
-        self._audio_queue = asyncio.Queue()
-        self._video_queue = asyncio.Queue()
         self._event_task = None
         self._audio_task = None
         self._video_task = None
@@ -395,11 +395,18 @@ class DailyTransportClient(EventHandler):
         if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
 
+    def reset_watchdog(self):
+        if self._task_manager:
+            self._task_manager.reset_watchdog(asyncio.current_task())
+
     async def setup(self, setup: FrameProcessorSetup):
         if self._task_manager:
             return
 
         self._task_manager = setup.task_manager
+        self._watchdog_timers_enabled = setup.watchdog_timers_enabled
+
+        self._event_queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
         self._event_task = self._task_manager.create_task(
             self._callback_task_handler(self._event_queue),
             f"{self}::event_callback_task",
@@ -424,12 +431,14 @@ class DailyTransportClient(EventHandler):
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
         if self._params.audio_in_enabled and not self._audio_task and self._task_manager:
+            self._audio_queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
             self._audio_task = self._task_manager.create_task(
                 self._callback_task_handler(self._audio_queue),
                 f"{self}::audio_callback_task",
             )
 
         if self._params.video_in_enabled and not self._video_task and self._task_manager:
+            self._video_queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
             self._video_task = self._task_manager.create_task(
                 self._callback_task_handler(self._video_queue),
                 f"{self}::video_callback_task",
@@ -934,6 +943,7 @@ class DailyTransportClient(EventHandler):
             await self._joined_event.wait()
             (callback, *args) = await queue.get()
             await callback(*args)
+            queue.task_done()
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
         if not self._task_manager:
