@@ -6,12 +6,33 @@
 
 import asyncio
 import inspect
+import types
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Protocol, Sequence, Type
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    Set,
+    Tuple,
+    Type,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
+import docstring_parser
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
@@ -75,13 +96,13 @@ class FunctionCallRegistryItem:
 
     Attributes:
         function_name (Optional[str]): The name of the function.
-        handler (FunctionCallHandler): The handler for processing function call parameters.
+        handler (FunctionCallHandler | DirectFunctionWrapper): The handler for processing function call parameters.
         cancel_on_interruption (bool): Flag indicating whether to cancel the call on interruption.
 
     """
 
     function_name: Optional[str]
-    handler: FunctionCallHandler
+    handler: FunctionCallHandler | "DirectFunctionWrapper"
     cancel_on_interruption: bool
 
 
@@ -209,10 +230,28 @@ class LLMService(AIService):
 
             self._start_callbacks[function_name] = start_callback
 
+    def register_direct_function(
+        self,
+        handler: DirectFunction,
+        *,
+        cancel_on_interruption: bool = True,
+    ):
+        wrapper = DirectFunctionWrapper(handler)
+        self._functions[wrapper.name] = FunctionCallRegistryItem(
+            function_name=wrapper.name,
+            handler=wrapper,
+            cancel_on_interruption=cancel_on_interruption,
+        )
+
     def unregister_function(self, function_name: Optional[str]):
         del self._functions[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
+
+    def unregister_direct_function(self, handler: Any):
+        wrapper = DirectFunctionWrapper(handler)
+        del self._functions[wrapper.name]
+        # Note: no need to remove start callback here, as direct functions don't support start callbacks.
 
     def has_function(self, function_name: str):
         if None in self._functions.keys():
@@ -364,35 +403,50 @@ class LLMService(AIService):
             await self.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
             await self.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
-        signature = inspect.signature(item.handler)
-        if len(signature.parameters) > 1:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
-                    DeprecationWarning,
-                )
-
-            await item.handler(
-                runner_item.function_name,
-                runner_item.tool_call_id,
-                runner_item.arguments,
-                self,
-                runner_item.context,
-                function_call_result_callback,
+        if isinstance(item.handler, DirectFunctionWrapper):
+            # Handler is a DirectFunctionWrapper
+            await item.handler.invoke(
+                args=runner_item.arguments,
+                params=FunctionCallParams(
+                    function_name=runner_item.function_name,
+                    tool_call_id=runner_item.tool_call_id,
+                    arguments=runner_item.arguments,
+                    llm=self,
+                    context=runner_item.context,
+                    result_callback=function_call_result_callback,
+                ),
             )
         else:
-            params = FunctionCallParams(
-                function_name=runner_item.function_name,
-                tool_call_id=runner_item.tool_call_id,
-                arguments=runner_item.arguments,
-                llm=self,
-                context=runner_item.context,
-                result_callback=function_call_result_callback,
-            )
-            await item.handler(params)
+            # Handler is a FunctionCallHandler
+            signature = inspect.signature(item.handler)
+            if len(signature.parameters) > 1:
+                import warnings
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
+                        DeprecationWarning,
+                    )
+
+                await item.handler(
+                    runner_item.function_name,
+                    runner_item.tool_call_id,
+                    runner_item.arguments,
+                    self,
+                    runner_item.context,
+                    function_call_result_callback,
+                )
+            else:
+                params = FunctionCallParams(
+                    function_name=runner_item.function_name,
+                    tool_call_id=runner_item.tool_call_id,
+                    arguments=runner_item.arguments,
+                    llm=self,
+                    context=runner_item.context,
+                    result_callback=function_call_result_callback,
+                )
+                await item.handler(params)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()

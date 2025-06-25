@@ -7,6 +7,7 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 
@@ -17,7 +18,7 @@ class AdapterType(Enum):
 class ToolsSchema:
     def __init__(
         self,
-        standard_tools: List[FunctionSchema],
+        standard_tools: List[FunctionSchema | DirectFunction],
         custom_tools: Optional[Dict[AdapterType, List[Dict[str, Any]]]] = None,
     ) -> None:
         """
@@ -27,7 +28,20 @@ class ToolsSchema:
         :param standard_tools: List of tools following FunctionSchema.
         :param custom_tools: List of tools in a custom format (e.g., search_tool).
         """
-        self._standard_tools = standard_tools
+
+        def _map_standard_tools(tools):
+            schemas = []
+            for tool in tools:
+                if isinstance(tool, FunctionSchema):
+                    schemas.append(tool)
+                elif callable(tool):
+                    wrapper = DirectFunctionWrapper(tool)
+                    schemas.append(wrapper.to_function_schema())
+                else:
+                    raise TypeError(f"Unsupported tool type: {type(tool)}")
+            return schemas
+
+        self._standard_tools = _map_standard_tools(standard_tools)
         self._custom_tools = custom_tools
 
     @property
