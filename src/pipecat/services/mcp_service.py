@@ -9,7 +9,7 @@ from pipecat.utils.base_object import BaseObject
 
 try:
     from mcp import ClientSession, StdioServerParameters
-    from mcp.client.session_group import SseServerParameters
+    from mcp.client.session_group import SseServerParameters, StreamableHttpParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamablehttp_client
@@ -22,13 +22,12 @@ except ModuleNotFoundError as e:
 class MCPClient(BaseObject):
     def __init__(
         self,
-        server_params: Union[StdioServerParameters, SseServerParameters],
+        server_params: Union[StdioServerParameters, SseServerParameters, StreamableHttpParameters],
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._server_params = server_params
         self._session = ClientSession
-        self._additional_headers = additional_headers or {}
         
         if isinstance(server_params, StdioServerParameters):
             self._client = stdio_client
@@ -36,7 +35,7 @@ class MCPClient(BaseObject):
         elif isinstance(server_params, SseServerParameters):
             self._client = sse_client
             self._register_tools = self._sse_register_tools
-        elif isinstance(server_params, str) and streamable_http:
+        elif isinstance(server_params, StreamableHttpParameters):
             self._client = streamablehttp_client
             self._register_tools = self._streamable_http_register_tools
         else:
@@ -182,7 +181,12 @@ class MCPClient(BaseObject):
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
             logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
             try:
-                async with self._client(self._server_params, headers=self._additional_headers) as (read_stream, write_stream, _):
+                async with self._client(
+                    url=self._server_params.url,
+                    headers=self._server_params.headers,
+                    timeout=self._server_params.timeout,
+                    sse_read_timeout=self._server_params.sse_read_timeout,
+                ) as (read_stream, write_stream, _):
                     async with self._session(read_stream, write_stream) as session:
                         await session.initialize()
                         await self._call_tool(session, function_name, arguments, result_callback)
@@ -194,7 +198,12 @@ class MCPClient(BaseObject):
 
         logger.debug("Starting registration of mcp.run tools using streamable HTTP")
 
-        async with self._client(self._server_params, headers=self._additional_headers) as (read_stream, write_stream, _):
+        async with self._client(
+            url=self._server_params.url,
+            headers=self._server_params.headers,
+            timeout=self._server_params.timeout,
+            sse_read_timeout=self._server_params.sse_read_timeout,
+        ) as (read_stream, write_stream, _):
             async with self._session(read_stream, write_stream) as session:
                 await session.initialize()
                 tools_schema = await self._list_tools(session, mcp_tool_wrapper, llm)
