@@ -220,8 +220,6 @@ class TaskManager(BaseTaskManager):
             raise
         except Exception as e:
             logger.exception(f"{name}: unexpected exception while stopping task: {e}")
-        finally:
-            await self._remove_task(task)
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Cancels the given asyncio Task and awaits its completion with an
@@ -254,8 +252,6 @@ class TaskManager(BaseTaskManager):
         except BaseException as e:
             logger.critical(f"{name}: fatal base exception while cancelling task: {e}")
             raise
-        finally:
-            await self._remove_task(task)
 
     def current_tasks(self) -> Sequence[asyncio.Task]:
         """Returns the list of currently created/registered tasks."""
@@ -281,13 +277,6 @@ class TaskManager(BaseTaskManager):
                 self._watchdog_task_handler(task_data)
             )
             task_data.watchdog_task = watchdog_task
-
-    async def _remove_task(self, task: asyncio.Task):
-        name = task.get_name()
-        try:
-            del self._tasks[name]
-        except KeyError as e:
-            logger.trace(f"{name}: unable to remove task (already removed?): {e}")
 
     async def _watchdog_task_handler(self, task_data: TaskData):
         name = task_data.task.get_name()
@@ -316,5 +305,6 @@ class TaskManager(BaseTaskManager):
             if task_data.watchdog_task:
                 task_data.watchdog_task.cancel()
                 task_data.watchdog_task = None
+            del self._tasks[name]
         except KeyError as e:
-            logger.trace(f"{name}: unable to find task (already removed?): {e}")
+            logger.trace(f"{name}: unable to remove task data (already removed?): {e}")
