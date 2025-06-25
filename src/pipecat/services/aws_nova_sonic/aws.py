@@ -699,6 +699,8 @@ class AWSNovaSonicLLMService(LLMService):
                 output = await self._stream.await_output()
                 result = await output[1].receive()
 
+                self.start_watchdog()
+
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
                     json_data = json.loads(response_data)
@@ -731,6 +733,8 @@ class AWSNovaSonicLLMService(LLMService):
             logger.error(f"{self} error processing responses: {e}")
             if self._wants_connection:
                 await self.reset_conversation()
+        finally:
+            self.reset_watchdog()
 
     async def _handle_completion_start_event(self, event_json):
         pass

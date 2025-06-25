@@ -783,14 +783,18 @@ class RTVIProcessor(FrameProcessor):
     async def _action_task_handler(self):
         while True:
             frame = await self._action_queue.get()
+            self.start_watchdog()
             await self._handle_action(frame.message_id, frame.rtvi_action_run)
             self._action_queue.task_done()
+            self.reset_watchdog()
 
     async def _message_task_handler(self):
         while True:
             message = await self._message_queue.get()
+            self.start_watchdog()
             await self._handle_message(message)
             self._message_queue.task_done()
+            self.reset_watchdog()
 
     async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
         try:

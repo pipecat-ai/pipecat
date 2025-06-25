@@ -11,6 +11,7 @@ from typing import Optional
 
 from loguru import logger
 
+from pipecat.pipeline.base_task import PipelineTaskParams
 from pipecat.pipeline.task import PipelineTask
 from pipecat.utils.base_object import BaseObject
 
@@ -37,8 +38,8 @@ class PipelineRunner(BaseObject):
     async def run(self, task: PipelineTask):
         logger.debug(f"Runner {self} started running {task}")
         self._tasks[task.name] = task
-        task.set_event_loop(self._loop)
-        await task.run()
+        params = PipelineTaskParams(loop=self._loop)
+        await task.run(params)
         del self._tasks[task.name]
 
         # Cleanup base object.

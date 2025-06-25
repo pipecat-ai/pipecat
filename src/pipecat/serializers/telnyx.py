@@ -196,8 +196,31 @@ class TelnyxFrameSerializer(FrameSerializer):
                 async with session.post(endpoint, headers=headers) as response:
                     if response.status == 200:
                         logger.info(f"Successfully terminated Telnyx call {call_control_id}")
+                    elif response.status == 422:
+                        # Handle the case where the call has already ended
+                        # Error code 90018: "Call has already ended"
+                        # Source: https://developers.telnyx.com/api/errors/90018
+                        try:
+                            error_data = await response.json()
+                            if any(
+                                error.get("code") == "90018"
+                                for error in error_data.get("errors", [])
+                            ):
+                                logger.debug(
+                                    f"Telnyx call {call_control_id} was already terminated"
+                                )
+                                return
+                        except:
+                            pass  # Fall through to log the raw error
+
+                        # Log other 422 errors
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to terminate Telnyx call {call_control_id}: "
+                            f"Status {response.status}, Response: {error_text}"
+                        )
                     else:
-                        # Get the error details for better debugging
+                        # Log other errors
                         error_text = await response.text()
                         logger.error(
                             f"Failed to terminate Telnyx call {call_control_id}: "

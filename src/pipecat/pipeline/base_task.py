@@ -6,18 +6,21 @@
 
 import asyncio
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import AsyncIterable, Iterable
 
 from pipecat.frames.frames import Frame
 from pipecat.utils.base_object import BaseObject
 
 
-class BaseTask(BaseObject):
-    @abstractmethod
-    def set_event_loop(self, loop: asyncio.AbstractEventLoop):
-        """Sets the event loop that this task will run on."""
-        pass
+@dataclass
+class PipelineTaskParams:
+    """Specific configuration for the pipeline task."""
 
+    loop: asyncio.AbstractEventLoop
+
+
+class BasePipelineTask(BaseObject):
     @abstractmethod
     def has_finished(self) -> bool:
         """Indicates whether the tasks has finished. That is, all processors
@@ -40,7 +43,7 @@ class BaseTask(BaseObject):
         pass
 
     @abstractmethod
-    async def run(self):
+    async def run(self, params: PipelineTaskParams):
         """Starts running the given pipeline."""
         pass
 

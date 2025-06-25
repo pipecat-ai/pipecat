@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import asyncio
+
 from loguru import logger
+
+from pipecat.utils.asyncio import TaskManager
 
 try:
     import sentry_sdk
@@ -24,6 +28,25 @@ class SentryMetrics(FrameProcessorMetrics):
         self._sentry_available = sentry_sdk.is_initialized()
         if not self._sentry_available:
             logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
+        self._sentry_queue = asyncio.Queue()
+        self._sentry_task = None
+
+    async def setup(self, task_manager: TaskManager):
+        await super().setup(task_manager)
+        if self._sentry_available:
+            self._sentry_queue = asyncio.Queue()
+            self._sentry_task = self.task_manager.create_task(
+                self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
+            )
+
+    async def cleanup(self):
+        await super().cleanup()
+        if self._sentry_task:
+            await self._sentry_queue.put(None)
+            await self.task_manager.wait_for_task(self._sentry_task)
+            self._sentry_task = None
+            logger.trace(f"{self} Flushing Sentry metrics")
+            sentry_sdk.flush(timeout=5.0)
 
     async def start_ttfb_metrics(self, report_only_initial_ttfb):
         await super().start_ttfb_metrics(report_only_initial_ttfb)
@@ -34,14 +57,15 @@ class SentryMetrics(FrameProcessorMetrics):
                 name=f"TTFB for {self._processor_name()}",
             )
             logger.debug(
-                f"Sentry transaction started (ID: {self._ttfb_metrics_tx.span_id} Name: {self._ttfb_metrics_tx.name})"
+                f"{self} Sentry transaction started (ID: {self._ttfb_metrics_tx.span_id} Name: {self._ttfb_metrics_tx.name})"
             )
 
     async def stop_ttfb_metrics(self):
         await super().stop_ttfb_metrics()
 
         if self._sentry_available and self._ttfb_metrics_tx:
-            self._ttfb_metrics_tx.finish()
+            await self._sentry_queue.put(self._ttfb_metrics_tx)
+            self._ttfb_metrics_tx = None
 
     async def start_processing_metrics(self):
         await super().start_processing_metrics()
@@ -52,11 +76,20 @@ class SentryMetrics(FrameProcessorMetrics):
                 name=f"Processing for {self._processor_name()}",
             )
             logger.debug(
-                f"Sentry transaction started (ID: {self._processing_metrics_tx.span_id} Name: {self._processing_metrics_tx.name})"
+                f"{self} Sentry transaction started (ID: {self._processing_metrics_tx.span_id} Name: {self._processing_metrics_tx.name})"
             )
 
     async def stop_processing_metrics(self):
         await super().stop_processing_metrics()
 
         if self._sentry_available and self._processing_metrics_tx:
-            self._processing_metrics_tx.finish()
+            await self._sentry_queue.put(self._processing_metrics_tx)
+            self._processing_metrics_tx = None
+
+    async def _sentry_task_handler(self):
+        running = True
+        while running:
+            tx = await self._sentry_queue.get()
+            if tx:
+                await self.task_manager.get_event_loop().run_in_executor(None, tx.finish)
+            running = tx is not None

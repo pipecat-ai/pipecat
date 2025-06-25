@@ -78,3 +78,8 @@ class BaseTurnAnalyzer(ABC):
             EndOfTurnState: The result of the end of turn analysis.
         """
         pass
+
+    @abstractmethod
+    def clear(self):
+        """Reset the turn analyzer to its initial state."""
+        pass

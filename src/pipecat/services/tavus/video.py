@@ -217,5 +217,7 @@ class TavusVideoService(AIService):
     async def _send_task_handler(self):
         while True:
             frame = await self._queue.get()
-            if isinstance(frame, OutputAudioRawFrame):
+            self.start_watchdog()
+            if isinstance(frame, OutputAudioRawFrame) and self._client:
                 await self._client.write_audio_frame(frame)
+            self.reset_watchdog()

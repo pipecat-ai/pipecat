@@ -43,6 +43,8 @@ from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 
+AUDIO_INPUT_TIMEOUT_SECS = 0.5
+
 
 class BaseInputTransport(FrameProcessor):
     def __init__(self, params: TransportParams, **kwargs):
@@ -55,6 +57,9 @@ class BaseInputTransport(FrameProcessor):
 
         # Track bot speaking state for interruption logic
         self._bot_speaking = False
+
+        # Track user speaking state for interruption logic
+        self._user_speaking = False
 
         # We read audio from a single queue one at a time and we then run VAD in
         # a thread. Therefore, only one thread should be necessary.
@@ -130,6 +135,7 @@ class BaseInputTransport(FrameProcessor):
 
     async def start(self, frame: StartFrame):
         self._paused = False
+        self._user_speaking = False
 
         self._sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
 
@@ -240,6 +246,7 @@ class BaseInputTransport(FrameProcessor):
     async def _handle_user_interruption(self, frame: Frame):
         if isinstance(frame, UserStartedSpeakingFrame):
             logger.debug("User started speaking")
+            self._user_speaking = True
             await self.push_frame(frame)
 
             # Only push StartInterruptionFrame if:
@@ -263,6 +270,7 @@ class BaseInputTransport(FrameProcessor):
                 )
         elif isinstance(frame, UserStoppedSpeakingFrame):
             logger.debug("User stopped speaking")
+            self._user_speaking = False
             await self.push_frame(frame)
             if self.interruptions_allowed:
                 await self._stop_interruption()
@@ -355,26 +363,42 @@ class BaseInputTransport(FrameProcessor):
     async def _audio_task_handler(self):
         vad_state: VADState = VADState.QUIET
         while True:
-            frame: InputAudioRawFrame = await self._audio_in_queue.get()
+            try:
+                frame: InputAudioRawFrame = await asyncio.wait_for(
+                    self._audio_in_queue.get(), timeout=AUDIO_INPUT_TIMEOUT_SECS
+                )
 
-            # If an audio filter is available, run it before VAD.
-            if self._params.audio_in_filter:
-                frame.audio = await self._params.audio_in_filter.filter(frame.audio)
+                self.start_watchdog()
 
-            # Check VAD and push event if necessary. We just care about
-            # changes from QUIET to SPEAKING and vice versa.
-            previous_vad_state = vad_state
-            if self._params.vad_analyzer:
-                vad_state = await self._handle_vad(frame, vad_state)
+                # If an audio filter is available, run it before VAD.
+                if self._params.audio_in_filter:
+                    frame.audio = await self._params.audio_in_filter.filter(frame.audio)
 
-            if self._params.turn_analyzer:
-                await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
+                # Check VAD and push event if necessary. We just care about
+                # changes from QUIET to SPEAKING and vice versa.
+                previous_vad_state = vad_state
+                if self._params.vad_analyzer:
+                    vad_state = await self._handle_vad(frame, vad_state)
 
-            # Push audio downstream if passthrough is set.
-            if self._params.audio_in_passthrough:
-                await self.push_frame(frame)
+                if self._params.turn_analyzer:
+                    await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
 
-            self._audio_in_queue.task_done()
+                # Push audio downstream if passthrough is set.
+                if self._params.audio_in_passthrough:
+                    await self.push_frame(frame)
+
+                self._audio_in_queue.task_done()
+            except asyncio.TimeoutError:
+                if self._user_speaking:
+                    logger.warning(
+                        "Forcing user stopped speaking due to timeout receiving audio frame!"
+                    )
+                    vad_state = VADState.QUIET
+                    if self._params.turn_analyzer:
+                        self._params.turn_analyzer.clear()
+                    await self._handle_user_interruption(UserStoppedSpeakingFrame())
+            finally:
+                self.reset_watchdog()
 
     async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer.

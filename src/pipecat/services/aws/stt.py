@@ -285,6 +285,9 @@ class AWSTranscribeSTTService(STTService):
 
             try:
                 response = await self._ws_client.recv()
+
+                self.start_watchdog()
+
                 headers, payload = decode_event(response)
 
                 if headers.get(":message-type") == "event":
@@ -342,3 +345,5 @@ class AWSTranscribeSTTService(STTService):
             except Exception as e:
                 logger.error(f"{self} Unexpected error in receive loop: {e}")
                 break
+            finally:
+                self.reset_watchdog()

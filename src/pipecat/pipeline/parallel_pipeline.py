@@ -202,13 +202,17 @@ class ParallelPipeline(BasePipeline):
     async def _process_up_queue(self):
         while True:
             frame = await self._up_queue.get()
+            self.start_watchdog()
             await self._parallel_push_frame(frame, FrameDirection.UPSTREAM)
             self._up_queue.task_done()
+            self.reset_watchdog()
 
     async def _process_down_queue(self):
         running = True
         while running:
             frame = await self._down_queue.get()
+
+            self.start_watchdog()
 
             endframe_counter = self._endframe_counter.get(frame.id, 0)
 
@@ -224,3 +228,5 @@ class ParallelPipeline(BasePipeline):
             running = not (endframe_counter == 0 and isinstance(frame, EndFrame))
 
             self._down_queue.task_done()
+
+            self.reset_watchdog()

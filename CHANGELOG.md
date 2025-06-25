@@ -9,9 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added logging and improved error handling to help diagnose and prevent potential
+  Pipeline freezes.
+
+- Introduce task watchdog timers. Watchdog timers are used to detect if a
+  Pipecat task is taking longer than expected (by default 5 seconds). It is
+  possible to change the default watchdog timer timeout by using the
+  `watchdog_timeout` constructor argument when creating a `PipelineTask`. With
+  watchdog timers it is also possible to log how long each processing step is
+  taking (e.g. processing an element from a queue inside a task). This is done
+  with the `enable_watchdog_logging` constructor argument when creating a
+  `PipelineTask.` It is also possible to control these two values per each frame
+  processor. That is, you can set set `enable_watchdog_logging` and
+  `watchdog_timeout` when creating any frame processor through their constructor
+  arguments. Finally, you can also set these values per task. So, if you are
+  writing a frame processor that creates multiple tasks and you only want to
+  enable logging for one of them, you can do so by passing the same argument
+  names to the `FrameProcessor.create_task()` function. Note that watchdog
+  timers only work with Pipecat tasks but not if you use `asycio.create_task()`
+  or similar.
+
 - Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
 
 - Added reconnection logic and audio buffer management to `GladiaSTTService`.
+
+- The `TurnTrackingObserver` now ends a turn upon observing an `EndFrame` or
+  `CancelFrame`.
 
 - Added Polish support to `AWSTranscribeSTTService`.
 
@@ -29,7 +52,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMAssistantContextAggregator` that exposes whether a function call is in
   progress.
 
+- Added `SambaNovaLLMService` which provides llm api integration with an
+  OpenAI-compatible interface.
+
+- Added `SambaNovaTTSService` which provides speech-to-text functionality using
+  SambaNovas's (whisper) API.
+
+- Add fundational examples for function calling and transcription
+  `14s-function-calling-sambanova.py`, `13g-sambanova-transcription.py`
+
 ### Changed
+
+- `HeartbeatFrame`s are now control frames. This will make it easier to detect
+  pipeline freezes. Previously, heartbeat frames were system frames which meant
+  they were not get queued with other frames, making it difficult to detect
+  pipeline stalls.
+
+- Updated `OpenAIRealtimeBetaLLMService` to accept `language` in the
+  `InputAudioTranscription` class for all models.
+
+- Updated the default model for `OpenAIRealtimeBetaLLMService` to
+  `gpt-4o-realtime-preview-2025-06-03`.
 
 - The `PipelineParams` arg `allow_interruptions` now defaults to `True`.
 
@@ -40,6 +83,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `daily-python` to 0.19.3.
 
 ### Fixed
+
+- Fixed an event loop blocking issue when using `SentryMetrics`.
+
+- Fixed an issue in `FastAPIWebsocketClient` to ensure proper disconnection
+  when the websocket is already closed.
+
+- Fixed an issue where the `UserStoppedSpeakingFrame` was not received if the
+  transport was not receiving new audio frames.
+
+- Fixed an edge case where if the user interrupted the bot but no new aggregation
+  was received, the bot would not resume speaking.
+
+- Fixed an issue with `TelnyxFrameSerializer` where it would throw an exception
+  when the user hung up the call.
+
+- Fixed an issue with `ElevenLabsTTSService` where the context was not being
+  closed.
 
 - Fixed function calling in `AWSNovaSonicLLMService`.
 

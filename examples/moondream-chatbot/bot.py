@@ -143,6 +143,7 @@ async def main():
             DailyParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
+                video_in_enabled=True,
                 video_out_enabled=True,
                 video_out_width=1024,
                 video_out_height=576,
