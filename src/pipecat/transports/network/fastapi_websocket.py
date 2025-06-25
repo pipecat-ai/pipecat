@@ -70,11 +70,22 @@ class FastAPIWebsocketClient:
         return self._websocket.iter_bytes() if self._is_binary else self._websocket.iter_text()
 
     async def send(self, data: str | bytes):
-        if self._can_send():
-            if self._is_binary:
-                await self._websocket.send_bytes(data)
-            else:
-                await self._websocket.send_text(data)
+        try:
+            if self._can_send():
+                if self._is_binary:
+                    await self._websocket.send_bytes(data)
+                else:
+                    await self._websocket.send_text(data)
+        except Exception as e:
+            logger.error(
+                f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
+            )
+            # For some reason the websocket is disconnected, and we are not able to send data
+            # So let's properly handle it and disconnect the transport
+            if self._websocket.application_state == WebSocketState.DISCONNECTED:
+                logger.warning("Closing already disconnected websocket!")
+                self._closing = True
+                await self.trigger_client_disconnected()
 
     async def disconnect(self):
         self._leave_counter -= 1
@@ -171,6 +182,8 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                 if not self._params.serializer:
                     continue
 
+                self.start_watchdog()
+
                 frame = await self._params.serializer.deserialize(message)
 
                 if not frame:
@@ -180,8 +193,12 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                     await self.push_audio_frame(frame)
                 else:
                     await self.push_frame(frame)
+
+                self.reset_watchdog()
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
+
+        self.reset_watchdog()
 
         await self._client.trigger_client_disconnected()
 

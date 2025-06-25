@@ -49,7 +49,7 @@ async def main():
 
         # Initialize Sentry
         sentry_sdk.init(
-            dsn="your-project-dsn",
+            dsn=os.getenv("SENTRY_DSN"),
             traces_sample_rate=1.0,
         )
 

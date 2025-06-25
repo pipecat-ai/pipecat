@@ -42,6 +42,7 @@ pipecat-ai[openai]
 pipecat-ai[qwen]
 pipecat-ai[remote-smart-turn]
 # pipecat-ai[riva] # Mocked
+pipecat-ai[sambanova]
 pipecat-ai[silero]
 pipecat-ai[simli]
 pipecat-ai[soundfile]

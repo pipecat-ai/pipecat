@@ -736,6 +736,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _receive_task_handler(self):
         async for message in self._websocket:
+            self.start_watchdog()
+
             evt = events.parse_server_event(message)
             # logger.debug(f"Received event: {message[:500]}")
             # logger.debug(f"Received event: {evt}")
@@ -763,6 +765,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Log unhandled events that might contain grounding metadata
                 logger.warning(f"Received unhandled server event type: {evt}")
                 pass
+
+
+            self.reset_watchdog()
 
     #
     #
