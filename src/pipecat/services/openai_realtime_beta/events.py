@@ -9,7 +9,7 @@ import json
 import uuid
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 #
 # session properties
