@@ -40,7 +40,7 @@ class MCPClient(BaseObject):
             self._register_tools = self._streamable_http_register_tools
         else:
             raise TypeError(
-                f"{self} invalid argument type: `server_params` must be either StdioServerParameters or SseServerParameters."
+                f"{self} invalid argument type: `server_params` must be either StdioServerParameters, SseServerParameters, or StreamableHttpParameters."
             )
 
     async def register_tools(self, llm) -> ToolsSchema:
