@@ -76,7 +76,7 @@ class InstantVoiceClient {
 
   private initializePipecatClient(): void {
     const PipecatConfig: PipecatClientOptions = {
-      transport: DailyTransport.create({
+      transport: new DailyTransport({
         bufferLocalAudioUntilBotReady: true,
       }),
       enableMic: true,

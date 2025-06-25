@@ -10,7 +10,7 @@ export function PipecatProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     const pcClient = new PipecatClient({
-      transport: DailyTransport.create(),
+      transport: new DailyTransport(),
       enableMic: true,
       enableCam: false,
     });

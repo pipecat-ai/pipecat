@@ -36,7 +36,7 @@ class WebRTCApp {
 
   private initializePipecatClient(): void {
     const opts: PipecatClientOptions = {
-      transport: SmallWebRTCTransport.create({ connectionUrl: '/api/offer' }),
+      transport: new SmallWebRTCTransport({ connectionUrl: '/api/offer' }),
       enableMic: true,
       enableCam: true,
       callbacks: {

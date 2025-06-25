@@ -117,7 +117,7 @@ class ChatbotClient {
     console.log('Initializing Pipecat client and transport...');
     // Initialize the Pipecat client with a DailyTransport and our configuration
     this.pcClient = new PipecatClient({
-      transport: DailyTransport.create(),
+      transport: new DailyTransport(),
       enableMic: true, // Enable microphone for user input
       enableCam: false,
       callbacks: {
