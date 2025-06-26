@@ -485,7 +485,7 @@ class GladiaSTTService(STTService):
     async def _keepalive_task_handler(self):
         """Send periodic empty audio chunks to keep the connection alive."""
         try:
-            KEEPALIVE_SLEEP = 20 if self.watchdog_timers_enabled else 3
+            KEEPALIVE_SLEEP = 20 if self.task_manager.task_watchdog_enabled else 3
             while self._connection_active:
                 self.reset_watchdog()
                 # Send keepalive (Gladia times out after 30 seconds)
