@@ -144,6 +144,28 @@ autodoc_mock_imports = [
     "transformers.AutoFeatureExtractor",
     # Also add specific classes that are imported
     "AutoFeatureExtractor",
+    # Sentry dependencies
+    "sentry_sdk",
+    # AWS Nova Sonic dependencies
+    "aws_sdk_bedrock_runtime",
+    "aws_sdk_bedrock_runtime.client",
+    "aws_sdk_bedrock_runtime.config",
+    "aws_sdk_bedrock_runtime.models",
+    "smithy_aws_core",
+    "smithy_aws_core.credentials_resolvers",
+    "smithy_aws_core.credentials_resolvers.static",
+    "smithy_aws_core.identity",
+    "smithy_core",
+    "smithy_core.aio",
+    "smithy_core.aio.eventstream",
+    # MCP dependencies (you may already have these)
+    "mcp",
+    "mcp.client",
+    "mcp.client.session_group",
+    "mcp.client.sse",
+    "mcp.client.stdio",
+    "mcp.ClientSession",
+    "mcp.StdioServerParameters",
 ]
 
 # HTML output settings
