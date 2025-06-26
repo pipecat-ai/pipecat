@@ -263,11 +263,8 @@ class TaskManager(BaseTaskManager):
 
         """
         name = task.get_name()
-        if name in self._tasks:
-            if self._tasks[name].enable_watchdog_timers:
-                self._tasks[name].watchdog_timer.set()
-        else:
-            logger.warning(f"Unable to reset watchdog timer: task {name} does not exist")
+        if name in self._tasks and self._tasks[name].enable_watchdog_timers:
+            self._tasks[name].watchdog_timer.set()
 
     def _add_task(self, task_data: TaskData):
         name = task_data.task.get_name()
