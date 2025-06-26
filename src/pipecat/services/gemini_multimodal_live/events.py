@@ -115,6 +115,20 @@ class AudioTranscriptionConfig(BaseModel):
     pass
 
 
+class ContextWindowCompressionConfig(BaseModel):
+    """Configuration for context window compression."""
+
+    sliding_window: Optional[dict] = Field(default=True)
+    trigger_tokens: Optional[int] = Field(default=None)
+
+
+class SessionResumptionConfig(BaseModel):
+    """Configuration for session resumption."""
+
+    transparent: Optional[bool] = Field(default=None)
+    handle: Optional[str] = Field(default=None)
+
+
 class Setup(BaseModel):
     model: str
     system_instruction: Optional[SystemInstruction] = None
@@ -123,6 +137,8 @@ class Setup(BaseModel):
     input_audio_transcription: Optional[AudioTranscriptionConfig] = None
     output_audio_transcription: Optional[AudioTranscriptionConfig] = None
     realtime_input_config: Optional[RealtimeInputConfig] = None
+    context_window_compression: Optional[ContextWindowCompressionConfig] = None
+    session_resumption: Optional[SessionResumptionConfig] = None
 
 
 class Config(BaseModel):
@@ -162,6 +178,11 @@ class ServerContentTurnComplete(BaseModel):
 
 class BidiGenerateContentTranscription(BaseModel):
     text: str
+
+
+class Duration(BaseModel):
+    seconds: int
+    nanos: int
 
 
 class ServerContent(BaseModel):
@@ -214,11 +235,27 @@ class UsageMetadata(BaseModel):
     toolUsePromptTokensDetails: Optional[List[ModalityTokenCount]] = None
 
 
+class GoAway(BaseModel):
+    """Server will not be able to service client soon."""
+
+    timeLeft: str
+
+
+class SessionResumptionUpdate(BaseModel):
+    """Update of the session resumption state. Only sent if BidiGenerateContentSetup.session_resumption was set."""
+
+    newHandle: Optional[str] = None
+    resumable: Optional[bool] = None
+    lastConsumedClientMessageIndex: Optional[int] = None
+
+
 class ServerEvent(BaseModel):
     setupComplete: Optional[SetupComplete] = None
     serverContent: Optional[ServerContent] = None
     toolCall: Optional[ToolCall] = None
     usageMetadata: Optional[UsageMetadata] = None
+    goAway: Optional[GoAway] = None
+    sessionResumptionUpdate: Optional[SessionResumptionUpdate] = None
 
 
 def parse_server_event(str):
@@ -228,10 +265,3 @@ def parse_server_event(str):
     except Exception as e:
         print(f"Error parsing server event: {e}")
         return None
-
-
-class ContextWindowCompressionConfig(BaseModel):
-    """Configuration for context window compression."""
-
-    sliding_window: Optional[bool] = Field(default=True)
-    trigger_tokens: Optional[int] = Field(default=None)
