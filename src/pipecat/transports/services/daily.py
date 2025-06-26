@@ -41,7 +41,6 @@ from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 
 try:
     from daily import (
@@ -252,7 +251,7 @@ class DailyAudioTrack:
     track: CustomAudioTrack
 
 
-class DailyTransportClient(WatchdogReseter, EventHandler):
+class DailyTransportClient(EventHandler):
     """Core client for interacting with Daily's API.
 
     Manages the connection to Daily rooms and handles all low-level API interactions.
@@ -395,10 +394,6 @@ class DailyTransportClient(WatchdogReseter, EventHandler):
         if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
 
-    def reset_watchdog(self):
-        if self._task_manager:
-            self._task_manager.reset_watchdog(asyncio.current_task())
-
     async def setup(self, setup: FrameProcessorSetup):
         if self._task_manager:
             return
@@ -406,7 +401,7 @@ class DailyTransportClient(WatchdogReseter, EventHandler):
         self._task_manager = setup.task_manager
         self._watchdog_timers_enabled = setup.watchdog_timers_enabled
 
-        self._event_queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
+        self._event_queue = WatchdogQueue(self._task_manager)
         self._event_task = self._task_manager.create_task(
             self._callback_task_handler(self._event_queue),
             f"{self}::event_callback_task",
@@ -431,14 +426,14 @@ class DailyTransportClient(WatchdogReseter, EventHandler):
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
         if self._params.audio_in_enabled and not self._audio_task and self._task_manager:
-            self._audio_queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
+            self._audio_queue = WatchdogQueue(self._task_manager)
             self._audio_task = self._task_manager.create_task(
                 self._callback_task_handler(self._audio_queue),
                 f"{self}::audio_callback_task",
             )
 
         if self._params.video_in_enabled and not self._video_task and self._task_manager:
-            self._video_queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
+            self._video_queue = WatchdogQueue(self._task_manager)
             self._video_task = self._task_manager.create_task(
                 self._callback_task_handler(self._video_queue),
                 f"{self}::video_callback_task",

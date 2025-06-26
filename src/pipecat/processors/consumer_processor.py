@@ -32,7 +32,7 @@ class ConsumerProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._transformer = transformer
         self._direction = direction
-        self._queue: WatchdogQueue = producer.add_consumer(self)
+        self._producer = producer
         self._consumer_task: Optional[asyncio.Task] = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -49,6 +49,7 @@ class ConsumerProcessor(FrameProcessor):
 
     async def _start(self, _: StartFrame):
         if not self._consumer_task:
+            self._queue: WatchdogQueue = self._producer.add_consumer()
             self._consumer_task = self.create_task(self._consumer_task_handler())
 
     async def _stop(self, _: EndFrame):

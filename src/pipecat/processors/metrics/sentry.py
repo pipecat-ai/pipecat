@@ -8,9 +8,8 @@ import asyncio
 
 from loguru import logger
 
-from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 
 try:
     import sentry_sdk
@@ -22,7 +21,7 @@ except ModuleNotFoundError as e:
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 
 
-class SentryMetrics(WatchdogReseter, FrameProcessorMetrics):
+class SentryMetrics(FrameProcessorMetrics):
     def __init__(self):
         super().__init__()
         self._ttfb_metrics_tx = None
@@ -32,10 +31,10 @@ class SentryMetrics(WatchdogReseter, FrameProcessorMetrics):
             logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
         self._sentry_task = None
 
-    async def setup(self, task_manager: TaskManager, watchdog_timers_enabled: bool = False):
-        await super().setup(task_manager, watchdog_timers_enabled)
+    async def setup(self, task_manager: BaseTaskManager):
+        await super().setup(task_manager)
         if self._sentry_available:
-            self._sentry_queue = WatchdogQueue(self, watchdog_enabled=watchdog_timers_enabled)
+            self._sentry_queue = WatchdogQueue(task_manager)
             self._sentry_task = self.task_manager.create_task(
                 self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
             )
@@ -48,10 +47,6 @@ class SentryMetrics(WatchdogReseter, FrameProcessorMetrics):
             self._sentry_task = None
             logger.trace(f"{self} Flushing Sentry metrics")
             sentry_sdk.flush(timeout=5.0)
-
-    def reset_watchdog(self):
-        if self._task_manager:
-            self._task_manager.reset_watchdog(asyncio.current_task())
 
     async def start_ttfb_metrics(self, report_only_initial_ttfb):
         await super().start_ttfb_metrics(report_only_initial_ttfb)
