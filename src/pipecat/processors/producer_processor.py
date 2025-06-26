@@ -37,14 +37,14 @@ class ProducerProcessor(FrameProcessor):
         self._passthrough = passthrough
         self._consumers: List[asyncio.Queue] = []
 
-    def add_consumer(self, consumer: FrameProcessor):
+    def add_consumer(self):
         """
         Adds a new consumer and returns its associated queue.
 
         Returns:
             asyncio.Queue: The queue for the newly added consumer.
         """
-        queue = WatchdogQueue(consumer, watchdog_enabled=self.watchdog_timers_enabled)
+        queue = WatchdogQueue(self.task_manager)
         self._consumers.append(queue)
         return queue
 

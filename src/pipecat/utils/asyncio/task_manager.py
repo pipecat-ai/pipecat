@@ -97,11 +97,17 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    def reset_watchdog(self, task: asyncio.Task):
-        """Resets the given task watchdog timer. If not reset, a warning will be
-        logged indicating the task is stalling.
+    def task_reset_watchdog(self):
+        """Resets the running task watchdog timer. If not reset, a warning will
+        be logged indicating the task is stalling.
 
         """
+        pass
+
+    @property
+    @abstractmethod
+    def task_watchdog_enabled(self) -> bool:
+        """Whether the current running task has a watchdog timer enabled."""
         pass
 
 
@@ -253,18 +259,31 @@ class TaskManager(BaseTaskManager):
             logger.critical(f"{name}: fatal base exception while cancelling task: {e}")
             raise
 
+    def reset_watchdog(self, task: asyncio.Task):
+        name = task.get_name()
+        if name in self._tasks and self._tasks[name].enable_watchdog_timers:
+            self._tasks[name].watchdog_timer.set()
+
     def current_tasks(self) -> Sequence[asyncio.Task]:
         """Returns the list of currently created/registered tasks."""
         return [data.task for data in self._tasks.values()]
 
-    def reset_watchdog(self, task: asyncio.Task):
-        """Resets the given task watchdog timer. If not reset on time, a warning
+    def task_reset_watchdog(self):
+        """Resets the running task watchdog timer. If not reset on time, a warning
         will be logged indicating the task is stalling.
 
         """
+        task = asyncio.current_task()
+        if task:
+            self.reset_watchdog(task)
+
+    @property
+    def task_watchdog_enabled(self) -> bool:
+        task = asyncio.current_task()
+        if not task:
+            return False
         name = task.get_name()
-        if name in self._tasks and self._tasks[name].enable_watchdog_timers:
-            self._tasks[name].watchdog_timer.set()
+        return name in self._tasks and self._tasks[name].enable_watchdog_timers
 
     def _add_task(self, task_data: TaskData):
         name = task_data.task.get_name()
