@@ -1,5 +1,6 @@
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Configure logging
@@ -13,7 +14,8 @@ sys.path.insert(0, str(project_root / "src"))
 
 # Project information
 project = "pipecat-ai"
-copyright = "2024, Daily"
+current_year = datetime.now().year
+copyright = f"2024-{current_year}, Daily" if current_year > 2024 else "2024, Daily"
 author = "Daily"
 
 # General configuration
