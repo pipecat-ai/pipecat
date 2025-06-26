@@ -284,9 +284,7 @@ class AWSTranscribeSTTService(STTService):
                 break
 
             try:
-                response = await self._ws_client.recv()
-
-                self.start_watchdog()
+                response = await asyncio.wait_for(self._ws_client.recv(), timeout=1.0)
 
                 headers, payload = decode_event(response)
 
@@ -337,6 +335,8 @@ class AWSTranscribeSTTService(STTService):
                 else:
                     logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
+            except asyncio.TimeoutError:
+                self.reset_watchdog()
             except websockets.exceptions.ConnectionClosed as e:
                 logger.error(
                     f"{self} WebSocket connection closed in receive loop with code {e.code}: {e.reason}"
@@ -345,5 +345,3 @@ class AWSTranscribeSTTService(STTService):
             except Exception as e:
                 logger.error(f"{self} Unexpected error in receive loop: {e}")
                 break
-            finally:
-                self.reset_watchdog()

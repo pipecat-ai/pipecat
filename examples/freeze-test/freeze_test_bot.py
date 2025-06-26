@@ -7,9 +7,11 @@
 import argparse
 import asyncio
 import os
+import random
 from contextlib import asynccontextmanager
 from typing import Any, Dict
 
+import sentry_sdk
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket
@@ -44,6 +46,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
+from pipecat.processors.metrics.sentry import SentryMetrics
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -125,6 +128,7 @@ class SimulateFreezeInput(FrameProcessor):
             self._send_frames_task = None
 
     async def _send_user_text(self, text: str):
+        self.reset_watchdog()
         # Emulation as if the user has spoken and the stt transcribed
         await self.push_frame(UserStartedSpeakingFrame())
         await self.push_frame(StartInterruptionFrame())
@@ -149,14 +153,13 @@ class SimulateFreezeInput(FrameProcessor):
                 logger.debug("SimulateFreezeInput _send_frames")
                 await self._send_user_text("Tell me a brief history of Brazil!")
                 await asyncio.sleep(3)
-                await self._send_user_text("")
-                break
-                # i += 1
-                # if i >= 5:
-                #    break
+                await self._send_user_text("and who has discovered it")
+                i += 1
+                if i >= 20:
+                    break
                 # sleeping 1s before interrupting
-                # wait_time = random.uniform(1, 10)
-                # await asyncio.sleep(wait_time)
+                wait_time = random.uniform(1, 10)
+                await asyncio.sleep(wait_time)
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
@@ -176,6 +179,11 @@ async def run_example(websocket_client):
         ),
     )
 
+    sentry_sdk.init(
+        dsn=os.getenv("SENTRY_DSN"),
+        traces_sample_rate=1.0,
+    )
+
     freeze = SimulateFreezeInput()
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -183,9 +191,13 @@ async def run_example(websocket_client):
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        metrics=SentryMetrics(),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        metrics=SentryMetrics(),
+    )
 
     rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
@@ -247,6 +259,7 @@ async def run_example(websocket_client):
                 },
             ),
         ],
+        enable_watchdog_timers=True,
     )
 
     @transport.event_handler("on_client_connected")

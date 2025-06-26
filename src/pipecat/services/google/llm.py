@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Google Gemini integration for Pipecat.
+
+This module provides Google Gemini integration for the Pipecat framework,
+including LLM services, context management, and message aggregation.
+"""
+
 import base64
 import io
 import json
@@ -47,6 +53,7 @@ from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
 )
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Suppress gRPC fork warnings
@@ -70,7 +77,14 @@ except ModuleNotFoundError as e:
 
 
 class GoogleUserContextAggregator(OpenAIUserContextAggregator):
+    """Google-specific user context aggregator.
+
+    Extends OpenAI user context aggregator to handle Google AI's specific
+    Content and Part message format for user messages.
+    """
+
     async def push_aggregation(self):
+        """Push aggregated user text as a Google Content message."""
         if len(self._aggregation) > 0:
             self._context.add_message(Content(role="user", parts=[Part(text=self._aggregation)]))
 
@@ -87,10 +101,26 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
+    """Google-specific assistant context aggregator.
+
+    Extends OpenAI assistant context aggregator to handle Google AI's specific
+    Content and Part message format for assistant responses and function calls.
+    """
+
     async def handle_aggregation(self, aggregation: str):
+        """Handle aggregated assistant text response.
+
+        Args:
+            aggregation: The aggregated text response from the assistant.
+        """
         self._context.add_message(Content(role="model", parts=[Part(text=aggregation)]))
 
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        """Handle function call in progress frame.
+
+        Args:
+            frame: Frame containing function call details.
+        """
         self._context.add_message(
             Content(
                 role="model",
@@ -119,6 +149,11 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
         )
 
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        """Handle function call result frame.
+
+        Args:
+            frame: Frame containing function call result.
+        """
         if frame.result:
             await self._update_function_call_result(
                 frame.function_name, frame.tool_call_id, frame.result
@@ -129,6 +164,11 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
             )
 
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        """Handle function call cancellation frame.
+
+        Args:
+            frame: Frame containing function call cancellation details.
+        """
         await self._update_function_call_result(
             frame.function_name, frame.tool_call_id, "CANCELLED"
         )
@@ -143,6 +183,11 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
                         part.function_response.response = {"value": json.dumps(result)}
 
     async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        """Handle user image frame.
+
+        Args:
+            frame: Frame containing user image data and request context.
+        """
         await self._update_function_call_result(
             frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
         )
@@ -156,17 +201,45 @@ class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
 
 @dataclass
 class GoogleContextAggregatorPair:
+    """Pair of Google context aggregators for user and assistant messages.
+
+    Parameters:
+        _user: User context aggregator for handling user messages.
+        _assistant: Assistant context aggregator for handling assistant responses.
+    """
+
     _user: GoogleUserContextAggregator
     _assistant: GoogleAssistantContextAggregator
 
     def user(self) -> GoogleUserContextAggregator:
+        """Get the user context aggregator.
+
+        Returns:
+            The user context aggregator instance.
+        """
         return self._user
 
     def assistant(self) -> GoogleAssistantContextAggregator:
+        """Get the assistant context aggregator.
+
+        Returns:
+            The assistant context aggregator instance.
+        """
         return self._assistant
 
 
 class GoogleLLMContext(OpenAILLMContext):
+    """Google AI LLM context that extends OpenAI context for Google-specific formatting.
+
+    This class handles conversion between OpenAI-style messages and Google AI's
+    Content/Part format, including system messages, function calls, and media.
+
+    Args:
+        messages: Initial messages in OpenAI format.
+        tools: Available tools/functions for the model.
+        tool_choice: Tool choice configuration.
+    """
+
     def __init__(
         self,
         messages: Optional[List[dict]] = None,
@@ -178,6 +251,14 @@ class GoogleLLMContext(OpenAILLMContext):
 
     @staticmethod
     def upgrade_to_google(obj: OpenAILLMContext) -> "GoogleLLMContext":
+        """Upgrade an OpenAI context to a Google context.
+
+        Args:
+            obj: OpenAI LLM context to upgrade.
+
+        Returns:
+            GoogleLLMContext instance with converted messages.
+        """
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, GoogleLLMContext):
             logger.debug(f"Upgrading to Google: {obj}")
             obj.__class__ = GoogleLLMContext
@@ -185,10 +266,20 @@ class GoogleLLMContext(OpenAILLMContext):
         return obj
 
     def set_messages(self, messages: List):
+        """Set messages and restructure them for Google format.
+
+        Args:
+            messages: List of messages to set.
+        """
         self._messages[:] = messages
         self._restructure_from_openai_messages()
 
     def add_messages(self, messages: List):
+        """Add messages to the context, converting to Google format as needed.
+
+        Args:
+            messages: List of messages to add (can be mixed formats).
+        """
         # Convert each message individually
         converted_messages = []
         for msg in messages:
@@ -205,6 +296,11 @@ class GoogleLLMContext(OpenAILLMContext):
         self._messages.extend(converted_messages)
 
     def get_messages_for_logging(self):
+        """Get messages formatted for logging with sensitive data redacted.
+
+        Returns:
+            List of message dictionaries with inline data redacted.
+        """
         msgs = []
         for message in self.messages:
             obj = message.to_json_dict()
@@ -221,6 +317,14 @@ class GoogleLLMContext(OpenAILLMContext):
     def add_image_frame_message(
         self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
     ):
+        """Add an image message to the context.
+
+        Args:
+            format: Image format (e.g., 'RGB', 'RGBA').
+            size: Image dimensions as (width, height).
+            image: Raw image bytes.
+            text: Optional text to accompany the image.
+        """
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
 
@@ -234,6 +338,12 @@ class GoogleLLMContext(OpenAILLMContext):
     def add_audio_frames_message(
         self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
     ):
+        """Add audio frames as a message to the context.
+
+        Args:
+            audio_frames: List of audio frames to add.
+            text: Text description of the audio content.
+        """
         if not audio_frames:
             return
 
@@ -447,17 +557,37 @@ class GoogleLLMContext(OpenAILLMContext):
 
 
 class GoogleLLMService(LLMService):
-    """This class implements inference with Google's AI models.
+    """Google AI (Gemini) LLM service implementation.
 
-    This service translates internally from OpenAILLMContext to the messages format
-    expected by the Google AI model. We are using the OpenAILLMContext as a lingua
-    franca for all LLM services, so that it is easy to switch between different LLMs.
+    This class implements inference with Google's AI models, translating internally
+    from OpenAILLMContext to the messages format expected by the Google AI model.
+    We use OpenAILLMContext as a lingua franca for all LLM services to enable
+    easy switching between different LLMs.
+
+    Args:
+        api_key: Google AI API key for authentication.
+        model: Model name to use. Defaults to "gemini-2.0-flash".
+        params: Input parameters for the model.
+        system_instruction: System instruction/prompt for the model.
+        tools: List of available tools/functions.
+        tool_config: Configuration for tool usage.
+        **kwargs: Additional arguments passed to parent class.
     """
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
 
     class InputParams(BaseModel):
+        """Input parameters for Google AI models.
+
+        Parameters:
+            max_tokens: Maximum number of tokens to generate.
+            temperature: Sampling temperature between 0.0 and 2.0.
+            top_k: Top-k sampling parameter.
+            top_p: Top-p sampling parameter between 0.0 and 1.0.
+            extra: Additional parameters as a dictionary.
+        """
+
         max_tokens: Optional[int] = Field(default=4096, ge=1)
         temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
         top_k: Optional[int] = Field(default=None, ge=0)
@@ -494,6 +624,11 @@ class GoogleLLMService(LLMService):
         self._tool_config = tool_config
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate usage metrics.
+
+        Returns:
+            True, as Google AI provides token usage metrics.
+        """
         return True
 
     def _create_client(self, api_key: str):
@@ -557,7 +692,7 @@ class GoogleLLMService(LLMService):
             )
 
             function_calls = []
-            async for chunk in response:
+            async for chunk in WatchdogAsyncIterator(response, manager=self.task_manager):
                 # Stop TTFB metrics after the first chunk
                 await self.stop_ttfb_metrics()
                 if chunk.usage_metadata:
@@ -650,6 +785,12 @@ class GoogleLLMService(LLMService):
             await self.push_frame(LLMFullResponseEndFrame())
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle different frame types.
+
+        Args:
+            frame: The frame to process.
+            direction: Direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         context = None
@@ -678,16 +819,15 @@ class GoogleLLMService(LLMService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> GoogleContextAggregatorPair:
-        """Create an instance of GoogleContextAggregatorPair from an
-        OpenAILLMContext. Constructor keyword arguments for both the user and
-        assistant aggregators can be provided.
+        """Create Google-specific context aggregators.
+
+        Creates a pair of context aggregators optimized for Google's message format,
+        including support for function calls, tool usage, and image handling.
 
         Args:
-            context (OpenAILLMContext): The LLM context.
-            user_params (LLMUserAggregatorParams, optional): User aggregator
-                parameters.
-            assistant_params (LLMAssistantAggregatorParams, optional): User
-                aggregator parameters.
+            context: The LLM context to create aggregators for.
+            user_params: Parameters for user message aggregation.
+            assistant_params: Parameters for assistant message aggregation.
 
         Returns:
             GoogleContextAggregatorPair: A pair of context aggregators, one for

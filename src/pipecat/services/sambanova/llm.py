@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""SambaNova LLM service implementation using OpenAI-compatible interface."""
+
 import json
 from typing import Any, Dict, List, Optional
 
@@ -18,17 +20,20 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
 class SambaNovaLLMService(OpenAILLMService):  # type: ignore
     """A service for interacting with SambaNova using the OpenAI-compatible interface.
+
     This service extends OpenAILLMService to connect to SambaNova's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
+
     Args:
-        api_key (str): The API key for accessing SambaNova API.
-        model (str, optional): The model identifier to use. Defaults to "Meta-Llama-3.3-70B-Instruct".
-        base_url (str, optional): The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
+        api_key: The API key for accessing SambaNova API.
+        model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
+        base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
         **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
@@ -48,16 +53,31 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         base_url: Optional[str] = None,
         **kwargs: Dict[Any, Any],
     ) -> Any:
-        """Create OpenAI-compatible client for SambaNova API endpoint."""
+        """Create OpenAI-compatible client for SambaNova API endpoint.
 
+        Args:
+            api_key: API key for authentication. If None, uses instance default.
+            base_url: Base URL for the API endpoint. If None, uses instance default.
+            **kwargs: Additional keyword arguments for client configuration.
+
+        Returns:
+            Configured OpenAI-compatible client instance.
+        """
         logger.debug(f"Creating SambaNova client with API {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> Any:
-        """Get chat completions from SambaNova API endpoint."""
+        """Get chat completions from SambaNova API endpoint.
 
+        Args:
+            context: OpenAI LLM context containing tools and configuration.
+            messages: List of chat completion message parameters.
+
+        Returns:
+            Chat completion response stream from SambaNova API.
+        """
         params = {
             "model": self.model_name,
             "stream": True,
@@ -78,8 +98,18 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
     @traced_llm  # type: ignore
     async def _process_context(self, context: OpenAILLMContext) -> AsyncStream[ChatCompletionChunk]:
-        """Redefine this method until SambaNova API introduces indexing in tool calls."""
+        """Process OpenAI LLM context and stream chat completion chunks.
 
+        This method handles the streaming response from SambaNova API, including
+        function call processing and text frame generation. It includes special
+        handling for SambaNova's API limitations with tool call indexing.
+
+        Args:
+            context: OpenAI LLM context containing conversation state and tools.
+
+        Returns:
+            Async stream of chat completion chunks.
+        """
         functions_list = []
         arguments_list = []
         tool_id_list = []
@@ -94,7 +124,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             context
         )
 
-        async for chunk in chunk_stream:
+        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

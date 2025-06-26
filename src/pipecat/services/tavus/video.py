@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
 from pipecat.transports.services.tavus import TavusCallbacks, TavusParams, TavusTransportClient
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 class TavusVideoService(AIService):
@@ -71,7 +72,6 @@ class TavusVideoService(AIService):
         self._resampler = create_default_resampler()
 
         self._audio_buffer = bytearray()
-        self._queue = asyncio.Queue()
         self._send_task: Optional[asyncio.Task] = None
         # This is the custom track destination expected by Tavus
         self._transport_destination: Optional[str] = "stream"
@@ -188,7 +188,7 @@ class TavusVideoService(AIService):
 
     async def _create_send_task(self):
         if not self._send_task:
-            self._queue = asyncio.Queue()
+            self._queue = WatchdogQueue(self.task_manager)
             self._send_task = self.create_task(self._send_task_handler())
 
     async def _cancel_send_task(self):
@@ -217,7 +217,6 @@ class TavusVideoService(AIService):
     async def _send_task_handler(self):
         while True:
             frame = await self._queue.get()
-            self.start_watchdog()
             if isinstance(frame, OutputAudioRawFrame) and self._client:
                 await self._client.write_audio_frame(frame)
-            self.reset_watchdog()
+            self._queue.task_done()

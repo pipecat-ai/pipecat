@@ -9,6 +9,7 @@ import json
 import os
 import time
 
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 # Suppress gRPC fork warnings
@@ -436,7 +437,6 @@ class GoogleSTTService(STTService):
         self._location = location
         self._stream = None
         self._config = None
-        self._request_queue = asyncio.Queue()
         self._streaming_task = None
 
         # Used for keep-alive logic
@@ -683,23 +683,15 @@ class GoogleSTTService(STTService):
             ),
         )
 
+        self._request_queue = asyncio.Queue()
         self._streaming_task = self.create_task(self._stream_audio())
 
     async def _disconnect(self):
         """Clean up streaming recognition resources."""
         if self._streaming_task:
             logger.debug("Disconnecting from Google Speech-to-Text")
-            # Send sentinel value to stop request generator
-            await self._request_queue.put(None)
             await self.cancel_task(self._streaming_task)
             self._streaming_task = None
-            # Clear any remaining items in the queue
-            while not self._request_queue.empty():
-                try:
-                    self._request_queue.get_nowait()
-                    self._request_queue.task_done()
-                except asyncio.QueueEmpty:
-                    break
 
     async def _request_generator(self):
         """Generates requests for the streaming recognize method."""
@@ -714,29 +706,23 @@ class GoogleSTTService(STTService):
             )
 
             while True:
-                try:
-                    audio_data = await self._request_queue.get()
-                    if audio_data is None:  # Sentinel value to stop
-                        break
+                audio_data = await self._request_queue.get()
 
-                    # Check streaming limit
-                    if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
-                        logger.debug("Streaming limit reached, initiating graceful reconnection")
-                        # Instead of immediate reconnection, we'll break and let the stream close naturally
-                        self._last_audio_input = self._audio_input
-                        self._audio_input = []
-                        self._restart_counter += 1
-                        # Put the current audio chunk back in the queue
-                        await self._request_queue.put(audio_data)
-                        break
+                self._request_queue.task_done()
 
-                    self._audio_input.append(audio_data)
-                    yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
-
-                except asyncio.CancelledError:
+                # Check streaming limit
+                if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
+                    logger.debug("Streaming limit reached, initiating graceful reconnection")
+                    # Instead of immediate reconnection, we'll break and let the stream close naturally
+                    self._last_audio_input = self._audio_input
+                    self._audio_input = []
+                    self._restart_counter += 1
+                    # Put the current audio chunk back in the queue
+                    await self._request_queue.put(audio_data)
                     break
-                finally:
-                    self._request_queue.task_done()
+
+                self._audio_input.append(audio_data)
+                yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
 
         except Exception as e:
             logger.error(f"Error in request generator: {e}")
@@ -747,8 +733,6 @@ class GoogleSTTService(STTService):
         try:
             while True:
                 try:
-                    self.start_watchdog()
-
                     if self._request_queue.empty():
                         # wait for 10ms in case we don't have audio
                         await asyncio.sleep(0.01)
@@ -762,8 +746,6 @@ class GoogleSTTService(STTService):
 
                     # Process responses
                     await self._process_responses(streaming_recognize)
-
-                    self.reset_watchdog()
 
                     # If we're here, check if we need to reconnect
                     if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
@@ -779,8 +761,6 @@ class GoogleSTTService(STTService):
 
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
-                finally:
-                    self.reset_watchdog()
 
         except Exception as e:
             logger.error(f"Error in streaming task: {e}")
@@ -804,17 +784,15 @@ class GoogleSTTService(STTService):
     async def _process_responses(self, streaming_recognize):
         """Process streaming recognition responses."""
         try:
-            async for response in streaming_recognize:
-                self.start_watchdog()
-
+            async for response in WatchdogAsyncIterator(
+                streaming_recognize, manager=self.task_manager
+            ):
                 # Check streaming limit
                 if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
                     logger.debug("Stream timeout reached in response processing")
-                    self.reset_watchdog()
                     break
 
                 if not response.results:
-                    self.reset_watchdog()
                     continue
 
                 for result in response.results:
@@ -856,11 +834,8 @@ class GoogleSTTService(STTService):
                                 result=result,
                             )
                         )
-
-                self.reset_watchdog()
         except Exception as e:
             logger.error(f"Error processing Google STT responses: {e}")
-            self.reset_watchdog()
             # Re-raise the exception to let it propagate (e.g. in the case of a
             # timeout, propagate to _stream_audio to reconnect)
             raise

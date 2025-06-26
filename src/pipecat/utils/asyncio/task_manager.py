@@ -8,7 +8,7 @@ import asyncio
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Coroutine, Dict, List, Optional, Sequence
+from typing import Coroutine, Dict, Optional, Sequence
 
 from loguru import logger
 
@@ -18,6 +18,7 @@ WATCHDOG_TIMEOUT = 5.0
 @dataclass
 class TaskManagerParams:
     loop: asyncio.AbstractEventLoop
+    enable_watchdog_timers: bool = False
     enable_watchdog_logging: bool = False
     watchdog_timeout: float = WATCHDOG_TIMEOUT
 
@@ -25,10 +26,6 @@ class TaskManagerParams:
 class BaseTaskManager(ABC):
     @abstractmethod
     def setup(self, params: TaskManagerParams):
-        pass
-
-    @abstractmethod
-    async def cleanup(self):
         pass
 
     @abstractmethod
@@ -42,6 +39,7 @@ class BaseTaskManager(ABC):
         name: str,
         *,
         enable_watchdog_logging: Optional[bool] = None,
+        enable_watchdog_timers: Optional[bool] = None,
         watchdog_timeout: Optional[float] = None,
     ) -> asyncio.Task:
         """
@@ -54,6 +52,7 @@ class BaseTaskManager(ABC):
             coroutine (Coroutine): The coroutine to be executed within the task.
             name (str): The name to assign to the task for identification.
             enable_watchdog_logging(bool): whether this task should log watchdog processing times.
+            enable_watchdog_timers(bool): whether this task should have a watchdog timer.
             watchdog_timeout(float): watchdog timer timeout for this task.
 
         Returns:
@@ -98,49 +97,38 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    def start_watchdog(self, task: asyncio.Task):
-        """Starts the given task watchdog timer. If not reset, a warning will be
-        logged indicating the task is stalling.
+    def task_reset_watchdog(self):
+        """Resets the running task watchdog timer. If not reset, a warning will
+        be logged indicating the task is stalling.
 
         """
         pass
 
+    @property
     @abstractmethod
-    def reset_watchdog(self, task: asyncio.Task):
-        """Resets the given task watchdog timer. If not reset, a warning will be
-        logged indicating the task is stalling.
-
-        """
+    def task_watchdog_enabled(self) -> bool:
+        """Whether the current running task has a watchdog timer enabled."""
         pass
 
 
 @dataclass
 class TaskData:
     task: asyncio.Task
-    watchdog_start: asyncio.Event
     watchdog_timer: asyncio.Event
     enable_watchdog_logging: bool
+    enable_watchdog_timers: bool
     watchdog_timeout: float
+    watchdog_task: Optional[asyncio.Task]
 
 
 class TaskManager(BaseTaskManager):
     def __init__(self) -> None:
         self._tasks: Dict[str, TaskData] = {}
         self._params: Optional[TaskManagerParams] = None
-        self._watchdog_tasks: List[asyncio.Task] = []
 
     def setup(self, params: TaskManagerParams):
         if not self._params:
             self._params = params
-
-    async def cleanup(self):
-        for task in self._watchdog_tasks:
-            try:
-                task.cancel()
-                await task
-            except asyncio.CancelledError:
-                # This is expected, no need to re-raise.
-                pass
 
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
         if not self._params:
@@ -153,6 +141,7 @@ class TaskManager(BaseTaskManager):
         name: str,
         *,
         enable_watchdog_logging: Optional[bool] = None,
+        enable_watchdog_timers: Optional[bool] = None,
         watchdog_timeout: Optional[float] = None,
     ) -> asyncio.Task:
         """
@@ -165,6 +154,7 @@ class TaskManager(BaseTaskManager):
             coroutine (Coroutine): The coroutine to be executed within the task.
             name (str): The name to assign to the task for identification.
             enable_watchdog_logging(bool): whether this task should log watchdog processing time.
+            enable_watchdog_timers(bool): whether this task should have a watchdog timer.
             watchdog_timeout(float): watchdog timer timeout for this task.
 
         Returns:
@@ -186,20 +176,26 @@ class TaskManager(BaseTaskManager):
 
         task = self._params.loop.create_task(run_coroutine())
         task.set_name(name)
+        task.add_done_callback(self._task_done_handler)
         self._add_task(
             TaskData(
                 task=task,
-                watchdog_start=asyncio.Event(),
                 watchdog_timer=asyncio.Event(),
                 enable_watchdog_logging=(
                     enable_watchdog_logging
                     if enable_watchdog_logging
                     else self._params.enable_watchdog_logging
                 ),
+                enable_watchdog_timers=(
+                    enable_watchdog_timers
+                    if enable_watchdog_timers
+                    else self._params.enable_watchdog_timers
+                ),
                 watchdog_timeout=(
                     watchdog_timeout if watchdog_timeout else self._params.watchdog_timeout
                 ),
-            )
+                watchdog_task=None,
+            ),
         )
         logger.trace(f"{name}: task created")
         return task
@@ -230,8 +226,6 @@ class TaskManager(BaseTaskManager):
             raise
         except Exception as e:
             logger.exception(f"{name}: unexpected exception while stopping task: {e}")
-        finally:
-            self._remove_task(task)
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Cancels the given asyncio Task and awaits its completion with an
@@ -264,82 +258,69 @@ class TaskManager(BaseTaskManager):
         except BaseException as e:
             logger.critical(f"{name}: fatal base exception while cancelling task: {e}")
             raise
-        finally:
-            self._remove_task(task)
+
+    def reset_watchdog(self, task: asyncio.Task):
+        name = task.get_name()
+        if name in self._tasks and self._tasks[name].enable_watchdog_timers:
+            self._tasks[name].watchdog_timer.set()
 
     def current_tasks(self) -> Sequence[asyncio.Task]:
         """Returns the list of currently created/registered tasks."""
         return [data.task for data in self._tasks.values()]
 
-    def start_watchdog(self, task: asyncio.Task):
-        """Starts the given task watchdog timer. If not reset, a warning will be
-        logged indicating the task is stalling. If the timer was already started
-        a warning will be logged.
+    def task_reset_watchdog(self):
+        """Resets the running task watchdog timer. If not reset on time, a warning
+        will be logged indicating the task is stalling.
 
         """
-        name = task.get_name()
-        if name in self._tasks:
-            if self._tasks[name].watchdog_start.is_set():
-                logger.warning(f"Watchdog timer for task {name} already started")
-            else:
-                self._tasks[name].watchdog_timer.clear()
-                self._tasks[name].watchdog_start.set()
-        else:
-            logger.warning(f"Unable to start watchdog timer: task {name} does not exist")
+        task = asyncio.current_task()
+        if task:
+            self.reset_watchdog(task)
 
-    def reset_watchdog(self, task: asyncio.Task):
-        """Resets the given task watchdog timer. If not reset, a warning will be
-        logged indicating the task is stalling.
-
-        """
+    @property
+    def task_watchdog_enabled(self) -> bool:
+        task = asyncio.current_task()
+        if not task:
+            return False
         name = task.get_name()
-        if name in self._tasks:
-            self._tasks[name].watchdog_start.clear()
-            self._tasks[name].watchdog_timer.set()
-        else:
-            logger.warning(f"Unable to reset watchdog timer: task {name} does not exist")
+        return name in self._tasks and self._tasks[name].enable_watchdog_timers
 
     def _add_task(self, task_data: TaskData):
         name = task_data.task.get_name()
         self._tasks[name] = task_data
-        watchdog_task = self.get_event_loop().create_task(
-            self._watchdog_task_handler(self._tasks[name])
-        )
-        self._watchdog_tasks.append(watchdog_task)
-
-    def _remove_task(self, task: asyncio.Task):
-        name = task.get_name()
-        try:
-            del self._tasks[name]
-        except KeyError as e:
-            logger.trace(f"{name}: unable to remove task (already removed?): {e}")
+        if self._params and task_data.enable_watchdog_timers:
+            watchdog_task = self.get_event_loop().create_task(
+                self._watchdog_task_handler(task_data)
+            )
+            task_data.watchdog_task = watchdog_task
 
     async def _watchdog_task_handler(self, task_data: TaskData):
         name = task_data.task.get_name()
-        start = task_data.watchdog_start
         timer = task_data.watchdog_timer
         enable_watchdog_logging = task_data.enable_watchdog_logging
         watchdog_timeout = task_data.watchdog_timeout
 
-        async def wait_for_reset():
-            waiting = True
-            while waiting:
-                try:
-                    start_time = time.time()
-                    await asyncio.wait_for(timer.wait(), timeout=watchdog_timeout)
-                    total_time = time.time() - start_time
-                    if enable_watchdog_logging:
-                        logger.debug(f"{name} task processing time: {total_time:.20f}")
-                    waiting = False
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        f"{name}: task is taking too long {WATCHDOG_TIMEOUT} second(s) (forgot to reset watchdog?)"
-                    )
-                finally:
-                    timer.clear()
-
         while True:
-            # Wait for the user to start the watchdog timer.
-            await start.wait()
-            # Now, waiting for the task to finish.
-            await wait_for_reset()
+            try:
+                start_time = time.time()
+                await asyncio.wait_for(timer.wait(), timeout=watchdog_timeout)
+                total_time = time.time() - start_time
+                if enable_watchdog_logging:
+                    logger.debug(f"{name} time between watchdog timer resets: {total_time:.20f}")
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"{name}: task is taking too long {WATCHDOG_TIMEOUT} second(s) (forgot to reset watchdog?)"
+                )
+            finally:
+                timer.clear()
+
+    def _task_done_handler(self, task: asyncio.Task):
+        name = task.get_name()
+        try:
+            task_data = self._tasks[name]
+            if task_data.watchdog_task:
+                task_data.watchdog_task.cancel()
+                task_data.watchdog_task = None
+            del self._tasks[name]
+        except KeyError as e:
+            logger.trace(f"{name}: unable to remove task data (already removed?): {e}")
