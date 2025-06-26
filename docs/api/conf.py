@@ -34,7 +34,7 @@ autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
     "undoc-members": True,
-    "exclude-members": "__weakref__",
+    "exclude-members": "__weakref__,__init__",
     "no-index": True,
     "show-inheritance": True,
 }

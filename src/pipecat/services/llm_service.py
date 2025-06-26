@@ -64,7 +64,7 @@ class FunctionCallResultCallback(Protocol):
 class FunctionCallParams:
     """Parameters for a function call.
 
-    Attributes:
+    Parameters:
         function_name: The name of the function being called.
         tool_call_id: A unique identifier for the function call.
         arguments: The arguments for the function.
@@ -87,7 +87,7 @@ class FunctionCallRegistryItem:
 
     This is what the user registers when calling register_function.
 
-    Attributes:
+    Parameters:
         function_name: The name of the function (None for catch-all handler).
         handler: The handler for processing function call parameters.
         cancel_on_interruption: Whether to cancel the call on interruption.
@@ -104,7 +104,7 @@ class FunctionCallRunnerItem:
 
     The runner executes function calls in order.
 
-    Attributes:
+    Parameters:
         registry_item: The registry item containing handler information.
         function_name: The name of the function.
         tool_call_id: A unique identifier for the function call.
