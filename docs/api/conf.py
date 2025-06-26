@@ -272,6 +272,9 @@ def clean_title(title: str) -> str:
         "playht": "PlayHT",
         "xtts": "XTTS",
         "lmnt": "LMNT",
+        "stt": "STT",
+        "tts": "TTS",
+        "llm": "LLM",
     }
 
     # Check if the entire title is a special case
