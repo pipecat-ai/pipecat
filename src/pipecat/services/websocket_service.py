@@ -33,8 +33,12 @@ class WebsocketService(ABC):
         try:
             if not self._websocket or self._websocket.closed:
                 return False
-            await self._websocket.ping()
+            # Add timeout to ping to prevent hanging
+            await asyncio.wait_for(self._websocket.ping(), timeout=5.0)
             return True
+        except asyncio.TimeoutError:
+            logger.error(f"{self} connection verification timed out")
+            return False
         except Exception as e:
             logger.error(f"{self} connection verification failed: {e}")
             return False
@@ -49,9 +53,24 @@ class WebsocketService(ABC):
             bool: True if reconnection and verification successful, False otherwise
         """
         logger.warning(f"{self} reconnecting (attempt: {attempt_number})")
-        await self._disconnect_websocket()
-        await self._connect_websocket()
-        return await self._verify_connection()
+        try:
+            # Disconnect with timeout
+            await asyncio.wait_for(self._disconnect_websocket(), timeout=5.0)
+        except asyncio.TimeoutError:
+            logger.warning(f"{self} timeout during disconnect for reconnection")
+        except Exception as e:
+            logger.warning(f"{self} error during disconnect for reconnection: {e}")
+            
+        try:
+            # Connect with timeout
+            await asyncio.wait_for(self._connect_websocket(), timeout=10.0)
+            return await self._verify_connection()
+        except asyncio.TimeoutError:
+            logger.error(f"{self} timeout during reconnection")
+            return False
+        except Exception as e:
+            logger.error(f"{self} error during reconnection: {e}")
+            return False
 
     async def _receive_task_handler(self, report_error: Callable[[ErrorFrame], Awaitable[None]]):
         """Handles WebSocket message receiving with automatic retry logic.
