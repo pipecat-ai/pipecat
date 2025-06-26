@@ -123,8 +123,7 @@ select = [
     "D", # Docstring rules
     "I", # Import rules
 ]
-# We ignore D107 because class docstrings already document __init__ parameters
-# and our Sphinx configuration uses napoleon_include_init_with_doc=True
+# Ignore requirement for __init__ docstrings
 ignore = ["D107"]
 
 [tool.ruff.lint.pydocstyle]

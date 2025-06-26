@@ -5,29 +5,31 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.72] - 2025-06-26
 
 ### Added
 
 - Added logging and improved error handling to help diagnose and prevent potential
   Pipeline freezes.
 
+- Added `WatchdogQueue`, `WatchdogPriorityQueue`, `WatchdogEvent` and
+  `WatchdogAsyncIterator`. These helper utilities reset watchdog timers
+  appropriately before they expire. When watchdog timers are disabled, the
+  utilities behave as standard counterparts without side effects.
+
 - Introduce task watchdog timers. Watchdog timers are used to detect if a
-  Pipecat task is taking longer than expected (by default 5 seconds). It is
+  Pipecat task is taking longer than expected (by default 5 seconds). Watchdog
+  timers are disabled by default and can be enabled globally by passing
+  `enable_watchdog_timers` argument to `PipelineTask` constructor. It is
   possible to change the default watchdog timer timeout by using the
-  `watchdog_timeout` constructor argument when creating a `PipelineTask`. With
-  watchdog timers it is also possible to log how long each processing step is
-  taking (e.g. processing an element from a queue inside a task). This is done
-  with the `enable_watchdog_logging` constructor argument when creating a
-  `PipelineTask.` It is also possible to control these two values per each frame
-  processor. That is, you can set set `enable_watchdog_logging` and
+  `watchdog_timeout` argument. You can also log how long it takes to reset the
+  watchdog timers which is done with the `enable_watchdog_logging`. You can
+  control all these settings per each frame processor or even per task. That is,
+  you can set `enable_watchdog_timers`, `enable_watchdog_logging` and
   `watchdog_timeout` when creating any frame processor through their constructor
-  arguments. Finally, you can also set these values per task. So, if you are
-  writing a frame processor that creates multiple tasks and you only want to
-  enable logging for one of them, you can do so by passing the same argument
-  names to the `FrameProcessor.create_task()` function. Note that watchdog
-  timers only work with Pipecat tasks but not if you use `asycio.create_task()`
-  or similar.
+  arguments or when you create a task with `FrameProcessor.create_task()`. Note
+  that watchdog timers only work with Pipecat tasks and will not work if you use
+  `asycio.create_task()` or similar.
 
 - Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
 
@@ -83,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgraded `daily-python` to 0.19.3.
 
 ### Fixed
+
+- Fixed an issue that would cause heartbeat frames to be sent before processors
+  were started.
 
 - Fixed an event loop blocking issue when using `SentryMetrics`.
 

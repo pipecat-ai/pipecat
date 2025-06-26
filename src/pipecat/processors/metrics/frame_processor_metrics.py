@@ -18,7 +18,7 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.base_object import BaseObject
 
 
@@ -31,14 +31,14 @@ class FrameProcessorMetrics(BaseObject):
         self._last_ttfb_time = 0
         self._should_report_ttfb = True
 
-    async def setup(self, task_manager: TaskManager):
+    async def setup(self, task_manager: BaseTaskManager):
         self._task_manager = task_manager
 
     async def cleanup(self):
         await super().cleanup()
 
     @property
-    def task_manager(self) -> TaskManager:
+    def task_manager(self) -> BaseTaskManager:
         return self._task_manager
 
     @property

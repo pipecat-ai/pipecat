@@ -10,6 +10,7 @@ from typing import Awaitable, Callable, Optional
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.producer_processor import ProducerProcessor, identity_transformer
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 class ConsumerProcessor(FrameProcessor):
@@ -31,7 +32,7 @@ class ConsumerProcessor(FrameProcessor):
         super().__init__(**kwargs)
         self._transformer = transformer
         self._direction = direction
-        self._queue: asyncio.Queue = producer.add_consumer()
+        self._producer = producer
         self._consumer_task: Optional[asyncio.Task] = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -48,6 +49,7 @@ class ConsumerProcessor(FrameProcessor):
 
     async def _start(self, _: StartFrame):
         if not self._consumer_task:
+            self._queue: WatchdogQueue = self._producer.add_consumer()
             self._consumer_task = self.create_task(self._consumer_task_handler())
 
     async def _stop(self, _: EndFrame):
@@ -61,7 +63,5 @@ class ConsumerProcessor(FrameProcessor):
     async def _consumer_task_handler(self):
         while True:
             frame = await self._queue.get()
-            self.start_watchdog()
             new_frame = await self._transformer(frame)
             await self.push_frame(new_frame, self._direction)
-            self.reset_watchdog()

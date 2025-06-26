@@ -8,7 +8,8 @@ import asyncio
 
 from loguru import logger
 
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 try:
     import sentry_sdk
@@ -28,13 +29,12 @@ class SentryMetrics(FrameProcessorMetrics):
         self._sentry_available = sentry_sdk.is_initialized()
         if not self._sentry_available:
             logger.warning("Sentry SDK not initialized. Sentry features will be disabled.")
-        self._sentry_queue = asyncio.Queue()
         self._sentry_task = None
 
-    async def setup(self, task_manager: TaskManager):
+    async def setup(self, task_manager: BaseTaskManager):
         await super().setup(task_manager)
         if self._sentry_available:
-            self._sentry_queue = asyncio.Queue()
+            self._sentry_queue = WatchdogQueue(task_manager)
             self._sentry_task = self.task_manager.create_task(
                 self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
             )
@@ -93,3 +93,4 @@ class SentryMetrics(FrameProcessorMetrics):
             if tx:
                 await self.task_manager.get_event_loop().run_in_executor(None, tx.finish)
             running = tx is not None
+            self._sentry_queue.task_done()

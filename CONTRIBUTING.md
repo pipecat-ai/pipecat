@@ -41,36 +41,76 @@ We use Ruff for code linting and formatting. Please ensure your code passes all 
 
 We follow Google-style docstrings with these specific conventions:
 
-- Class docstrings should fully document all parameters used in `__init__`
-- We don't require separate docstrings for `__init__` methods when parameters are documented in the class docstring
-- Property methods should have docstrings explaining their purpose and return value
+**Regular Classes:**
 
-Example of correctly documented class:
+- Class docstring describes the class purpose and documents all `__init__` parameters in an `Args:` section
+- No separate `__init__` docstring needed
+- All public methods must have docstrings with `Args:` and `Returns:` sections as appropriate
+
+**Dataclasses:**
+
+- Class docstring describes the purpose and documents all fields in a `Parameters:` section
+- No `__init__` docstring (auto-generated)
+
+**Properties:**
+
+- Must have docstrings with `Returns:` section
+
+**Abstract Methods:**
+
+- Must have docstrings explaining what subclasses should implement
+
+#### Examples:
 
 ```python
-class MyClass:
-    """Class description.
-
-    Additional details about the class.
+# Regular class
+class MyService(BaseService):
+    """Description of what the service does.
 
     Args:
-        param1: Description of first parameter.
-        param2: Description of second parameter.
+        param1: Description of param1.
+        param2: Description of param2. Defaults to True.
+        **kwargs: Additional arguments passed to parent.
     """
 
-    def __init__(self, param1, param2):
-        # No docstring required here as parameters are documented above
-        self.param1 = param1
-        self.param2 = param2
+    def __init__(self, param1: str, param2: bool = True, **kwargs):
+        # No docstring - parameters documented above
+        super().__init__(**kwargs)
 
     @property
-    def some_property(self) -> str:
-        """Get the formatted property value.
+    def sample_rate(self) -> int:
+        """Get the current sample rate.
 
         Returns:
-            A string representation of the property.
+            The sample rate in Hz.
         """
-        return f"Property: {self.param1}"
+        return self._sample_rate
+
+    async def process_data(self, data: str) -> bool:
+        """Process the provided data.
+
+        Args:
+            data: The data to process.
+
+        Returns:
+            True if processing succeeded.
+        """
+        pass
+
+# Dataclass
+@dataclass
+class ConfigParams:
+    """Configuration parameters for the service.
+
+    Parameters:
+        host: The host address.
+        port: The port number. Defaults to 8080.
+        timeout: Connection timeout in seconds.
+    """
+
+    host: str
+    port: int = 8080
+    timeout: float = 30.0
 ```
 
 # Contributor Covenant Code of Conduct

@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -198,7 +199,7 @@ class RivaSTTService(STTService):
             self._thread_task = self.create_task(self._thread_task_handler())
 
         if not self._response_task:
-            self._response_queue = asyncio.Queue()
+            self._response_queue = WatchdogQueue(self.task_manager)
             self._response_task = self.create_task(self._response_task_handler())
 
     async def stop(self, frame: EndFrame):
@@ -224,13 +225,12 @@ class RivaSTTService(STTService):
             streaming_config=self._config,
         )
         for response in responses:
-            self.start_watchdog()
+            self.reset_watchdog()
             if not response.results:
                 continue
             asyncio.run_coroutine_threadsafe(
                 self._response_queue.put(response), self.get_event_loop()
             )
-            self.reset_watchdog()
 
     async def _thread_task_handler(self):
         try:
@@ -285,9 +285,8 @@ class RivaSTTService(STTService):
     async def _response_task_handler(self):
         while True:
             response = await self._response_queue.get()
-            self.start_watchdog()
             await self._handle_response(response)
-            self.reset_watchdog()
+            self._response_queue.task_done()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         await self.start_ttfb_metrics()
