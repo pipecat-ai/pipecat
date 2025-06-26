@@ -59,9 +59,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
     )
 
-    llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash"
-    )
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash")
 
     try:
         # Github MCP docs: https://github.com/github/github-mcp-server

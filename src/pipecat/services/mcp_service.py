@@ -98,7 +98,7 @@ class MCPClient(BaseObject):
 
         properties = tool_schema["input_schema"].get("properties", {})
         required = tool_schema["input_schema"].get("required", [])
-        
+
         # Only clean properties for Google/Gemini LLM services
         if llm and self._is_google_llm(llm):
             logger.debug(f"Detected Google LLM service, cleaning schema for Gemini compatibility")
