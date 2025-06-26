@@ -18,7 +18,7 @@ from pipecat.metrics.metrics import (
     TTFBMetricsData,
     TTSUsageMetricsData,
 )
-from pipecat.utils.asyncio import TaskManager
+from pipecat.utils.asyncio.task_manager import TaskManager
 from pipecat.utils.base_object import BaseObject
 
 

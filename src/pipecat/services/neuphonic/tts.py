@@ -29,8 +29,8 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     import websockets

@@ -39,8 +39,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
 from pipecat.utils.time import nanoseconds_to_seconds
-from pipecat.utils.watchdog_priority_queue import WatchdogPriorityQueue
 
 BOT_VAD_STOP_SECS = 0.35
 

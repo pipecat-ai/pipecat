@@ -32,8 +32,8 @@ from pipecat.services.tts_service import (
     WordTTSService,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
-from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 # See .env.example for ElevenLabs configuration needed
 try:

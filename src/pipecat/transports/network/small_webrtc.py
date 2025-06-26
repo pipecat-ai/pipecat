@@ -33,7 +33,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     import cv2

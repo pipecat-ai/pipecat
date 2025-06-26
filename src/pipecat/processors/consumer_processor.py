@@ -10,7 +10,7 @@ from typing import Awaitable, Callable, Optional
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.producer_processor import ProducerProcessor, identity_transformer
-from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 class ConsumerProcessor(FrameProcessor):

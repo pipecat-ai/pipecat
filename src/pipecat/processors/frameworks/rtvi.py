@@ -67,8 +67,8 @@ from pipecat.services.llm_service import (
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.string import match_endofsentence
-from pipecat.utils.watchdog_queue import WatchdogQueue
 
 RTVI_PROTOCOL_VERSION = "0.3.0"
 
