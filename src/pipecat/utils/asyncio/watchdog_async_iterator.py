@@ -7,7 +7,7 @@
 import asyncio
 from typing import AsyncIterator, Optional
 
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class WatchdogAsyncIterator:
@@ -21,16 +21,14 @@ class WatchdogAsyncIterator:
         self,
         async_iterable,
         *,
-        reseter: WatchdogReseter,
+        manager: BaseTaskManager,
         timeout: float = 2.0,
-        watchdog_enabled: bool = False,
     ):
         self._async_iterable = async_iterable
-        self._reseter = reseter
+        self._manager = manager
         self._timeout = timeout
         self._iter: Optional[AsyncIterator] = None
         self._current_anext_task: Optional[asyncio.Task] = None
-        self._watchdog_enabled = watchdog_enabled
 
     def __aiter__(self):
         return self
@@ -39,7 +37,7 @@ class WatchdogAsyncIterator:
         if not self._iter:
             self._iter = await self._ensure_async_iterator(self._async_iterable)
 
-        if self._watchdog_enabled:
+        if self._manager.task_watchdog_enabled:
             return await self._watchdog_anext()
         else:
             return await self._iter.__anext__()
@@ -55,14 +53,14 @@ class WatchdogAsyncIterator:
                     timeout=self._timeout,
                 )
 
-                self._reseter.reset_watchdog()
+                self._manager.task_reset_watchdog()
 
                 # The task has finish, so we will create a new one for th next item.
                 self._current_anext_task = None
 
                 return item
             except asyncio.TimeoutError:
-                self._reseter.reset_watchdog()
+                self._manager.task_reset_watchdog()
             except StopAsyncIteration:
                 self._current_anext_task = None
                 raise

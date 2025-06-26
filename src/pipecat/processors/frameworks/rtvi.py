@@ -755,10 +755,10 @@ class RTVIProcessor(FrameProcessor):
 
     async def _start(self, frame: StartFrame):
         if not self._action_task:
-            self._action_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
+            self._action_queue = WatchdogQueue(self.task_manager)
             self._action_task = self.create_task(self._action_task_handler())
         if not self._message_task:
-            self._message_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
+            self._message_queue = WatchdogQueue(self.task_manager)
             self._message_task = self.create_task(self._message_task_handler())
         await self._call_event_handler("on_bot_started")
 

@@ -81,8 +81,8 @@ class SyncParallelPipeline(BasePipeline):
     async def setup(self, setup: FrameProcessorSetup):
         await super().setup(setup)
 
-        self._up_queue = WatchdogQueue(self, watchdog_enabled=setup.watchdog_timers_enabled)
-        self._down_queue = WatchdogQueue(self, watchdog_enabled=setup.watchdog_timers_enabled)
+        self._up_queue = WatchdogQueue(setup.task_manager)
+        self._down_queue = WatchdogQueue(setup.task_manager)
 
         logger.debug(f"Creating {self} pipelines")
         for processors in self._args:

@@ -425,7 +425,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         try:
             audio_iterator = self._client.read_audio_frame()
             async for audio_frame in WatchdogAsyncIterator(
-                audio_iterator, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+                audio_iterator, manager=self.task_manager
             ):
                 if audio_frame:
                     await self.push_audio_frame(audio_frame)
@@ -437,7 +437,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         try:
             video_iterator = self._client.read_video_frame()
             async for video_frame in WatchdogAsyncIterator(
-                video_iterator, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+                video_iterator, manager=self.task_manager
             ):
                 if video_frame:
                     await self.push_video_frame(video_frame)

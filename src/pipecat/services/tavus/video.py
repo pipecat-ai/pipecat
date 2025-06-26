@@ -188,7 +188,7 @@ class TavusVideoService(AIService):
 
     async def _create_send_task(self):
         if not self._send_task:
-            self._queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
+            self._queue = WatchdogQueue(self.task_manager)
             self._send_task = self.create_task(self._send_task_handler())
 
     async def _cancel_send_task(self):

@@ -45,7 +45,6 @@ from pipecat.utils.asyncio.task_manager import (
     TaskManagerParams,
 )
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
@@ -138,7 +137,7 @@ class PipelineTaskSink(FrameProcessor):
         await self._down_queue.put(frame)
 
 
-class PipelineTask(WatchdogReseter, BasePipelineTask):
+class PipelineTask(BasePipelineTask):
     """Manages the execution of a pipeline, handling frame processing and task lifecycle.
 
     It has a couple of event handlers `on_frame_reached_upstream` and
@@ -270,24 +269,28 @@ class PipelineTask(WatchdogReseter, BasePipelineTask):
         self._finished = False
         self._cancelled = False
 
+        # This task maneger will handle all the asyncio tasks created by this
+        # PipelineTask and its frame processors.
+        self._task_manager = task_manager or TaskManager()
+
         # This queue receives frames coming from the pipeline upstream.
-        self._up_queue = WatchdogQueue(self, watchdog_enabled=enable_watchdog_timers)
+        self._up_queue = WatchdogQueue(self._task_manager)
         self._process_up_task: Optional[asyncio.Task] = None
         # This queue receives frames coming from the pipeline downstream.
-        self._down_queue = WatchdogQueue(self, watchdog_enabled=enable_watchdog_timers)
+        self._down_queue = WatchdogQueue(self._task_manager)
         self._process_down_task: Optional[asyncio.Task] = None
         # This queue is the queue used to push frames to the pipeline.
-        self._push_queue = WatchdogQueue(self, watchdog_enabled=enable_watchdog_timers)
+        self._push_queue = WatchdogQueue(self._task_manager)
         self._process_push_task: Optional[asyncio.Task] = None
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
-        self._heartbeat_queue = WatchdogQueue(self, watchdog_enabled=enable_watchdog_timers)
+        self._heartbeat_queue = WatchdogQueue(self._task_manager)
         self._heartbeat_push_task: Optional[asyncio.Task] = None
         self._heartbeat_monitor_task: Optional[asyncio.Task] = None
         # This is the idle queue. When frames are received downstream they are
         # put in the queue. If no frame is received the pipeline is considered
         # idle.
-        self._idle_queue = WatchdogQueue(self, watchdog_enabled=enable_watchdog_timers)
+        self._idle_queue = WatchdogQueue(self._task_manager)
         self._idle_monitor_task: Optional[asyncio.Task] = None
         # This event is used to indicate a finalize frame (e.g. EndFrame,
         # StopFrame) has been received in the down queue.
@@ -304,10 +307,6 @@ class PipelineTask(WatchdogReseter, BasePipelineTask):
         # downstream frames.
         self._sink = PipelineTaskSink(self._down_queue)
         pipeline.link(self._sink)
-
-        # This task maneger will handle all the asyncio tasks created by this
-        # PipelineTask and its frame processors.
-        self._task_manager = task_manager or TaskManager()
 
         # The task observer acts as a proxy to the provided observers. This way,
         # we only need to pass a single observer (using the StartFrame) which
@@ -439,9 +438,6 @@ class PipelineTask(WatchdogReseter, BasePipelineTask):
         elif isinstance(frames, Iterable):
             for frame in frames:
                 await self.queue_frame(frame)
-
-    def reset_watchdog(self):
-        self._task_manager.reset_watchdog(asyncio.current_task())
 
     async def _cancel(self):
         if not self._cancelled:
