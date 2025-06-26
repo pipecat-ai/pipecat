@@ -17,8 +17,8 @@ from pipecat.utils.base_object import BaseObject
 
 try:
     from mcp import ClientSession, StdioServerParameters
-    from mcp.client.session_group import SseServerParameters, StreamableHttpParameters
     from mcp.client.session import ClientSession
+    from mcp.client.session_group import SseServerParameters, StreamableHttpParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamablehttp_client
@@ -81,7 +81,6 @@ class MCPClient(BaseObject):
         tools_schema = await self._register_tools(llm)
         return tools_schema
 
-
     def _convert_mcp_schema_to_pipecat(
         self, tool_name: str, tool_schema: Dict[str, Any]
     ) -> FunctionSchema:
@@ -131,9 +130,7 @@ class MCPClient(BaseObject):
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
             logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
             try:
-                async with self._client(
-                    **self._server_params.model_dump()
-                ) as (read, write):
+                async with self._client(**self._server_params.model_dump()) as (read, write):
                     async with self._session(read, write) as session:
                         await session.initialize()
                         await self._call_tool(session, function_name, arguments, result_callback)
@@ -146,9 +143,7 @@ class MCPClient(BaseObject):
         logger.debug(f"SSE server parameters: {self._server_params}")
         logger.debug("Starting registration of mcp tools")
 
-        async with self._client(
-            **self._server_params.model_dump()
-        ) as (read, write):
+        async with self._client(**self._server_params.model_dump()) as (read, write):
             async with self._session(read, write) as session:
                 await session.initialize()
                 tools_schema = await self._list_tools(session, mcp_tool_wrapper, llm)
@@ -213,9 +208,7 @@ class MCPClient(BaseObject):
             logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
             logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
             try:
-                async with self._client(
-                    **self._server_params.model_dump()
-                ) as (
+                async with self._client(**self._server_params.model_dump()) as (
                     read_stream,
                     write_stream,
                     _,
@@ -231,9 +224,7 @@ class MCPClient(BaseObject):
 
         logger.debug("Starting registration of mcp tools using streamable HTTP")
 
-        async with self._client(
-            **self._server_params.model_dump()
-        ) as (
+        async with self._client(**self._server_params.model_dump()) as (
             read_stream,
             write_stream,
             _,
@@ -286,8 +277,7 @@ class MCPClient(BaseObject):
             try:
                 # Convert the schema
                 function_schema = self._convert_mcp_schema_to_pipecat(
-                    tool_name,
-                    {"description": tool.description, "input_schema": tool.inputSchema}
+                    tool_name, {"description": tool.description, "input_schema": tool.inputSchema}
                 )
 
                 # Register the wrapped function
