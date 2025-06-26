@@ -6,7 +6,7 @@
 
 import asyncio
 
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class WatchdogEvent(asyncio.Event):
@@ -18,18 +18,16 @@ class WatchdogEvent(asyncio.Event):
 
     def __init__(
         self,
-        reseter: WatchdogReseter,
+        manager: BaseTaskManager,
         *,
         timeout: float = 2.0,
-        watchdog_enabled: bool = False,
     ) -> None:
         super().__init__()
-        self._reseter = reseter
+        self._manager = manager
         self._timeout = timeout
-        self._watchdog_enabled = watchdog_enabled
 
     async def wait(self):
-        if self._watchdog_enabled:
+        if self._manager.task_watchdog_enabled:
             return await self._watchdog_wait()
         else:
             return await super().wait()
@@ -38,7 +36,7 @@ class WatchdogEvent(asyncio.Event):
         while True:
             try:
                 await asyncio.wait_for(super().wait(), timeout=self._timeout)
-                self._reseter.reset_watchdog()
+                self._manager.task_reset_watchdog()
                 return True
             except asyncio.TimeoutError:
-                self._reseter.reset_watchdog()
+                self._manager.task_reset_watchdog()

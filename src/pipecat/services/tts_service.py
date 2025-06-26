@@ -505,7 +505,7 @@ class WordTTSService(TTSService):
 
     def _create_words_task(self):
         if not self._words_task:
-            self._words_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
+            self._words_queue = WatchdogQueue(self.task_manager)
             self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
@@ -787,9 +787,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._contexts_queue = WatchdogQueue(
-                self, watchdog_enabled=self.watchdog_timers_enabled
-            )
+            self._contexts_queue = WatchdogQueue(self.task_manager)
             self._contexts: Dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 

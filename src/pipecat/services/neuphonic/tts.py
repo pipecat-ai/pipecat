@@ -222,9 +222,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             self._websocket = None
 
     async def _receive_messages(self):
-        async for message in WatchdogAsyncIterator(
-            self._websocket, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
-        ):
+        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
             if isinstance(message, str):
                 msg = json.loads(message)
                 if msg.get("data", {}).get("audio") is not None:

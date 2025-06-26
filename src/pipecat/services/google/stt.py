@@ -785,7 +785,7 @@ class GoogleSTTService(STTService):
         """Process streaming recognition responses."""
         try:
             async for response in WatchdogAsyncIterator(
-                streaming_recognize, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+                streaming_recognize, manager=self.task_manager
             ):
                 # Check streaming limit
                 if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:

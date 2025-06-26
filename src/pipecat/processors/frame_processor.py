@@ -32,7 +32,6 @@ from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMet
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 from pipecat.utils.base_object import BaseObject
 
 
@@ -49,7 +48,7 @@ class FrameProcessorSetup:
     watchdog_timers_enabled: bool = False
 
 
-class FrameProcessor(WatchdogReseter, BaseObject):
+class FrameProcessor(BaseObject):
     def __init__(
         self,
         *,
@@ -89,7 +88,6 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         self._enable_usage_metrics = False
         self._report_only_initial_ttfb = False
         self._interruption_strategies: List[BaseInterruptionStrategy] = []
-        self._watchdog_timers_enabled = False
 
         # Indicates whether we have received the StartFrame.
         self.__started = False
@@ -147,8 +145,10 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         return self._interruption_strategies
 
     @property
-    def watchdog_timers_enabled(self):
-        return self._watchdog_timers_enabled
+    def task_manager(self) -> BaseTaskManager:
+        if not self._task_manager:
+            raise Exception(f"{self} TaskManager is still not initialized.")
+        return self._task_manager
 
     def can_generate_metrics(self) -> bool:
         return False
@@ -205,7 +205,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
             name = f"{self}::{name}"
         else:
             name = f"{self}::{coroutine.cr_code.co_name}"
-        return self.get_task_manager().create_task(
+        return self.task_manager.create_task(
             coroutine,
             name,
             enable_watchdog_logging=(
@@ -214,7 +214,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
                 else self._enable_watchdog_logging
             ),
             enable_watchdog_timers=(
-                enable_watchdog_timers if enable_watchdog_timers else self.watchdog_timers_enabled
+                enable_watchdog_timers if enable_watchdog_timers else self._enable_watchdog_timers
             ),
             watchdog_timeout=(
                 watchdog_timeout_secs if watchdog_timeout_secs else self._watchdog_timeout_secs
@@ -222,13 +222,13 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         )
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
-        await self.get_task_manager().cancel_task(task, timeout)
+        await self.task_manager.cancel_task(task, timeout)
 
     async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
-        await self.get_task_manager().wait_for_task(task, timeout)
+        await self.task_manager.wait_for_task(task, timeout)
 
     def reset_watchdog(self):
-        self.get_task_manager().reset_watchdog(asyncio.current_task())
+        self.task_manager.task_reset_watchdog()
 
     async def setup(self, setup: FrameProcessorSetup):
         self._clock = setup.clock
@@ -240,7 +240,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
             else setup.watchdog_timers_enabled
         )
         if self._metrics is not None:
-            await self._metrics.setup(self._task_manager, self._watchdog_timers_enabled)
+            await self._metrics.setup(self._task_manager)
 
     async def cleanup(self):
         await super().cleanup()
@@ -255,7 +255,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         logger.debug(f"Linking {self} -> {self._next}")
 
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
-        return self.get_task_manager().get_event_loop()
+        return self.task_manager.get_event_loop()
 
     def set_parent(self, parent: "FrameProcessor"):
         self._parent = parent
@@ -267,11 +267,6 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         if not self._clock:
             raise Exception(f"{self} Clock is still not initialized.")
         return self._clock
-
-    def get_task_manager(self) -> BaseTaskManager:
-        if not self._task_manager:
-            raise Exception(f"{self} TaskManager is still not initialized.")
-        return self._task_manager
 
     async def queue_frame(
         self,
@@ -417,11 +412,9 @@ class FrameProcessor(WatchdogReseter, BaseObject):
         if not self.__input_frame_task:
             self.__should_block_frames = False
             if not self.__input_event:
-                self.__input_event = WatchdogEvent(
-                    self, watchdog_enabled=self.watchdog_timers_enabled
-                )
+                self.__input_event = WatchdogEvent(self.task_manager)
             self.__input_event.clear()
-            self.__input_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
+            self.__input_queue = WatchdogQueue(self.task_manager)
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
@@ -453,7 +446,7 @@ class FrameProcessor(WatchdogReseter, BaseObject):
 
     def __create_push_task(self):
         if not self.__push_frame_task:
-            self.__push_queue = WatchdogQueue(self, watchdog_enabled=self.watchdog_timers_enabled)
+            self.__push_queue = WatchdogQueue(self.task_manager)
             self.__push_frame_task = self.create_task(self.__push_frame_task_handler())
 
     async def __cancel_push_task(self):

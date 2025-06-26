@@ -6,7 +6,7 @@
 
 import asyncio
 
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 class WatchdogPriorityQueue(asyncio.PriorityQueue):
@@ -18,33 +18,31 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
 
     def __init__(
         self,
-        reseter: WatchdogReseter,
+        manager: BaseTaskManager,
         *,
         maxsize: int = 0,
         timeout: float = 2.0,
-        watchdog_enabled: bool = False,
     ) -> None:
         super().__init__(maxsize)
-        self._reseter = reseter
+        self._manager = manager
         self._timeout = timeout
-        self._watchdog_enabled = watchdog_enabled
 
     async def get(self):
-        if self._watchdog_enabled:
+        if self._manager.task_watchdog_enabled:
             return await self._watchdog_get()
         else:
             return await super().get()
 
     def task_done(self):
-        if self._watchdog_enabled:
-            self._reseter.reset_watchdog()
+        if self._manager.task_watchdog_enabled:
+            self._manager.task_reset_watchdog()
         super().task_done()
 
     async def _watchdog_get(self):
         while True:
             try:
                 item = await asyncio.wait_for(super().get(), timeout=self._timeout)
-                self._reseter.reset_watchdog()
+                self._manager.task_reset_watchdog()
                 return item
             except asyncio.TimeoutError:
-                self._reseter.reset_watchdog()
+                self._manager.task_reset_watchdog()

@@ -13,7 +13,6 @@ from attr import dataclass
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
-from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 
 
 @dataclass
@@ -28,7 +27,7 @@ class Proxy:
     observer: BaseObserver
 
 
-class TaskObserver(WatchdogReseter, BaseObserver):
+class TaskObserver(BaseObserver):
     """This is a pipeline frame observer that is meant to be used as a proxy to
     the user provided observers. That is, this is the observer that should be
     passed to the frame processors. Then, every time a frame is pushed this
@@ -54,7 +53,6 @@ class TaskObserver(WatchdogReseter, BaseObserver):
         self._proxies: Optional[Dict[BaseObserver, Proxy]] = (
             None  # Becomes a dict after start() is called
         )
-        self._watchdog_timers_enabled = False
 
     def add_observer(self, observer: BaseObserver):
         # Add the observer to the list.
@@ -81,7 +79,6 @@ class TaskObserver(WatchdogReseter, BaseObserver):
 
     async def start(self, watchdog_timers_enabled: bool = False):
         """Starts all proxy observer tasks."""
-        self._watchdog_timers_enabled = watchdog_timers_enabled
         self._proxies = self._create_proxies(self._observers)
 
     async def stop(self):
@@ -96,14 +93,11 @@ class TaskObserver(WatchdogReseter, BaseObserver):
         for proxy in self._proxies.values():
             await proxy.queue.put(data)
 
-    def reset_watchdog(self):
-        self._task_manager.reset_watchdog(asyncio.current_task())
-
     def _started(self) -> bool:
         return self._proxies is not None
 
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
-        queue = WatchdogQueue(self, watchdog_enabled=self._watchdog_timers_enabled)
+        queue = WatchdogQueue(self._task_manager)
         task = self._task_manager.create_task(
             self._proxy_task_handler(queue, observer),
             f"TaskObserver::{observer}::_proxy_task_handler",
