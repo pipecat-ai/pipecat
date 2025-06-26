@@ -29,11 +29,11 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
-from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 from pipecat.utils.base_object import BaseObject
-from pipecat.utils.watchdog_event import WatchdogEvent
-from pipecat.utils.watchdog_queue import WatchdogQueue
-from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 
 class FrameDirection(Enum):

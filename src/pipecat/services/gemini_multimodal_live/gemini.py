@@ -58,10 +58,10 @@ from pipecat.services.openai.llm import (
     OpenAIUserContextAggregator,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
-from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 from . import events
 

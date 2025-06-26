@@ -8,9 +8,9 @@ import asyncio
 
 from loguru import logger
 
-from pipecat.utils.asyncio import TaskManager
-from pipecat.utils.watchdog_queue import WatchdogQueue
-from pipecat.utils.watchdog_reseter import WatchdogReseter
+from pipecat.utils.asyncio.task_manager import TaskManager
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 
 try:
     import sentry_sdk

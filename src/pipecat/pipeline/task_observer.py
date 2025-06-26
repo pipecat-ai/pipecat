@@ -11,9 +11,9 @@ from typing import Dict, List, Optional
 from attr import dataclass
 
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.utils.asyncio import BaseTaskManager
-from pipecat.utils.watchdog_queue import WatchdogQueue
-from pipecat.utils.watchdog_reseter import WatchdogReseter
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 
 
 @dataclass
