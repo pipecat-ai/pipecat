@@ -27,8 +27,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import BaseTaskManager
-from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from livekit import rtc

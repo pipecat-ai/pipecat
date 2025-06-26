@@ -38,11 +38,16 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.utils.asyncio import WATCHDOG_TIMEOUT, BaseTaskManager, TaskManager, TaskManagerParams
+from pipecat.utils.asyncio.task_manager import (
+    WATCHDOG_TIMEOUT,
+    BaseTaskManager,
+    TaskManager,
+    TaskManagerParams,
+)
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
-from pipecat.utils.watchdog_queue import WatchdogQueue
-from pipecat.utils.watchdog_reseter import WatchdogReseter
 
 HEARTBEAT_SECONDS = 1.0
 HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 10

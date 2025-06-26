@@ -9,7 +9,7 @@ from typing import Awaitable, Callable, List
 
 from pipecat.frames.frames import Frame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 async def identity_transformer(frame: Frame):

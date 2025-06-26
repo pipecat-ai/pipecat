@@ -6,7 +6,7 @@
 
 import asyncio
 
-from pipecat.utils.watchdog_reseter import WatchdogReseter
+from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 
 
 class WatchdogEvent(asyncio.Event):

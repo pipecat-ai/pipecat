@@ -18,8 +18,8 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
-from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
 
 
 class SambaNovaLLMService(OpenAILLMService):  # type: ignore

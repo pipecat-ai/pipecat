@@ -39,9 +39,9 @@ from pipecat.transcriptions.language import Language
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import BaseTaskManager
-from pipecat.utils.watchdog_queue import WatchdogQueue
-from pipecat.utils.watchdog_reseter import WatchdogReseter
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_reseter import WatchdogReseter
 
 try:
     from daily import (

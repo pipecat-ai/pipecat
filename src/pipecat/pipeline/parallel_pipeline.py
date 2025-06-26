@@ -21,7 +21,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.utils.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 class ParallelPipelineSource(FrameProcessor):

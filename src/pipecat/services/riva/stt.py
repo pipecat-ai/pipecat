@@ -21,9 +21,9 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
-from pipecat.utils.watchdog_queue import WatchdogQueue
 
 try:
     import riva.client
