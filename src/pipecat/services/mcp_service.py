@@ -82,13 +82,14 @@ class MCPClient(BaseObject):
         return tools_schema
 
     def _convert_mcp_schema_to_pipecat(
-        self, tool_name: str, tool_schema: Dict[str, Any]
+        self, tool_name: str, tool_schema: Dict[str, Any], llm=None
     ) -> FunctionSchema:
         """Convert an mcp tool schema to Pipecat's FunctionSchema format.
 
         Args:
             tool_name: The name of the tool
             tool_schema: The mcp tool schema
+            llm: The LLM service instance (used to determine if we need Gemini compatibility)
         Returns:
             A FunctionSchema instance
         """
@@ -97,6 +98,11 @@ class MCPClient(BaseObject):
 
         properties = tool_schema["input_schema"].get("properties", {})
         required = tool_schema["input_schema"].get("required", [])
+        
+        # Only clean properties for Google/Gemini LLM services
+        if llm and self._is_google_llm(llm):
+            logger.debug(f"Detected Google LLM service, cleaning schema for Gemini compatibility")
+            properties = self._clean_schema_for_gemini(properties)
 
         schema = FunctionSchema(
             name=tool_name,
