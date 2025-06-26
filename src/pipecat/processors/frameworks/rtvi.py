@@ -1433,7 +1433,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_audio_buffer(message.data)
 
                 case _:
-                    await self._send_error_response(message.id, f"UNSUPPORTED type {message.type}")
+                    await self._send_error_response(message.id, f"Unsupported type {message.type}")
 
         except ValidationError as e:
             await self._send_error_response(message.id, f"Invalid message: {e}")
