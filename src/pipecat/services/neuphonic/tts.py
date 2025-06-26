@@ -233,7 +233,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     await self.push_frame(frame)
 
     async def _keepalive_task_handler(self):
-        KEEPALIVE_SLEEP = 10 if self.watchdog_timers_enabled else 3
+        KEEPALIVE_SLEEP = 10 if self.task_manager.task_watchdog_enabled else 3
         while True:
             self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
