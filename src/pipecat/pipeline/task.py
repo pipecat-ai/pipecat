@@ -647,8 +647,8 @@ class PipelineTask(BasePipelineTask):
 
             if isinstance(frame, StartFrame):
                 await self._call_event_handler("on_pipeline_started", frame)
-                
-                # Start heartbeat tasks now that StartFrame has been processed 
+
+                # Start heartbeat tasks now that StartFrame has been processed
                 # by all processors in the pipeline
                 self._maybe_start_heartbeat_tasks()
             elif isinstance(frame, EndFrame):
