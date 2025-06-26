@@ -18,7 +18,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, StartFrame
-from pipecat.utils.watchdog_async_iterator import WatchdogAsyncIterator
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from av.audio.frame import AudioFrame
