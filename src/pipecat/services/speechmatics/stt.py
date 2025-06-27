@@ -541,15 +541,15 @@ class SpeechmaticsSTTService(STTService):
                     speaker_groups.append([])
             speaker_groups[-1].append(frag)
 
-        # Create SpeechData objects
-        speech_data: list[SpeakerFragments] = []
+        # Create SpeakerFragments objects
+        speaker_fragments: list[SpeakerFragments] = []
         for group in speaker_groups:
             sd = self._get_speaker_fragments_from_fragment_group(group)
             if sd:
-                speech_data.append(sd)
+                speaker_fragments.append(sd)
 
-        # Return the grouped SpeechData objects
-        return speech_data
+        # Return the grouped SpeakerFragments objects
+        return speaker_fragments
 
     def _get_speaker_fragments_from_fragment_group(
         self,
