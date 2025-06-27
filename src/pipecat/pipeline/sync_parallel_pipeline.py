@@ -15,6 +15,7 @@ from pipecat.frames.frames import ControlFrame, EndFrame, Frame, SystemFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 @dataclass
@@ -61,15 +62,30 @@ class SyncParallelPipeline(BasePipeline):
         if len(args) == 0:
             raise Exception(f"SyncParallelPipeline needs at least one argument")
 
+        self._args = args
         self._sinks = []
         self._sources = []
         self._pipelines = []
 
-        self._up_queue = asyncio.Queue()
-        self._down_queue = asyncio.Queue()
+    #
+    # BasePipeline
+    #
+
+    def processors_with_metrics(self) -> List[FrameProcessor]:
+        return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
+
+    #
+    # Frame processor
+    #
+
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+
+        self._up_queue = WatchdogQueue(setup.task_manager)
+        self._down_queue = WatchdogQueue(setup.task_manager)
 
         logger.debug(f"Creating {self} pipelines")
-        for processors in args:
+        for processors in self._args:
             if not isinstance(processors, list):
                 raise TypeError(f"SyncParallelPipeline argument {processors} is not a list")
 
@@ -92,19 +108,6 @@ class SyncParallelPipeline(BasePipeline):
 
         logger.debug(f"Finished creating {self} pipelines")
 
-    #
-    # BasePipeline
-    #
-
-    def processors_with_metrics(self) -> List[FrameProcessor]:
-        return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
-
-    #
-    # Frame processor
-    #
-
-    async def setup(self, setup: FrameProcessorSetup):
-        await super().setup(setup)
         await asyncio.gather(*[s["processor"].setup(setup) for s in self._sources])
         await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
         await asyncio.gather(*[s["processor"].setup(setup) for s in self._sinks])

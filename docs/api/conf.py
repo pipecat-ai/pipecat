@@ -1,5 +1,6 @@
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Configure logging
@@ -13,7 +14,8 @@ sys.path.insert(0, str(project_root / "src"))
 
 # Project information
 project = "pipecat-ai"
-copyright = "2024, Daily"
+current_year = datetime.now().year
+copyright = f"2024-{current_year}, Daily" if current_year > 2024 else "2024, Daily"
 author = "Daily"
 
 # General configuration
@@ -27,15 +29,14 @@ extensions = [
 # Napoleon settings
 napoleon_google_docstring = True
 napoleon_numpy_docstring = False
-napoleon_include_init_with_doc = True
+napoleon_include_init_with_doc = False
 
 # AutoDoc settings
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
-    "special-members": "__init__",
     "undoc-members": True,
-    "exclude-members": "__weakref__",
+    "exclude-members": "__weakref__,__init__",
     "no-index": True,
     "show-inheritance": True,
 }
@@ -145,6 +146,28 @@ autodoc_mock_imports = [
     "transformers.AutoFeatureExtractor",
     # Also add specific classes that are imported
     "AutoFeatureExtractor",
+    # Sentry dependencies
+    "sentry_sdk",
+    # AWS Nova Sonic dependencies
+    "aws_sdk_bedrock_runtime",
+    "aws_sdk_bedrock_runtime.client",
+    "aws_sdk_bedrock_runtime.config",
+    "aws_sdk_bedrock_runtime.models",
+    "smithy_aws_core",
+    "smithy_aws_core.credentials_resolvers",
+    "smithy_aws_core.credentials_resolvers.static",
+    "smithy_aws_core.identity",
+    "smithy_core",
+    "smithy_core.aio",
+    "smithy_core.aio.eventstream",
+    # MCP dependencies (you may already have these)
+    "mcp",
+    "mcp.client",
+    "mcp.client.session_group",
+    "mcp.client.sse",
+    "mcp.client.stdio",
+    "mcp.ClientSession",
+    "mcp.StdioServerParameters",
 ]
 
 # HTML output settings
@@ -249,6 +272,9 @@ def clean_title(title: str) -> str:
         "playht": "PlayHT",
         "xtts": "XTTS",
         "lmnt": "LMNT",
+        "stt": "STT",
+        "tts": "TTS",
+        "llm": "LLM",
     }
 
     # Check if the entire title is a special case
