@@ -12,18 +12,6 @@ from typing import Any, AsyncGenerator, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from loguru import logger
-from speechmatics.rt import (
-    AsyncClient,
-    AudioEncoding,
-    AudioFormat,
-    ConnectionConfig,
-    OperatingPoint,
-    ServerMessageType,
-    TranscriptionConfig,
-    TranscriptResult,
-    __version__,
-)
-from speechmatics.rt._models import ConversationConfig, SpeakerDiarizationConfig
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -36,6 +24,26 @@ from pipecat.frames.frames import (
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+
+try:
+    from speechmatics.rt import (
+        AsyncClient,
+        AudioEncoding,
+        AudioFormat,
+        ConnectionConfig,
+        OperatingPoint,
+        ServerMessageType,
+        TranscriptionConfig,
+        TranscriptResult,
+        __version__,
+    )
+    from speechmatics.rt._models import ConversationConfig, SpeakerDiarizationConfig
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error(
+        "In order to use Speechmatics, you need to `pip install pipecat-ai[speechmatics]`."
+    )
+    raise Exception(f"Missing module: {e}")
 
 
 class AudioBuffer:
