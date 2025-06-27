@@ -307,6 +307,17 @@ class LLMService(AIService):
             return True
         return function_name in self._functions.keys()
 
+    def needs_mcp_clean_schema(self) -> bool:
+        """Check if this LLM service requires MCP schema cleaning.
+
+        Some LLM services have stricter JSON schema validation and require
+        certain properties to be removed or modified for compatibility.
+
+        Returns:
+            True if MCP schemas should be cleaned for this service, False otherwise.
+        """
+        return False
+
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         """Execute a sequence of function calls from the LLM.
 
