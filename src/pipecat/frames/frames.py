@@ -453,8 +453,8 @@ class StartFrame(SystemFrame):
     allow_interruptions: bool = False
     enable_metrics: bool = False
     enable_usage_metrics: bool = False
-    report_only_initial_ttfb: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
+    report_only_initial_ttfb: bool = False
 
 
 @dataclass
@@ -487,16 +487,6 @@ class FatalErrorFrame(ErrorFrame):
     """
 
     fatal: bool = field(default=True, init=False)
-
-
-@dataclass
-class HeartbeatFrame(SystemFrame):
-    """This frame is used by the pipeline task as a mechanism to know if the
-    pipeline is running properly.
-
-    """
-
-    timestamp: int
 
 
 @dataclass
@@ -879,6 +869,16 @@ class StopFrame(ControlFrame):
     """
 
     pass
+
+
+@dataclass
+class HeartbeatFrame(ControlFrame):
+    """This frame is used by the pipeline task as a mechanism to know if the
+    pipeline is running properly.
+
+    """
+
+    timestamp: int
 
 
 @dataclass

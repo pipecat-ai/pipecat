@@ -26,11 +26,12 @@ from pipecat.frames.frames import (
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from fastapi import WebSocket
@@ -70,11 +71,22 @@ class FastAPIWebsocketClient:
         return self._websocket.iter_bytes() if self._is_binary else self._websocket.iter_text()
 
     async def send(self, data: str | bytes):
-        if self._can_send():
-            if self._is_binary:
-                await self._websocket.send_bytes(data)
-            else:
-                await self._websocket.send_text(data)
+        try:
+            if self._can_send():
+                if self._is_binary:
+                    await self._websocket.send_bytes(data)
+                else:
+                    await self._websocket.send_text(data)
+        except Exception as e:
+            logger.error(
+                f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
+            )
+            # For some reason the websocket is disconnected, and we are not able to send data
+            # So let's properly handle it and disconnect the transport
+            if self._websocket.application_state == WebSocketState.DISCONNECTED:
+                logger.warning("Closing already disconnected websocket!")
+                self._closing = True
+                await self.trigger_client_disconnected()
 
     async def disconnect(self):
         self._leave_counter -= 1
@@ -167,7 +179,9 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def _receive_messages(self):
         try:
-            async for message in self._client.receive():
+            async for message in WatchdogAsyncIterator(
+                self._client.receive(), manager=self.task_manager
+            ):
                 if not self._params.serializer:
                     continue
 
