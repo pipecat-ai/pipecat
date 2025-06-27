@@ -53,7 +53,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        base_url=os.getenv("SPEECHMATICS_ENDPOINT", None),
+        base_url=os.getenv("SPEECHMATICS_ENDPOINT", "eu2.rt.speechmatics.com"),
         end_of_utterance_silence_trigger=0.5,
         enable_speaker_diarization=True,
         text_format="<{speaker_id}>{text}</{speaker_id}>",
@@ -77,6 +77,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "Your goal is to demonstrate your capabilities in a succinct way. "
                 "Your output will be converted to audio so don't include special characters in your answers. "
                 "Respond to what the user said in a concise, funny, creative and helpful way. "
+                "Do not give long replies unless stricly necessary. "
                 "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
             ),
         },
