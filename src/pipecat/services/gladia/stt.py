@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -391,8 +392,8 @@ class GladiaSTTService(STTService):
                         await self._send_buffered_audio()
 
                         # Start tasks
-                        self._receive_task = asyncio.create_task(self._receive_task_handler())
-                        self._keepalive_task = asyncio.create_task(self._keepalive_task_handler())
+                        self._receive_task = self.create_task(self._receive_task_handler())
+                        self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
                         # Wait for tasks to complete
                         await asyncio.gather(self._receive_task, self._keepalive_task)
@@ -403,9 +404,9 @@ class GladiaSTTService(STTService):
 
                         # Clean up tasks
                         if self._receive_task:
-                            self._receive_task.cancel()
+                            await self.cancel_task(self._receive_task)
                         if self._keepalive_task:
-                            self._keepalive_task.cancel()
+                            await self.cancel_task(self._keepalive_task)
 
                         # Attempt reconnect using helper
                         if not await self._maybe_reconnect():
@@ -484,9 +485,11 @@ class GladiaSTTService(STTService):
     async def _keepalive_task_handler(self):
         """Send periodic empty audio chunks to keep the connection alive."""
         try:
+            KEEPALIVE_SLEEP = 20 if self.task_manager.task_watchdog_enabled else 3
             while self._connection_active:
-                # Send keepalive every 20 seconds (Gladia times out after 30 seconds)
-                await asyncio.sleep(20)
+                self.reset_watchdog()
+                # Send keepalive (Gladia times out after 30 seconds)
+                await asyncio.sleep(KEEPALIVE_SLEEP)
                 if self._websocket and not self._websocket.closed:
                     # Send an empty audio chunk as keepalive
                     empty_audio = b""
@@ -501,7 +504,7 @@ class GladiaSTTService(STTService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in self._websocket:
+            async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
                 content = json.loads(message)
 
                 # Handle audio chunk acknowledgments
@@ -559,6 +562,8 @@ class GladiaSTTService(STTService):
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
+
+                self.reset_watchdog()
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection
             pass

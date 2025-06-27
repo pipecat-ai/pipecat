@@ -33,6 +33,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     import cv2
@@ -422,7 +423,10 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
     async def _receive_audio(self):
         try:
-            async for audio_frame in self._client.read_audio_frame():
+            audio_iterator = self._client.read_audio_frame()
+            async for audio_frame in WatchdogAsyncIterator(
+                audio_iterator, manager=self.task_manager
+            ):
                 if audio_frame:
                     await self.push_audio_frame(audio_frame)
 
@@ -431,7 +435,10 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
     async def _receive_video(self):
         try:
-            async for video_frame in self._client.read_video_frame():
+            video_iterator = self._client.read_video_frame()
+            async for video_frame in WatchdogAsyncIterator(
+                video_iterator, manager=self.task_manager
+            ):
                 if video_frame:
                     await self.push_video_frame(video_frame)
 

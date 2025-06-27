@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Anthropic AI service integration for Pipecat.
+
+This module provides LLM services and context management for Anthropic's Claude models,
+including support for function calling, vision, and prompt caching features.
+"""
+
 import asyncio
 import base64
 import copy
@@ -46,6 +52,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -58,27 +65,66 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AnthropicContextAggregatorPair:
+    """Pair of context aggregators for Anthropic conversations.
+
+    Encapsulates both user and assistant context aggregators
+    to manage conversation flow and message formatting.
+
+    Parameters:
+        _user: The user context aggregator.
+        _assistant: The assistant context aggregator.
+    """
+
     _user: "AnthropicUserContextAggregator"
     _assistant: "AnthropicAssistantContextAggregator"
 
     def user(self) -> "AnthropicUserContextAggregator":
+        """Get the user context aggregator.
+
+        Returns:
+            The user context aggregator instance.
+        """
         return self._user
 
     def assistant(self) -> "AnthropicAssistantContextAggregator":
+        """Get the assistant context aggregator.
+
+        Returns:
+            The assistant context aggregator instance.
+        """
         return self._assistant
 
 
 class AnthropicLLMService(LLMService):
-    """This class implements inference with Anthropic's AI models.
+    """LLM service for Anthropic's Claude models.
 
-    Can provide a custom client via the `client` kwarg, allowing you to
-    use `AsyncAnthropicBedrock` and `AsyncAnthropicVertex` clients
+    Provides inference capabilities with Claude models including support for
+    function calling, vision processing, streaming responses, and prompt caching.
+    Can use custom clients like AsyncAnthropicBedrock and AsyncAnthropicVertex.
+
+    Args:
+        api_key: Anthropic API key for authentication.
+        model: Model name to use. Defaults to "claude-sonnet-4-20250514".
+        params: Optional model parameters for inference.
+        client: Optional custom Anthropic client instance.
+        **kwargs: Additional arguments passed to parent LLMService.
     """
 
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AnthropicLLMAdapter
 
     class InputParams(BaseModel):
+        """Input parameters for Anthropic model inference.
+
+        Parameters:
+            enable_prompt_caching_beta: Whether to enable beta prompt caching feature.
+            max_tokens: Maximum tokens to generate. Must be at least 1.
+            temperature: Sampling temperature between 0.0 and 1.0.
+            top_k: Top-k sampling parameter.
+            top_p: Top-p sampling parameter between 0.0 and 1.0.
+            extra: Additional parameters to pass to the API.
+        """
+
         enable_prompt_caching_beta: Optional[bool] = False
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
@@ -111,10 +157,20 @@ class AnthropicLLMService(LLMService):
         }
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate usage metrics.
+
+        Returns:
+            True, as Anthropic provides detailed token usage metrics.
+        """
         return True
 
     @property
     def enable_prompt_caching_beta(self) -> bool:
+        """Check if prompt caching beta feature is enabled.
+
+        Returns:
+            True if prompt caching is enabled.
+        """
         return self._enable_prompt_caching_beta
 
     def create_context_aggregator(
@@ -124,22 +180,19 @@ class AnthropicLLMService(LLMService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> AnthropicContextAggregatorPair:
-        """Create an instance of AnthropicContextAggregatorPair from an
-        OpenAILLMContext. Constructor keyword arguments for both the user and
-        assistant aggregators can be provided.
+        """Create Anthropic-specific context aggregators.
+
+        Creates a pair of context aggregators optimized for Anthropic's message format,
+        including support for function calls, tool usage, and image handling.
 
         Args:
-            context (OpenAILLMContext): The LLM context.
-            user_params (LLMUserAggregatorParams, optional): User aggregator
-                parameters.
-            assistant_params (LLMAssistantAggregatorParams, optional): User
-                aggregator parameters.
+            context: The LLM context.
+            user_params: User aggregator parameters.
+            assistant_params: Assistant aggregator parameters.
 
         Returns:
-            AnthropicContextAggregatorPair: A pair of context aggregators, one
-            for the user and one for the assistant, encapsulated in an
-            AnthropicContextAggregatorPair.
-
+            A pair of context aggregators, one for the user and one for the assistant,
+            encapsulated in an AnthropicContextAggregatorPair.
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
@@ -203,7 +256,7 @@ class AnthropicLLMService(LLMService):
             json_accumulator = ""
 
             function_calls = []
-            async for event in response:
+            async for event in WatchdogAsyncIterator(response, manager=self.task_manager):
                 # Aggregate streaming content, create frames, trigger events
 
                 if event.type == "content_block_delta":
@@ -307,6 +360,15 @@ class AnthropicLLMService(LLMService):
             )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and route them appropriately.
+
+        Handles various frame types including context frames, message frames,
+        vision frames, and settings updates.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         context = None
@@ -358,6 +420,19 @@ class AnthropicLLMService(LLMService):
 
 
 class AnthropicLLMContext(OpenAILLMContext):
+    """LLM context specialized for Anthropic's message format and features.
+
+    Extends OpenAILLMContext to handle Anthropic-specific features like
+    system messages, prompt caching, and message format conversions.
+    Manages conversation state and message history formatting.
+
+    Args:
+        messages: Initial list of conversation messages.
+        tools: Available function calling tools.
+        tool_choice: Tool selection preference.
+        system: System message content.
+    """
+
     def __init__(
         self,
         messages: Optional[List[dict]] = None,
@@ -378,6 +453,16 @@ class AnthropicLLMContext(OpenAILLMContext):
 
     @staticmethod
     def upgrade_to_anthropic(obj: OpenAILLMContext) -> "AnthropicLLMContext":
+        """Upgrade an OpenAI context to Anthropic format.
+
+        Converts message format and restructures content for Anthropic compatibility.
+
+        Args:
+            obj: The OpenAI context to upgrade.
+
+        Returns:
+            The upgraded Anthropic context.
+        """
         logger.debug(f"Upgrading to Anthropic: {obj}")
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AnthropicLLMContext):
             obj.__class__ = AnthropicLLMContext
@@ -386,6 +471,14 @@ class AnthropicLLMContext(OpenAILLMContext):
 
     @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
+        """Create Anthropic context from OpenAI context.
+
+        Args:
+            openai_context: The OpenAI context to convert.
+
+        Returns:
+            New Anthropic context with converted messages.
+        """
         self = cls(
             messages=openai_context.messages,
             tools=openai_context.tools,
@@ -397,12 +490,28 @@ class AnthropicLLMContext(OpenAILLMContext):
 
     @classmethod
     def from_messages(cls, messages: List[dict]) -> "AnthropicLLMContext":
+        """Create context from a list of messages.
+
+        Args:
+            messages: List of conversation messages.
+
+        Returns:
+            New Anthropic context with the provided messages.
+        """
         self = cls(messages=messages)
         self._restructure_from_openai_messages()
         return self
 
     @classmethod
     def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
+        """Create context from a vision image frame.
+
+        Args:
+            frame: The vision image frame to process.
+
+        Returns:
+            New Anthropic context with the image message.
+        """
         context = cls()
         context.add_image_frame_message(
             format=frame.format, size=frame.size, image=frame.image, text=frame.text
@@ -410,11 +519,15 @@ class AnthropicLLMContext(OpenAILLMContext):
         return context
 
     def set_messages(self, messages: List):
+        """Set the messages list and reset cache tracking.
+
+        Args:
+            messages: New list of messages to set.
+        """
         self.turns_above_cache_threshold = 0
         self._messages[:] = messages
         self._restructure_from_openai_messages()
 
-    # convert a message in Anthropic format into one or more messages in OpenAI format
     def to_standard_messages(self, obj):
         """Convert Anthropic message format to standard structured format.
 
@@ -555,6 +668,17 @@ class AnthropicLLMContext(OpenAILLMContext):
     def add_image_frame_message(
         self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
     ):
+        """Add an image message to the context.
+
+        Converts the image to base64 JPEG format and adds it as a user message
+        with optional accompanying text.
+
+        Args:
+            format: The image format (e.g., 'RGB', 'RGBA').
+            size: Image dimensions as (width, height).
+            image: Raw image bytes.
+            text: Optional text to accompany the image.
+        """
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
@@ -575,6 +699,14 @@ class AnthropicLLMContext(OpenAILLMContext):
         self.add_message({"role": "user", "content": content})
 
     def add_message(self, message):
+        """Add a message to the context, merging with previous message if same role.
+
+        Anthropic requires alternating roles, so consecutive messages from the same
+        role are merged together.
+
+        Args:
+            message: The message to add to the context.
+        """
         try:
             if self.messages:
                 # Anthropic requires that roles alternate. If this message's role is the same as the
@@ -600,6 +732,14 @@ class AnthropicLLMContext(OpenAILLMContext):
             logger.error(f"Error adding message: {e}")
 
     def get_messages_with_cache_control_markers(self) -> List[dict]:
+        """Get messages with prompt caching markers applied.
+
+        Adds cache control markers to appropriate messages based on the
+        number of turns above the cache threshold.
+
+        Returns:
+            List of messages with cache control markers added.
+        """
         try:
             messages = copy.deepcopy(self.messages)
             if self.turns_above_cache_threshold >= 1 and messages[-1]["role"] == "user":
@@ -667,12 +807,26 @@ class AnthropicLLMContext(OpenAILLMContext):
                 message["content"] = [{"type": "text", "text": "(empty)"}]
 
     def get_messages_for_persistent_storage(self):
+        """Get messages formatted for persistent storage.
+
+        Includes system message at the beginning if present.
+
+        Returns:
+            List of messages suitable for storage.
+        """
         messages = super().get_messages_for_persistent_storage()
         if self.system:
             messages.insert(0, {"role": "system", "content": self.system})
         return messages
 
     def get_messages_for_logging(self) -> str:
+        """Get messages formatted for logging with sensitive data redacted.
+
+        Replaces image data with placeholder text for cleaner logs.
+
+        Returns:
+            JSON string representation of messages for logging.
+        """
         msgs = []
         for message in self.messages:
             msg = copy.deepcopy(message)
@@ -686,6 +840,12 @@ class AnthropicLLMContext(OpenAILLMContext):
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
+    """Anthropic-specific user context aggregator.
+
+    Handles aggregation of user messages for Anthropic LLM services.
+    Inherits all functionality from the base LLMUserContextAggregator.
+    """
+
     pass
 
 
@@ -700,7 +860,20 @@ class AnthropicUserContextAggregator(LLMUserContextAggregator):
 
 
 class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
+    """Context aggregator for assistant messages in Anthropic conversations.
+
+    Handles function call lifecycle management including in-progress tracking,
+    result handling, and cancellation for Anthropic's tool use format.
+    """
+
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        """Handle a function call that is starting.
+
+        Creates tool use message and placeholder tool result for tracking.
+
+        Args:
+            frame: Frame containing function call details.
+        """
         assistant_message = {"role": "assistant", "content": []}
         assistant_message["content"].append(
             {
@@ -725,6 +898,13 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
         )
 
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        """Handle the result of a completed function call.
+
+        Updates the tool result with actual return value or completion status.
+
+        Args:
+            frame: Frame containing function call result.
+        """
         if frame.result:
             result = json.dumps(frame.result)
             await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
@@ -734,6 +914,13 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
             )
 
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        """Handle cancellation of a function call.
+
+        Updates the tool result to indicate cancellation.
+
+        Args:
+            frame: Frame containing function call cancellation details.
+        """
         await self._update_function_call_result(
             frame.function_name, frame.tool_call_id, "CANCELLED"
         )
@@ -752,6 +939,14 @@ class AnthropicAssistantContextAggregator(LLMAssistantContextAggregator):
                         content["content"] = result
 
     async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        """Handle a user image frame with function call context.
+
+        Marks the associated function call as completed and adds the image
+        to the conversation context.
+
+        Args:
+            frame: User image frame with request context.
+        """
         await self._update_function_call_result(
             frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
         )
