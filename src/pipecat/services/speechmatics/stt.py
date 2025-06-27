@@ -7,7 +7,7 @@
 import asyncio
 import datetime
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
@@ -39,7 +39,16 @@ from pipecat.utils.time import time_now_iso8601
 
 
 class AudioBuffer:
-    """Audio buffer for STT clients."""
+    """Audio buffer for STT clients.
+
+    The Python SDK expects audio in a pre-defined number of frames. This
+    buffer will accumulate the data from the pipeline and provide it to the
+    STT client in the correct lengths, waiting for the number of frames to
+    be available.
+
+    Args:
+        maxsize: Maximum size of the buffer.
+    """
 
     def __init__(self, maxsize: int = 0):
         self._queue = asyncio.Queue(maxsize=maxsize)
@@ -48,7 +57,11 @@ class AudioBuffer:
         self._closed = False
 
     def write_audio(self, data: bytes) -> None:
-        """Write audio data to the buffer (thread-safe)."""
+        """Write audio data to the buffer (thread-safe).
+
+        Args:
+            data: Audio data to write.
+        """
         if data:
             try:
                 self._queue.put_nowait(data)
@@ -56,7 +69,22 @@ class AudioBuffer:
                 pass
 
     async def read(self, size: int) -> bytes:
-        """Read exactly `size` bytes from the buffer."""
+        """Read exactly `size` bytes from the buffer (thread-safe).
+
+        This process will block until the required number of bytes are available
+        in the buffer. Audio is received from the pipeline in varying sizes, so
+        this buffer will accumulate the data and provide it to the STT client in
+        the correct lengths, waiting for the number of frames to be available.
+
+        Calling stop() will close the buffer and release the blocking read
+        process.
+
+        Args:
+            size: Number of bytes to read.
+
+        Returns:
+            bytes: Audio data read from the buffer.
+        """
         result = b""
         bytes_needed = size
 
@@ -95,27 +123,19 @@ class SpeechFragment:
     Attributes:
         start_time: Start time of the fragment in seconds (from session start).
         end_time: End time of the fragment in seconds (from session start).
-        language: Language of the fragment.
-            Defaults to `en`.
-        is_eos: Whether the fragment is the end of a sentence.
-            Defaults to `False`.
-        is_final: Whether the fragment is the final fragment.
-            Defaults to `False`.
-        attaches_to: Whether the fragment attaches to the previous or next fragment (punctuation).
-            Defaults to empty string.
-        content: Content of the fragment.
-            Defaults to empty string.
-        speaker: Speaker of the fragment (if diarization is enabled).
-            Defaults to `None`.
-        confidence: Confidence of the fragment (0.0 to 1.0).
-            Defaults to `1.0`.
-        result: Raw result of the fragment.
-            Defaults to `None`.
+        language: Language of the fragment. Defaults to `Language.EN`.
+        is_eos: Whether the fragment is the end of a sentence. Defaults to `False`.
+        is_final: Whether the fragment is the final fragment. Defaults to `False`.
+        attaches_to: Whether the fragment attaches to the previous or next fragment (punctuation). Defaults to empty string.
+        content: Content of the fragment. Defaults to empty string.
+        speaker: Speaker of the fragment (if diarization is enabled). Defaults to `None`.
+        confidence: Confidence of the fragment (0.0 to 1.0). Defaults to `1.0`.
+        result: Raw result of the fragment from the TTS.
     """
 
     start_time: float
     end_time: float
-    language: str = "en"
+    language: Language = Language.EN
     is_eos: bool = False
     is_final: bool = False
     attaches_to: str = ""
@@ -126,68 +146,65 @@ class SpeechFragment:
 
 
 @dataclass
-class SpeechFrame(TranscriptionFrame):
-    """TranscriptionFrame with speaker_id.
-
-    This class extends the TranscriptionFrame class with an additional speaker_id
-    attribute used to identify the speaker of the transcription. This is used to
-    add custom markup for the speaker within the transcript for the LLM to use
-    to identify different speakers in a multi-speaker conversation.
+class SpeakerFragments:
+    """SpeechFragment items grouped by speaker_id.
 
     Attributes:
-        text: The text of the frame.
-        user_id: The ID string.
+        speaker_id: The ID of the speaker.
         timestamp: The timestamp of the frame.
         language: The language of the frame.
-        result: The result of the frame.
-        speaker_id: The ID of the speaker.
+        fragments: The list of SpeechFragment items.
     """
 
-    text: str
-    user_id: str
-    timestamp: str
-    language: Optional[Language] = None
-    result: Optional[Any] = None
     speaker_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    language: Optional[Language] = None
+    fragments: list[SpeechFragment] = field(default_factory=list)
 
     def __str__(self):
         """Return a string representation of the object."""
-        return f"{self.name}(user: {self.user_id}, speaker_id: {self.speaker_id}, text: [{self.text}], language: {self.language}, timestamp: {self.timestamp})"
+        return f"SpeakerFragments(speaker_id: {self.speaker_id}, timestamp: {self.timestamp}, language: {self.language}, text: {self._format_text()})"
 
-    def _as_transcription_frame(self, format: Optional[str] = None) -> TranscriptionFrame:
-        """Convert to TranscriptionFrame.
+    def _format_text(self, format: Optional[str] = None) -> str:
+        """Wrap text with speaker ID in an optional f-string format.
 
-        If format is provided and there is a valid speaker id, then the
-        text is wrapped with the speaker id. This will help the LLM understand
-        who spoke what in a multi-speaker conversation.
+        Args:
+            format: Format to wrap the text with.
+
+        Returns:
+            str: The wrapped text.
         """
-        return TranscriptionFrame(
-            text=self._wrap_text(format),
-            user_id=self.user_id,
-            timestamp=self.timestamp,
-            language=self.language,
-            result=self.result,
-        )
+        # Cumulative contents
+        content = ""
 
-    def _as_interim_transcription_frame(self) -> InterimTranscriptionFrame:
-        """Convert to InterimTranscriptionFrame.
+        # Assemble the text
+        for frag in self.fragments:
+            if content == "" or frag.attaches_to == "previous":
+                content += frag.content
+            else:
+                content += " " + frag.content
 
-        Interim transcriptions do not include the speaker id, as this can
-        skew any end of utterance detection (e.g. when including XML tags).
-        """
-        return InterimTranscriptionFrame(
-            text=self.text,
-            user_id=self.user_id,
-            timestamp=self.timestamp,
-            language=self.language,
-            result=self.result,
-        )
-
-    def _wrap_text(self, format: Optional[str] = None) -> str:
-        """Wrap text with speaker ID."""
+        # Format the text, if format is provided
         if format is None or self.speaker_id is None:
-            return self.text
-        return format.format(**{"speaker_id": self.speaker_id, "text": self.text})
+            return content
+        return format.format(**{"speaker_id": self.speaker_id, "text": content})
+
+    def _as_frame_attributes(self, format: Optional[str] = None) -> dict[str, Any]:
+        """Return a dictionary of attributes for a TranscriptionFrame.
+
+        Args:
+            format: Format to wrap the text with.
+
+        Returns:
+            dict[str, Any]: The dictionary of attributes.
+        """
+        return {
+            "text": self._format_text(format),
+            "user_id": self.speaker_id,
+            "timestamp": self.timestamp,
+            "language": self.language,
+            "result": [frag.result for frag in self.fragments],
+        }
 
 
 class SpeechmaticsSTTService(STTService):
@@ -199,32 +216,19 @@ class SpeechmaticsSTTService(STTService):
 
     Args:
         api_key: Speechmatics API key for authentication.
-        language: Language code for transcription.
-            Defaults to `en`.
-        base_url: Base URL for Speechmatics API.
-            Defaults to `eu2.rt.speechmatics.com`.
-        enable_partials: Enable partial transcription results.
-            Defaults to `True`.
-        max_delay: Maximum delay for transcription in seconds.
-            Defaults to `2.0`.
-        sample_rate: Audio sample rate in Hz.
-            Defaults to `16000`.
-        chunk_size: Audio chunk size for streaming.
-            Defaults to `256`.
-        audio_encoding: Audio encoding format.
-            Defaults to `pcm_s16le`.
-        end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection.
-            Defaults to `None`.
-        operating_point: Operating point for transcription accuracy vs. latency tradeoff.
-            Defaults to `enhanced`.
-        enable_speaker_diarization: Enable speaker diarization to identify different speakers.
-            Defaults to `False`.
-        text_format: Wrapper for speaker ID.
-            Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
-        max_speakers: Maximum number of speakers to detect.
-            Defaults to `None` (auto-detect).
-        transcription_config: Custom transcription configuration (other set parameters are merged).
-            Defaults to `None`.
+        language: Language code for transcription. Defaults to `Language.EN`.
+        base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
+        enable_partials: Enable partial transcription results. Defaults to `True`.
+        max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
+        sample_rate: Audio sample rate in Hz. Defaults to `16000`.
+        chunk_size: Audio chunk size for streaming. Defaults to `256`.
+        audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
+        end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
+        operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
+        enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
+        text_format: Wrapper for speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
+        max_speakers: Maximum number of speakers to detect. Defaults to `None` (auto-detect).
+        transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
         **kwargs: Additional arguments passed to STTService.
     """
 
@@ -233,7 +237,7 @@ class SpeechmaticsSTTService(STTService):
         *,
         api_key: str,
         language: Language = Language.EN,
-        base_url: str = "eu2.rt.speechmatics.com",
+        base_url: str = "wss://eu2.rt.speechmatics.com/v2",
         enable_partials: bool = True,
         max_delay: float = 2.0,
         sample_rate: Optional[int] = 16000,
@@ -431,11 +435,14 @@ class SpeechmaticsSTTService(STTService):
             self._speech_fragments.clear()
 
             # Transform frames
-            frames = [frame._as_transcription_frame(self._text_format) for frame in frames]
+            frames = [
+                TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
+                for frame in frames
+            ]
 
         # Return as interim results
         else:
-            frames = [frame._as_interim_transcription_frame() for frame in frames]
+            frames = [InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in frames]
 
         # Send the frames back to pipecat
         for frame in frames:
@@ -472,7 +479,7 @@ class SpeechmaticsSTTService(STTService):
                 fragment = SpeechFragment(
                     start_time=result.get("start_time", 0),
                     end_time=result.get("end_time", 0),
-                    language=alt.get("language", "en"),
+                    language=alt.get("language", Language.EN),
                     is_eos=alt.get("is_eos", False),
                     is_final=is_final,
                     attaches_to=result.get("attaches_to", ""),
@@ -502,17 +509,17 @@ class SpeechmaticsSTTService(STTService):
         # Data was updated
         return True
 
-    def _get_frames_from_fragments(self) -> list[SpeechFrame]:
+    def _get_frames_from_fragments(self) -> list[SpeakerFragments]:
         """Get speech data objects for the current fragment list.
 
         Each speech fragments is grouped by contiguous speaker and then
-        returned as internal SpeechFrame objects with the `speaker_id` field
+        returned as internal SpeakerFragments objects with the `speaker_id` field
         set to the current speaker (string). An utterance may contain speech from
         more than one speaker (e.g. S1, S2, S1, S3, ...), so they are kept
         in strict order for the context of the conversation.
 
         Returns:
-            list[SpeechFrame]: The list of objects.
+            list[SpeakerFragments]: The list of objects.
         """
         # Speaker groups
         current_speaker: str | None = None
@@ -527,20 +534,20 @@ class SpeechmaticsSTTService(STTService):
             speaker_groups[-1].append(frag)
 
         # Create SpeechData objects
-        speech_data: list[SpeechFrame] = []
+        speech_data: list[SpeakerFragments] = []
         for group in speaker_groups:
-            sd = self._get_speech_data_from_fragment_group(group)
+            sd = self._get_speaker_fragments_from_fragment_group(group)
             if sd:
                 speech_data.append(sd)
 
         # Return the grouped SpeechData objects
         return speech_data
 
-    def _get_speech_data_from_fragment_group(
+    def _get_speaker_fragments_from_fragment_group(
         self,
         group: list[SpeechFragment],
-    ) -> SpeechFrame | None:
-        """Take a group of fragments and piece together into a SpeechFrame.
+    ) -> SpeakerFragments | None:
+        """Take a group of fragments and piece together into SpeakerFragments.
 
         Each fragment for a given speaker is assembled into a string,
         taking into consideration whether words are attached to the
@@ -549,8 +556,11 @@ class SpeechmaticsSTTService(STTService):
         any straggling punctuation from earlier utterances that should
         be removed.
 
+        Args:
+            group: List of SpeechFragment objects.
+
         Returns:
-            SpeechFrame: The object for the group.
+            SpeakerFragments: The object for the group.
         """
         # Check for starting fragments that are attached to previous
         if group and group[0].attaches_to == "previous":
@@ -566,20 +576,6 @@ class SpeechmaticsSTTService(STTService):
 
         # Get the timing extremes
         start_time = min(frag.start_time for frag in group)
-        end_time = max(frag.end_time for frag in group)
-        avg_confidence = sum(frag.confidence for frag in group) / len(group)
-
-        # Cumulative contents
-        content = ""
-        results: list[Any] = []
-
-        # Assemble the text
-        for frag in group:
-            if content == "" or frag.attaches_to == "previous":
-                content += frag.content
-            else:
-                content += " " + frag.content
-            results.append(frag.result)
 
         # Timestamp
         ts = (self._start_time + datetime.timedelta(seconds=start_time)).isoformat(
@@ -587,22 +583,25 @@ class SpeechmaticsSTTService(STTService):
         )
 
         # Return the SpeechData object
-        return SpeechFrame(
-            text=content,
-            user_id="",
+        return SpeakerFragments(
             speaker_id=group[0].speaker,
             timestamp=ts,
             language=group[0].language,
-            result=results,
+            fragments=group,
         )
 
 
 def _get_endpoint_url(url: str) -> str:
-    """Format the endpoint URL with the SDK and app versions."""
-    url_path = f"wss://{url}/v2"
+    """Format the endpoint URL with the SDK and app versions.
 
+    Args:
+        url: The base URL for the endpoint.
+
+    Returns:
+        str: The formatted endpoint URL.
+    """
     query_params = dict()
     query_params["sm-app"] = f"pipecat/{__version__}"
     query = urlencode(query_params)
 
-    return f"{url_path}?{query}"
+    return f"{url}?{query}"

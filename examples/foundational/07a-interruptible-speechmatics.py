@@ -53,7 +53,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        base_url=os.getenv("SPEECHMATICS_ENDPOINT", "eu2.rt.speechmatics.com"),
         end_of_utterance_silence_trigger=0.5,
         enable_speaker_diarization=True,
         text_format="<{speaker_id}>{text}</{speaker_id}>",
