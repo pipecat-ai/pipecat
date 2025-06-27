@@ -62,6 +62,7 @@ from pipecat.services.aws_nova_sonic.context import (
 )
 from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.asyncio.watchdog_coroutine import watchdog_coroutine
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -776,9 +777,7 @@ class AWSNovaSonicLLMService(LLMService):
         try:
             while self._stream and not self._disconnecting:
                 output = await self._stream.await_output()
-                result = await asyncio.wait_for(output[1].receive(), timeout=1.0)
-
-                self.reset_watchdog()
+                result = await watchdog_coroutine(output[1].receive(), manager=self.task_manager)
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
@@ -807,8 +806,6 @@ class AWSNovaSonicLLMService(LLMService):
                         elif "completionEnd" in event_json:
                             # Handle the LLM completion ending
                             await self._handle_completion_end_event(event_json)
-        except asyncio.TimeoutError:
-            self.reset_watchdog()
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
             if self._wants_connection:

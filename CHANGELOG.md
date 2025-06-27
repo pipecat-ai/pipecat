@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time, you will need to wrap it with `watchdog_coroutine()` so the watchdog
   timers are reset regularly.
 
+### Fixed
+
+- Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.
+
 ## [0.0.73] - 2025-06-26
 
 ### Fixed
