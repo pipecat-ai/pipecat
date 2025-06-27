@@ -590,7 +590,7 @@ class SpeechmaticsSTTService(STTService):
             timespec="milliseconds"
         )
 
-        # Return the SpeechData object
+        # Return the SpeakerFragments object
         return SpeakerFragments(
             speaker_id=group[0].speaker,
             timestamp=ts,
