@@ -13,6 +13,7 @@ import time
 
 from dotenv import load_dotenv
 from loguru import logger
+from pipecat_flows import FlowArgs, FlowManager, FlowResult, FlowsFunctionSchema, NodeConfig
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -65,6 +66,156 @@ MUTE_MODE = "mute"
 
 VOICEMAIL_CONFIDENCE_THRESHOLD = 0.6
 HUMAN_CONFIDENCE_THRESHOLD = 0.6
+
+# ------------ FLOW MANAGER SETUP ------------
+
+
+# ------------ PIPECAT FLOWS FOR HUMAN CONVERSATION ------------
+
+
+# Type definitions for flows
+class GreetingResult(FlowResult):
+    greeting_complete: bool
+
+
+class ConversationResult(FlowResult):
+    message: str
+
+
+class EndConversationResult(FlowResult):
+    status: str
+
+
+# Flow function handlers
+async def handle_greeting(args: FlowArgs, flow_manager: FlowManager) -> tuple[GreetingResult, str]:
+    """Handle initial greeting to human."""
+    logger.debug("handle_greeting executing")
+
+    result = GreetingResult(greeting_complete=True)
+
+    # Set up the conversation node dynamically
+    await flow_manager.set_node("conversation", create_conversation_node())
+
+    return result, "conversation"
+
+
+async def handle_conversation(
+    args: FlowArgs, flow_manager: FlowManager
+) -> tuple[ConversationResult, str]:
+    """Handle ongoing conversation with human."""
+    message = args.get("message", "")
+    logger.debug(f"handle_conversation executing with message: {message}")
+
+    result = ConversationResult(message=message)
+
+    # Continue with the same conversation node for ongoing chat
+    return result, "conversation"
+
+
+async def handle_end_conversation(
+    args: FlowArgs, flow_manager: FlowManager
+) -> tuple[EndConversationResult, str]:
+    """Handle ending the conversation."""
+    logger.debug("handle_end_conversation executing")
+
+    result = EndConversationResult(status="completed")
+
+    # Set up the end node dynamically
+    await flow_manager.set_node("end", create_end_node())
+
+    return result, "end"
+
+
+# Node configurations for human conversation flow
+def create_greeting_node() -> NodeConfig:
+    """Create the initial greeting node for human conversation."""
+    return {
+        "name": "greeting",
+        "role_messages": [
+            {
+                "role": "system",
+                "content": (
+                    """You are a friendly chatbot. Your responses will be
+                    converted to audio, so avoid special characters.
+                    Be conversational and helpful."""
+                ),
+            }
+        ],
+        "task_messages": [
+            {
+                "role": "system",
+                "content": (
+                    "The user has been detected as a human (not a voicemail system). "
+                    "Respond naturally to what they say. Listen to their input and respond appropriately. "
+                    "If they seem to be greeting you or asking if someone is there, greet them warmly. "
+                    "After responding to their input, call handle_greeting to proceed to the main conversation."
+                ),
+            }
+        ],
+        "functions": [
+            FlowsFunctionSchema(
+                name="handle_greeting",
+                description="Mark that greeting is complete and proceed to conversation",
+                properties={},
+                required=[],
+                handler=handle_greeting,
+            )
+        ],
+    }
+
+
+def create_conversation_node() -> NodeConfig:
+    """Create the main conversation node."""
+    return {
+        "name": "conversation",
+        "task_messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are having a friendly conversation with a human. "
+                    "Listen to what they say and respond helpfully. "
+                    "Keep your responses brief and conversational. "
+                    "If they indicate they want to end the conversation (saying goodbye, "
+                    "thanks, that's all, etc.), call handle_end_conversation. "
+                    "Otherwise, use handle_conversation to continue the chat."
+                ),
+            }
+        ],
+        "functions": [
+            FlowsFunctionSchema(
+                name="handle_conversation",
+                description="Continue the conversation with the human",
+                properties={"message": {"type": "string", "description": "The response message"}},
+                required=["message"],
+                handler=handle_conversation,
+            ),
+            FlowsFunctionSchema(
+                name="handle_end_conversation",
+                description="End the conversation when the human is ready to finish",
+                properties={},
+                required=[],
+                handler=handle_end_conversation,
+            ),
+        ],
+    }
+
+
+def create_end_node() -> NodeConfig:
+    """Create the final conversation end node."""
+    return {
+        "name": "end",
+        "task_messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Thank the person for the conversation and say goodbye. "
+                    "Keep it brief and friendly."
+                ),
+            }
+        ],
+        "functions": [],  # Required by FlowManager, even if empty
+        "post_actions": [{"type": "end_conversation"}],
+    }
 
 
 # ------------ SIMPLIFIED CLASSES ------------
@@ -264,14 +415,15 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             is_voicemail = False
 
             await human_notifier.notify()
+            await flow_manager.initialize()
 
         await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
 
-    async def terminate_call(params: FunctionCallParams):
-        logger.info("Terminating call")
-        await asyncio.sleep(3)  # Brief delay before termination
-        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-        await params.result_callback({"status": "call terminated"})
+    # async def terminate_call(params: FunctionCallParams):
+    #     logger.info("Terminating call")
+    #     await asyncio.sleep(3)  # Brief delay before termination
+    #     await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+    #     await params.result_callback({"status": "call terminated"})
 
     # ------------ TRANSPORT & SERVICES ------------
 
@@ -348,9 +500,9 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         }
     ]
 
-    human_tools = [
-        {"function_declarations": [{"name": "terminate_call", "description": "End the call"}]}
-    ]
+    # human_tools = [
+    #     {"function_declarations": [{"name": "terminate_call", "description": "End the call"}]}
+    # ]
 
     detection_system_instructions = """
     You are an AI Call Analyzer. Your primary function is to determine if the initial audio from an incoming call is a voicemail system/answering machine or a live human attempting to engage in conversation.
@@ -386,43 +538,38 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     human_llm = GoogleLLMService(
         model="models/gemini-2.0-flash-001",
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction="""You are Chatbot talking to a human. Be friendly and helpful.
-
-        Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
-
-        Keep your responses brief and to the point. Listen to what the person says.
-
-        If the user asks you to check the context, call the function `context_check`.
-
-        When the person indicates they're done with the conversation by saying something like:
-        - "Goodbye"
-        - "That's all"
-        - "I'm done"
-        - "Thank you, that's all I needed"
-
-        THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function.""",
-        tools=human_tools,
+        # system_instruction="""You are Chatbot talking to a human. Be friendly and helpful.
+        # Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
+        # Keep your responses brief and to the point. Listen to what the person says.
+        # If the user asks you to check the context, call the function `context_check`.
+        # When the person indicates they're done with the conversation by saying something like:
+        # - "Goodbye"
+        # - "That's all"
+        # - "I'm done"
+        # - "Thank you, that's all I needed"
+        # THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function.""",
+        # tools=human_tools,
     )
 
     # ------------ CONTEXTS & FUNCTIONS ------------
 
-    context = GoogleLLMContext()
-    context_aggregator = detection_llm.create_context_aggregator(context)
+    # context = GoogleLLMContext()
+    # context_aggregator = detection_llm.create_context_aggregator(context)
 
-    # detection_context = GoogleLLMContext()
-    # detection_context_aggregator = detection_llm.create_context_aggregator(detection_context)
+    detection_context = GoogleLLMContext()
+    detection_context_aggregator = detection_llm.create_context_aggregator(detection_context)
 
-    # human_context = GoogleLLMContext()
-    # human_context_aggregator = human_llm.create_context_aggregator(human_context)
+    human_context = GoogleLLMContext()
+    human_context_aggregator = human_llm.create_context_aggregator(human_context)
 
     # Register functions
     detection_llm.register_function("voicemail_detected", voicemail_detected)
     detection_llm.register_function("human_detected", human_detected)
-    human_llm.register_function("terminate_call", terminate_call)
+    # human_llm.register_function("terminate_call", terminate_call)
 
     # ------------ PROCESSORS ------------
 
-    audio_collector = UserAudioCollector(context, context_aggregator.user())
+    audio_collector = UserAudioCollector(detection_context, detection_context_aggregator.user())
     human_gate = OutputGate(human_notifier, start_open=False)
 
     # Filter functions
@@ -441,7 +588,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                 # Voicemail detection branch
                 [
                     audio_collector,
-                    context_aggregator.user(),
+                    detection_context_aggregator.user(),
                     detection_llm,
                     voicemail_tts,
                     FunctionFilter(voicemail_filter),
@@ -449,12 +596,12 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                 # Human conversation branch
                 [
                     stt,
-                    context_aggregator.user(),
+                    human_context_aggregator.user(),
                     human_llm,
                     human_gate,
                     human_tts,
                     FunctionFilter(human_filter),
-                    context_aggregator.assistant(),
+                    human_context_aggregator.assistant(),
                 ],
             ),
             transport.output(),
@@ -467,6 +614,14 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         cancel_on_idle_timeout=False,
         observers=[voicemail_observer],
+    )
+
+    flow_manager = FlowManager(
+        task=pipeline_task,
+        tts=human_tts,
+        llm=human_llm,
+        context_aggregator=human_context_aggregator,
+        transport=transport,
     )
 
     # ------------ EVENT HANDLERS ------------

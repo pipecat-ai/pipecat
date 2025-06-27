@@ -147,13 +147,6 @@ class FunctionHandlers:
         await params.result_callback(message)
         await params.llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
 
-    async def context_check(self, params: FunctionCallParams):
-        """Function to check the current context."""
-        # This function can be used to debug or inspect the context
-        context_messages = params.context.get_messages_for_persistent_storage()
-        logger.debug(f"Current context messages: {context_messages}")
-        await params.result_callback("Context checked. See logs for details.")
-
 
 # ------------ MAIN FUNCTION ------------
 
@@ -260,10 +253,6 @@ async def run_bot(
                     "name": "terminate_call",
                     "description": "Call this function to terminate the call.",
                 },
-                {
-                    "name": "context_check",
-                    "description": "Call this function to check the current context.",
-                },
             ]
         }
     ]
@@ -284,8 +273,6 @@ async def run_bot(
         Then call the function switch_to_voicemail_response.
 
         If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
-
-        If the user asks you to check the context, call the function context_check.
 
         DO NOT say anything until you've determined if this is a voicemail or human.
 
@@ -319,8 +306,6 @@ async def run_bot(
         "terminate_call", lambda params: terminate_call(params, call_flow_state)
     )
 
-    voicemail_detection_llm.register_function("context_check", handlers.context_check)
-
     # Set up audio collector for handling audio input
     voicemail_detection_audio_collector = UserAudioCollector(context, context_aggregator.user())
 
@@ -328,8 +313,7 @@ async def run_bot(
     voicemail_detection_pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
-            # voicemail_detection_audio_collector,  # Collect audio frames
+            voicemail_detection_audio_collector,  # Collect audio frames
             context_aggregator.user(),  # User context
             voicemail_detection_llm,  # LLM
             tts,  # TTS
@@ -450,8 +434,6 @@ async def run_bot(
 
         Keep your responses brief and to the point. Listen to what the person says.
 
-        If the user asks you to check the context, call the function `context_check`.
-
         When the person indicates they're done with the conversation by saying something like:
         - "Goodbye"
         - "That's all"
@@ -468,18 +450,10 @@ async def run_bot(
         tools=tools,
     )
 
-    # Initialize context and context aggregator
-    # human_conversation_context = GoogleLLMContext()
-    # human_conversation_context_aggregator = human_conversation_llm.create_context_aggregator(
-    #     human_conversation_context
-    # )
-
     # Register terminate function with the human conversation LLM
     human_conversation_llm.register_function(
         "terminate_call", lambda params: terminate_call(params, call_flow_state)
     )
-
-    human_conversation_llm.register_function("context_check", handlers.context_check)
 
     # Build human conversation pipeline
     human_conversation_pipeline = Pipeline(
@@ -513,23 +487,20 @@ async def run_bot(
 
     print("!!! starting human conversation pipeline")
 
-    context_debug = context.get_messages_for_persistent_storage()
-
-    logger.debug(f"+++ Voicemail detection context: {context_debug}")
     # Initialize the context with system message
-    # human_conversation_context_aggregator.user().set_messages(
-    #     [
-    #         {
-    #             "role": "system",
-    #             "content": human_conversation_system_instruction,
-    #         }
-    #     ]
-    # )
+    context_aggregator.user().set_messages(
+        [
+            {
+                "role": "system",
+                "content": human_conversation_system_instruction,
+            }
+        ]
+    )
 
     # Queue the context frame to start the conversation
-    # await human_conversation_pipeline_task.queue_frames(
-    #     [human_conversation_context_aggregator.user().get_context_frame()]
-    # )
+    await human_conversation_pipeline_task.queue_frames(
+        [context_aggregator.user().get_context_frame()]
+    )
 
     # Run the human conversation pipeline
     try:
