@@ -7,9 +7,12 @@
 """Custom frame types for OpenAI Realtime API integration."""
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from pipecat.frames.frames import DataFrame, FunctionCallResultFrame
-from pipecat.services.openai_realtime_beta.context import OpenAIRealtimeLLMContext
+
+if TYPE_CHECKING:
+    from pipecat.services.openai_realtime_beta.context import OpenAIRealtimeLLMContext
 
 
 @dataclass
