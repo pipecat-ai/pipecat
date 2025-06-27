@@ -5,7 +5,7 @@
  */
 
 /**
- * RTVI Client Implementation
+ * Pipecat Client Implementation
  *
  * This client connects to an RTVI-compatible bot server using WebRTC (via Daily).
  * It handles audio/video streaming and manages the connection lifecycle.
@@ -16,77 +16,8 @@
  * - Browser with WebRTC support
  */
 
-import {
-  LogLevel,
-  RTVIClient,
-  RTVIClientHelper,
-  RTVIEvent,
-} from '@pipecat-ai/client-js';
+import { LogLevel, PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
 import { DailyTransport } from '@pipecat-ai/daily-transport';
-
-class SearchResponseHelper extends RTVIClientHelper {
-  constructor(contentPanel) {
-    super();
-    this.contentPanel = contentPanel;
-  }
-
-  handleMessage(rtviMessage) {
-    console.log('SearchResponseHelper, received message:', rtviMessage);
-    if (rtviMessage.data) {
-      // Clear existing content
-      this.contentPanel.innerHTML = '';
-
-      // Create a container for all content
-      const contentContainer = document.createElement('div');
-      contentContainer.className = 'content-container';
-
-      // Add the search_result
-      if (rtviMessage.data.search_result) {
-        const searchResultDiv = document.createElement('div');
-        searchResultDiv.className = 'search-result';
-        searchResultDiv.textContent = rtviMessage.data.search_result;
-        contentContainer.appendChild(searchResultDiv);
-      }
-
-      // Add the sources
-      if (rtviMessage.data.origins) {
-        const sourcesDiv = document.createElement('div');
-        sourcesDiv.className = 'sources';
-
-        const sourcesTitle = document.createElement('h3');
-        sourcesTitle.className = 'sources-title';
-        sourcesTitle.textContent = 'Sources:';
-        sourcesDiv.appendChild(sourcesTitle);
-
-        rtviMessage.data.origins.forEach((origin) => {
-          const sourceLink = document.createElement('a');
-          sourceLink.className = 'source-link';
-          sourceLink.href = origin.site_uri;
-          sourceLink.target = '_blank';
-          sourceLink.textContent = origin.site_title;
-          sourcesDiv.appendChild(sourceLink);
-        });
-
-        contentContainer.appendChild(sourcesDiv);
-      }
-
-      // Add the rendered_content in an iframe
-      if (rtviMessage.data.rendered_content) {
-        const iframe = document.createElement('iframe');
-        iframe.className = 'iframe-container';
-        iframe.srcdoc = rtviMessage.data.rendered_content;
-        contentContainer.appendChild(iframe);
-      }
-
-      // Append the content container to the content panel
-      this.contentPanel.appendChild(contentContainer);
-    }
-  }
-
-  getMessageTypes() {
-    return ['bot-llm-search-response'];
-  }
-}
 
 /**
  * ChatbotClient handles the connection and media management for a real-time
@@ -95,7 +26,7 @@ class SearchResponseHelper extends RTVIClientHelper {
 class ChatbotClient {
   constructor() {
     // Initialize client state
-    this.rtviClient = null;
+    this.pcClient = null;
     this.setupDOMElements();
     this.setupEventListeners();
   }
@@ -160,10 +91,10 @@ class ChatbotClient {
    * This is called when the bot is ready or when the transport state changes to ready
    */
   setupMediaTracks() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Get current tracks from the client
-    const tracks = this.rtviClient.tracks();
+    const tracks = this.pcClient.tracks();
 
     // Set up any available bot tracks
     if (tracks.bot?.audio) {
@@ -176,10 +107,10 @@ class ChatbotClient {
    * This handles new tracks being added during the session
    */
   setupTrackListeners() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Listen for new tracks starting
-    this.rtviClient.on(RTVIEvent.TrackStarted, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStarted, (track, participant) => {
       // Only handle non-local (bot) tracks
       if (!participant?.local && track.kind === 'audio') {
         this.setupAudioTrack(track);
@@ -187,7 +118,7 @@ class ChatbotClient {
     });
 
     // Listen for tracks stopping
-    this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStopped, (track, participant) => {
       this.log(
         `Track stopped event: ${track.kind} from ${
           participant?.name || 'unknown'
@@ -213,20 +144,13 @@ class ChatbotClient {
 
   /**
    * Initialize and connect to the bot
-   * This sets up the RTVI client, initializes devices, and establishes the connection
+   * This sets up the Pipecat client, initializes devices, and establishes the connection
    */
   async connect() {
     try {
-      // Initialize the RTVI client with a Daily WebRTC transport and our configuration
-      this.rtviClient = new RTVIClient({
+      // Initialize the Pipecat client with a Daily WebRTC transport and our configuration
+      this.pcClient = new PipecatClient({
         transport: new DailyTransport(),
-        params: {
-          // The baseURL and endpoint of your bot server that the client will connect to
-          baseUrl: 'http://localhost:7860',
-          endpoints: {
-            connect: '/connect',
-          },
-        },
         enableMic: true, // Enable microphone for user input
         enableCam: false,
         callbacks: {
@@ -251,6 +175,8 @@ class ChatbotClient {
               this.setupMediaTracks();
             }
           },
+          // Handle search response events
+          onBotLlmSearchResponse: this.handleSearchResponse.bind(this),
           // Handle bot connection events
           onBotConnected: (participant) => {
             this.log(`Bot connected: ${JSON.stringify(participant)}`);
@@ -281,22 +207,22 @@ class ChatbotClient {
           },
         },
       });
-      //this.rtviClient.setLogLevel(LogLevel.DEBUG)
-      this.rtviClient.registerHelper(
-        'llm',
-        new SearchResponseHelper(this.searchResultContainer)
-      );
+
+      //this.pcClient.setLogLevel(LogLevel.DEBUG)
 
       // Set up listeners for media track events
       this.setupTrackListeners();
 
       // Initialize audio devices
       this.log('Initializing devices...');
-      await this.rtviClient.initDevices();
+      await this.pcClient.initDevices();
 
       // Connect to the bot
       this.log('Connecting to bot...');
-      await this.rtviClient.connect();
+      await this.pcClient.connect({
+        // The baseURL and endpoint of your bot server that the client will connect to
+        endpoint: 'http://localhost:7860/connect',
+      });
 
       this.log('Connection complete');
     } catch (error) {
@@ -306,9 +232,9 @@ class ChatbotClient {
       this.updateStatus('Error');
 
       // Clean up if there's an error
-      if (this.rtviClient) {
+      if (this.pcClient) {
         try {
-          await this.rtviClient.disconnect();
+          await this.pcClient.disconnect();
         } catch (disconnectError) {
           this.log(`Error during disconnect: ${disconnectError.message}`);
         }
@@ -320,11 +246,11 @@ class ChatbotClient {
    * Disconnect from the bot and clean up media resources
    */
   async disconnect() {
-    if (this.rtviClient) {
+    if (this.pcClient) {
       try {
-        // Disconnect the RTVI client
-        await this.rtviClient.disconnect();
-        this.rtviClient = null;
+        // Disconnect the Pipecat client
+        await this.pcClient.disconnect();
+        this.pcClient = null;
 
         // Clean up audio
         if (this.botAudio.srcObject) {
@@ -338,6 +264,57 @@ class ChatbotClient {
         this.log(`Error disconnecting: ${error.message}`);
       }
     }
+  }
+
+  handleSearchResponse(response) {
+    console.log('SearchResponseHelper, received message:', response);
+    // Clear existing content
+    this.searchResultContainer.innerHTML = '';
+
+    // Create a container for all content
+    const contentContainer = document.createElement('div');
+    contentContainer.className = 'content-container';
+
+    // Add the search_result
+    if (response.search_result) {
+      const searchResultDiv = document.createElement('div');
+      searchResultDiv.className = 'search-result';
+      searchResultDiv.textContent = response.search_result;
+      contentContainer.appendChild(searchResultDiv);
+    }
+
+    // Add the sources
+    if (response.origins) {
+      const sourcesDiv = document.createElement('div');
+      sourcesDiv.className = 'sources';
+
+      const sourcesTitle = document.createElement('h3');
+      sourcesTitle.className = 'sources-title';
+      sourcesTitle.textContent = 'Sources:';
+      sourcesDiv.appendChild(sourcesTitle);
+
+      response.origins.forEach((origin) => {
+        const sourceLink = document.createElement('a');
+        sourceLink.className = 'source-link';
+        sourceLink.href = origin.site_uri;
+        sourceLink.target = '_blank';
+        sourceLink.textContent = origin.site_title;
+        sourcesDiv.appendChild(sourceLink);
+      });
+
+      contentContainer.appendChild(sourcesDiv);
+    }
+
+    // Add the rendered_content in an iframe
+    if (response.rendered_content) {
+      const iframe = document.createElement('iframe');
+      iframe.className = 'iframe-container';
+      iframe.srcdoc = response.rendered_content;
+      contentContainer.appendChild(iframe);
+    }
+
+    // Append the content container to the content panel
+    this.searchResultContainer.appendChild(contentContainer);
   }
 }
 
