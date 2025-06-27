@@ -5,6 +5,15 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
+  if you have a coroutine that is waiting for a result and that takes a long
+  time, you will need to wrap it with `watchdog_coroutine()` so the watchdog
+  timers are reset regularly.
+
 ## [0.0.73] - 2025-06-26
 
 ### Fixed
