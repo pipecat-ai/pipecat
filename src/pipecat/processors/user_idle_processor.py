@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""User idle detection and timeout handling for Pipecat."""
+
 import asyncio
 import inspect
 from typing import Awaitable, Callable, Union
@@ -22,19 +24,12 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 class UserIdleProcessor(FrameProcessor):
     """Monitors user inactivity and triggers callbacks after timeout periods.
 
-    Starts monitoring only after the first conversation activity (UserStartedSpeaking
-    or BotSpeaking).
-
-    Args:
-        callback: Function to call when user is idle. Can be either:
-            - Basic callback(processor) -> None
-            - Retry callback(processor, retry_count) -> bool
-              Return True to continue monitoring for idle events,
-              Return False to stop the idle monitoring task
-        timeout: Seconds to wait before considering user idle
-        **kwargs: Additional arguments passed to FrameProcessor
+    This processor tracks user activity and triggers configurable callbacks when
+    users become idle. It starts monitoring only after the first conversation
+    activity and supports both basic and retry-based callback patterns.
 
     Example:
+        ```
         # Retry callback:
         async def handle_idle(processor: "UserIdleProcessor", retry_count: int) -> bool:
             if retry_count < 3:
@@ -50,6 +45,7 @@ class UserIdleProcessor(FrameProcessor):
             callback=handle_idle,
             timeout=5.0
         )
+        ```
     """
 
     def __init__(
@@ -62,6 +58,17 @@ class UserIdleProcessor(FrameProcessor):
         timeout: float,
         **kwargs,
     ):
+        """Initialize the user idle processor.
+
+        Args:
+            callback: Function to call when user is idle. Can be either:
+                - Basic callback(processor) -> None
+                - Retry callback(processor, retry_count) -> bool
+                  Return True to continue monitoring for idle events,
+                  Return False to stop the idle monitoring task
+            timeout: Seconds to wait before considering user idle.
+            **kwargs: Additional arguments passed to FrameProcessor.
+        """
         super().__init__(**kwargs)
         self._callback = self._wrap_callback(callback)
         self._timeout = timeout
@@ -107,7 +114,11 @@ class UserIdleProcessor(FrameProcessor):
 
     @property
     def retry_count(self) -> int:
-        """Returns the current retry count."""
+        """Get the current retry count.
+
+        Returns:
+            The number of times the idle callback has been triggered.
+        """
         return self._retry_count
 
     async def _stop(self) -> None:
@@ -120,8 +131,8 @@ class UserIdleProcessor(FrameProcessor):
         """Processes incoming frames and manages idle monitoring state.
 
         Args:
-            frame: The frame to process
-            direction: Direction of the frame flow
+            frame: The frame to process.
+            direction: Direction of the frame flow.
         """
         await super().process_frame(frame, direction)
 
