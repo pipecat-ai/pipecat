@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Rime text-to-speech service implementations.
+
+This module provides both WebSocket and HTTP-based text-to-speech services
+using Rime's API for streaming and batch audio synthesis.
+"""
+
 import base64
 import json
 import uuid
@@ -47,7 +53,7 @@ def language_to_rime_language(language: Language) -> str:
         language: The pipecat Language enum value.
 
     Returns:
-        str: Three-letter language code used by Rime (e.g., 'eng' for English).
+        Three-letter language code used by Rime (e.g., 'eng' for English).
     """
     LANGUAGE_MAP = {
         Language.DE: "ger",
@@ -67,7 +73,15 @@ class RimeTTSService(AudioContextWordTTSService):
     """
 
     class InputParams(BaseModel):
-        """Configuration parameters for Rime TTS service."""
+        """Configuration parameters for Rime TTS service.
+
+        Parameters:
+            language: Language for synthesis. Defaults to English.
+            speed_alpha: Speech speed multiplier. Defaults to 1.0.
+            reduce_latency: Whether to reduce latency at potential quality cost.
+            pause_between_brackets: Whether to add pauses between bracketed content.
+            phonemize_between_brackets: Whether to phonemize bracketed content.
+        """
 
         language: Optional[Language] = Language.EN
         speed_alpha: Optional[float] = 1.0
@@ -96,6 +110,8 @@ class RimeTTSService(AudioContextWordTTSService):
             model: Model ID to use for synthesis.
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
+            text_aggregator: Custom text aggregator for processing input text.
+            **kwargs: Additional arguments passed to parent class.
         """
         # Initialize with parent class settings for proper frame handling
         super().__init__(
@@ -135,14 +151,30 @@ class RimeTTSService(AudioContextWordTTSService):
         self._cumulative_time = 0  # Accumulates time across messages
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Rime service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        """Convert pipecat language to Rime language code."""
+        """Convert pipecat language to Rime language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Rime-specific language code, or None if not supported.
+        """
         return language_to_rime_language(language)
 
     async def set_model(self, model: str):
-        """Update the TTS model."""
+        """Update the TTS model.
+
+        Args:
+            model: The model name to use for synthesis.
+        """
         self._model = model
         await super().set_model(model)
 
@@ -159,18 +191,30 @@ class RimeTTSService(AudioContextWordTTSService):
         return {"operation": "eos"}
 
     async def start(self, frame: StartFrame):
-        """Start the service and establish websocket connection."""
+        """Start the service and establish websocket connection.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._settings["samplingRate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
-        """Stop the service and close connection."""
+        """Stop the service and close connection.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel current operation and clean up."""
+        """Cancel current operation and clean up.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
@@ -261,6 +305,7 @@ class RimeTTSService(AudioContextWordTTSService):
         return word_pairs
 
     async def flush_audio(self):
+        """Flush any pending audio synthesis."""
         if not self._context_id or not self._websocket:
             return
 
@@ -310,7 +355,12 @@ class RimeTTSService(AudioContextWordTTSService):
                 self._context_id = None
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
-        """Push frame and handle end-of-turn conditions."""
+        """Push frame and handle end-of-turn conditions.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             if isinstance(frame, TTSStoppedFrame):
@@ -318,13 +368,13 @@ class RimeTTSService(AudioContextWordTTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text.
+        """Generate speech from text using Rime's streaming API.
 
         Args:
             text: The text to convert to speech.
 
         Yields:
-            Frames containing audio data and timing information.
+            Frame: Audio frames containing the synthesized speech.
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
@@ -354,7 +404,24 @@ class RimeTTSService(AudioContextWordTTSService):
 
 
 class RimeHttpTTSService(TTSService):
+    """Rime HTTP-based text-to-speech service.
+
+    Provides text-to-speech synthesis using Rime's HTTP API for batch processing.
+    Suitable for use cases where streaming is not required.
+    """
+
     class InputParams(BaseModel):
+        """Configuration parameters for Rime HTTP TTS service.
+
+        Parameters:
+            language: Language for synthesis. Defaults to English.
+            pause_between_brackets: Whether to add pauses between bracketed content.
+            phonemize_between_brackets: Whether to phonemize bracketed content.
+            inline_speed_alpha: Inline speed control markup.
+            speed_alpha: Speech speed multiplier. Defaults to 1.0.
+            reduce_latency: Whether to reduce latency at potential quality cost.
+        """
+
         language: Optional[Language] = Language.EN
         pause_between_brackets: Optional[bool] = False
         phonemize_between_brackets: Optional[bool] = False
@@ -373,6 +440,17 @@ class RimeHttpTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize Rime HTTP TTS service.
+
+        Args:
+            api_key: Rime API key for authentication.
+            voice_id: ID of the voice to use.
+            aiohttp_session: Shared aiohttp session for HTTP requests.
+            model: Model ID to use for synthesis.
+            sample_rate: Audio sample rate in Hz.
+            params: Additional configuration parameters.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or RimeHttpTTSService.InputParams()
@@ -396,14 +474,34 @@ class RimeHttpTTSService(TTSService):
             self._settings["inlineSpeedAlpha"] = params.inline_speed_alpha
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Rime HTTP service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> str | None:
-        """Convert pipecat language to Rime language code."""
+        """Convert pipecat language to Rime language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Rime-specific language code, or None if not supported.
+        """
         return language_to_rime_language(language)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Rime's HTTP API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         headers = {
