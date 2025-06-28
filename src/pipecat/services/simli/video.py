@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Simli video service for real-time avatar generation."""
+
 import asyncio
 
 import numpy as np
@@ -31,12 +33,26 @@ except ModuleNotFoundError as e:
 
 
 class SimliVideoService(FrameProcessor):
+    """Simli video service for real-time avatar generation.
+
+    Provides real-time avatar video generation by processing audio frames
+    and producing synchronized video output using the Simli API. Handles
+    audio resampling, video frame processing, and connection management.
+    """
+
     def __init__(
         self,
         simli_config: SimliConfig,
         use_turn_server: bool = False,
         latency_interval: int = 0,
     ):
+        """Initialize the Simli video service.
+
+        Args:
+            simli_config: Configuration object for Simli client settings.
+            use_turn_server: Whether to use TURN server for connection. Defaults to False.
+            latency_interval: Latency interval setting for video processing. Defaults to 0.
+        """
         super().__init__()
         self._simli_client = SimliClient(simli_config, use_turn_server, latency_interval)
 
@@ -49,6 +65,7 @@ class SimliVideoService(FrameProcessor):
         self._video_task: asyncio.Task = None
 
     async def _start_connection(self):
+        """Start the connection to Simli service and begin processing tasks."""
         if not self._initialized:
             await self._simli_client.Initialize()
             self._initialized = True
@@ -61,6 +78,7 @@ class SimliVideoService(FrameProcessor):
             self._video_task = self.create_task(self._consume_and_process_video())
 
     async def _consume_and_process_audio(self):
+        """Consume audio frames from Simli and push them downstream."""
         await self._pipecat_resampler_event.wait()
         audio_iterator = self._simli_client.getAudioStreamIterator()
         async for audio_frame in WatchdogAsyncIterator(audio_iterator, manager=self.task_manager):
@@ -78,6 +96,7 @@ class SimliVideoService(FrameProcessor):
                     )
 
     async def _consume_and_process_video(self):
+        """Consume video frames from Simli and convert them to output frames."""
         await self._pipecat_resampler_event.wait()
         video_iterator = self._simli_client.getVideoStreamIterator(targetFormat="rgb24")
         async for video_frame in WatchdogAsyncIterator(video_iterator, manager=self.task_manager):
@@ -91,6 +110,12 @@ class SimliVideoService(FrameProcessor):
             await self.push_frame(convertedFrame)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle Simli video generation.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
             await self.push_frame(frame, direction)
@@ -127,6 +152,7 @@ class SimliVideoService(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _stop(self):
+        """Stop the Simli client and cancel processing tasks."""
         await self._simli_client.stop()
         if self._audio_task:
             await self.cancel_task(self._audio_task)

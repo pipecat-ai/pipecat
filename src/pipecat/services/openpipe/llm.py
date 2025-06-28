@@ -33,15 +33,6 @@ class OpenPipeLLMService(OpenAILLMService):
     Extends OpenAI's LLM service to integrate with OpenPipe's fine-tuning and
     monitoring platform. Provides enhanced request logging and tagging capabilities
     for model training and evaluation.
-
-    Args:
-        model: The model name to use. Defaults to "gpt-4.1".
-        api_key: OpenAI API key for authentication. If None, reads from environment.
-        base_url: Custom OpenAI API endpoint URL. Uses default if None.
-        openpipe_api_key: OpenPipe API key for enhanced features. If None, reads from environment.
-        openpipe_base_url: OpenPipe API endpoint URL. Defaults to "https://app.openpipe.ai/api/v1".
-        tags: Optional dictionary of tags to apply to all requests for tracking.
-        **kwargs: Additional arguments passed to parent OpenAILLMService.
     """
 
     def __init__(
@@ -55,6 +46,17 @@ class OpenPipeLLMService(OpenAILLMService):
         tags: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
+        """Initialize OpenPipe LLM service.
+
+        Args:
+            model: The model name to use. Defaults to "gpt-4.1".
+            api_key: OpenAI API key for authentication. If None, reads from environment.
+            base_url: Custom OpenAI API endpoint URL. Uses default if None.
+            openpipe_api_key: OpenPipe API key for enhanced features. If None, reads from environment.
+            openpipe_base_url: OpenPipe API endpoint URL. Defaults to "https://app.openpipe.ai/api/v1".
+            tags: Optional dictionary of tags to apply to all requests for tracking.
+            **kwargs: Additional arguments passed to parent OpenAILLMService.
+        """
         super().__init__(
             model=model,
             api_key=api_key,

@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Deepgram text-to-speech service implementation.
+
+This module provides integration with Deepgram's text-to-speech API
+for generating speech from text using various voice models.
+"""
+
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -27,6 +33,13 @@ except ModuleNotFoundError as e:
 
 
 class DeepgramTTSService(TTSService):
+    """Deepgram text-to-speech service.
+
+    Provides text-to-speech synthesis using Deepgram's streaming API.
+    Supports various voice models and audio encoding formats with
+    configurable sample rates and quality settings.
+    """
+
     def __init__(
         self,
         *,
@@ -37,6 +50,16 @@ class DeepgramTTSService(TTSService):
         encoding: str = "linear16",
         **kwargs,
     ):
+        """Initialize the Deepgram TTS service.
+
+        Args:
+            api_key: Deepgram API key for authentication.
+            voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
+            base_url: Custom base URL for Deepgram API. Uses default if empty.
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            encoding: Audio encoding format. Defaults to "linear16".
+            **kwargs: Additional arguments passed to parent TTSService class.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
@@ -48,10 +71,23 @@ class DeepgramTTSService(TTSService):
         self._deepgram_client = DeepgramClient(api_key, config=client_options)
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate metrics.
+
+        Returns:
+            True, as Deepgram TTS service supports metrics generation.
+        """
         return True
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Deepgram's TTS API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech, plus start/stop frames.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         options = SpeakOptions(

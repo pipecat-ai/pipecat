@@ -128,11 +128,6 @@ class LLMService(AIService):
     parallel and sequential execution modes. Provides event handlers for
     completion timeouts and function call lifecycle events.
 
-    Args:
-        run_in_parallel: Whether to run function calls in parallel or sequentially.
-            Defaults to True.
-        **kwargs: Additional arguments passed to the parent AIService.
-
     Event handlers:
         on_completion_timeout: Called when an LLM completion timeout occurs.
         on_function_calls_started: Called when function calls are received and
@@ -155,6 +150,13 @@ class LLMService(AIService):
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
     def __init__(self, run_in_parallel: bool = True, **kwargs):
+        """Initialize the LLM service.
+
+        Args:
+            run_in_parallel: Whether to run function calls in parallel or sequentially.
+                Defaults to True.
+            **kwargs: Additional arguments passed to the parent AIService.
+        """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
         self._start_callbacks = {}
