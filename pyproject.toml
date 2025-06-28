@@ -124,6 +124,9 @@ select = [
     "I", # Import rules
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["D104"]
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 

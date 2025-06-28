@@ -60,6 +60,11 @@ We follow Google-style docstrings with these specific conventions:
 
 - Must have docstrings explaining what subclasses should implement
 
+**`__init__.py` Files:**
+
+- **Skip docstrings** for pure import/re-export modules
+- **Add brief docstrings** for top-level packages or those with initialization logic
+
 #### Examples:
 
 ```python
