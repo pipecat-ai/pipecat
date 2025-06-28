@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""AWS Polly text-to-speech service implementation.
+
+This module provides integration with Amazon Polly for text-to-speech synthesis,
+supporting multiple languages, voices, and SSML features.
+"""
+
 import asyncio
 import os
 from typing import AsyncGenerator, List, Optional
@@ -33,6 +39,14 @@ except ModuleNotFoundError as e:
 
 
 def language_to_aws_language(language: Language) -> Optional[str]:
+    """Convert a Language enum to AWS Polly language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding AWS Polly language code, or None if not supported.
+    """
     language_map = {
         # Arabic
         Language.AR: "arb",
@@ -109,7 +123,35 @@ def language_to_aws_language(language: Language) -> Optional[str]:
 
 
 class AWSPollyTTSService(TTSService):
+    """AWS Polly text-to-speech service.
+
+    Provides text-to-speech synthesis using Amazon Polly with support for
+    multiple languages, voices, SSML features, and voice customization
+    options including prosody controls.
+
+    Args:
+        api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
+        aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
+        aws_session_token: AWS session token for temporary credentials.
+        region: AWS region for Polly service. Defaults to 'us-east-1'.
+        voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
+        sample_rate: Audio sample rate. If None, uses service default.
+        params: Additional input parameters for voice customization.
+        **kwargs: Additional arguments passed to parent TTSService class.
+    """
+
     class InputParams(BaseModel):
+        """Input parameters for AWS Polly TTS configuration.
+
+        Parameters:
+            engine: TTS engine to use ('standard', 'neural', etc.).
+            language: Language for synthesis. Defaults to English.
+            pitch: Voice pitch adjustment (for standard engine only).
+            rate: Speech rate adjustment.
+            volume: Voice volume adjustment.
+            lexicon_names: List of pronunciation lexicons to apply.
+        """
+
         engine: Optional[str] = None
         language: Optional[Language] = Language.EN
         pitch: Optional[str] = None
@@ -174,9 +216,22 @@ class AWSPollyTTSService(TTSService):
             )
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as AWS Polly service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to AWS Polly language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The AWS Polly-specific language code, or None if not supported.
+        """
         return language_to_aws_language(language)
 
     def _construct_ssml(self, text: str) -> str:
@@ -214,6 +269,15 @@ class AWSPollyTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using AWS Polly.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
+
         def read_audio_data(**args):
             response = self._polly_client.synthesize_speech(**args)
             if "AudioStream" in response:
@@ -277,6 +341,12 @@ class AWSPollyTTSService(TTSService):
 
 
 class PollyTTSService(AWSPollyTTSService):
+    """Deprecated alias for AWSPollyTTSService.
+
+    Args:
+        **kwargs: All arguments passed to AWSPollyTTSService.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
