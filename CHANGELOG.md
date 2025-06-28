@@ -5,6 +5,30 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.68] - 2025-06-05
+
+Resemble's Websocket TTS Initial release.
+
+### Added
+
+- Added `ResembleTTSService` for Resemble AI Text-to-Speech integration.
+
+- WebSocket-based streaming audio generation with real-time voice synthesis
+
+- Support for both binary and JSON response formats
+
+- Configurable audio output parameters (sample rate, format, precision)
+
+- Automatic audio buffering and chunking (8KB chunks) for smooth playback
+
+- Sentence aggregation for improved audio quality
+
+- Skip tags support via `SkipTagsAggregator` for excluding specific text patterns
+
+- TTFB (Time To First Byte) and TTS usage metrics tracking
+
+- Interruption handling to stop audio generation mid-stream
+
 ## [Unreleased]
 
 ### Added
