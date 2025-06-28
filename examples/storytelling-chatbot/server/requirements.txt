@@ -3,3 +3,7 @@ fastapi
 uvicorn
 python-dotenv
 pipecat-ai[daily,silero,openai,cartesia,google]
+# The `google.ai.generativelanguage` module, imported by this example,
+# is not included in the `pipecat-ai[google]` extras. It is provided by the
+# `google-generativeai` package, which must be installed explicitly.
+google-generativeai
