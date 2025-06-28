@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""SambaNova's Speech-to-Text service implementation for real-time transcription."""
+
 from typing import Any, Optional
 
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
@@ -12,8 +14,10 @@ from pipecat.transcriptions.language import Language
 
 class SambaNovaSTTService(BaseWhisperSTTService):  # type: ignore
     """SambaNova Whisper speech-to-text service.
+
     Uses SambaNova's Whisper API to convert audio to text.
     Requires a SambaNova API key set via the api_key parameter or SAMBANOVA_API_KEY environment variable.
+
     Args:
         model: Whisper model to use. Defaults to "Whisper-Large-v3".
         api_key: SambaNova API key. Defaults to None.
