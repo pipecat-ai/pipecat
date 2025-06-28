@@ -634,6 +634,20 @@ class GoogleLLMService(LLMService):
     def _create_client(self, api_key: str):
         self._client = genai.Client(api_key=api_key)
 
+    def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
+        try:
+            # There's no way to introspect on model capabilities, so
+            # to check for models that we know default to thinkin on
+            # and can be configured to turn it off.
+            if not self._model_name.startswith("gemini-2.5-flash"):
+                return
+            # If thinking_config is already set, don't override it.
+            if "thinking_config" in generation_params:
+                return
+            generation_params.setdefault("thinking_config", {})["thinking_budget"] = 0
+        except Exception as e:
+            logger.exception(f"Failed to unset thinking budget: {e}")
+
     @traced_llm
     async def _process_context(self, context: OpenAILLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
@@ -641,6 +655,8 @@ class GoogleLLMService(LLMService):
         prompt_tokens = 0
         completion_tokens = 0
         total_tokens = 0
+        cache_read_input_tokens = 0
+        reasoning_tokens = 0
 
         grounding_metadata = None
         search_result = ""
@@ -680,6 +696,12 @@ class GoogleLLMService(LLMService):
                 if v is not None
             }
 
+            if self._settings["extra"]:
+                generation_params.update(self._settings["extra"])
+
+            # possibly modify generation_params (in place) to set thinking to off by default
+            self._maybe_unset_thinking_budget(generation_params)
+
             generation_config = (
                 GenerateContentConfig(**generation_params) if generation_params else None
             )
@@ -699,6 +721,8 @@ class GoogleLLMService(LLMService):
                     prompt_tokens += chunk.usage_metadata.prompt_token_count or 0
                     completion_tokens += chunk.usage_metadata.candidates_token_count or 0
                     total_tokens += chunk.usage_metadata.total_token_count or 0
+                    cache_read_input_tokens += chunk.usage_metadata.cached_content_token_count or 0
+                    reasoning_tokens += chunk.usage_metadata.thoughts_token_count or 0
 
                 if not chunk.candidates:
                     continue
@@ -780,6 +804,8 @@ class GoogleLLMService(LLMService):
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    cache_read_input_tokens=cache_read_input_tokens,
+                    reasoning_tokens=reasoning_tokens,
                 )
             )
             await self.push_frame(LLMFullResponseEndFrame())

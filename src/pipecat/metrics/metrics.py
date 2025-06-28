@@ -22,6 +22,7 @@ class LLMTokenUsage(BaseModel):
     total_tokens: int
     cache_read_input_tokens: Optional[int] = None
     cache_creation_input_tokens: Optional[int] = None
+    reasoning_tokens: Optional[int] = None
 
 
 class LLMUsageMetricsData(MetricsData):
