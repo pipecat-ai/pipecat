@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""OpenAI Speech-to-Text service implementation using OpenAI's transcription API."""
+
 from typing import Optional
 
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
