@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Azure Cognitive Services Text-to-Speech service implementations."""
+
 import asyncio
 from typing import AsyncGenerator, Optional
 
@@ -39,6 +41,15 @@ except ModuleNotFoundError as e:
 
 
 def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputFormat:
+    """Convert sample rate to Azure speech synthesis output format.
+
+    Args:
+        sample_rate: Sample rate in Hz.
+
+    Returns:
+        Corresponding Azure SpeechSynthesisOutputFormat enum value.
+        Defaults to Raw24Khz16BitMonoPcm if sample rate not found.
+    """
     sample_rate_map = {
         8000: SpeechSynthesisOutputFormat.Raw8Khz16BitMonoPcm,
         16000: SpeechSynthesisOutputFormat.Raw16Khz16BitMonoPcm,
@@ -51,7 +62,34 @@ def sample_rate_to_output_format(sample_rate: int) -> SpeechSynthesisOutputForma
 
 
 class AzureBaseTTSService(TTSService):
+    """Base class for Azure Cognitive Services text-to-speech implementations.
+
+    Provides common functionality for Azure TTS services including SSML
+    construction, voice configuration, and parameter management.
+
+    Args:
+        api_key: Azure Cognitive Services subscription key.
+        region: Azure region identifier (e.g., "eastus", "westus2").
+        voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
+        sample_rate: Audio sample rate in Hz. If None, uses service default.
+        params: Voice and synthesis parameters configuration.
+        **kwargs: Additional arguments passed to parent TTSService.
+    """
+
     class InputParams(BaseModel):
+        """Input parameters for Azure TTS voice configuration.
+
+        Parameters:
+            emphasis: Emphasis level for speech ("strong", "moderate", "reduced").
+            language: Language for synthesis. Defaults to English (US).
+            pitch: Voice pitch adjustment (e.g., "+10%", "-5Hz", "high").
+            rate: Speech rate multiplier. Defaults to "1.05".
+            role: Voice role for expression (e.g., "YoungAdultFemale").
+            style: Speaking style (e.g., "cheerful", "sad", "excited").
+            style_degree: Intensity of the speaking style (0.01 to 2.0).
+            volume: Volume level (e.g., "+20%", "loud", "x-soft").
+        """
+
         emphasis: Optional[str] = None
         language: Optional[Language] = Language.EN_US
         pitch: Optional[str] = None
@@ -94,9 +132,22 @@ class AzureBaseTTSService(TTSService):
         self._speech_synthesizer = None
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Azure TTS service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Azure language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Azure-specific language code, or None if not supported.
+        """
         return language_to_azure_language(language)
 
     def _construct_ssml(self, text: str) -> str:
@@ -146,6 +197,16 @@ class AzureBaseTTSService(TTSService):
 
 
 class AzureTTSService(AzureBaseTTSService):
+    """Azure Cognitive Services streaming TTS service.
+
+    Provides real-time text-to-speech synthesis using Azure's WebSocket-based
+    streaming API. Audio chunks are streamed as they become available for
+    lower latency playback.
+
+    Args:
+        **kwargs: All arguments passed to AzureBaseTTSService parent class.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._speech_config = None
@@ -153,6 +214,11 @@ class AzureTTSService(AzureBaseTTSService):
         self._audio_queue = asyncio.Queue()
 
     async def start(self, frame: StartFrame):
+        """Start the Azure TTS service and initialize speech synthesizer.
+
+        Args:
+            frame: Start frame containing initialization parameters.
+        """
         await super().start(frame)
 
         if self._speech_config:
@@ -183,24 +249,33 @@ class AzureTTSService(AzureBaseTTSService):
         self._speech_synthesizer.synthesis_canceled.connect(self._handle_canceled)
 
     def _handle_synthesizing(self, evt):
-        """Handle audio chunks as they arrive"""
+        """Handle audio chunks as they arriv."""
         if evt.result and evt.result.audio_data:
             self._audio_queue.put_nowait(evt.result.audio_data)
 
     def _handle_completed(self, evt):
-        """Handle synthesis completion"""
+        """Handle synthesis completion."""
         self._audio_queue.put_nowait(None)  # Signal completion
 
     def _handle_canceled(self, evt):
-        """Handle synthesis cancellation"""
+        """Handle synthesis cancellation."""
         logger.error(f"Speech synthesis canceled: {evt.result.cancellation_details.reason}")
         self._audio_queue.put_nowait(None)
 
     async def flush_audio(self):
+        """Flush any pending audio data."""
         logger.trace(f"{self}: flushing audio")
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Azure's streaming synthesis.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing synthesized speech data.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
@@ -244,12 +319,27 @@ class AzureTTSService(AzureBaseTTSService):
 
 
 class AzureHttpTTSService(AzureBaseTTSService):
+    """Azure Cognitive Services HTTP-based TTS service.
+
+    Provides text-to-speech synthesis using Azure's HTTP API for simpler,
+    non-streaming synthesis. Suitable for use cases where streaming is not
+    required and simpler integration is preferred.
+
+    Args:
+        **kwargs: All arguments passed to AzureBaseTTSService parent class.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._speech_config = None
         self._speech_synthesizer = None
 
     async def start(self, frame: StartFrame):
+        """Start the Azure HTTP TTS service and initialize speech synthesizer.
+
+        Args:
+            frame: Start frame containing initialization parameters.
+        """
         await super().start(frame)
 
         if self._speech_config:
@@ -269,6 +359,14 @@ class AzureHttpTTSService(AzureBaseTTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Azure's HTTP synthesis API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the complete synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         await self.start_ttfb_metrics()

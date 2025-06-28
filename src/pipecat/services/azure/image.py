@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Azure OpenAI image generation service implementation.
+
+This module provides integration with Azure's OpenAI image generation API
+using REST endpoints for creating images from text prompts.
+"""
+
 import asyncio
 import io
 from typing import AsyncGenerator
@@ -17,6 +23,21 @@ from pipecat.services.image_service import ImageGenService
 
 
 class AzureImageGenServiceREST(ImageGenService):
+    """Azure OpenAI REST-based image generation service.
+
+    Provides image generation using Azure's OpenAI service via REST API.
+    Supports asynchronous image generation with polling for completion
+    and automatic image download and processing.
+
+    Args:
+        image_size: Size specification for generated images (e.g., "1024x1024").
+        api_key: Azure OpenAI API key for authentication.
+        endpoint: Azure OpenAI endpoint URL.
+        model: The image generation model to use.
+        aiohttp_session: Shared aiohttp session for HTTP requests.
+        api_version: Azure API version string. Defaults to "2023-06-01-preview".
+    """
+
     def __init__(
         self,
         *,
@@ -37,6 +58,15 @@ class AzureImageGenServiceREST(ImageGenService):
         self._aiohttp_session = aiohttp_session
 
     async def run_image_gen(self, prompt: str) -> AsyncGenerator[Frame, None]:
+        """Generate an image from a text prompt using Azure OpenAI.
+
+        Args:
+            prompt: The text prompt describing the desired image.
+
+        Yields:
+            URLImageRawFrame containing the generated image data, or
+            ErrorFrame if generation fails.
+        """
         url = f"{self._azure_endpoint}openai/images/generations:submit?api-version={self._api_version}"
 
         headers = {"api-key": self._api_key, "Content-Type": "application/json"}
