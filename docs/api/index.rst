@@ -50,6 +50,7 @@ Utilities
 * :mod:`Metrics <pipecat.metrics>`
 * :mod:`Observers <pipecat.observers>`
 * :mod:`Sync <pipecat.sync>`
+* :mod:`Tests <pipecat.tests>`
 * :mod:`Transcriptions <pipecat.transcriptions>`
 * :mod:`Utils <pipecat.utils>`
 
@@ -69,6 +70,7 @@ Utilities
    Serializers <api/pipecat.serializers>
    Services <api/pipecat.services>
    Sync <api/pipecat.sync>
+   Tests <api/pipecat.tests>
    Transcriptions <api/pipecat.transcriptions>
    Transports <api/pipecat.transports>
    Utils <api/pipecat.utils>
