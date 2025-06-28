@@ -31,11 +31,6 @@ class Mem0MemoryService(FrameProcessor):
 
     This service intercepts message frames in the pipeline, stores them in Mem0,
     and enhances context with relevant memories before passing them downstream.
-
-    Args:
-        api_key (str): The API key for accessing Mem0's API
-        user_id (str): The user ID to associate with memories in Mem0
-        params (InputParams, optional): Configuration parameters for memory retrieval
     """
 
     class InputParams(BaseModel):
@@ -56,6 +51,16 @@ class Mem0MemoryService(FrameProcessor):
         run_id: Optional[str] = None,
         params: Optional[InputParams] = None,
     ):
+        """Initialize the Mem0 memory service.
+
+        Args:
+            api_key (str): The API key for accessing Mem0's API
+            user_id (str): The user ID to associate with memories in Mem0
+            params (InputParams, optional): Configuration parameters for memory retrieval
+            local_config (Dict[str, Any], optional): Local configuration for Mem0 client
+            agent_id (str, optional): The agent ID to associate with memories in Mem0
+            run_id (str, optional): The run ID to associate with memories in Mem0
+        """
         # Important: Call the parent class __init__ first
         super().__init__()
 

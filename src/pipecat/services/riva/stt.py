@@ -94,14 +94,6 @@ class RivaSTTService(STTService):
     Provides real-time transcription capabilities using NVIDIA's Riva ASR models
     through streaming recognition. Supports interim results and continuous audio
     processing for low-latency applications.
-
-    Args:
-        api_key: NVIDIA API key for authentication.
-        server: Riva server address. Defaults to NVIDIA Cloud Function endpoint.
-        model_function_map: Mapping containing 'function_id' and 'model_name' for the ASR model.
-        sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
-        params: Additional configuration parameters for Riva.
-        **kwargs: Additional arguments passed to STTService.
     """
 
     class InputParams(BaseModel):
@@ -126,6 +118,16 @@ class RivaSTTService(STTService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Riva STT service.
+
+        Args:
+            api_key: NVIDIA API key for authentication.
+            server: Riva server address. Defaults to NVIDIA Cloud Function endpoint.
+            model_function_map: Mapping containing 'function_id' and 'model_name' for the ASR model.
+            sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
+            params: Additional configuration parameters for Riva.
+            **kwargs: Additional arguments passed to STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or RivaSTTService.InputParams()
@@ -383,14 +385,6 @@ class RivaSegmentedSTTService(SegmentedSTTService):
     By default, his service uses NVIDIA's Riva Canary ASR API to perform speech-to-text
     transcription on audio segments. It inherits from SegmentedSTTService to handle
     audio buffering and speech detection.
-
-    Args:
-        api_key: NVIDIA API key for authentication
-        server: Riva server address (defaults to NVIDIA Cloud Function endpoint)
-        model_function_map: Mapping of model name and its corresponding NVIDIA Cloud Function ID
-        sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
-        params: Additional configuration parameters for Riva
-        **kwargs: Additional arguments passed to SegmentedSTTService
     """
 
     class InputParams(BaseModel):
@@ -425,6 +419,16 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Riva segmented STT service.
+
+        Args:
+            api_key: NVIDIA API key for authentication
+            server: Riva server address (defaults to NVIDIA Cloud Function endpoint)
+            model_function_map: Mapping of model name and its corresponding NVIDIA Cloud Function ID
+            sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
+            params: Additional configuration parameters for Riva
+            **kwargs: Additional arguments passed to SegmentedSTTService
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or RivaSegmentedSTTService.InputParams()
@@ -655,14 +659,6 @@ class ParakeetSTTService(RivaSTTService):
 
     This class is deprecated. Use RivaSTTService instead for equivalent functionality
     with Parakeet models by specifying the appropriate model_function_map.
-
-    Args:
-        api_key: NVIDIA API key for authentication.
-        server: Riva server address. Defaults to NVIDIA Cloud Function endpoint.
-        model_function_map: Mapping containing 'function_id' and 'model_name' for Parakeet model.
-        sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
-        params: Additional configuration parameters for Riva.
-        **kwargs: Additional arguments passed to RivaSTTService.
     """
 
     def __init__(
@@ -678,6 +674,16 @@ class ParakeetSTTService(RivaSTTService):
         params: Optional[RivaSTTService.InputParams] = None,  # Use parent class's type
         **kwargs,
     ):
+        """Initialize the Parakeet STT service.
+
+        Args:
+            api_key: NVIDIA API key for authentication.
+            server: Riva server address. Defaults to NVIDIA Cloud Function endpoint.
+            model_function_map: Mapping containing 'function_id' and 'model_name' for Parakeet model.
+            sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
+            params: Additional configuration parameters for Riva.
+            **kwargs: Additional arguments passed to RivaSTTService.
+        """
         super().__init__(
             api_key=api_key,
             server=server,

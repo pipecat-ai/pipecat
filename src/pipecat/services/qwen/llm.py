@@ -16,12 +16,6 @@ class QwenLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Qwen's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing Qwen's API (DashScope API key).
-        base_url: Base URL for Qwen API. Defaults to "https://dashscope-intl.aliyuncs.com/compatible-mode/v1".
-        model: The model identifier to use. Defaults to "qwen-plus".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -32,6 +26,14 @@ class QwenLLMService(OpenAILLMService):
         model: str = "qwen-plus",
         **kwargs,
     ):
+        """Initialize the Qwen LLM service.
+
+        Args:
+            api_key: The API key for accessing Qwen's API (DashScope API key).
+            base_url: Base URL for Qwen API. Defaults to "https://dashscope-intl.aliyuncs.com/compatible-mode/v1".
+            model: The model identifier to use. Defaults to "qwen-plus".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
         logger.info(f"Initialized Qwen LLM service with model: {model}")
 

@@ -36,13 +36,6 @@ class FalImageGenService(ImageGenService):
 
     Provides text-to-image generation using Fal.ai's API with configurable
     parameters for image quality, safety, and format options.
-
-    Args:
-        params: Input parameters for image generation configuration.
-        aiohttp_session: HTTP client session for downloading generated images.
-        model: The Fal.ai model to use for generation. Defaults to "fal-ai/fast-sdxl".
-        key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.
-        **kwargs: Additional arguments passed to parent ImageGenService.
     """
 
     class InputParams(BaseModel):
@@ -75,6 +68,15 @@ class FalImageGenService(ImageGenService):
         key: Optional[str] = None,
         **kwargs,
     ):
+        """Initialize the FalImageGenService.
+
+        Args:
+            params: Input parameters for image generation configuration.
+            aiohttp_session: HTTP client session for downloading generated images.
+            model: The Fal.ai model to use for generation. Defaults to "fal-ai/fast-sdxl".
+            key: Optional API key for Fal.ai. If provided, sets FAL_KEY environment variable.
+            **kwargs: Additional arguments passed to parent ImageGenService.
+        """
         super().__init__(**kwargs)
         self.set_model_name(model)
         self._params = params

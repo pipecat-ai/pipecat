@@ -43,8 +43,8 @@ We follow Google-style docstrings with these specific conventions:
 
 **Regular Classes:**
 
-- Class docstring describes the class purpose and documents all `__init__` parameters in an `Args:` section
-- No separate `__init__` docstring needed
+- Class docstring describes the class purpose and key functionality
+- `__init__` method has its own docstring with complete `Args:` section documenting all parameters
 - All public methods must have docstrings with `Args:` and `Returns:` sections as appropriate
 
 **Dataclasses:**
@@ -67,14 +67,18 @@ We follow Google-style docstrings with these specific conventions:
 class MyService(BaseService):
     """Description of what the service does.
 
-    Args:
-        param1: Description of param1.
-        param2: Description of param2. Defaults to True.
-        **kwargs: Additional arguments passed to parent.
+    Provides detailed explanation of the service's functionality,
+    key features, and usage patterns.
     """
 
     def __init__(self, param1: str, param2: bool = True, **kwargs):
-        # No docstring - parameters documented above
+        """Initialize the service.
+
+        Args:
+            param1: Description of param1.
+            param2: Description of param2. Defaults to True.
+            **kwargs: Additional arguments passed to parent.
+        """
         super().__init__(**kwargs)
 
     @property

@@ -28,15 +28,14 @@ extensions = [
 
 # Napoleon settings
 napoleon_google_docstring = True
-napoleon_numpy_docstring = False
-napoleon_include_init_with_doc = False
+napoleon_include_init_with_doc = True
 
 # AutoDoc settings
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
     "undoc-members": True,
-    "exclude-members": "__weakref__,__init__,model_config",
+    "exclude-members": "__weakref__,model_config",
     "no-index": True,
     "show-inheritance": True,
 }

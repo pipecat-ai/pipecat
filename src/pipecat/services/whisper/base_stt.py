@@ -111,15 +111,6 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
     Provides common functionality for services implementing the Whisper API interface,
     including metrics generation and error handling.
-
-    Args:
-        model: Name of the Whisper model to use.
-        api_key: Service API key. Defaults to None.
-        base_url: Service API base URL. Defaults to None.
-        language: Language of the audio input. Defaults to English.
-        prompt: Optional text to guide the model's style or continue a previous segment.
-        temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
     def __init__(
@@ -133,6 +124,17 @@ class BaseWhisperSTTService(SegmentedSTTService):
         temperature: Optional[float] = None,
         **kwargs,
     ):
+        """Initialize the Whisper STT service.
+
+        Args:
+            model: Name of the Whisper model to use.
+            api_key: Service API key. Defaults to None.
+            base_url: Service API base URL. Defaults to None.
+            language: Language of the audio input. Defaults to English.
+            prompt: Optional text to guide the model's style or continue a previous segment.
+            temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
         super().__init__(**kwargs)
         self.set_model_name(model)
         self._client = self._create_client(api_key, base_url)

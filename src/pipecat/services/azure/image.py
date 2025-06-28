@@ -28,14 +28,6 @@ class AzureImageGenServiceREST(ImageGenService):
     Provides image generation using Azure's OpenAI service via REST API.
     Supports asynchronous image generation with polling for completion
     and automatic image download and processing.
-
-    Args:
-        image_size: Size specification for generated images (e.g., "1024x1024").
-        api_key: Azure OpenAI API key for authentication.
-        endpoint: Azure OpenAI endpoint URL.
-        model: The image generation model to use.
-        aiohttp_session: Shared aiohttp session for HTTP requests.
-        api_version: Azure API version string. Defaults to "2023-06-01-preview".
     """
 
     def __init__(
@@ -48,6 +40,16 @@ class AzureImageGenServiceREST(ImageGenService):
         aiohttp_session: aiohttp.ClientSession,
         api_version="2023-06-01-preview",
     ):
+        """Initialize the AzureImageGenServiceREST.
+
+        Args:
+            image_size: Size specification for generated images (e.g., "1024x1024").
+            api_key: Azure OpenAI API key for authentication.
+            endpoint: Azure OpenAI endpoint URL.
+            model: The image generation model to use.
+            aiohttp_session: Shared aiohttp session for HTTP requests.
+            api_version: Azure API version string. Defaults to "2023-06-01-preview".
+        """
         super().__init__()
 
         self._api_key = api_key

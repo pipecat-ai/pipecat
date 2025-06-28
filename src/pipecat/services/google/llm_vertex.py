@@ -44,13 +44,6 @@ class GoogleVertexLLMService(OpenAILLMService):
     account credentials and constructs appropriate endpoint URLs for
     different GCP regions and projects.
 
-    Args:
-        credentials: JSON string of service account credentials.
-        credentials_path: Path to the service account JSON file.
-        model: Model identifier (e.g., "google/gemini-2.0-flash-001").
-        params: Vertex AI input parameters including location and project.
-        **kwargs: Additional arguments passed to OpenAILLMService.
-
     Reference:
         https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library
     """
@@ -79,11 +72,11 @@ class GoogleVertexLLMService(OpenAILLMService):
         """Initializes the VertexLLMService.
 
         Args:
-            credentials (Optional[str]): JSON string of service account credentials.
-            credentials_path (Optional[str]): Path to the service account JSON file.
-            model (str): Model identifier. Defaults to "google/gemini-2.0-flash-001".
-            params (InputParams): Vertex AI input parameters.
-            **kwargs: Additional arguments for OpenAILLMService.
+            credentials: JSON string of service account credentials.
+            credentials_path: Path to the service account JSON file.
+            model: Model identifier (e.g., "google/gemini-2.0-flash-001").
+            params: Vertex AI input parameters including location and project.
+            **kwargs: Additional arguments passed to OpenAILLMService.
         """
         params = params or OpenAILLMService.InputParams()
         base_url = self._get_base_url(params)

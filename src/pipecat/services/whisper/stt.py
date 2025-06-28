@@ -262,14 +262,6 @@ class WhisperSTTService(SegmentedSTTService):
 
     This service uses Faster Whisper to perform speech-to-text transcription on audio
     segments. It supports multiple languages and various model sizes.
-
-    Args:
-        model: The Whisper model to use for transcription. Can be a Model enum or string.
-        device: The device to run inference on ('cpu', 'cuda', or 'auto').
-        compute_type: The compute type for inference ('default', 'int8', 'int8_float16', etc.).
-        no_speech_prob: Probability threshold for filtering out non-speech segments.
-        language: The default language for transcription.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
     def __init__(
@@ -282,6 +274,16 @@ class WhisperSTTService(SegmentedSTTService):
         language: Language = Language.EN,
         **kwargs,
     ):
+        """Initialize the Whisper STT service.
+
+        Args:
+            model: The Whisper model to use for transcription. Can be a Model enum or string.
+            device: The device to run inference on ('cpu', 'cuda', or 'auto').
+            compute_type: The compute type for inference ('default', 'int8', 'int8_float16', etc.).
+            no_speech_prob: Probability threshold for filtering out non-speech segments.
+            language: The default language for transcription.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
         super().__init__(**kwargs)
         self._device: str = device
         self._compute_type = compute_type
@@ -401,13 +403,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
     This service uses MLX Whisper to perform speech-to-text transcription on audio
     segments. It's optimized for Apple Silicon and supports multiple languages and quantizations.
-
-    Args:
-        model: The MLX Whisper model to use for transcription. Can be an MLXModel enum or string.
-        no_speech_prob: Probability threshold for filtering out non-speech segments.
-        language: The default language for transcription.
-        temperature: Temperature for sampling. Can be a float or tuple of floats.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
     def __init__(
@@ -419,6 +414,15 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         temperature: float = 0.0,
         **kwargs,
     ):
+        """Initialize the MLX Whisper STT service.
+
+        Args:
+            model: The MLX Whisper model to use for transcription. Can be an MLXModel enum or string.
+            no_speech_prob: Probability threshold for filtering out non-speech segments.
+            language: The default language for transcription.
+            temperature: Temperature for sampling. Can be a float or tuple of floats.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
         # Skip WhisperSTTService.__init__ and call its parent directly
         SegmentedSTTService.__init__(self, **kwargs)
 

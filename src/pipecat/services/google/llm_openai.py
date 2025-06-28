@@ -40,12 +40,6 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
     Note: This service includes a workaround for a Google API bug where function
     call indices may be incorrectly set to None, resulting in empty function names.
 
-    Args:
-        api_key: Google API key for authentication.
-        base_url: Base URL for Google's OpenAI-compatible API.
-        model: Google model name to use (e.g., "gemini-2.0-flash").
-        **kwargs: Additional arguments passed to the parent OpenAILLMService.
-
     Reference:
         https://ai.google.dev/gemini-api/docs/openai
     """
@@ -58,6 +52,14 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         model: str = "gemini-2.0-flash",
         **kwargs,
     ):
+        """Initialize the Google LLM service.
+
+        Args:
+            api_key: Google API key for authentication.
+            base_url: Base URL for Google's OpenAI-compatible API.
+            model: Google model name to use (e.g., "gemini-2.0-flash").
+            **kwargs: Additional arguments passed to the parent OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     async def _process_context(self, context: OpenAILLMContext):

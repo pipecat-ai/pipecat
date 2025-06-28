@@ -40,13 +40,6 @@ class CartesiaLiveOptions:
 
     Manages transcription parameters including model selection, language,
     audio encoding format, and sample rate settings.
-
-    Args:
-        model: The transcription model to use. Defaults to "ink-whisper".
-        language: Target language for transcription. Defaults to English.
-        encoding: Audio encoding format. Defaults to "pcm_s16le".
-        sample_rate: Audio sample rate in Hz. Defaults to 16000.
-        **kwargs: Additional parameters for the transcription service.
     """
 
     def __init__(
@@ -58,6 +51,15 @@ class CartesiaLiveOptions:
         sample_rate: int = 16000,
         **kwargs,
     ):
+        """Initialize CartesiaLiveOptions with default or provided parameters.
+
+        Args:
+            model: The transcription model to use. Defaults to "ink-whisper".
+            language: Target language for transcription. Defaults to English.
+            encoding: Audio encoding format. Defaults to "pcm_s16le".
+            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            **kwargs: Additional parameters for the transcription service.
+        """
         self.model = model
         self.language = language
         self.encoding = encoding
@@ -120,13 +122,6 @@ class CartesiaSTTService(STTService):
     Provides real-time speech transcription through WebSocket connection
     to Cartesia's Live transcription service. Supports both interim and
     final transcriptions with configurable models and languages.
-
-    Args:
-        api_key: Authentication key for Cartesia API.
-        base_url: Custom API endpoint URL. If empty, uses default.
-        sample_rate: Audio sample rate in Hz. Defaults to 16000.
-        live_options: Configuration options for transcription service.
-        **kwargs: Additional arguments passed to parent STTService.
     """
 
     def __init__(
@@ -138,6 +133,15 @@ class CartesiaSTTService(STTService):
         live_options: Optional[CartesiaLiveOptions] = None,
         **kwargs,
     ):
+        """Initialize CartesiaSTTService with API key and options.
+
+        Args:
+            api_key: Authentication key for Cartesia API.
+            base_url: Custom API endpoint URL. If empty, uses default.
+            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            live_options: Configuration options for transcription service.
+            **kwargs: Additional arguments passed to parent STTService.
+        """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
 

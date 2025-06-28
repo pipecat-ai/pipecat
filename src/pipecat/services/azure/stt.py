@@ -51,13 +51,6 @@ class AzureSTTService(STTService):
     This service uses Azure Cognitive Services Speech SDK to convert speech
     audio into text transcriptions. It supports continuous recognition and
     provides real-time transcription results with timing information.
-
-    Args:
-        api_key: Azure Cognitive Services subscription key.
-        region: Azure region for the Speech service (e.g., 'eastus').
-        language: Language for speech recognition. Defaults to English (US).
-        sample_rate: Audio sample rate in Hz. If None, uses service default.
-        **kwargs: Additional arguments passed to parent STTService.
     """
 
     def __init__(
@@ -69,6 +62,15 @@ class AzureSTTService(STTService):
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
+        """Initialize the Azure STT service.
+
+        Args:
+            api_key: Azure Cognitive Services subscription key.
+            region: Azure region for the Speech service (e.g., 'eastus').
+            language: Language for speech recognition. Defaults to English (US).
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            **kwargs: Additional arguments passed to parent STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._speech_config = SpeechConfig(

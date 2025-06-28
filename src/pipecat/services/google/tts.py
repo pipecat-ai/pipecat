@@ -224,14 +224,6 @@ class GoogleHttpTTSService(TTSService):
     and styling options. Ideal for applications requiring fine-grained
     control over speech output.
 
-    Args:
-        credentials: JSON string containing Google Cloud service account credentials.
-        credentials_path: Path to Google Cloud service account JSON file.
-        voice_id: Google TTS voice identifier (e.g., "en-US-Standard-A").
-        sample_rate: Audio sample rate in Hz. If None, uses default.
-        params: Voice customization parameters including pitch, rate, volume, etc.
-        **kwargs: Additional arguments passed to parent TTSService.
-
     Note:
         Requires Google Cloud credentials via service account JSON, credentials file,
         or default application credentials (GOOGLE_APPLICATION_CREDENTIALS).
@@ -269,6 +261,16 @@ class GoogleHttpTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initializes the Google HTTP TTS service.
+
+        Args:
+            credentials: JSON string containing Google Cloud service account credentials.
+            credentials_path: Path to Google Cloud service account JSON file.
+            voice_id: Google TTS voice identifier (e.g., "en-US-Standard-A").
+            sample_rate: Audio sample rate in Hz. If None, uses default.
+            params: Voice customization parameters including pitch, rate, volume, etc.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or GoogleHttpTTSService.InputParams()
@@ -464,14 +466,6 @@ class GoogleTTSService(TTSService):
     for low-latency applications. Optimized for Chirp 3 HD and Journey voices
     with continuous audio streaming capabilities.
 
-    Args:
-        credentials: JSON string containing Google Cloud service account credentials.
-        credentials_path: Path to Google Cloud service account JSON file.
-        voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
-        sample_rate: Audio sample rate in Hz. If None, uses default.
-        params: Language configuration parameters.
-        **kwargs: Additional arguments passed to parent TTSService.
-
     Note:
         Requires Google Cloud credentials via service account JSON, file path, or
         default application credentials (GOOGLE_APPLICATION_CREDENTIALS env var).
@@ -508,6 +502,16 @@ class GoogleTTSService(TTSService):
         params: InputParams = InputParams(),
         **kwargs,
     ):
+        """Initializes the Google streaming TTS service.
+
+        Args:
+            credentials: JSON string containing Google Cloud service account credentials.
+            credentials_path: Path to Google Cloud service account JSON file.
+            voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
+            sample_rate: Audio sample rate in Hz. If None, uses default.
+            params: Language configuration parameters.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or GoogleTTSService.InputParams()

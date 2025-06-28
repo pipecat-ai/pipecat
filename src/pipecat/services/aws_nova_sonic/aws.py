@@ -127,6 +127,7 @@ class CurrentContent:
     text_content: str  # starts as None, then fills in if text
 
     def __str__(self):
+        """String representation of the current content."""
         return (
             f"CurrentContent(\n"
             f"  type={self.type.name},\n"
@@ -172,18 +173,6 @@ class AWSNovaSonicLLMService(LLMService):
 
     Provides bidirectional audio streaming, real-time transcription, text generation,
     and function calling capabilities using AWS Nova Sonic model.
-
-    Args:
-        secret_access_key: AWS secret access key for authentication.
-        access_key_id: AWS access key ID for authentication.
-        region: AWS region where the service is hosted.
-        model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
-        voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
-        params: Model parameters for audio configuration and inference.
-        system_instruction: System-level instruction for the model.
-        tools: Available tools/functions for the model to use.
-        send_transcription_frames: Whether to emit transcription frames.
-        **kwargs: Additional arguments passed to the parent LLMService.
     """
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
@@ -203,6 +192,20 @@ class AWSNovaSonicLLMService(LLMService):
         send_transcription_frames: bool = True,
         **kwargs,
     ):
+        """Initializes the AWS Nova Sonic LLM service.
+
+        Args:
+            secret_access_key: AWS secret access key for authentication.
+            access_key_id: AWS access key ID for authentication.
+            region: AWS region where the service is hosted.
+            model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
+            voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
+            params: Model parameters for audio configuration and inference.
+            system_instruction: System-level instruction for the model.
+            tools: Available tools/functions for the model to use.
+            send_transcription_frames: Whether to emit transcription frames.
+            **kwargs: Additional arguments passed to the parent LLMService.
+        """
         super().__init__(**kwargs)
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id

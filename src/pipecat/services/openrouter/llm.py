@@ -22,13 +22,6 @@ class OpenRouterLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to OpenRouter's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing OpenRouter's API. If None, will attempt
-            to read from environment variables.
-        model: The model identifier to use. Defaults to "openai/gpt-4o-2024-11-20".
-        base_url: The base URL for OpenRouter API. Defaults to "https://openrouter.ai/api/v1".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -39,6 +32,15 @@ class OpenRouterLLMService(OpenAILLMService):
         base_url: str = "https://openrouter.ai/api/v1",
         **kwargs,
     ):
+        """Initialize the OpenRouter LLM service.
+
+        Args:
+            api_key: The API key for accessing OpenRouter's API. If None, will attempt
+                to read from environment variables.
+            model: The model identifier to use. Defaults to "openai/gpt-4o-2024-11-20".
+            base_url: The base URL for OpenRouter API. Defaults to "https://openrouter.ai/api/v1".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(
             api_key=api_key,
             base_url=base_url,

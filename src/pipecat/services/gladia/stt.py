@@ -189,18 +189,6 @@ class GladiaSTTService(STTService):
     Provides automatic reconnection, audio buffering, and comprehensive error handling.
 
     For complete API documentation, see: https://docs.gladia.io/api-reference/v2/live/init
-
-    Args:
-        api_key: Gladia API key for authentication.
-        url: Gladia API URL. Defaults to "https://api.gladia.io/v2/live".
-        confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
-        sample_rate: Audio sample rate in Hz. If None, uses service default.
-        model: Model to use for transcription. Defaults to "solaria-1".
-        params: Additional configuration parameters for Gladia service.
-        max_reconnection_attempts: Maximum number of reconnection attempts. Defaults to 5.
-        reconnection_delay: Initial delay between reconnection attempts in seconds.
-        max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
-        **kwargs: Additional arguments passed to the STTService parent class.
     """
 
     # Maintain backward compatibility
@@ -223,16 +211,16 @@ class GladiaSTTService(STTService):
         """Initialize the Gladia STT service.
 
         Args:
-            api_key: Gladia API key
-            url: Gladia API URL
-            confidence: Minimum confidence threshold for transcriptions
-            sample_rate: Audio sample rate in Hz
-            model: Model to use ("solaria-1")
-            params: Additional configuration parameters
-            max_reconnection_attempts: Maximum number of reconnection attempts
-            reconnection_delay: Initial delay between reconnection attempts (exponential backoff)
-            max_buffer_size: Maximum size of audio buffer in bytes
-            **kwargs: Additional arguments passed to the STTService
+            api_key: Gladia API key for authentication.
+            url: Gladia API URL. Defaults to "https://api.gladia.io/v2/live".
+            confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            model: Model to use for transcription. Defaults to "solaria-1".
+            params: Additional configuration parameters for Gladia service.
+            max_reconnection_attempts: Maximum number of reconnection attempts. Defaults to 5.
+            reconnection_delay: Initial delay between reconnection attempts in seconds.
+            max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
+            **kwargs: Additional arguments passed to the STTService parent class.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 

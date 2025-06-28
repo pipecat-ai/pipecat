@@ -233,11 +233,6 @@ class GoogleLLMContext(OpenAILLMContext):
 
     This class handles conversion between OpenAI-style messages and Google AI's
     Content/Part format, including system messages, function calls, and media.
-
-    Args:
-        messages: Initial messages in OpenAI format.
-        tools: Available tools/functions for the model.
-        tool_choice: Tool choice configuration.
     """
 
     def __init__(
@@ -246,6 +241,13 @@ class GoogleLLMContext(OpenAILLMContext):
         tools: Optional[List[dict]] = None,
         tool_choice: Optional[dict] = None,
     ):
+        """Initialize GoogleLLMContext.
+
+        Args:
+            messages: Initial messages in OpenAI format.
+            tools: Available tools/functions for the model.
+            tool_choice: Tool choice configuration.
+        """
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.system_message = None
 
@@ -563,15 +565,6 @@ class GoogleLLMService(LLMService):
     from OpenAILLMContext to the messages format expected by the Google AI model.
     We use OpenAILLMContext as a lingua franca for all LLM services to enable
     easy switching between different LLMs.
-
-    Args:
-        api_key: Google AI API key for authentication.
-        model: Model name to use. Defaults to "gemini-2.0-flash".
-        params: Input parameters for the model.
-        system_instruction: System instruction/prompt for the model.
-        tools: List of available tools/functions.
-        tool_config: Configuration for tool usage.
-        **kwargs: Additional arguments passed to parent class.
     """
 
     # Overriding the default adapter to use the Gemini one.
@@ -605,6 +598,17 @@ class GoogleLLMService(LLMService):
         tool_config: Optional[Dict[str, Any]] = None,
         **kwargs,
     ):
+        """Initialize the Google LLM service.
+
+        Args:
+            api_key: Google AI API key for authentication.
+            model: Model name to use. Defaults to "gemini-2.0-flash".
+            params: Input parameters for the model.
+            system_instruction: System instruction/prompt for the model.
+            tools: List of available tools/functions.
+            tool_config: Configuration for tool usage.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(**kwargs)
 
         params = params or GoogleLLMService.InputParams()

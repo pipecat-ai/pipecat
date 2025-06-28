@@ -80,14 +80,16 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
 
     Extends OpenAI context with Nova Sonic-specific message handling,
     conversation history management, and text buffering capabilities.
-
-    Args:
-        messages: Initial messages for the context.
-        tools: Available tools for the context.
-        **kwargs: Additional arguments passed to parent class.
     """
 
     def __init__(self, messages=None, tools=None, **kwargs):
+        """Initialize AWS Nova Sonic LLM context.
+
+        Args:
+            messages: Initial messages for the context.
+            tools: Available tools for the context.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(messages=messages, tools=tools, **kwargs)
         self.__setup_local()
 

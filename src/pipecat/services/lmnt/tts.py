@@ -86,14 +86,6 @@ class LmntTTSService(InterruptibleTTSService):
     Provides real-time text-to-speech synthesis using LMNT's WebSocket API.
     Supports streaming audio generation with configurable voice models and
     language settings.
-
-    Args:
-        api_key: LMNT API key for authentication.
-        voice_id: ID of the voice to use for synthesis.
-        sample_rate: Audio sample rate. If None, uses default.
-        language: Language for synthesis. Defaults to English.
-        model: TTS model to use. Defaults to "aurora".
-        **kwargs: Additional arguments passed to parent InterruptibleTTSService.
     """
 
     def __init__(
@@ -106,6 +98,16 @@ class LmntTTSService(InterruptibleTTSService):
         model: str = "aurora",
         **kwargs,
     ):
+        """Initialize the LMNT TTS service.
+
+        Args:
+            api_key: LMNT API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            sample_rate: Audio sample rate. If None, uses default.
+            language: Language for synthesis. Defaults to English.
+            model: TTS model to use. Defaults to "aurora".
+            **kwargs: Additional arguments passed to parent InterruptibleTTSService.
+        """
         super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,

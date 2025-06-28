@@ -56,14 +56,6 @@ class AssemblyAISTTService(STTService):
     Provides real-time speech transcription using AssemblyAI's WebSocket API.
     Supports both interim and final transcriptions with configurable parameters
     for audio processing and connection management.
-
-    Args:
-        api_key: AssemblyAI API key for authentication.
-        language: Language code for transcription. Defaults to English (Language.EN).
-        api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
-        connection_params: Connection configuration parameters. Defaults to AssemblyAIConnectionParams().
-        vad_force_turn_endpoint: Whether to force turn endpoint on VAD stop. Defaults to True.
-        **kwargs: Additional arguments passed to parent STTService class.
     """
 
     def __init__(
@@ -76,6 +68,16 @@ class AssemblyAISTTService(STTService):
         vad_force_turn_endpoint: bool = True,
         **kwargs,
     ):
+        """Initialize the AssemblyAI STT service.
+
+        Args:
+            api_key: AssemblyAI API key for authentication.
+            language: Language code for transcription. Defaults to English (Language.EN).
+            api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
+            connection_params: Connection configuration parameters. Defaults to AssemblyAIConnectionParams().
+            vad_force_turn_endpoint: Whether to force turn endpoint on VAD stop. Defaults to True.
+            **kwargs: Additional arguments passed to parent STTService class.
+        """
         self._api_key = api_key
         self._language = language
         self._api_endpoint_base_url = api_endpoint_base_url

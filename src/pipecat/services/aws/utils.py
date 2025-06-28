@@ -92,17 +92,19 @@ class AWSTranscribePresignedURL:
 
     Handles AWS Signature Version 4 signing process to create authenticated
     WebSocket URLs for streaming transcription requests.
-
-    Args:
-        access_key: AWS access key ID.
-        secret_key: AWS secret access key.
-        session_token: AWS session token for temporary credentials.
-        region: AWS region for the service. Defaults to "us-east-1".
     """
 
     def __init__(
         self, access_key: str, secret_key: str, session_token: str, region: str = "us-east-1"
     ):
+        """Initialize the presigned URL generator.
+
+        Args:
+            access_key: AWS access key ID.
+            secret_key: AWS secret access key.
+            session_token: AWS session token for temporary credentials.
+            region: AWS region for the service. Defaults to "us-east-1".
+        """
         self.access_key = access_key
         self.secret_key = secret_key
         self.session_token = session_token

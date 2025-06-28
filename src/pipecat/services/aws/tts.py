@@ -128,16 +128,6 @@ class AWSPollyTTSService(TTSService):
     Provides text-to-speech synthesis using Amazon Polly with support for
     multiple languages, voices, SSML features, and voice customization
     options including prosody controls.
-
-    Args:
-        api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
-        aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
-        aws_session_token: AWS session token for temporary credentials.
-        region: AWS region for Polly service. Defaults to 'us-east-1'.
-        voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
-        sample_rate: Audio sample rate. If None, uses service default.
-        params: Additional input parameters for voice customization.
-        **kwargs: Additional arguments passed to parent TTSService class.
     """
 
     class InputParams(BaseModel):
@@ -171,6 +161,18 @@ class AWSPollyTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initializes the AWS Polly TTS service.
+
+        Args:
+            api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
+            aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
+            aws_session_token: AWS session token for temporary credentials.
+            region: AWS region for Polly service. Defaults to 'us-east-1'.
+            voice_id: Voice ID to use for synthesis. Defaults to 'Joanna'.
+            sample_rate: Audio sample rate. If None, uses service default.
+            params: Additional input parameters for voice customization.
+            **kwargs: Additional arguments passed to parent TTSService class.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or AWSPollyTTSService.InputParams()
@@ -341,13 +343,14 @@ class AWSPollyTTSService(TTSService):
 
 
 class PollyTTSService(AWSPollyTTSService):
-    """Deprecated alias for AWSPollyTTSService.
-
-    Args:
-        **kwargs: All arguments passed to AWSPollyTTSService.
-    """
+    """Deprecated alias for AWSPollyTTSService."""
 
     def __init__(self, **kwargs):
+        """Initialize the deprecated PollyTTSService.
+
+        Args:
+            **kwargs: All arguments passed to AWSPollyTTSService.
+        """
         super().__init__(**kwargs)
 
         import warnings

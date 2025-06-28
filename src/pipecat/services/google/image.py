@@ -40,11 +40,6 @@ class GoogleImageGenService(ImageGenService):
     Provides text-to-image generation capabilities using Google's Imagen models
     through the Google AI API. Supports multiple image generation and negative
     prompting for enhanced control over generated content.
-
-    Args:
-        api_key: Google AI API key for authentication.
-        params: Configuration parameters for image generation. Defaults to InputParams().
-        **kwargs: Additional arguments passed to the parent ImageGenService.
     """
 
     class InputParams(BaseModel):
@@ -67,6 +62,13 @@ class GoogleImageGenService(ImageGenService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the GoogleImageGenService with API key and parameters.
+
+        Args:
+            api_key: Google AI API key for authentication.
+            params: Configuration parameters for image generation. Defaults to InputParams().
+            **kwargs: Additional arguments passed to the parent ImageGenService.
+        """
         super().__init__(**kwargs)
         self._params = params or GoogleImageGenService.InputParams()
         self._client = genai.Client(api_key=api_key)

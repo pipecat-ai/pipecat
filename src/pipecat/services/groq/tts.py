@@ -32,15 +32,6 @@ class GroqTTSService(TTSService):
     Provides text-to-speech synthesis using Groq's TTS API. The service
     operates at a fixed 48kHz sample rate and supports various voices
     and output formats.
-
-    Args:
-        api_key: Groq API key for authentication.
-        output_format: Audio output format. Defaults to "wav".
-        params: Additional input parameters for voice customization.
-        model_name: TTS model to use. Defaults to "playai-tts".
-        voice_id: Voice identifier to use. Defaults to "Celeste-PlayAI".
-        sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
-        **kwargs: Additional arguments passed to parent TTSService class.
     """
 
     class InputParams(BaseModel):
@@ -67,6 +58,17 @@ class GroqTTSService(TTSService):
         sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
         **kwargs,
     ):
+        """Initialize Groq TTS service.
+
+        Args:
+            api_key: Groq API key for authentication.
+            output_format: Audio output format. Defaults to "wav".
+            params: Additional input parameters for voice customization.
+            model_name: TTS model to use. Defaults to "playai-tts".
+            voice_id: Voice identifier to use. Defaults to "Celeste-PlayAI".
+            sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
+            **kwargs: Additional arguments passed to parent TTSService class.
+        """
         if sample_rate != self.GROQ_SAMPLE_RATE:
             logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
 

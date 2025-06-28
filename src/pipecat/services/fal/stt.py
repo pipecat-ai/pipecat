@@ -158,12 +158,6 @@ class FalSTTService(SegmentedSTTService):
 
     This service uses Fal's Wizper API to perform speech-to-text transcription on audio
     segments. It inherits from SegmentedSTTService to handle audio buffering and speech detection.
-
-    Args:
-        api_key: Fal API key. If not provided, will check FAL_KEY environment variable.
-        sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
-        params: Configuration parameters for the Wizper API.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
     class InputParams(BaseModel):
@@ -189,6 +183,14 @@ class FalSTTService(SegmentedSTTService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the FalSTTService with API key and parameters.
+
+        Args:
+            api_key: Fal API key. If not provided, will check FAL_KEY environment variable.
+            sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate.
+            params: Configuration parameters for the Wizper API.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
         super().__init__(
             sample_rate=sample_rate,
             **kwargs,

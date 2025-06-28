@@ -44,15 +44,7 @@ class OpenAITTSService(TTSService):
 
     This service uses the OpenAI TTS API to generate PCM-encoded audio at 24kHz.
 
-    Args:
-        api_key: OpenAI API key. Defaults to None.
-        voice: Voice ID to use. Defaults to "alloy".
-        model: TTS model to use. Defaults to "gpt-4o-mini-tts".
-        sample_rate: Output audio sample rate in Hz. Defaults to None.
-        **kwargs: Additional keyword arguments passed to TTSService.
-
     The service returns PCM-encoded audio at the specified sample rate.
-
     """
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
@@ -68,6 +60,15 @@ class OpenAITTSService(TTSService):
         instructions: Optional[str] = None,
         **kwargs,
     ):
+        """Initialize OpenAI TTS service.
+
+        Args:
+            api_key: OpenAI API key. Defaults to None.
+            voice: Voice ID to use. Defaults to "alloy".
+            model: TTS model to use. Defaults to "gpt-4o-mini-tts".
+            sample_rate: Output audio sample rate in Hz. Defaults to None.
+            **kwargs: Additional keyword arguments passed to TTSService.
+        """
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "

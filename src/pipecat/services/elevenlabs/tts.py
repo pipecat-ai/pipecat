@@ -202,15 +202,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
     Provides real-time text-to-speech using ElevenLabs' WebSocket streaming API.
     Supports word-level timestamps, audio context management, and various voice
     customization options including stability, similarity boost, and speed controls.
-
-    Args:
-        api_key: ElevenLabs API key for authentication.
-        voice_id: ID of the voice to use for synthesis.
-        model: TTS model to use (e.g., "eleven_flash_v2_5").
-        url: WebSocket URL for ElevenLabs TTS API.
-        sample_rate: Audio sample rate. If None, uses default.
-        params: Additional input parameters for voice customization.
-        **kwargs: Additional arguments passed to the parent service.
     """
 
     class InputParams(BaseModel):
@@ -249,6 +240,17 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the ElevenLabs TTS service.
+
+        Args:
+            api_key: ElevenLabs API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
+            url: WebSocket URL for ElevenLabs TTS API.
+            sample_rate: Audio sample rate. If None, uses default.
+            params: Additional input parameters for voice customization.
+            **kwargs: Additional arguments passed to the parent service.
+        """
         # Aggregating sentences still gives cleaner-sounding results and fewer
         # artifacts than streaming one word at a time. On average, waiting for a
         # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
@@ -616,16 +618,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
     Provides text-to-speech using ElevenLabs' HTTP streaming API for simpler,
     non-WebSocket integration. Suitable for use cases where streaming WebSocket
     connection is not required or desired.
-
-    Args:
-        api_key: ElevenLabs API key for authentication.
-        voice_id: ID of the voice to use for synthesis.
-        aiohttp_session: aiohttp ClientSession for HTTP requests.
-        model: TTS model to use (e.g., "eleven_flash_v2_5").
-        base_url: Base URL for ElevenLabs HTTP API.
-        sample_rate: Audio sample rate. If None, uses default.
-        params: Additional input parameters for voice customization.
-        **kwargs: Additional arguments passed to the parent service.
     """
 
     class InputParams(BaseModel):
@@ -661,6 +653,18 @@ class ElevenLabsHttpTTSService(WordTTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the ElevenLabs HTTP TTS service.
+
+        Args:
+            api_key: ElevenLabs API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            aiohttp_session: aiohttp ClientSession for HTTP requests.
+            model: TTS model to use (e.g., "eleven_flash_v2_5").
+            base_url: Base URL for ElevenLabs HTTP API.
+            sample_rate: Audio sample rate. If None, uses default.
+            params: Additional input parameters for voice customization.
+            **kwargs: Additional arguments passed to the parent service.
+        """
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,

@@ -35,10 +35,6 @@ class MCPClient(BaseObject):
     to LLMs. Supports both stdio and SSE server connections with automatic tool
     registration and schema conversion.
 
-    Args:
-        server_params: Server connection parameters (stdio or SSE).
-        **kwargs: Additional arguments passed to the parent BaseObject.
-
     Raises:
         TypeError: If server_params is not a supported parameter type.
     """
@@ -48,6 +44,12 @@ class MCPClient(BaseObject):
         server_params: Tuple[StdioServerParameters, SseServerParameters, StreamableHttpParameters],
         **kwargs,
     ):
+        """Initialize the MCP client with server parameters.
+
+        Args:
+            server_params: Server connection parameters (stdio or SSE).
+            **kwargs: Additional arguments passed to the parent BaseObject.
+        """
         super().__init__(**kwargs)
         self._server_params = server_params
         self._session = ClientSession
@@ -190,6 +192,7 @@ class MCPClient(BaseObject):
 
     async def _streamable_http_register_tools(self, llm) -> ToolsSchema:
         """Register all available mcp tools with the LLM service using streamable HTTP.
+
         Args:
             llm: The Pipecat LLM service to register tools with
         Returns:

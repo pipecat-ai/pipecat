@@ -48,15 +48,6 @@ class AWSTranscribeSTTService(STTService):
     Provides real-time speech transcription using AWS Transcribe's streaming API.
     Supports multiple languages, configurable sample rates, and both interim and
     final transcription results.
-
-    Args:
-        api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
-        aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
-        aws_session_token: AWS session token for temporary credentials. If None, uses AWS_SESSION_TOKEN environment variable.
-        region: AWS region for the service. Defaults to "us-east-1".
-        sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
-        language: Language for transcription. Defaults to English.
-        **kwargs: Additional arguments passed to parent STTService class.
     """
 
     def __init__(
@@ -70,6 +61,17 @@ class AWSTranscribeSTTService(STTService):
         language: Language = Language.EN,
         **kwargs,
     ):
+        """Initialize the AWS Transcribe STT service.
+
+        Args:
+            api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
+            aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
+            aws_session_token: AWS session token for temporary credentials. If None, uses AWS_SESSION_TOKEN environment variable.
+            region: AWS region for the service. Defaults to "us-east-1".
+            sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
+            language: Language for transcription. Defaults to English.
+            **kwargs: Additional arguments passed to parent STTService class.
+        """
         super().__init__(**kwargs)
 
         self._settings = {

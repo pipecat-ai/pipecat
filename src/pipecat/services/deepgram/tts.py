@@ -38,14 +38,6 @@ class DeepgramTTSService(TTSService):
     Provides text-to-speech synthesis using Deepgram's streaming API.
     Supports various voice models and audio encoding formats with
     configurable sample rates and quality settings.
-
-    Args:
-        api_key: Deepgram API key for authentication.
-        voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
-        base_url: Custom base URL for Deepgram API. Uses default if empty.
-        sample_rate: Audio sample rate in Hz. If None, uses service default.
-        encoding: Audio encoding format. Defaults to "linear16".
-        **kwargs: Additional arguments passed to parent TTSService class.
     """
 
     def __init__(
@@ -58,6 +50,16 @@ class DeepgramTTSService(TTSService):
         encoding: str = "linear16",
         **kwargs,
     ):
+        """Initialize the Deepgram TTS service.
+
+        Args:
+            api_key: Deepgram API key for authentication.
+            voice: Voice model to use for synthesis. Defaults to "aura-2-helena-en".
+            base_url: Custom base URL for Deepgram API. Uses default if empty.
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            encoding: Audio encoding format. Defaults to "linear16".
+            **kwargs: Additional arguments passed to parent TTSService class.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {

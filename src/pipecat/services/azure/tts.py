@@ -66,14 +66,6 @@ class AzureBaseTTSService(TTSService):
 
     Provides common functionality for Azure TTS services including SSML
     construction, voice configuration, and parameter management.
-
-    Args:
-        api_key: Azure Cognitive Services subscription key.
-        region: Azure region identifier (e.g., "eastus", "westus2").
-        voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
-        sample_rate: Audio sample rate in Hz. If None, uses service default.
-        params: Voice and synthesis parameters configuration.
-        **kwargs: Additional arguments passed to parent TTSService.
     """
 
     class InputParams(BaseModel):
@@ -109,6 +101,16 @@ class AzureBaseTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Azure TTS service with configuration parameters.
+
+        Args:
+            api_key: Azure Cognitive Services subscription key.
+            region: Azure region identifier (e.g., "eastus", "westus2").
+            voice: Voice name to use for synthesis. Defaults to "en-US-SaraNeural".
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            params: Voice and synthesis parameters configuration.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or AzureBaseTTSService.InputParams()
@@ -202,12 +204,14 @@ class AzureTTSService(AzureBaseTTSService):
     Provides real-time text-to-speech synthesis using Azure's WebSocket-based
     streaming API. Audio chunks are streamed as they become available for
     lower latency playback.
-
-    Args:
-        **kwargs: All arguments passed to AzureBaseTTSService parent class.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the Azure streaming TTS service.
+
+        Args:
+            **kwargs: All arguments passed to AzureBaseTTSService parent class.
+        """
         super().__init__(**kwargs)
         self._speech_config = None
         self._speech_synthesizer = None
@@ -324,12 +328,14 @@ class AzureHttpTTSService(AzureBaseTTSService):
     Provides text-to-speech synthesis using Azure's HTTP API for simpler,
     non-streaming synthesis. Suitable for use cases where streaming is not
     required and simpler integration is preferred.
-
-    Args:
-        **kwargs: All arguments passed to AzureBaseTTSService parent class.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the Azure HTTP TTS service.
+
+        Args:
+            **kwargs: All arguments passed to AzureBaseTTSService parent class.
+        """
         super().__init__(**kwargs)
         self._speech_config = None
         self._speech_synthesizer = None

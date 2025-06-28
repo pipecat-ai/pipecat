@@ -55,13 +55,14 @@ class GoogleRTVIObserver(RTVIObserver):
 
     Extends the base RTVIObserver to handle Google-specific frame types,
     particularly LLM search response frames from Google services.
-
-    Args:
-        rtvi: The RTVI processor to send messages through.
     """
 
     def __init__(self, rtvi: RTVIProcessor):
-        # No docstring - parameters documented in class docstring
+        """Initialize the Google RTVI observer.
+
+        Args:
+            rtvi: The RTVI processor to send messages through.
+        """
         super().__init__(rtvi)
 
     async def on_push_frame(self, data: FramePushed):

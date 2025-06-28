@@ -49,6 +49,7 @@ class AudioBuffer:
     """
 
     def __init__(self):
+        """Initialize the audio buffer."""
         self.frames: List[AudioRawFrame] = []
         self.started_at: Optional[float] = None
         self.is_processing: bool = False
@@ -59,13 +60,15 @@ class UltravoxModel:
 
     This class handles loading and running the Ultravox model for speech-to-text
     transcription using vLLM for efficient inference.
-
-    Args:
-        model_name: The name or path of the Ultravox model to load.
-            Defaults to "fixie-ai/ultravox-v0_5-llama-3_1-8b".
     """
 
     def __init__(self, model_name: str = "fixie-ai/ultravox-v0_5-llama-3_1-8b"):
+        """Initialize the Ultravox model.
+
+        Args:
+            model_name: The name or path of the Ultravox model to load.
+                Defaults to "fixie-ai/ultravox-v0_5-llama-3_1-8b".
+        """
         self.model_name = model_name
         self._initialize_engine()
         self._initialize_tokenizer()
@@ -170,15 +173,6 @@ class UltravoxSTTService(AIService):
     This service collects audio frames during speech and processes them with
     Ultravox to generate text transcriptions. It handles real-time audio
     buffering, model warm-up, and streaming text generation.
-
-    Args:
-        model_name: The Ultravox model to use. Defaults to
-            "fixie-ai/ultravox-v0_5-llama-3_1-8b".
-        hf_token: Hugging Face token for model access. If None, will try
-            to use HF_TOKEN environment variable.
-        temperature: Sampling temperature for generation. Defaults to 0.7.
-        max_tokens: Maximum tokens to generate. Defaults to 100.
-        **kwargs: Additional arguments passed to AIService.
     """
 
     def __init__(
@@ -190,6 +184,17 @@ class UltravoxSTTService(AIService):
         max_tokens: int = 100,
         **kwargs,
     ):
+        """Initialize the UltravoxSTTService.
+
+        Args:
+            model_name: The Ultravox model to use. Defaults to
+                "fixie-ai/ultravox-v0_5-llama-3_1-8b".
+            hf_token: Hugging Face token for model access. If None, will try
+                to use HF_TOKEN environment variable.
+            temperature: Sampling temperature for generation. Defaults to 0.7.
+            max_tokens: Maximum tokens to generate. Defaults to 100.
+            **kwargs: Additional arguments passed to AIService.
+        """
         super().__init__(**kwargs)
 
         # Authenticate with Hugging Face if token provided

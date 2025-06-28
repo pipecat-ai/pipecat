@@ -50,14 +50,6 @@ class FishAudioTTSService(InterruptibleTTSService):
     Provides real-time text-to-speech synthesis using Fish Audio's WebSocket API.
     Supports various audio formats, customizable prosody controls, and streaming
     audio generation with interruption handling.
-
-    Args:
-        api_key: Fish Audio API key for authentication.
-        model: Reference ID of the voice model to use for synthesis.
-        output_format: Audio output format. Defaults to "pcm".
-        sample_rate: Audio sample rate. If None, uses default.
-        params: Additional input parameters for voice customization.
-        **kwargs: Additional arguments passed to the parent service.
     """
 
     class InputParams(BaseModel):
@@ -85,6 +77,16 @@ class FishAudioTTSService(InterruptibleTTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Fish Audio TTS service.
+
+        Args:
+            api_key: Fish Audio API key for authentication.
+            model: Reference ID of the voice model to use for synthesis.
+            output_format: Audio output format. Defaults to "pcm".
+            sample_rate: Audio sample rate. If None, uses default.
+            params: Additional input parameters for voice customization.
+            **kwargs: Additional arguments passed to the parent service.
+        """
         super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,
