@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Configuration for the Gladia STT service."""
+
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel

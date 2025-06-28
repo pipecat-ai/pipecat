@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Fal speech-to-text service implementation.
+
+This module provides integration with Fal's Wizper API for speech-to-text
+transcription using segmented audio processing.
+"""
+
 import os
 from typing import AsyncGenerator, Optional
 
@@ -27,7 +33,14 @@ except ModuleNotFoundError as e:
 
 
 def language_to_fal_language(language: Language) -> Optional[str]:
-    """Language support for Fal's Wizper API."""
+    """Convert a Language enum to Fal's Wizper language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding Fal Wizper language code, or None if not supported.
+    """
     BASE_LANGUAGES = {
         Language.AF: "af",
         Language.AM: "am",
@@ -156,7 +169,7 @@ class FalSTTService(SegmentedSTTService):
     class InputParams(BaseModel):
         """Configuration parameters for Fal's Wizper API.
 
-        Attributes:
+        Parameters:
             language: Language of the audio input. Defaults to English.
             task: Task to perform ('transcribe' or 'translate'). Defaults to 'transcribe'.
             chunk_level: Level of chunking ('segment'). Defaults to 'segment'.
@@ -201,16 +214,39 @@ class FalSTTService(SegmentedSTTService):
         }
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate processing metrics.
+
+        Returns:
+            True, as Fal STT service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Fal's service-specific language code.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Fal-specific language code, or None if not supported.
+        """
         return language_to_fal_language(language)
 
     async def set_language(self, language: Language):
+        """Set the transcription language.
+
+        Args:
+            language: The language to use for speech-to-text transcription.
+        """
         logger.info(f"Switching STT language to: [{language}]")
         self._settings["language"] = self.language_to_service_language(language)
 
     async def set_model(self, model: str):
+        """Set the STT model.
+
+        Args:
+            model: The model name to use for transcription.
+        """
         await super().set_model(model)
         logger.info(f"Switching STT model to: [{model}]")
 
@@ -229,7 +265,7 @@ class FalSTTService(SegmentedSTTService):
             audio: Raw audio bytes in WAV format (already converted by base class).
 
         Yields:
-            Frame: TranscriptionFrame containing the transcribed text.
+            Frame: TranscriptionFrame containing the transcribed text, or ErrorFrame on failure.
 
         Note:
             The audio is already in WAV format from the SegmentedSTTService.
