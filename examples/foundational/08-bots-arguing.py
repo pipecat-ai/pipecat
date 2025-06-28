@@ -4,12 +4,19 @@ import os
 from typing import Tuple
 
 import aiohttp
-from daily_runner import configure
 from dotenv import load_dotenv
 
-from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
+from pipecat.examples.daily_runner import configure
+from pipecat.frames.frames import (
+    EndFrame,
+    LLMMessagesFrame,
+    OutputAudioRawFrame,
+    OutputImageRawFrame,
+    TextFrame,
+    TTSAudioRawFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators import SentenceAggregator
+from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.services.azure import AzureLLMService, AzureTTSService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
@@ -89,7 +96,7 @@ async def main():
                 frame = sink_queue.get_nowait()
                 if isinstance(frame, TextFrame):
                     message += frame.text
-                elif isinstance(frame, AudioFrame):
+                elif isinstance(frame, TTSAudioRawFrame):
                     all_audio.extend(frame.audio)
 
             return (message, all_audio)
@@ -121,8 +128,10 @@ async def main():
                 )
                 await transport.send_queue.put(
                     [
-                        ImageFrame(image_data1[1], image_data1[2]),
-                        AudioFrame(audio1),
+                        OutputImageRawFrame(
+                            image=image_data1[1], size=image_data1[2], format="jpeg"
+                        ),
+                        OutputAudioRawFrame(audio=audio1, sample_rate=24000, num_channels=1),
                     ]
                 )
 
@@ -133,8 +142,10 @@ async def main():
                 )
                 await transport.send_queue.put(
                     [
-                        ImageFrame(image_data2[1], image_data2[2]),
-                        AudioFrame(audio2),
+                        OutputImageRawFrame(
+                            image=image_data2[1], size=image_data2[2], format="jpeg"
+                        ),
+                        OutputAudioRawFrame(audio=audio2, sample_rate=24000, num_channels=1),
                     ]
                 )
 
