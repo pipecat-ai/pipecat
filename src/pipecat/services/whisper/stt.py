@@ -46,7 +46,7 @@ class Model(Enum):
     Provides various model sizes and specializations for speech recognition,
     balancing quality and performance based on use case requirements.
 
-    Attributes:
+    Parameters:
         TINY: Smallest multilingual model, fastest inference.
         BASE: Basic multilingual model, good speed/quality balance.
         MEDIUM: Medium-sized multilingual model, better quality.
@@ -72,7 +72,7 @@ class MLXModel(Enum):
     Provides various model sizes optimized for Apple Silicon hardware,
     including quantized variants for improved performance.
 
-    Attributes:
+    Parameters:
         TINY: Smallest multilingual model for MLX.
         MEDIUM: Medium-sized multilingual model for MLX.
         LARGE_V3: Best quality multilingual model for MLX.

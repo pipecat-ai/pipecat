@@ -41,7 +41,14 @@ from pipecat.services.openai.llm import (
 
 
 class Role(Enum):
-    """Roles supported in AWS Nova Sonic conversations."""
+    """Roles supported in AWS Nova Sonic conversations.
+
+    Parameters:
+        SYSTEM: System-level messages (not used in conversation history).
+        USER: Messages sent by the user.
+        ASSISTANT: Messages sent by the assistant.
+        TOOL: Messages sent by tools (not used in conversation history).
+    """
 
     SYSTEM = "SYSTEM"
     USER = "USER"

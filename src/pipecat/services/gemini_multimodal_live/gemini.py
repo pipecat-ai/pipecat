@@ -333,7 +333,12 @@ class GeminiMultimodalLiveContextAggregatorPair:
 
 
 class GeminiMultimodalModalities(Enum):
-    """Supported modalities for Gemini Multimodal Live."""
+    """Supported modalities for Gemini Multimodal Live.
+
+    Parameters:
+        TEXT: Text responses.
+        AUDIO: Audio responses.
+    """
 
     TEXT = "TEXT"
     AUDIO = "AUDIO"

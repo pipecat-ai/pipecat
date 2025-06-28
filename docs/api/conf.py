@@ -274,6 +274,7 @@ def clean_title(title: str) -> str:
         "stt": "STT",
         "tts": "TTS",
         "llm": "LLM",
+        "rtvi": "RTVI",
     }
 
     # Check if the entire title is a special case

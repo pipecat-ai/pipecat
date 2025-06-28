@@ -45,7 +45,7 @@ from pipecat.utils.base_object import BaseObject
 class FrameDirection(Enum):
     """Direction of frame flow in the processing pipeline.
 
-    Attributes:
+    Parameters:
         DOWNSTREAM: Frames flowing from input to output.
         UPSTREAM: Frames flowing back from output to input.
     """

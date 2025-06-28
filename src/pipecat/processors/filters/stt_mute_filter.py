@@ -43,12 +43,13 @@ class STTMuteStrategy(Enum):
     processing should be temporarily disabled to prevent unwanted audio
     processing during specific conversation states.
 
-    FIRST_SPEECH: Mute STT until the first bot speech is detected.
-    MUTE_UNTIL_FIRST_BOT_COMPLETE: Mute STT until the first bot completes speaking,
-      regardless of whether it is the first speech.
-    FUNCTION_CALL: Mute STT during function calls to prevent interruptions.
-    ALWAYS: Always mute STT when the bot is speaking.
-    CUSTOM: Use a custom callback to determine muting logic dynamically.
+    Parameters:
+        FIRST_SPEECH: Mute STT until the first bot speech is detected.
+        MUTE_UNTIL_FIRST_BOT_COMPLETE: Mute STT until the first bot completes speaking,
+        regardless of whether it is the first speech.
+        FUNCTION_CALL: Mute STT during function calls to prevent interruptions.
+        ALWAYS: Always mute STT when the bot is speaking.
+        CUSTOM: Use a custom callback to determine muting logic dynamically.
     """
 
     FIRST_SPEECH = "first_speech"

@@ -96,7 +96,13 @@ class AWSNovaSonicUnhandledFunctionException(Exception):
 
 
 class ContentType(Enum):
-    """Content types supported by AWS Nova Sonic."""
+    """Content types supported by AWS Nova Sonic.
+
+    Parameters:
+        AUDIO: Audio content type.
+        TEXT: Text content type.
+        TOOL: Tool content type.
+    """
 
     AUDIO = "AUDIO"
     TEXT = "TEXT"
@@ -104,7 +110,12 @@ class ContentType(Enum):
 
 
 class TextStage(Enum):
-    """Text generation stages in AWS Nova Sonic responses."""
+    """Text generation stages in AWS Nova Sonic responses.
+
+    Parameters:
+        FINAL: Final text that has been fully generated.
+        SPECULATIVE: Speculative text that is still being generated.
+    """
 
     FINAL = "FINAL"  # what has been said
     SPECULATIVE = "SPECULATIVE"  # what's planned to be said

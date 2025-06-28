@@ -33,8 +33,9 @@ class WakeCheckFilter(FrameProcessor):
     class WakeState(Enum):
         """Enumeration of wake detection states.
 
-        IDLE: No wake phrase detected, filtering active.
-        AWAKE: Wake phrase detected, allowing frames through.
+        Parameters:
+            IDLE: No wake phrase detected, filtering active.
+            AWAKE: Wake phrase detected, allowing frames through.
         """
 
         IDLE = 1

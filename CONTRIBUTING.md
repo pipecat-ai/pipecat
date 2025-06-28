@@ -65,6 +65,12 @@ We follow Google-style docstrings with these specific conventions:
 - **Skip docstrings** for pure import/re-export modules
 - **Add brief docstrings** for top-level packages or those with initialization logic
 
+**Enums:**
+
+- Class docstring describes the enumeration purpose
+- Use `Parameters:` section to document each enum value and its meaning
+- No `__init__` docstring (Enums don't have custom constructors)
+
 #### Examples:
 
 ```python
@@ -120,6 +126,22 @@ class ConfigParams:
     host: str
     port: int = 8080
     timeout: float = 30.0
+
+# Enum class
+class Status(Enum):
+    """Status codes for processing operations.
+
+    Parameters:
+        PENDING: Operation is queued but not started.
+        RUNNING: Operation is currently in progress.
+        COMPLETED: Operation finished successfully.
+        FAILED: Operation encountered an error.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
 ```
 
 # Contributor Covenant Code of Conduct
