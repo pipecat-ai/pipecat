@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+python-dotenv
+# Must install pipecat from local directory instead of PyPI since package excludes pipecat.examples modules:
+# This example requires Python >= 3.12 to run.
+-e ../../..[daily,aws-nova-sonic,silero,aws]
