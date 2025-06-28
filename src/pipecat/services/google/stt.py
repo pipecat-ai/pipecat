@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Google Cloud Speech-to-Text V2 service implementation for Pipecat.
+
+This module provides a Google Cloud Speech-to-Text V2 service with streaming
+support, enabling real-time speech recognition with features like automatic
+punctuation, voice activity detection, and multi-language support.
+"""
+
 import asyncio
 import json
 import os
@@ -353,9 +360,23 @@ class GoogleSTTService(STTService):
 
     Provides real-time speech recognition using Google Cloud's Speech-to-Text V2 API
     with streaming support. Handles audio transcription and optional voice activity detection.
+    Implements automatic stream reconnection to handle Google's 4-minute streaming limit.
+
+    Args:
+        credentials: JSON string containing Google Cloud service account credentials.
+        credentials_path: Path to service account credentials JSON file.
+        location: Google Cloud location (e.g., "global", "us-central1").
+        sample_rate: Audio sample rate in Hertz.
+        params: Configuration parameters for the service.
+        **kwargs: Additional arguments passed to STTService.
 
     Attributes:
         InputParams: Configuration parameters for the STT service.
+        STREAMING_LIMIT: Google Cloud's streaming limit in milliseconds (4 minutes).
+
+    Raises:
+        ValueError: If neither credentials nor credentials_path is provided.
+        ValueError: If project ID is not found in credentials.
     """
 
     # Google Cloud's STT service has a connection time limit of 5 minutes per stream.
@@ -367,7 +388,7 @@ class GoogleSTTService(STTService):
     class InputParams(BaseModel):
         """Configuration parameters for Google Speech-to-Text.
 
-        Attributes:
+        Parameters:
             languages: Single language or list of recognition languages. First language is primary.
             model: Speech recognition model to use.
             use_separate_recognition_per_channel: Process each audio channel separately.
@@ -396,13 +417,25 @@ class GoogleSTTService(STTService):
         @field_validator("languages", mode="before")
         @classmethod
         def validate_languages(cls, v) -> List[Language]:
+            """Ensure languages is always a list.
+
+            Args:
+                v: Single Language enum or list of Language enums.
+
+            Returns:
+                List[Language]: List of configured languages.
+            """
             if isinstance(v, Language):
                 return [v]
             return v
 
         @property
         def language_list(self) -> List[Language]:
-            """Get languages as a guaranteed list."""
+            """Get languages as a guaranteed list.
+
+            Returns:
+                List[Language]: List of configured languages.
+            """
             assert isinstance(self.languages, list)
             return self.languages
 
@@ -501,6 +534,11 @@ class GoogleSTTService(STTService):
         }
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate metrics.
+
+        Returns:
+            bool: True, as this service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language | List[Language]) -> str | List[str]:
@@ -548,7 +586,11 @@ class GoogleSTTService(STTService):
         await self._reconnect_if_needed()
 
     async def set_model(self, model: str):
-        """Update the service's recognition model."""
+        """Update the service's recognition model.
+
+        Args:
+            model: The new recognition model to use.
+        """
         logger.debug(f"Switching STT model to: {model}")
         await super().set_model(model)
         self._settings["model"] = model
@@ -556,14 +598,29 @@ class GoogleSTTService(STTService):
         await self._reconnect_if_needed()
 
     async def start(self, frame: StartFrame):
+        """Start the STT service and establish connection.
+
+        Args:
+            frame: The start frame triggering the service start.
+        """
         await super().start(frame)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the STT service and clean up resources.
+
+        Args:
+            frame: The end frame triggering the service stop.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the STT service and clean up resources.
+
+        Args:
+            frame: The cancel frame triggering the service cancellation.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
@@ -585,7 +642,7 @@ class GoogleSTTService(STTService):
         """Update service options dynamically.
 
         Args:
-            languages: New list of recongition languages.
+            languages: New list of recognition languages.
             model: New recognition model.
             enable_automatic_punctuation: Enable/disable automatic punctuation.
             enable_spoken_punctuation: Enable/disable spoken punctuation.
@@ -767,7 +824,14 @@ class GoogleSTTService(STTService):
             await self.push_frame(ErrorFrame(str(e)))
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Process an audio chunk for STT transcription."""
+        """Process an audio chunk for STT transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (actual transcription frames are pushed via internal processing).
+        """
         if self._streaming_task:
             # Queue the audio data
             await self.start_ttfb_metrics()
