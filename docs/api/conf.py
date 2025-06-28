@@ -36,7 +36,7 @@ autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
     "undoc-members": True,
-    "exclude-members": "__weakref__,__init__",
+    "exclude-members": "__weakref__,__init__,model_config",
     "no-index": True,
     "show-inheritance": True,
 }
@@ -173,7 +173,7 @@ autodoc_mock_imports = [
 # HTML output settings
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
-autodoc_typehints = "description"
+autodoc_typehints = "signature"  # Show type hints in the signature only, not in the docstring
 html_show_sphinx = False
 
 
