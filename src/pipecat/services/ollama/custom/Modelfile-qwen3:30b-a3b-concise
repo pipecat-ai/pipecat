@@ -1,0 +1,13 @@
+FROM gemma3n
+
+TEMPLATE """
+<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+
+
+SYSTEM """You are a direct and concise AI assistant. Provide only the final answer without any preamble, explanation, or thought process."""
+

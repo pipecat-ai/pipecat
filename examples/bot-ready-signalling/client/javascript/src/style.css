@@ -57,12 +57,14 @@ button:disabled {
 }
 
 #bot-video-container {
-  width: 640px;
-  height: 360px;
+  /* Make the container perfectly circular and responsive */
+  width: 100%;              /* take full available width */
+  max-width: 360px;         /* but cap at 360px */
+  aspect-ratio: 1 / 1;      /* keep it a square */
   background-color: #e0e0e0;
-  border-radius: 8px;
+  border-radius: 50%;
   margin: 20px auto;
-  overflow: hidden;
+  overflow: hidden; /* hide video corners */
   display: flex;
   align-items: center;
   justify-content: center;

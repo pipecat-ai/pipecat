@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipecat Chatbot</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <img src="/client/pipecat-logo.svg" alt="Pipecat logo" class="logo">
+        <h1>Pipecat RAG Chatbot</h1>
+    </header>
+
+    <main>
+        <canvas id="visualizer" width="240" height="240"></canvas>
+        <button id="mic-btn" class="mic" aria-label="Start talking"></button>
+        <div id="chat-window" class="chat-window"></div>
+            <button id="disconnect-btn" class="danger" disabled>Disconnect</button>
+        </div>
+        <p class="hint">Voice-only. Speak after you press “Connect Mic”. Live captions will appear below.</p>
+    </main>
+
+    <footer>
+        <small>Running locally on Pipecat &nbsp;•&nbsp; <a href="https://github.com/pipecat-ai/pipecat" target="_blank">GitHub</a></small>
+    </footer>
+    <!-- hidden iframe to load prebuilt Small-WebRTC UI -->
+    <iframe id="webrtc-frame" src="/client/" title="webrtc backend" style="border:none;width:1px;height:1px;position:absolute;left:-9999px;"></iframe>
+    <script src="app.js" type="module"></script>
+
+</body>
+</html>

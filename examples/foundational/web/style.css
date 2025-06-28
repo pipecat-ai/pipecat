@@ -1,0 +1,63 @@
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --accent: #58a6ff;
+  --text: #c9d1d9;
+  --danger: #ff6a6a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+header { text-align: center; padding: 1rem; }
+header .logo { width: 48px; height: 48px; }
+
+#visualizer {
+  margin-top: 1rem;
+  border-radius: 50%;
+  background: var(--panel);
+  max-width: 80vw;
+  height: auto;
+}
+
+.mic {
+  margin-top: -64px; /* overlap bottom of circle */
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 0 12px rgba(88,166,255,.6);
+}
+.mic::before {
+  content: "\1F3A4"; /* mic emoji */
+  font-size: 24px;
+}
+
+.chat-window {
+  width: 90%;
+  max-width: 600px;
+  background: var(--panel);
+  margin: 1rem 0;
+  padding: 1rem;
+  border-radius: 8px;
+  overflow-y: auto;
+  max-height: 50vh;
+}
+
+.hint { opacity: .6; font-size: .85rem; text-align: center; }
+
+@media (min-width: 600px) {
+  #visualizer { width: 240px; height: 240px; }
+}

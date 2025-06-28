@@ -4,10 +4,22 @@ __pycache__/
 *~
 venv
 .venv
+.venv2
+venv*/
+.venv*/
+env*/
+.env
+.env.*
+.env
+.env.local
 /.idea
 #*#
 
+# MLX LLM Models
+mlx_models/
+
 # Distribution / Packaging
+.next/
 .Python
 build/
 develop-eggs/

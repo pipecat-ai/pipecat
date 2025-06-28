@@ -1,0 +1,131 @@
+
+---
+id: alex_covo_rag_v2
+generated: 2025-06-17T18:42:15.286890
+contact:
+  name: Alex Covo
+  email: alex@alexcovo.com
+social:
+  website: alexcovo.com
+  linkedin: linkedin.com/in/alexcovo
+  instagram: instagram.com/alexcovo
+summary: >
+  Creative technologist and multimedia leader with 25+ years in photography, video, AI-driven content, and interactive media. Proven record scaling startups, directing global campaigns, and pioneering open‑source, fully local AI frameworks.
+core_competencies:
+  - commercial_and_advertising_photography
+  - end_to_end_photo_video_production
+  - creative_strategy_through_post
+  - AI_driven_content_workflows
+  - fashion_healthcare_music_events
+differentiators:
+  - photography_as_core_service_not_add_on
+  - direct_rate_negotiation_no_hidden_fees
+  - efficient_on_budget_delivery
+  - tech_and_social_media_friendly
+  - AR_VR_3D_modeling_rendering
+codes:
+  nigp: [91501, 91509, 91572, 91578, 91582, 91584, 91596]
+  naics: [512110, 541921, 541922, 711510]
+  product_supply: [T09, T010]
+certifications:
+  mwbe: NYC_SBS
+  duns: '11717835'
+  ein: '842811852'
+skills:
+  platforms: [Windows, Mac, SGI]
+  software: [Photoshop, Illustrator, Premiere, AfterEffects, Lightwave, SoftImage, MS_Project, Visio, Excel, PowerPoint, Dreamweaver]
+  coding_familiarity: [XML, JavaScript, SQL, Flash]
+  ai_tools: [CrewAI, Google_Gemini, Supabase, PipeCat, LLAMA, Whisper_MLX, Coqui_TTS, FastAPI, NextJS, React]
+  soft_skills: [team_leadership, client_management, second_order_thinking, ethical_ai, problem_solving_under_pressure]
+industries_experience: [advertising, finance, interactive_media, international_art, education_technology]
+experience:
+  - role: EVP/COO – Operations & Technology
+    company: ParishPay/Intuition
+    location: New York, NY
+    period: '2005-05 to 2006-08'
+    highlights:
+      - processed_500M_usd_annually
+      - scaled_company_from_startup_to_growth
+      - led_15_developer_tech_team
+      - guided_30M_acquisition_strategy
+  - role: Director – Interactive Design
+    company: Spider Partners, LLC
+    location: New York, NY
+    period: '1998-10 to 2000-04'
+    highlights:
+      - led_cross_functional_creative_tech_teams
+      - implemented_SDLC_and_usability_practices
+      - clients: [ABC, MTV, Fleer_Skybox, USTA]
+  - role: Director – New Media
+    company: YAR Communications, Inc
+    location: New York, NY
+    period: '1996-09 to 1998-06'
+    highlights:
+      - launched_interactive_group_ranked_ADWEEK_Top50
+      - positioned_company_for_20M_usd_acquisition
+      - clients: [Allstate, Apple, Disney, Nike]
+  - role: Research Associate & Multimedia Specialist
+    company: J&W Seligman & Co
+    location: New York, NY
+    period: '1993-10 to 1996-06'
+  - role: Data Compilation Analyst
+    company: Moody's Investor Services
+    location: New York, NY
+    period: '1991-06 to 1993-09'
+past_clients:
+  - Ogilvy_CommonHealth
+  - GlaxoSmithKline
+  - Laurence_Xu
+  - Armand_Basi
+  - Fingerpaint_Marketing
+  - Celeb_Luxury
+  - Sachin_Babi
+  - Cappellazzo_Couture
+  - LA_Weekly
+  - DNA_Agency
+philosophy:
+  - open_source_advocate
+  - AI_as_equalizer
+  - socratic_method_continuous_learning
+  - no_half_measures_commit_fully
+qa_pairs:
+  - id: qa_01
+    question: "Can you describe a project where you integrated AI into your creative workflow?"
+    answer: "I developed an agentic framework using CrewAI to automate the entire content-production pipeline for blogs—research, writing, and artwork—which demonstrates how AI can elevate creativity end-to-end."
+    tags: ['ai_integration', 'creative_workflow', 'crewai', 'agentic_framework', 'content_production']
+  - id: qa_02
+    question: "How have you utilized multimodal AI in your work?"
+    answer: "I leveraged Google Gemini’s multimodal capabilities to build interactive galleries, connecting the model to a Supabase DB so users could retrieve images and context dynamically via text queries."
+    tags: ['multimodal_ai', 'google_gemini', 'interactive_gallery', 'supabase', 'image_retrieval']
+  - id: qa_03
+    question: "Can you give an example of how you’ve incorporated AI into traditional creative tools?"
+    answer: "Within Photoshop and Premiere I employ AI plug‑ins to generate visuals and automate segments of the editing workflow, seamlessly blending state‑of‑the‑art models with classic production software."
+    tags: ['traditional_tools', 'photoshop', 'premiere', 'ai_enhancement', 'video_editing']
+  - id: qa_04
+    question: "What kind of clients or companies are you looking to work with?"
+    answer: "Forward‑thinking, AI‑centric organizations committed to bold innovation and clear growth or exit strategies. I excel at guiding both startups and enterprises toward market‑leading outcomes."
+    tags: ['client_preferences', 'ai_centric', 'innovation', 'growth_strategy', 'startup_scaling']
+  - id: qa_05
+    question: "How do you approach ethical considerations in AI?"
+    answer: "Ethics are foundational. Inspired by the Socratic method, I keep questioning assumptions to ensure AI remains accessible and beneficial to all, embedding responsibility into every solution."
+    tags: ['ai_ethics', 'accessibility', 'socratic_method', 'responsible_ai']
+  - id: qa_06
+    question: "What industries have you worked in, and how does that influence your approach to AI?"
+    answer: "My multimedia background spans advertising, finance, international art, and tech startups, giving me a global lens and the adaptability to tailor AI solutions to diverse creative and business needs."
+    tags: ['industry_experience', 'multimedia', 'advertising', 'finance', 'international_art', 'adaptability']
+  - id: qa_07
+    question: "Can you tell us about a project where you successfully merged creativity and technology?"
+    answer: "I built a fully local, publicly accessible AI assistant—served free of charge—that showcases my commitment to open‑source tech and democratizing AI‑driven creativity."
+    tags: ['creativity_technology', 'local_ai', 'open_source', 'public_access']
+  - id: qa_08
+    question: "How do you ensure AI projects deliver bold, impactful results for clients?"
+    answer: "By committing fully—never half measures—aligning AI initiatives with clear KPIs, and drawing on my record of helping startups grow to successful acquisitions (e.g., a $20 M ad‑tech exit)."
+    tags: ['impact', 'kpi_alignment', 'acquisitions', 'bold_execution']
+  - id: qa_09
+    question: "Describe your experience at the frontier of 3D and motion‑capture technology."
+    answer: "As an early beta tester for AI‑driven mocap tools, I combined my 3D expertise with emerging models to create realistic, adaptable character animations—proving my readiness to adopt frontier tech."
+    tags: ['3d_technology', 'motion_capture', 'frontier_ai', 'beta_testing']
+  - id: qa_10
+    question: "What philosophy guides your lifelong learning in AI and tech?"
+    answer: "I live by Socrates’ insight: “I know that I know nothing.” Each breakthrough reveals new questions, fueling continuous learning and second‑ and third‑order thinking."
+    tags: ['learning_philosophy', 'continuous_improvement', 'second_order_thinking']

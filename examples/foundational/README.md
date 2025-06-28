@@ -1,5 +1,56 @@
 # Pipecat Foundational Examples
 
+## Multi-Session Voice Chat Backend (Default)
+
+**This directory now defaults to the multi-user backend for voice chat and LLM streaming.**
+
+### Quick Start (Multi-User)
+
+1. **Install dependencies:**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   pip install pipecat-ai[webrtc]  # for WebRTC multi-session
+   ```
+2. **Start all required services:**
+   - Ollama server: `ollama serve` (model `gemma3n` recommended)
+   - Kokoro TTS: `docker run -p 8880:8080 ghcr.io/pipecat-ai/kokoro:latest`
+   - (Optional) Lightning Whisper MLX for Apple Silicon
+
+3. **Run the multi-session backend:**
+   ```bash
+   python -m src.pipecat.examples.run_multisession_ws_patch --host 0.0.0.0 --port 27880
+   ```
+   - This launches a FastAPI server with built-in WebRTC, LLM, TTS, and live captions support.
+   - Handles multiple concurrent users; each gets a fully independent pipeline.
+
+4. **Open the UI:**
+   - Built-in: [http://localhost:27880/client/](http://localhost:27880/client/)
+   - Custom: [http://localhost:27880/web/](http://localhost:27880/web/) (if present)
+
+5. **Expose to the internet (optional):**
+   ```bash
+   ngrok http --domain=<your-ngrok-domain> 27880
+   ```
+   - Use the HTTPS ngrok URL for remote/mic access.
+
+### Features
+- True multi-session: each client connection gets an isolated LLM, TTS, STT, and context.
+- Live captions via WebSocket (single server instance, lifecycle-managed).
+- Clean FastAPI lifecycle management, robust against port and event loop conflicts.
+- `.env` support for all credentials (Ollama, OpenAI, coturn, etc).
+- No public STUN/TURN—private only, secure by default.
+
+### Troubleshooting
+- **Port in use:** `lsof -i :27880` then `kill <PID>` or change `--port`.
+- **Missing aiortc:** `pip install pipecat-ai[webrtc]`
+- **Mic blocked:** Use HTTPS (ngrok) or localhost.
+- **Dict/params errors:** Ensure you use the multi-session backend and not legacy scripts.
+
+See `local-alex-covo-readme.md` in this directory for advanced/local deployment, ngrok, and personal workflow tips.
+
+
 This directory contains examples showing how to build voice and multimodal agents with Pipecat. Each example demonstrates specific features, progressing from basic to advanced concepts.
 
 ## Learning Paths
@@ -134,6 +185,51 @@ python 07-interruptible.py -t twilio -x NGROK_HOST_NAME (no protocol)
 - **[16-gpu-container-local-bot.py](./16-gpu-container-local-bot.py)**: GPU-accelerated local bot (Performance measurement)
 
 ### Utilities
+
+## Local Ollama + RAG Chatbot (example 43)
+
+This example turns your Mac into a fully-local voice assistant powered by Whisper-MLX (STT), Ollama (LLM), Kokoro (TTS) and a Retrieval-Augmented Knowledge Base. It can stream live captions over WebSocket and expose itself publicly via ngrok.
+
+### Prerequisites
+
+| Service | How to start |
+|---------|--------------|
+| Ollama | `ollama serve` (make sure model `gemma3n` is pulled) |
+| Kokoro TTS | `docker run -p 8880:8080 …` or your usual method |
+| Python deps | `pip install -e .` inside repo + `pip install -r requirements.txt` |
+
+### Run locally (no Docker)
+
+```bash
+# in repo root
+python examples/foundational/43-ollama-chatbot_rag.py \
+       --host 0.0.0.0 --port 27880 --transport webrtc
+```
+You should see `Uvicorn running on http://0.0.0.0:27880`.
+
+• Built-in UI (Small-WebRTC prebuilt):  `http://localhost:27880/client/`
+• Custom UI (folder `examples/foundational/web/`): `http://localhost:27880/web/`
+
+> Tip: Chrome only grants mic access on `localhost` or HTTPS. Use the same Mac for testing or add HTTPS (see below).
+
+### Expose to the Internet with ngrok (free tier)
+
+```bash
+# one terminal window is still running the chatbot
+# another window:
+ngrok http --domain=<your-reserved-sub>.ngrok-free.app 27880
+```
+Now open `https://<your-reserved-sub>.ngrok-free.app/web/` (or `/client/`).
+
+### Common issues
+
+| Symptom | Fix |
+|---------|-----|
+| `ERR_NGROK_8012 dial tcp … connect: connection refused` | The chatbot isn’t running or is on a different port. Start the Python script first. |
+| Browser errors like `enumerateDevices is undefined` | Page loaded via plain HTTP on LAN. Use `localhost` or the HTTPS ngrok URL. |
+| `address already in use` | Another process is bound to the port. `lsof -i :27880` then kill it or pick a new port. |
+
+---
 
 ## Advanced Usage
 

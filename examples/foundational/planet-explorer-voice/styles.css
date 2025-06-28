@@ -1,0 +1,182 @@
+body {
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: #000;
+}
+#cesiumContainer {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    z-index: 1;
+}
+#webcam {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform: scaleX(-1);
+    z-index: 0;
+    filter: grayscale(100%);
+}
+#canvas {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    transform: scaleX(-1);
+    pointer-events: none;
+    z-index: 2;
+}
+#layerControls {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    z-index: 3;
+    background: #ffffff;
+    border: 4px solid #000000;
+    padding: 0;
+    font-family: 'Courier New', monospace;
+    color: #000000;
+    /* min-width: 200px; */
+}
+#layerControls h3 {
+    margin: 0;
+    background: #000000;
+    color: #ffffff;
+    padding: 5px;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-bottom: 2px solid #000000;
+}
+.layer-option {
+    display: block;
+    margin: 0;
+    cursor: pointer;
+    padding: 8px;
+    border-bottom: 2px solid #cccccc;
+    transition: none;
+    background: #ffffff;
+    color: #000000;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.layer-option:last-child {
+    border-bottom: none;
+}
+.layer-option:hover {
+    background: #cccccc;
+    color: #000000;
+}
+.layer-option.active {
+    background: #5d5d5d;
+    color: #ffffff;
+}
+.layer-option.active:hover {
+    background: #333333;
+    color: #ffffff;
+}
+input[type="radio"] {
+    /* margin-right: 0px; */
+    width: 16px;
+    height: 16px;
+    accent-color: #000000;
+}
+#instructions {
+    position: absolute;
+    bottom: 5px;
+    right: 5px;
+    z-index: 3;
+    background: #ffffff;
+    border: 4px solid #000000;
+    padding: 0;
+    font-family: 'Courier New', monospace;
+    color: #000000;
+    max-width: 225px;
+    /* box-shadow: 8px 8px 0px #000000; */
+}
+#instructions .header {
+    background: #000000;
+    color: #ffffff;
+    padding: 5px;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-bottom: 2px solid #000000;
+}
+#instructions .content {
+    padding: 8px;
+    font-size: 12px;
+    line-height: 1.6;
+    font-weight: bold;
+}
+#instructions .section {
+    margin-bottom: 16px;
+}
+#instructions .section:last-child {
+    margin-bottom: 0;
+}
+#instructions .section-title {
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+    color: #000000;
+    font-size: 11px;
+}
+#instructions .control-item {
+    margin-bottom: 0px;
+    color: #333333;
+}
+
+.text-box {
+    padding: 8px 15px;
+    background-color: rgba(255, 255, 255, 0.5);
+    color: black;
+    /* border-radius: 4px; */
+    font-family: "Arial", "Helvetica Neue", Helvetica, sans-serif;
+    border: 2px solid black;
+    box-shadow: 3px 3px 0px black;
+    font-size: clamp(13px, 2vw, 15px);
+    text-align: center;
+    z-index: 200;
+    opacity: 1;
+    transition: opacity 0.3s ease-in-out, bottom 0.3s ease-in-out, box-shadow 0.2s ease;
+    max-width: 90%;
+    box-sizing: border-box;
+}
+
+#logo-container {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+}
+
+#logo {
+    font-size: clamp(1.5em, 4vw, 2em);
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+#infoBox {
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    translate: -50%;
+    z-index: 10;
+    background: #ffffff;
+    color: #000000;
+    border: 2px solid #000000;
+    padding: 10px;
+    font-family: Helvetica;
+    font-size: 16px;
+    pointer-events: none; /* So it doesn't interfere with other mouse events */
+    line-height: 1.5;
+    opacity: 0.8;
+}

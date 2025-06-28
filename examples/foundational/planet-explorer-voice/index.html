@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Planet Explorer</title>
+  <link rel="stylesheet" href="styles.css">
+  
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+
+  <!-- Primary Meta Tags -->
+  <meta name="title" content="Planet Explorer">
+  <meta name="description" content="use hand gestures to explore the world">
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://funwithcomputervision.com/planet-explorer/">
+  <meta property="og:title" content="Planet Explorer">
+  <meta property="og:description" content="use hand gestures to explore the world">
+  <meta property="og:image" content="https://funwithcomputervision.com/assets/planet-explorer.jpg">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://funwithcomputervision.com/planet-explorer/">
+  <meta property="twitter:title" content="Planet Explorer">
+  <meta property="twitter:description" content="use hand gestures to explore the world">
+  <meta property="twitter:image" content="https://funwithcomputervision.com/assets/planet-explorer.jpg">
+
+  <script defer src="https://cloud.umami.is/script.js" data-website-id="376d8af4-cd09-461a-9ca9-f5eeed83e857"></script>
+
+</head>
+<body>
+  <video id="webcam" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+  <div id="cesiumContainer"></div>
+  
+  <div id="layerControls">
+    <h3>MAP LAYERS</h3>
+    <label class="layer-option active">
+      <input type="radio" name="layer" value="terrain" checked> TERRAIN
+    </label>
+    <label class="layer-option">
+      <input type="radio" name="layer" value="streets"> STREETS
+    </label>
+    <label class="layer-option">
+      <input type="radio" name="layer" value="dark"> DARK MODE
+    </label>
+  </div>
+
+  <div id="instructions">
+    <div class="header">CONTROLS</div>
+    <div class="content">
+      <div class="section">
+        <div class="control-item">Left hand: pinch and move up/down to zoom</div>
+        <div class="control-item">Right hand: pinch and drag to rotate</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="logo-container" class="text-box">
+      <span id="logo">🪬</span><br>
+      <a href="https://www.funwithcomputervision.com/" target="_blank">code & tutorials</a>
+  </div>
+
+  <div id="infoBox" style="display: none;"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script src="main.js"></script>
+</body>
+</html>

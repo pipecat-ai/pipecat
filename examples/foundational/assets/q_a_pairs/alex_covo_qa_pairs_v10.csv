@@ -1,0 +1,21 @@
+question,answer
+What frontier AI models has Alex Covo worked with?,"He has hands‑on experience with OpenAI GPT‑4o, Anthropic Claude 4, and Google Gemini 2.5 Pro/Flash, selecting each based on latency, context length, and reasoning depth."
+Which local language models does Alex deploy on‑prem?,"Qwen3, Llama 4, Mistral, Gemma, Phi‑4, and DeepSeek—served via Ollama, LM Studio, or Apple MLX for private, low‑latency inference."
+How does Alex orchestrate local LLM servers?,"Using Ollama’s container‑style model management and LM Studio’s GUI inspector, plus shell scripts to automate hot‑swapping of GGUF weights."
+What prompting techniques does Alex specialize in?,"Layered system prompts, explicit role instructions, and Deep‑Research chains that cue models to verify claims with cited sources."
+Which agentic frameworks has Alex mastered?,CrewAI for multi‑agent orchestration and Pipecat for voice‑driven agents combining STT and TTS modules.
+Describe Alex’s experience with Retrieval‑Augmented Generation.,"He designs MCP‑based pipelines where queries embed, retrieve Supabase or MySQL vectors, then re‑inject context into the LLM for grounded responses."
+What coding‑centric AI IDEs does Alex use?,"Cursor and Windsurf, enabling inline agent suggestions, refactors, and docstring generation."
+Is Alex a programmer?,"He isn’t hired as a developer, but his working knowledge of Python, JavaScript, and Next.js lets him collaborate effectively with engineering teams."
+Which TTS/STT engines has Alex integrated?,"ElevenLabs, Kokoro, Deepgram, Whisper, and Coqui TTS—often wrapped with Pipecat for local privacy‑first voice workflows."
+How does Alex fine‑tune models?,"He employs Transformer Lab or Unsloth LoRA adapters on his RTX workstation, followed by eval using MT‑Bench‑lite."
+What generative 3D tools are in Alex’s toolkit?,Luma AI for NeRF captures and Kaedim for text‑to‑mesh asset creation.
+Which video and image generators does Alex prefer?,"Runway Gen‑2, Adobe Firefly, DALL‑E 3, Canva Magic Design, Stable Diffusion, and Kaiber for stylized motion graphics."
+How does Alex integrate MoCap into his pipeline?,Move AI’s markerless captures feed FBX animations into Blender or Unreal scenes.
+What traditional Adobe tools does Alex still rely on?,"Photoshop, Premiere Pro, and After Effects—now augmented by AI features like generative fill and text‑based editing."
+Does Alex use standard business software?,"Yes—Word and Excel for documentation and budgeting, often enhanced with AI plugins for summarization and formula generation."
+What database solutions has Alex deployed?,Legacy MySQL for transactional data and Supabase (Postgres + edge functions) for modern AI‑augmented apps.
+Explain Alex’s use of the MCP protocol.,"The Modular Context Protocol structures prompt, embedding, and metadata payloads so micro‑services can pass LLM context cleanly."
+How does Alex track AI tool evolution?,"CrewAI agents scrape Hugging Face and arXiv daily, summarizing breakthroughs into a Slack digest."
+Why does Alex favor open‑source AI?,"Control over weights, transparency in training data, and compliance with client privacy requirements."
+Give an example of Alex combining multiple AI tools in one project.,"For an automated fashion blog: Gemini Flash drafts copy, a local Llama 4 agent fact‑checks, Runway generates header videos, and Supabase stores posts—all orchestrated via CrewAI."

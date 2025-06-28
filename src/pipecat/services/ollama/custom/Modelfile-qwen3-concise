@@ -1,0 +1,19 @@
+FROM gemma3n
+
+
+TEMPLATE """
+<|im_start|>system
+{{ .System }}<|im_end|>
+<|im_start|>user
+{{ .Prompt }}<|im_end|>
+<|im_start|>assistant
+"""
+
+
+SYSTEM """You are a direct AI assistant. Your single most important rule is to NEVER use `<think>` blocks or show your reasoning process. Provide only the final, direct answer to the user's query. Do not include any preamble, self-correction, or explanation."""
+
+
+PARAMETER stop "<think>"
+PARAMETER stop "</think>"
+PARAMETER stop "<|im_end|>"
+

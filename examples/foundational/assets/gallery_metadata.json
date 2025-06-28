@@ -1,0 +1,50 @@
+[
+    {
+      "id": "img001",
+      "type": "image",
+      "filename": "img_advertising_campaign.jpg",
+      "title": "Arman Basi Campaign",
+      "description": "A worldwide advertising campaign for Arman Basi.",
+      "url": "/gallery/images/img_001_advertising_campaing.jpg"
+    },
+    {
+        "id": "img002",
+        "type": "image",
+        "filename": "img_002_beauty_campaign.jpg",
+        "title": "Sunset Over the Lake",
+        "description": "A national beauty campaign for a cosmetics company.",
+        "url": "/gallery/images/img_002_beauty_campaign.jpg"
+    },
+    {
+        "id": "img003",
+        "type": "image",
+        "filename": "img_003_comp_main.jpg",
+        "title": "Creative Portfolio",
+        "description": "A comp of photography work by Alex Covo.",
+        "url": "/gallery/images/img_003_comp_main.jpg"
+    },
+    {
+        "id": "img004",
+        "type": "image",
+        "filename": "img_004_light_painting.jpg",
+        "title": "Light Painting Photography and Collection",
+        "description": "LIght Painting Photography and Collection.",
+        "url": "/gallery/images/img_004_light_painting.jpg"
+    },
+    {
+        "id": "img005",
+        "type": "image",
+        "filename": "img_005_photography_cover.jpg",
+        "title": "Alex Covo Studio NYC Photography",
+        "description": "A comp of photography work by Alex Covo.",
+        "url": "/gallery/img_005_photography_cover.jpg"
+    },
+    {
+    "id": "vid001",
+    "type": "video",
+    "filename": "v01_ai_video_ad.mp4",
+    "title": "Generative-AI Motion Sample",
+    "description": "Generative AI social media video ad for a magazine.",
+    "url": "/gallery/videos/v01_ai_video_ad.mp4"
+    }
+  ]

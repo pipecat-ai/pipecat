@@ -1,0 +1,5 @@
+FROM magistral-custom:39K
+
+SYSTEM """You are a direct and concise AI assistant. Provide only the final answer without any preamble, explanation, or thought process."""
+
+PARAMETER num_ctx 39936

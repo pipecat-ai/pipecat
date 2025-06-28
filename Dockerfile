@@ -12,9 +12,12 @@ COPY examples/ /app/examples/
 WORKDIR /app
 RUN ls --recursive /app/
 RUN pip3 install --upgrade -r requirements.txt
-RUN python -m build .
+# Installing the project directly builds it, so we don't need the separate build step
+# RUN python -m build .
 RUN pip3 install .
 RUN pip3 install gunicorn
+# Install example-specific dependencies
+RUN pip3 install -r examples/simple-chatbot/server/requirements.txt
 # If running on Ubuntu, Azure TTS requires some extra config
 # https://learn.microsoft.com/en-us/azure/ai-services/speech-service/quickstarts/setup-platform?pivots=programming-language-python&tabs=linux%2Cubuntu%2Cdotnetcli%2Cdotnet%2Cjre%2Cmaven%2Cnodejs%2Cmac%2Cpypi
 
@@ -37,4 +40,4 @@ WORKDIR /app
 
 EXPOSE 8000
 # run
-CMD ["gunicorn", "--workers=2", "--log-level", "debug", "--chdir", "examples/server", "--capture-output", "daily-bot-manager:app", "--bind=0.0.0.0:8000"]
+CMD ["gunicorn", "--worker-class", "uvicorn.workers.UvicornWorker", "--workers=2", "--log-level", "debug", "--chdir", "examples/simple-chatbot/server", "server:app", "--bind=0.0.0.0:8000"]
