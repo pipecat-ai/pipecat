@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This module implements Whisper transcription with a locally-downloaded model."""
+"""Whisper speech-to-text services with locally-downloaded models.
+
+This module implements Whisper transcription using locally-downloaded models,
+supporting both Faster Whisper and MLX Whisper backends for efficient inference.
+"""
 
 import asyncio
 from enum import Enum
@@ -37,18 +41,18 @@ if TYPE_CHECKING:
 
 
 class Model(Enum):
-    """Class of basic Whisper model selection options.
+    """Whisper model selection options for Faster Whisper.
 
-    Available models:
-        Multilingual models:
-            TINY: Smallest multilingual model
-            BASE: Basic multilingual model
-            MEDIUM: Good balance for multilingual
-            LARGE: Best quality multilingual
-            DISTIL_LARGE_V2: Fast multilingual
+    Provides various model sizes and specializations for speech recognition,
+    balancing quality and performance based on use case requirements.
 
-        English-only models:
-            DISTIL_MEDIUM_EN: Fast English-only
+    Attributes:
+        TINY: Smallest multilingual model, fastest inference.
+        BASE: Basic multilingual model, good speed/quality balance.
+        MEDIUM: Medium-sized multilingual model, better quality.
+        LARGE: Best quality multilingual model, slower inference.
+        DISTIL_LARGE_V2: Fast multilingual distilled model.
+        DISTIL_MEDIUM_EN: Fast English-only distilled model.
     """
 
     # Multilingual models
@@ -63,16 +67,18 @@ class Model(Enum):
 
 
 class MLXModel(Enum):
-    """Class of MLX Whisper model selection options.
+    """MLX Whisper model selection options for Apple Silicon.
 
-    Available models:
-        Multilingual models:
-            TINY: Smallest multilingual model
-            MEDIUM: Good balance for multilingual
-            LARGE_V3: Best quality multilingual
-            LARGE_V3_TURBO: Finetuned, pruned Whisper large-v3, much faster, slightly lower quality
-            DISTIL_LARGE_V3: Fast multilingual
-            LARGE_V3_TURBO_Q4: LARGE_V3_TURBO, quantized to Q4
+    Provides various model sizes optimized for Apple Silicon hardware,
+    including quantized variants for improved performance.
+
+    Attributes:
+        TINY: Smallest multilingual model for MLX.
+        MEDIUM: Medium-sized multilingual model for MLX.
+        LARGE_V3: Best quality multilingual model for MLX.
+        LARGE_V3_TURBO: Finetuned, pruned Whisper large-v3, much faster with slightly lower quality.
+        DISTIL_LARGE_V3: Fast multilingual distilled model for MLX.
+        LARGE_V3_TURBO_Q4: LARGE_V3_TURBO quantized to Q4 for reduced memory usage.
     """
 
     # Multilingual models
@@ -264,13 +270,6 @@ class WhisperSTTService(SegmentedSTTService):
         no_speech_prob: Probability threshold for filtering out non-speech segments.
         language: The default language for transcription.
         **kwargs: Additional arguments passed to SegmentedSTTService.
-
-    Attributes:
-        _device: The device used for inference.
-        _compute_type: The compute type for inference.
-        _no_speech_prob: Threshold for non-speech filtering.
-        _model: The loaded Whisper model instance.
-        _settings: Dictionary containing service settings.
     """
 
     def __init__(
@@ -355,7 +354,7 @@ class WhisperSTTService(SegmentedSTTService):
         pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribes given audio using Whisper.
+        """Transcribe audio data using Whisper.
 
         Args:
             audio: Raw audio bytes in 16-bit PCM format.
@@ -409,11 +408,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         language: The default language for transcription.
         temperature: Temperature for sampling. Can be a float or tuple of floats.
         **kwargs: Additional arguments passed to SegmentedSTTService.
-
-    Attributes:
-        _no_speech_threshold: Threshold for non-speech filtering.
-        _temperature: Temperature for sampling.
-        _settings: Dictionary containing service settings.
     """
 
     def __init__(
@@ -455,7 +449,10 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
     @override
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribes given audio using MLX Whisper.
+        """Transcribe audio data using MLX Whisper.
+
+        The audio is expected to be 16-bit signed PCM data.
+        MLX Whisper will handle the conversion internally.
 
         Args:
             audio: Raw audio bytes in 16-bit PCM format.
@@ -463,10 +460,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         Yields:
             Frame: Either a TranscriptionFrame containing the transcribed text
                   or an ErrorFrame if transcription fails.
-
-        Note:
-            The audio is expected to be 16-bit signed PCM data.
-            MLX Whisper will handle the conversion internally.
         """
         try:
             import mlx_whisper
