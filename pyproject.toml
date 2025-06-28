@@ -123,8 +123,9 @@ select = [
     "D", # Docstring rules
     "I", # Import rules
 ]
-# Ignore requirement for __init__ docstrings
-ignore = ["D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["D104"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

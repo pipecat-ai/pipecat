@@ -101,13 +101,6 @@ class AnthropicLLMService(LLMService):
     Provides inference capabilities with Claude models including support for
     function calling, vision processing, streaming responses, and prompt caching.
     Can use custom clients like AsyncAnthropicBedrock and AsyncAnthropicVertex.
-
-    Args:
-        api_key: Anthropic API key for authentication.
-        model: Model name to use. Defaults to "claude-sonnet-4-20250514".
-        params: Optional model parameters for inference.
-        client: Optional custom Anthropic client instance.
-        **kwargs: Additional arguments passed to parent LLMService.
     """
 
     # Overriding the default adapter to use the Anthropic one.
@@ -141,6 +134,15 @@ class AnthropicLLMService(LLMService):
         client=None,
         **kwargs,
     ):
+        """Initialize the Anthropic LLM service.
+
+        Args:
+            api_key: Anthropic API key for authentication.
+            model: Model name to use. Defaults to "claude-sonnet-4-20250514".
+            params: Optional model parameters for inference.
+            client: Optional custom Anthropic client instance.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         super().__init__(**kwargs)
         params = params or AnthropicLLMService.InputParams()
         self._client = client or AsyncAnthropic(
@@ -425,12 +427,6 @@ class AnthropicLLMContext(OpenAILLMContext):
     Extends OpenAILLMContext to handle Anthropic-specific features like
     system messages, prompt caching, and message format conversions.
     Manages conversation state and message history formatting.
-
-    Args:
-        messages: Initial list of conversation messages.
-        tools: Available function calling tools.
-        tool_choice: Tool selection preference.
-        system: System message content.
     """
 
     def __init__(
@@ -441,6 +437,14 @@ class AnthropicLLMContext(OpenAILLMContext):
         *,
         system: Union[str, NotGiven] = NOT_GIVEN,
     ):
+        """Initialize the Anthropic LLM context.
+
+        Args:
+            messages: Initial list of conversation messages.
+            tools: Available function calling tools.
+            tool_choice: Tool selection preference.
+            system: System message content.
+        """
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
 
         # For beta prompt caching. This is a counter that tracks the number of turns

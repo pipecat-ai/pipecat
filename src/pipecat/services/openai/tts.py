@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""OpenAI text-to-speech service implementation.
+
+This module provides integration with OpenAI's text-to-speech API for
+generating high-quality synthetic speech from text input.
+"""
+
 from typing import AsyncGenerator, Dict, Literal, Optional
 
 from loguru import logger
@@ -43,16 +49,8 @@ class OpenAITTSService(TTSService):
     """OpenAI Text-to-Speech service that generates audio from text.
 
     This service uses the OpenAI TTS API to generate PCM-encoded audio at 24kHz.
-
-    Args:
-        api_key: OpenAI API key. Defaults to None.
-        voice: Voice ID to use. Defaults to "alloy".
-        model: TTS model to use. Defaults to "gpt-4o-mini-tts".
-        sample_rate: Output audio sample rate in Hz. Defaults to None.
-        **kwargs: Additional keyword arguments passed to TTSService.
-
-    The service returns PCM-encoded audio at the specified sample rate.
-
+    Supports multiple voice models and configurable parameters for high-quality
+    speech synthesis with streaming audio output.
     """
 
     OPENAI_SAMPLE_RATE = 24000  # OpenAI TTS always outputs at 24kHz
@@ -68,6 +66,17 @@ class OpenAITTSService(TTSService):
         instructions: Optional[str] = None,
         **kwargs,
     ):
+        """Initialize OpenAI TTS service.
+
+        Args:
+            api_key: OpenAI API key for authentication. If None, uses environment variable.
+            base_url: Custom base URL for OpenAI API. If None, uses default.
+            voice: Voice ID to use for synthesis. Defaults to "alloy".
+            model: TTS model to use. Defaults to "gpt-4o-mini-tts".
+            sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
+            instructions: Optional instructions to guide voice synthesis behavior.
+            **kwargs: Additional keyword arguments passed to TTSService.
+        """
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
                 f"OpenAI TTS only supports {self.OPENAI_SAMPLE_RATE}Hz sample rate. "
@@ -81,13 +90,28 @@ class OpenAITTSService(TTSService):
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as OpenAI TTS service supports metrics generation.
+        """
         return True
 
     async def set_model(self, model: str):
+        """Set the TTS model to use.
+
+        Args:
+            model: The model name to use for text-to-speech synthesis.
+        """
         logger.info(f"Switching TTS model to: [{model}]")
         self.set_model_name(model)
 
     async def start(self, frame: StartFrame):
+        """Start the OpenAI TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         if self.sample_rate != self.OPENAI_SAMPLE_RATE:
             logger.warning(
@@ -97,6 +121,14 @@ class OpenAITTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using OpenAI's TTS API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech data.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             await self.start_ttfb_metrics()

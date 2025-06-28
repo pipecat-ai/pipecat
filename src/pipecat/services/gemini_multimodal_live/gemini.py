@@ -333,7 +333,12 @@ class GeminiMultimodalLiveContextAggregatorPair:
 
 
 class GeminiMultimodalModalities(Enum):
-    """Supported modalities for Gemini Multimodal Live."""
+    """Supported modalities for Gemini Multimodal Live.
+
+    Parameters:
+        TEXT: Text responses.
+        AUDIO: Audio responses.
+    """
 
     TEXT = "TEXT"
     AUDIO = "AUDIO"
@@ -422,20 +427,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
     This service enables real-time conversations with Gemini, supporting both
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
-
-    Args:
-        api_key: Google AI API key for authentication.
-        base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
-        model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-001".
-        voice_id: TTS voice identifier. Defaults to "Charon".
-        start_audio_paused: Whether to start with audio input paused. Defaults to False.
-        start_video_paused: Whether to start with video input paused. Defaults to False.
-        system_instruction: System prompt for the model. Defaults to None.
-        tools: Tools/functions available to the model. Defaults to None.
-        params: Configuration parameters for the model. Defaults to InputParams().
-        inference_on_context_initialization: Whether to generate a response when context
-            is first set. Defaults to True.
-        **kwargs: Additional arguments passed to parent LLMService.
     """
 
     # Overriding the default adapter to use the Gemini one.
@@ -456,6 +447,22 @@ class GeminiMultimodalLiveLLMService(LLMService):
         inference_on_context_initialization: bool = True,
         **kwargs,
     ):
+        """Initialize the Gemini Multimodal Live LLM service.
+
+        Args:
+            api_key: Google AI API key for authentication.
+            base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
+            model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-001".
+            voice_id: TTS voice identifier. Defaults to "Charon".
+            start_audio_paused: Whether to start with audio input paused. Defaults to False.
+            start_video_paused: Whether to start with video input paused. Defaults to False.
+            system_instruction: System prompt for the model. Defaults to None.
+            tools: Tools/functions available to the model. Defaults to None.
+            params: Configuration parameters for the model. Defaults to InputParams().
+            inference_on_context_initialization: Whether to generate a response when context
+                is first set. Defaults to True.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         super().__init__(base_url=base_url, **kwargs)
 
         params = params or InputParams()

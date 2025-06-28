@@ -28,15 +28,14 @@ extensions = [
 
 # Napoleon settings
 napoleon_google_docstring = True
-napoleon_numpy_docstring = False
-napoleon_include_init_with_doc = False
+napoleon_include_init_with_doc = True
 
 # AutoDoc settings
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
     "undoc-members": True,
-    "exclude-members": "__weakref__,__init__",
+    "exclude-members": "__weakref__,model_config",
     "no-index": True,
     "show-inheritance": True,
 }
@@ -173,7 +172,7 @@ autodoc_mock_imports = [
 # HTML output settings
 html_theme = "sphinx_rtd_theme"
 html_static_path = ["_static"]
-autodoc_typehints = "description"
+autodoc_typehints = "signature"  # Show type hints in the signature only, not in the docstring
 html_show_sphinx = False
 
 
@@ -275,6 +274,7 @@ def clean_title(title: str) -> str:
         "stt": "STT",
         "tts": "TTS",
         "llm": "LLM",
+        "rtvi": "RTVI",
     }
 
     # Check if the entire title is a special case
