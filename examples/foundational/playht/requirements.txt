@@ -1,0 +1,8 @@
+# This file contains dependencies for PlayHT-based examples.
+# These have been separated from the main foundational requirements.txt
+# due to a dependency conflict between pipecat-ai[riva] and pipecat-ai[playht].
+fastapi
+uvicorn
+python-dotenv
+# Must install pipecat from local directory instead of PyPI since package excludes pipecat.examples modules:
+-e ../../..[playht,deepgram,silero,daily,webrtc]
