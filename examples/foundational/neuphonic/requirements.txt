@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+python-dotenv
+# Must install pipecat from local directory instead of PyPI since package excludes pipecat.examples modules:
+-e ../../..[daily,neuphonic,silero,deepgram]
