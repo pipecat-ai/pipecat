@@ -1,5 +1,12 @@
 fastapi
 uvicorn
 python-dotenv
-pipecat-ai[webrtc,daily,deepgram,cartesia]
+# Must install pipecat from local directory instead of PyPI since package excludes pipecat.examples modules:
+# Some examples with conflicting dependencies (e.g. Riva and PlayHT) have been moved to subdirectories
+# with their own requirements.txt files.
+-e ../..[daily,deepgram,cartesia,silero,simli,azure,fal,elevenlabs,local,gstreamer,livekit,google,langchain,azure,webrtc,openpipe,groq,aws,fish,ultravox,soundfile,krisp]
 pipecat-ai-small-webrtc-prebuilt
+coremltools
+torch
+mem0ai
+mcp
