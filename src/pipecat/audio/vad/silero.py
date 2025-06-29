@@ -26,10 +26,6 @@ except ModuleNotFoundError as e:
 
 class SileroOnnxModel:
     def __init__(self, path, force_onnx_cpu=True):
-        import numpy as np
-
-        global np
-
         opts = onnxruntime.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
