@@ -53,6 +53,7 @@ class MCPClient(BaseObject):
         super().__init__(**kwargs)
         self._server_params = server_params
         self._session = ClientSession
+        self._needs_schema_cleaning = False
 
         if isinstance(server_params, StdioServerParameters):
             self._client = stdio_client
@@ -80,8 +81,47 @@ class MCPClient(BaseObject):
         Returns:
             A ToolsSchema containing all successfully registered tools.
         """
+        # Check once if the LLM needs schema cleaning
+        self._needs_schema_cleaning = llm and llm.needs_mcp_clean_schema()
         tools_schema = await self._register_tools(llm)
         return tools_schema
+
+    def _clean_schema_for_strict_validation(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """Clean a JSON schema to be compatible with LLMs that have strict validation.
+
+        Some LLMs have stricter validation and don't allow certain schema properties
+        that are valid in standard JSON Schema.
+
+        Args:
+            schema: The JSON schema to clean
+
+        Returns:
+            A cleaned schema compatible with strict validation
+        """
+        if not isinstance(schema, dict):
+            return schema
+
+        cleaned = {}
+
+        for key, value in schema.items():
+            # Skip additionalProperties as some LLMs don't like additionalProperties: false
+            if key == "additionalProperties":
+                continue
+
+            # Recursively clean nested objects
+            if isinstance(value, dict):
+                cleaned[key] = self._clean_schema_for_strict_validation(value)
+            elif isinstance(value, list):
+                cleaned[key] = [
+                    self._clean_schema_for_strict_validation(item)
+                    if isinstance(item, dict)
+                    else item
+                    for item in value
+                ]
+            else:
+                cleaned[key] = value
+
+        return cleaned
 
     def _convert_mcp_schema_to_pipecat(
         self, tool_name: str, tool_schema: Dict[str, Any]
@@ -99,6 +139,11 @@ class MCPClient(BaseObject):
 
         properties = tool_schema["input_schema"].get("properties", {})
         required = tool_schema["input_schema"].get("required", [])
+
+        # Only clean properties for LLMs that need strict schema validation
+        if self._needs_schema_cleaning:
+            logger.debug("Cleaning schema for strict validation")
+            properties = self._clean_schema_for_strict_validation(properties)
 
         schema = FunctionSchema(
             name=tool_name,
@@ -280,7 +325,8 @@ class MCPClient(BaseObject):
             try:
                 # Convert the schema
                 function_schema = self._convert_mcp_schema_to_pipecat(
-                    tool_name, {"description": tool.description, "input_schema": tool.inputSchema}
+                    tool_name,
+                    {"description": tool.description, "input_schema": tool.inputSchema},
                 )
 
                 # Register the wrapped function
