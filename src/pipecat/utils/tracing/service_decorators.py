@@ -41,9 +41,15 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 
-# Internal helper functions
 def _noop_decorator(func):
-    """No-op fallback decorator when tracing is unavailable."""
+    """No-op fallback decorator when tracing is unavailable.
+
+    Args:
+        func: The function to pass through unchanged.
+
+    Returns:
+        The original function unchanged.
+    """
     return func
 
 
@@ -53,10 +59,10 @@ def _get_parent_service_context(self):
     This looks for the service span that was created when the service was initialized.
 
     Args:
-        self: The service instance
+        self: The service instance.
 
     Returns:
-        Context or None: The parent service context, or None if unavailable
+        The parent service context, or None if unavailable.
     """
     if not is_tracing_available():
         return None
@@ -73,8 +79,8 @@ def _add_token_usage_to_span(span, token_usage):
     """Add token usage metrics to a span (internal use only).
 
     Args:
-        span: The span to add token metrics to
-        token_usage: Dictionary or object containing token usage information
+        span: The span to add token metrics to.
+        token_usage: Dictionary or object containing token usage information.
     """
     if not is_tracing_available() or not token_usage:
         return
@@ -93,7 +99,7 @@ def _add_token_usage_to_span(span, token_usage):
 
 
 def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Traces TTS service methods with TTS-specific attributes.
+    """Trace TTS service methods with TTS-specific attributes.
 
     Automatically captures and records:
     - Service name and model information
@@ -118,7 +124,15 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
         @contextlib.asynccontextmanager
         async def tracing_context(self, text):
-            """Async context manager for TTS tracing."""
+            """Async context manager for TTS tracing.
+
+            Args:
+                self: The TTS service instance.
+                text: The text being synthesized.
+
+            Yields:
+                The active span for the TTS operation.
+            """
             if not is_tracing_available():
                 yield None
                 return
@@ -201,7 +215,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Traces STT service methods with transcription attributes.
+    """Trace STT service methods with transcription attributes.
 
     Automatically captures and records:
     - Service name and model information
@@ -278,7 +292,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -> Callable:
-    """Traces LLM service methods with LLM-specific attributes.
+    """Trace LLM service methods with LLM-specific attributes.
 
     Automatically captures and records:
     - Service name and model information
@@ -482,7 +496,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
 
 
 def traced_gemini_live(operation: str) -> Callable:
-    """Traces Gemini Live service methods with operation-specific attributes.
+    """Trace Gemini Live service methods with operation-specific attributes.
 
     This decorator automatically captures relevant information based on the operation type:
     - llm_setup: Configuration, tools definitions, and system instructions
@@ -491,7 +505,7 @@ def traced_gemini_live(operation: str) -> Callable:
     - llm_response: Complete LLM response with usage and output
 
     Args:
-        operation: The operation name (matches the event type being handled)
+        operation: The operation name (matches the event type being handled).
 
     Returns:
         Wrapped method with Gemini Live specific tracing.
@@ -786,7 +800,7 @@ def traced_gemini_live(operation: str) -> Callable:
 
 
 def traced_openai_realtime(operation: str) -> Callable:
-    """Traces OpenAI Realtime service methods with operation-specific attributes.
+    """Trace OpenAI Realtime service methods with operation-specific attributes.
 
     This decorator automatically captures relevant information based on the operation type:
     - llm_setup: Session configuration and tools
@@ -794,7 +808,7 @@ def traced_openai_realtime(operation: str) -> Callable:
     - llm_response: Usage metadata, output, and function calls
 
     Args:
-        operation: The operation name (matches the event type being handled)
+        operation: The operation name (matches the event type being handled).
 
     Returns:
         Wrapped method with OpenAI Realtime specific tracing.
