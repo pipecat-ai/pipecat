@@ -1,4 +1,5 @@
 python-dotenv
 fastapi[all]
 uvicorn
-pipecat-ai[silero,websocket,openai, deepgram, cartesia, sentry]
+pipecat-ai[silero,websocket,openai, deepgram, cartesia, sentry, daily]
+pipecat-ai-small-webrtc-prebuilt
