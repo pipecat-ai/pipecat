@@ -7,7 +7,7 @@
 import argparse
 import time
 
-from daily import CallClient, CustomAudioSource, Daily
+from daily import CallClient, CustomAudioSource, Daily, CustomAudioTrack
 from pydub import AudioSegment
 
 parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
@@ -52,7 +52,8 @@ time.sleep(2)
 audio_source = CustomAudioSource(sample_rate, channels)
 
 # Create an audio track and assign it our audio source.
-client.add_custom_audio_track("pipecat", audio_source)
+track = CustomAudioTrack(audio_source)
+client.add_custom_audio_track("pipecat", track)
 
 # Just sleep for a second. To do this well we should really use completions.
 time.sleep(1)
