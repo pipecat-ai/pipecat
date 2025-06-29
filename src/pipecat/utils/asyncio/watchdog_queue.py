@@ -5,8 +5,16 @@
 #
 
 import asyncio
+from dataclasses import dataclass
+
+from loguru import logger
 
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+
+
+@dataclass
+class WatchdogQueueCancelSentinel:
+    pass
 
 
 class WatchdogQueue(asyncio.Queue):
@@ -26,26 +34,34 @@ class WatchdogQueue(asyncio.Queue):
         super().__init__(maxsize)
         self._manager = manager
         self._timeout = timeout
-        self._cancel = False
 
     async def get(self):
-        while True:
-            if self._cancel:
-                raise asyncio.CancelledError("Cancelling watchdog queue get() call.")
-            try:
-                item = await asyncio.wait_for(super().get(), timeout=self._timeout)
-                if self._manager.task_watchdog_enabled:
-                    self._manager.task_reset_watchdog()
-                return item
-            except asyncio.TimeoutError:
-                if self._manager.task_watchdog_enabled:
-                    self._manager.task_reset_watchdog()
+        if self._manager.task_watchdog_enabled:
+            get_result = await self._watchdog_get()
+        else:
+            get_result = await super().get()
+
+        if isinstance(get_result, WatchdogQueueCancelSentinel):
+            logger.debug(
+                "Received WatchdogQueueCancelFrame, throwing CancelledError to force cancelling"
+            )
+            raise asyncio.CancelledError("Cancelling watchdog queue get() call.")
+        else:
+            return get_result
 
     def task_done(self):
         if self._manager.task_watchdog_enabled:
             self._manager.task_reset_watchdog()
-        if not self._cancel:
-            super().task_done()
+        super().task_done()
 
     def cancel(self):
-        self._cancel = True
+        super().put_nowait(WatchdogQueueCancelSentinel())
+
+    async def _watchdog_get(self):
+        while True:
+            try:
+                item = await asyncio.wait_for(super().get(), timeout=self._timeout)
+                self._manager.task_reset_watchdog()
+                return item
+            except asyncio.TimeoutError:
+                self._manager.task_reset_watchdog()
