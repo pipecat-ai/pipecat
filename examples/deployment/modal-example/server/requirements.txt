@@ -1,2 +1,9 @@
 python-dotenv==1.0.1
-modal==0.73.75
+# The modal-client version is pinned to 0.77.0 to ensure compatibility with
+# the features used in this example. Specifically, version 0.73.75, which was
+# previously used, does not support the `min_containers` argument in
+# `@app.function`. Version 0.77.0 is the last version before the 1.0.0
+# release and supports all necessary features, including `min_containers`
+# and `@modal.concurrent`.
+modal==0.77.0
+pipecat-ai[silero,daily,websocket]
