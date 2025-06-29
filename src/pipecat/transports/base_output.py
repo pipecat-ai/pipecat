@@ -607,6 +607,7 @@ class BaseOutputTransport(FrameProcessor):
 
         async def _cancel_clock_task(self):
             if self._clock_task:
+                self._clock_queue.cancel()
                 await self._transport.cancel_task(self._clock_task)
                 self._clock_task = None
 

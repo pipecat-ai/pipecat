@@ -18,7 +18,6 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from loguru import logger
-from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -77,9 +76,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Mount the frontend at /
-app.mount("/client", SmallWebRTCPrebuiltUI)
 
 
 class SimulateFreezeInput(FrameProcessor):
@@ -249,6 +245,10 @@ async def run_example(websocket_client):
                     # LLMTextFrame: None,
                     OpenAILLMContextFrame: None,
                     LLMFullResponseEndFrame: None,
+                    UserStartedSpeakingFrame: None,
+                    UserStoppedSpeakingFrame: None,
+                    StartInterruptionFrame: None,
+                    StopInterruptionFrame: None,
                 },
                 exclude_fields={
                     "result",

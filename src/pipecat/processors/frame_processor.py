@@ -651,6 +651,7 @@ class FrameProcessor(BaseObject):
     async def __cancel_input_task(self):
         """Cancel the input processing task."""
         if self.__input_frame_task:
+            self.__input_queue.cancel()
             await self.cancel_task(self.__input_frame_task)
             self.__input_frame_task = None
 
@@ -686,6 +687,7 @@ class FrameProcessor(BaseObject):
     async def __cancel_push_task(self):
         """Cancel the frame pushing task."""
         if self.__push_frame_task:
+            self.__push_queue.cancel()
             await self.cancel_task(self.__push_frame_task)
             self.__push_frame_task = None
 

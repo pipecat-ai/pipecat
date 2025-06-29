@@ -243,6 +243,7 @@ class TavusVideoService(AIService):
     async def _cancel_send_task(self):
         """Cancel the audio sending task if it exists."""
         if self._send_task:
+            self._queue.cancel()
             await self.cancel_task(self._send_task)
             self._send_task = None
 
