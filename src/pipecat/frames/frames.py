@@ -71,6 +71,13 @@ class KeypadEntry(str, Enum):
 
 
 def format_pts(pts: Optional[int]):
+    """Format presentation timestamp (PTS) in nanoseconds to a human-readable string.
+
+    Converts a PTS value in nanoseconds to a string representation.
+
+    Args:
+        pts: Presentation timestamp in nanoseconds, or None if not set.
+    """
     return nanoseconds_to_str(pts) if pts else None
 
 
@@ -111,7 +118,9 @@ class Frame:
 
 @dataclass
 class SystemFrame(Frame):
-    """System frames are frames that are not internally queued by any of the
+    """System frame class for immediate processing.
+
+    System frames are frames that are not internally queued by any of the
     frame processors and should be processed immediately.
     """
 
@@ -120,7 +129,9 @@ class SystemFrame(Frame):
 
 @dataclass
 class DataFrame(Frame):
-    """Data frames are frames that will be processed in order and usually
+    """Data frame class for processing data in order.
+
+    Data frames are frames that will be processed in order and usually
     contain data such as LLM context, text, audio or images.
     """
 
@@ -129,7 +140,9 @@ class DataFrame(Frame):
 
 @dataclass
 class ControlFrame(Frame):
-    """Control frames are frames that, similar to data frames, will be processed
+    """Control frame class for processing control information in order.
+
+    Control frames are frames that, similar to data frames, will be processed
     in order and usually contain control information such as frames to update
     settings or to end the pipeline.
     """

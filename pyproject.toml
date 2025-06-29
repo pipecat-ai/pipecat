@@ -123,6 +123,9 @@ select = [
     "D", # Docstring rules
     "I", # Import rules
 ]
+ignore = [
+    "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Skip docstring checks for non-source code
