@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   ruff-format:
-    name: "Formatting checker"
+    name: "Code quality checks"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -39,8 +39,8 @@ jobs:
         run: |
           source .venv/bin/activate
           ruff format --diff
-      - name: Ruff import linter
+      - name: Ruff linter (all rules)
         id: ruff-check
         run: |
           source .venv/bin/activate
-          ruff check --select I
+          ruff check

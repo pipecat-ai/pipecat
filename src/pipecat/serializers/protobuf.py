@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Protobuf frame serialization for Pipecat."""
+
 import dataclasses
 import json
 
@@ -22,13 +24,25 @@ from pipecat.frames.frames import (
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
 
-# Data class for converting transport messages into Protobuf format.
 @dataclasses.dataclass
 class MessageFrame:
+    """Data class for converting transport messages into Protobuf format.
+
+    Parameters:
+        data: JSON-encoded message data for transport.
+    """
+
     data: str
 
 
 class ProtobufFrameSerializer(FrameSerializer):
+    """Serializer for converting Pipecat frames to/from Protocol Buffer format.
+
+    Provides efficient binary serialization for frame transport over network
+    connections. Supports text, audio, transcription, and message frames with
+    automatic conversion between transport message types.
+    """
+
     SERIALIZABLE_TYPES = {
         TextFrame: "text",
         OutputAudioRawFrame: "audio",
@@ -46,13 +60,27 @@ class ProtobufFrameSerializer(FrameSerializer):
     DESERIALIZABLE_FIELDS = {v: k for k, v in DESERIALIZABLE_TYPES.items()}
 
     def __init__(self):
+        """Initialize the Protobuf frame serializer."""
         pass
 
     @property
     def type(self) -> FrameSerializerType:
+        """Get the serializer type.
+
+        Returns:
+            FrameSerializerType.BINARY indicating binary serialization format.
+        """
         return FrameSerializerType.BINARY
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Serialize a frame to Protocol Buffer binary format.
+
+        Args:
+            frame: The frame to serialize.
+
+        Returns:
+            Serialized frame as bytes, or None if frame type is not serializable.
+        """
         # Wrapping this messages as a JSONFrame to send
         if isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
             frame = MessageFrame(
@@ -75,6 +103,14 @@ class ProtobufFrameSerializer(FrameSerializer):
         return proto_frame.SerializeToString()
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Deserialize Protocol Buffer binary data to a frame.
+
+        Args:
+            data: Binary protobuf data to deserialize.
+
+        Returns:
+            Deserialized frame instance, or None if deserialization fails.
+        """
         proto = frame_protos.Frame.FromString(data)
         which = proto.WhichOneof("frame")
         if which not in self.DESERIALIZABLE_FIELDS:

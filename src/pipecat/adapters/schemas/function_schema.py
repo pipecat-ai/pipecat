@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Function schema utilities for AI tool definitions.
+
+This module provides standardized function schema representation for defining
+tools and functions used with AI models, ensuring consistent formatting
+across different AI service providers.
+"""
+
 from typing import Any, Dict, List
 
 
@@ -13,17 +20,19 @@ class FunctionSchema:
     Provides a structured way to define function tools used with AI models like OpenAI.
     This schema defines the function's name, description, parameter properties, and
     required parameters, following specifications required by AI service providers.
-
-    Args:
-        name: Name of the function to be called.
-        description: Description of what the function does.
-        properties: Dictionary defining parameter types, descriptions, and constraints.
-        required: List of property names that are required parameters.
     """
 
     def __init__(
         self, name: str, description: str, properties: Dict[str, Any], required: List[str]
     ) -> None:
+        """Initialize the function schema.
+
+        Args:
+            name: Name of the function to be called.
+            description: Description of what the function does.
+            properties: Dictionary defining parameter types, descriptions, and constraints.
+            required: List of property names that are required parameters.
+        """
         self._name = name
         self._description = description
         self._properties = properties

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Telnyx WebSocket frame serializer for Pipecat."""
+
 import base64
 import json
 from typing import Optional
@@ -43,22 +45,12 @@ class TelnyxFrameSerializer(FrameSerializer):
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Telnyx call when an EndFrame or CancelFrame is processed, but requires Telnyx
     credentials to be provided.
-
-    Attributes:
-        _stream_id: The Telnyx Stream ID.
-        _call_control_id: The associated Telnyx Call Control ID.
-        _api_key: Telnyx API key for API access.
-        _params: Configuration parameters.
-        _telnyx_sample_rate: Sample rate used by Telnyx (typically 8kHz).
-        _sample_rate: Input sample rate for the pipeline.
-        _resampler: Audio resampler for format conversion.
-        _hangup_attempted: Flag to track if hang-up has been attempted.
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for TelnyxFrameSerializer.
 
-        Attributes:
+        Parameters:
             telnyx_sample_rate: Sample rate used by Telnyx, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             inbound_encoding: Audio encoding for data sent to Telnyx (e.g., "PCMU").

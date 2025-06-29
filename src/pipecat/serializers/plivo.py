@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Plivo WebSocket frame serializer for audio streaming."""
+
 import base64
 import json
 from typing import Optional
@@ -38,22 +40,12 @@ class PlivoFrameSerializer(FrameSerializer):
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Plivo call when an EndFrame or CancelFrame is processed, but requires Plivo
     credentials to be provided.
-
-    Attributes:
-        _stream_id: The Plivo Stream ID.
-        _call_id: The associated Plivo Call ID.
-        _auth_id: Plivo auth ID for API access.
-        _auth_token: Plivo authentication token for API access.
-        _params: Configuration parameters.
-        _plivo_sample_rate: Sample rate used by Plivo (typically 8kHz).
-        _sample_rate: Input sample rate for the pipeline.
-        _resampler: Audio resampler for format conversion.
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for PlivoFrameSerializer.
 
-        Attributes:
+        Parameters:
             plivo_sample_rate: Sample rate used by Plivo, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.

@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Tkinter-based local transport implementation for Pipecat.
+
+This module provides a local transport using Tkinter for video display and
+PyAudio for audio I/O, suitable for desktop applications and testing.
+"""
+
 import asyncio
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
@@ -40,20 +46,44 @@ except ModuleNotFoundError as e:
 
 
 class TkTransportParams(TransportParams):
+    """Configuration parameters for Tkinter transport.
+
+    Parameters:
+        audio_input_device_index: PyAudio device index for audio input. If None, uses default.
+        audio_output_device_index: PyAudio device index for audio output. If None, uses default.
+    """
+
     audio_input_device_index: Optional[int] = None
     audio_output_device_index: Optional[int] = None
 
 
 class TkInputTransport(BaseInputTransport):
+    """Tkinter-based audio input transport.
+
+    Captures audio from the system's audio input device using PyAudio and
+    converts it to InputAudioRawFrame objects for pipeline processing.
+    """
+
     _params: TkTransportParams
 
     def __init__(self, py_audio: pyaudio.PyAudio, params: TkTransportParams):
+        """Initialize the Tkinter input transport.
+
+        Args:
+            py_audio: PyAudio instance for audio device management.
+            params: Transport configuration parameters.
+        """
         super().__init__(params)
         self._py_audio = py_audio
         self._in_stream = None
         self._sample_rate = 0
 
     async def start(self, frame: StartFrame):
+        """Start the audio input stream.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
 
         if self._in_stream:
@@ -76,6 +106,7 @@ class TkInputTransport(BaseInputTransport):
         await self.set_transport_ready(frame)
 
     async def cleanup(self):
+        """Stop and cleanup the audio input stream."""
         await super().cleanup()
         if self._in_stream:
             self._in_stream.stop_stream()
@@ -83,6 +114,7 @@ class TkInputTransport(BaseInputTransport):
             self._in_stream = None
 
     def _audio_in_callback(self, in_data, frame_count, time_info, status):
+        """Callback function for PyAudio input stream."""
         frame = InputAudioRawFrame(
             audio=in_data,
             sample_rate=self._sample_rate,
@@ -95,9 +127,22 @@ class TkInputTransport(BaseInputTransport):
 
 
 class TkOutputTransport(BaseOutputTransport):
+    """Tkinter-based audio and video output transport.
+
+    Plays audio through PyAudio and displays video frames in a Tkinter window,
+    providing a complete multimedia output solution for desktop applications.
+    """
+
     _params: TkTransportParams
 
     def __init__(self, tk_root: tk.Tk, py_audio: pyaudio.PyAudio, params: TkTransportParams):
+        """Initialize the Tkinter output transport.
+
+        Args:
+            tk_root: The root Tkinter window for video display.
+            py_audio: PyAudio instance for audio device management.
+            params: Transport configuration parameters.
+        """
         super().__init__(params)
         self._py_audio = py_audio
         self._out_stream = None
@@ -115,6 +160,11 @@ class TkOutputTransport(BaseOutputTransport):
         self._image_label.pack()
 
     async def start(self, frame: StartFrame):
+        """Start the audio output stream.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
 
         if self._out_stream:
@@ -134,6 +184,7 @@ class TkOutputTransport(BaseOutputTransport):
         await self.set_transport_ready(frame)
 
     async def cleanup(self):
+        """Stop and cleanup the audio output stream."""
         await super().cleanup()
         if self._out_stream:
             self._out_stream.stop_stream()
@@ -141,15 +192,26 @@ class TkOutputTransport(BaseOutputTransport):
             self._out_stream = None
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        """Write an audio frame to the output stream.
+
+        Args:
+            frame: The audio frame to write to the output device.
+        """
         if self._out_stream:
             await self.get_event_loop().run_in_executor(
                 self._executor, self._out_stream.write, frame.audio
             )
 
     async def write_video_frame(self, frame: OutputImageRawFrame):
+        """Write a video frame to the Tkinter display.
+
+        Args:
+            frame: The video frame to display in the Tkinter window.
+        """
         self.get_event_loop().call_soon(self._write_frame_to_tk, frame)
 
     def _write_frame_to_tk(self, frame: OutputImageRawFrame):
+        """Write frame data to the Tkinter image label."""
         width = frame.size[0]
         height = frame.size[1]
         data = f"P6 {width} {height} 255 ".encode() + frame.image
@@ -162,7 +224,19 @@ class TkOutputTransport(BaseOutputTransport):
 
 
 class TkLocalTransport(BaseTransport):
+    """Complete Tkinter-based local transport with audio and video capabilities.
+
+    Provides a unified interface for local multimedia I/O using Tkinter for video
+    display and PyAudio for audio, suitable for desktop applications and testing.
+    """
+
     def __init__(self, tk_root: tk.Tk, params: TkTransportParams):
+        """Initialize the Tkinter local transport.
+
+        Args:
+            tk_root: The root Tkinter window for video display.
+            params: Transport configuration parameters.
+        """
         super().__init__()
         self._tk_root = tk_root
         self._params = params
@@ -176,11 +250,21 @@ class TkLocalTransport(BaseTransport):
     #
 
     def input(self) -> TkInputTransport:
+        """Get the input frame processor for this transport.
+
+        Returns:
+            The Tkinter input transport processor.
+        """
         if not self._input:
             self._input = TkInputTransport(self._pyaudio, self._params)
         return self._input
 
     def output(self) -> TkOutputTransport:
+        """Get the output frame processor for this transport.
+
+        Returns:
+            The Tkinter output transport processor.
+        """
         if not self._output:
             self._output = TkOutputTransport(self._tk_root, self._pyaudio, self._params)
         return self._output

@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Task observer for managing pipeline frame observers.
+
+This module provides a proxy observer system that manages multiple observers
+for pipeline frame events, ensuring that observer processing doesn't block
+the main pipeline execution.
+"""
+
 import asyncio
 import inspect
 from typing import Dict, List, Optional
@@ -17,9 +24,15 @@ from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 @dataclass
 class Proxy:
-    """This is the data we receive from the main observer and that we put into
-    a queue for later processing.
+    """Proxy data for managing observer tasks and queues.
 
+    This represents is the data received from the main observer that
+    is queued for later processing.
+
+    Parameters:
+        queue: Queue for frame data awaiting observer processing.
+        task: Asyncio task running the observer's frame processing loop.
+        observer: The actual observer instance being proxied.
     """
 
     queue: asyncio.Queue
@@ -28,7 +41,9 @@ class Proxy:
 
 
 class TaskObserver(BaseObserver):
-    """This is a pipeline frame observer that is meant to be used as a proxy to
+    """Proxy observer that manages multiple observers without blocking the pipeline.
+
+    This is a pipeline frame observer that is meant to be used as a proxy to
     the user provided observers. That is, this is the observer that should be
     passed to the frame processors. Then, every time a frame is pushed this
     observer will call all the observers registered to the pipeline task.
@@ -37,7 +52,6 @@ class TaskObserver(BaseObserver):
     pipeline by creating a queue and a task for each user observer. When a frame
     is received, it will be put in a queue for efficiency and later processed by
     each task.
-
     """
 
     def __init__(
@@ -47,6 +61,13 @@ class TaskObserver(BaseObserver):
         task_manager: BaseTaskManager,
         **kwargs,
     ):
+        """Initialize the TaskObserver.
+
+        Args:
+            observers: List of observers to manage. Defaults to empty list.
+            task_manager: Task manager for creating and managing observer tasks.
+            **kwargs: Additional arguments passed to the base observer.
+        """
         super().__init__(**kwargs)
         self._observers = observers or []
         self._task_manager = task_manager
@@ -55,6 +76,11 @@ class TaskObserver(BaseObserver):
         )
 
     def add_observer(self, observer: BaseObserver):
+        """Add a new observer to the managed list.
+
+        Args:
+            observer: The observer to add.
+        """
         # Add the observer to the list.
         self._observers.append(observer)
 
@@ -65,6 +91,11 @@ class TaskObserver(BaseObserver):
             self._proxies[observer] = proxy
 
     async def remove_observer(self, observer: BaseObserver):
+        """Remove an observer and clean up its resources.
+
+        Args:
+            observer: The observer to remove.
+        """
         # If the observer has a proxy, remove it.
         if observer in self._proxies:
             proxy = self._proxies[observer]
@@ -78,11 +109,11 @@ class TaskObserver(BaseObserver):
             self._observers.remove(observer)
 
     async def start(self):
-        """Starts all proxy observer tasks."""
+        """Start all proxy observer tasks."""
         self._proxies = self._create_proxies(self._observers)
 
     async def stop(self):
-        """Stops all proxy observer tasks."""
+        """Stop all proxy observer tasks."""
         if not self._proxies:
             return
 
@@ -90,13 +121,20 @@ class TaskObserver(BaseObserver):
             await self._task_manager.cancel_task(proxy.task)
 
     async def on_push_frame(self, data: FramePushed):
+        """Queue frame data for all managed observers.
+
+        Args:
+            data: The frame push event data to distribute to observers.
+        """
         for proxy in self._proxies.values():
             await proxy.queue.put(data)
 
     def _started(self) -> bool:
+        """Check if the task observer has been started."""
         return self._proxies is not None
 
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
+        """Create a proxy for a single observer."""
         queue = WatchdogQueue(self._task_manager)
         task = self._task_manager.create_task(
             self._proxy_task_handler(queue, observer),
@@ -106,6 +144,7 @@ class TaskObserver(BaseObserver):
         return proxy
 
     def _create_proxies(self, observers: List[BaseObserver]) -> Dict[BaseObserver, Proxy]:
+        """Create proxies for all observers."""
         proxies = {}
         for observer in observers:
             proxy = self._create_proxy(observer)
@@ -113,6 +152,7 @@ class TaskObserver(BaseObserver):
         return proxies
 
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):
+        """Handle frame processing for a single observer."""
         warning_reported = False
         while True:
             data = await queue.get()

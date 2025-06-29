@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Krisp noise reduction audio filter for Pipecat.
+
+This module provides an audio filter implementation using Krisp's noise
+reduction technology to suppress background noise in audio streams.
+"""
+
 import os
 
 import numpy as np
@@ -21,14 +27,27 @@ except ModuleNotFoundError as e:
 
 
 class KrispProcessorManager:
-    """
-    Ensures that only one KrispAudioProcessor instance exists for the entire program.
+    """Singleton manager for KrispAudioProcessor instances.
+
+    Ensures that only one KrispAudioProcessor instance exists for the entire
+    program.
     """
 
     _krisp_instance = None
 
     @classmethod
     def get_processor(cls, sample_rate: int, sample_type: str, channels: int, model_path: str):
+        """Get or create a KrispAudioProcessor instance.
+
+        Args:
+            sample_rate: Audio sample rate in Hz.
+            sample_type: Audio sample type (e.g., "PCM_16").
+            channels: Number of audio channels.
+            model_path: Path to the Krisp model file.
+
+        Returns:
+            Shared KrispAudioProcessor instance.
+        """
         if cls._krisp_instance is None:
             cls._krisp_instance = KrispAudioProcessor(
                 sample_rate, sample_type, channels, model_path
@@ -37,14 +56,26 @@ class KrispProcessorManager:
 
 
 class KrispFilter(BaseAudioFilter):
+    """Audio filter using Krisp noise reduction technology.
+
+    Provides real-time noise reduction for audio streams using Krisp's
+    proprietary noise suppression algorithms. Requires a Krisp model file
+    for operation.
+    """
+
     def __init__(
         self, sample_type: str = "PCM_16", channels: int = 1, model_path: str = None
     ) -> None:
-        """Initializes the KrispAudioProcessor with customizable audio processing settings.
+        """Initialize the Krisp noise reduction filter.
 
-        :param sample_type: The type of audio sample, default is 'PCM_16'.
-        :param channels: Number of audio channels, default is 1.
-        :param model_path: Path to the Krisp model; defaults to environment variable KRISP_MODEL_PATH if not provided.
+        Args:
+            sample_type: The audio sample format. Defaults to "PCM_16".
+            channels: Number of audio channels. Defaults to 1.
+            model_path: Path to the Krisp model file. If None, uses KRISP_MODEL_PATH
+                environment variable.
+
+        Raises:
+            ValueError: If model_path is not provided and KRISP_MODEL_PATH is not set.
         """
         super().__init__()
 
@@ -63,19 +94,41 @@ class KrispFilter(BaseAudioFilter):
         self._krisp_processor = None
 
     async def start(self, sample_rate: int):
+        """Initialize the Krisp processor with the transport's sample rate.
+
+        Args:
+            sample_rate: The sample rate of the input transport in Hz.
+        """
         self._sample_rate = sample_rate
         self._krisp_processor = KrispProcessorManager.get_processor(
             self._sample_rate, self._sample_type, self._channels, self._model_path
         )
 
     async def stop(self):
+        """Clean up the Krisp processor when stopping."""
         self._krisp_processor = None
 
     async def process_frame(self, frame: FilterControlFrame):
+        """Process control frames to enable/disable filtering.
+
+        Args:
+            frame: The control frame containing filter commands.
+        """
         if isinstance(frame, FilterEnableFrame):
             self._filtering = frame.enable
 
     async def filter(self, audio: bytes) -> bytes:
+        """Apply Krisp noise reduction to audio data.
+
+        Converts audio to float32, applies Krisp noise reduction processing,
+        and returns the filtered audio clipped to int16 range.
+
+        Args:
+            audio: Raw audio data as bytes to be filtered.
+
+        Returns:
+            Noise-reduced audio data as bytes.
+        """
         if not self._filtering:
             return audio
 

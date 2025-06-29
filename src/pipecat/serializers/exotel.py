@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Exotel Media Streams serializer for Pipecat."""
+
 import base64
 import json
 from typing import Optional
@@ -33,13 +35,14 @@ class ExotelFrameSerializer(FrameSerializer):
     media streams protocol. It supports audio conversion, DTMF events, and automatic
     call termination.
 
-    Ref Doc for events - https://support.exotel.com/support/solutions/articles/3000108630-working-with-the-stream-and-voicebot-applet
+    Note: Ref docs for events:
+        https://support.exotel.com/support/solutions/articles/3000108630-working-with-the-stream-and-voicebot-applet
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for ExotelFrameSerializer.
 
-        Attributes:
+        Parameters:
             exotel_sample_rate: Sample rate used by Exotel, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
         """

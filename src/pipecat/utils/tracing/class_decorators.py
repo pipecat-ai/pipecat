@@ -33,7 +33,7 @@ C = TypeVar("C", bound=type)
 class AttachmentStrategy(enum.Enum):
     """Controls how spans are attached to the trace hierarchy.
 
-    Attributes:
+    Parameters:
         CHILD: Attached to class span if no parent, otherwise to parent.
         LINK: Attached to class span with link to parent.
         NONE: Always attached to class span regardless of context.
@@ -71,10 +71,10 @@ class Traceable:
 
     @property
     def meter(self):
-        """Returns the OpenTelemetry meter instance.
+        """Get the OpenTelemetry meter instance.
 
         Returns:
-            Meter: The OpenTelemetry meter instance for this object.
+            The OpenTelemetry meter instance for this object.
         """
         return self._meter
 
@@ -83,7 +83,17 @@ class Traceable:
 def __traced_context_manager(
     self: Traceable, func: Callable, name: str | None, attachment_strategy: AttachmentStrategy
 ):
-    """Internal context manager for the traced decorator."""
+    """Internal context manager for the traced decorator.
+
+    Args:
+        self: The Traceable instance.
+        func: The function being traced.
+        name: Custom span name or None to use function name.
+        attachment_strategy: How to attach this span to the trace hierarchy.
+
+    Raises:
+        RuntimeError: If used in a class not inheriting from Traceable.
+    """
     if not isinstance(self, Traceable):
         raise RuntimeError(
             "@traced annotation can only be used in classes inheriting from Traceable"
@@ -124,7 +134,16 @@ def __traced_context_manager(
 
 
 def __traced_decorator(func, name, attachment_strategy: AttachmentStrategy):
-    """Implementation of the traced decorator."""
+    """Implementation of the traced decorator.
+
+    Args:
+        func: The function to trace.
+        name: Custom span name.
+        attachment_strategy: How to attach this span.
+
+    Returns:
+        The wrapped function with tracing capabilities.
+    """
 
     @functools.wraps(func)
     async def coroutine_wrapper(self: Traceable, *args, **kwargs):
@@ -163,7 +182,7 @@ def traced(
     name: Optional[str] = None,
     attachment_strategy: AttachmentStrategy = AttachmentStrategy.CHILD,
 ) -> Callable:
-    """Adds tracing to an async function in a Traceable class.
+    """Add tracing to an async function in a Traceable class.
 
     Args:
         func: The async function to trace.
@@ -193,7 +212,7 @@ def traced(
 
 
 def traceable(cls: C) -> C:
-    """Makes a class traceable for OpenTelemetry.
+    """Make a class traceable for OpenTelemetry.
 
     Creates a new class that inherits from both the original class
     and Traceable, enabling tracing for class methods.
@@ -210,6 +229,12 @@ def traceable(cls: C) -> C:
     @functools.wraps(cls, updated=())
     class TracedClass(cls, Traceable):
         def __init__(self, *args, **kwargs):
+            """Initialize the traced class instance.
+
+            Args:
+                *args: Positional arguments passed to parent classes.
+                **kwargs: Keyword arguments passed to parent classes.
+            """
             cls.__init__(self, *args, **kwargs)
             if hasattr(self, "name"):
                 Traceable.__init__(self, self.name)

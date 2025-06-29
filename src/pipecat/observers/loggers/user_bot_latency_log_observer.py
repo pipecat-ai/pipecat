@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Observer for measuring user-to-bot response latency."""
+
 import time
 
 from loguru import logger
@@ -18,19 +20,28 @@ from pipecat.processors.frame_processor import FrameDirection
 
 
 class UserBotLatencyLogObserver(BaseObserver):
-    """Observer that logs the latency between when the user stops speaking and
-    when the bot starts speaking.
+    """Observer that measures time between user stopping speech and bot starting speech.
 
-    This helps measure how quickly the AI services respond.
-
+    This helps measure how quickly the AI services respond by tracking
+    conversation turn timing and logging latency metrics.
     """
 
     def __init__(self):
+        """Initialize the latency observer.
+
+        Sets up tracking for processed frames and user speech timing
+        to calculate response latencies.
+        """
         super().__init__()
         self._processed_frames = set()
         self._user_stopped_time = 0
 
     async def on_push_frame(self, data: FramePushed):
+        """Process frames to track speech timing and calculate latency.
+
+        Args:
+            data: Frame push event containing the frame and direction information.
+        """
         # Only process downstream frames
         if data.direction != FrameDirection.DOWNSTREAM:
             return

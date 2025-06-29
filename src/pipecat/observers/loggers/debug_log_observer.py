@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Debug logging observer for frame activity monitoring.
+
+This module provides a debug observer that logs detailed frame activity
+to the console, making it useful for debugging pipeline behavior and
+understanding frame flow between processors.
+"""
+
 from dataclasses import fields, is_dataclass
 from enum import Enum, auto
 from typing import Dict, Optional, Set, Tuple, Type, Union
@@ -16,7 +23,12 @@ from pipecat.processors.frame_processor import FrameDirection
 
 
 class FrameEndpoint(Enum):
-    """Specifies which endpoint (source or destination) to filter on."""
+    """Specifies which endpoint (source or destination) to filter on.
+
+    Parameters:
+        SOURCE: Filter on the source component that is pushing the frame.
+        DESTINATION: Filter on the destination component receiving the frame.
+    """
 
     SOURCE = auto()
     DESTINATION = auto()
@@ -27,11 +39,6 @@ class DebugLogObserver(BaseObserver):
 
     Automatically extracts and formats data from any frame type, making it useful
     for debugging pipeline behavior without needing frame-specific observers.
-
-    Args:
-        frame_types: Optional tuple of frame types to log, or a dict with frame type
-            filters. If None, logs all frame types.
-        exclude_fields: Optional set of field names to exclude from logging.
 
     Examples:
         Log all frames from all services:
@@ -87,6 +94,7 @@ class DebugLogObserver(BaseObserver):
                 If None is provided instead of a tuple/dict, log all frames.
             exclude_fields: Set of field names to exclude from logging. If None, only binary
                 data fields are excluded.
+            **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
 
@@ -113,14 +121,7 @@ class DebugLogObserver(BaseObserver):
         )
 
     def _format_value(self, value):
-        """Format a value for logging.
-
-        Args:
-            value: The value to format.
-
-        Returns:
-            str: A string representation of the value suitable for logging.
-        """
+        """Format a value for logging."""
         if value is None:
             return "None"
         elif isinstance(value, str):
@@ -143,16 +144,7 @@ class DebugLogObserver(BaseObserver):
             return str(value)
 
     def _should_log_frame(self, frame, src, dst):
-        """Determine if a frame should be logged based on filters.
-
-        Args:
-            frame: The frame being processed
-            src: The source component
-            dst: The destination component
-
-        Returns:
-            bool: True if the frame should be logged, False otherwise
-        """
+        """Determine if a frame should be logged based on filters."""
         # If no filters, log all frames
         if not self.frame_filters:
             return True

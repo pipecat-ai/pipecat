@@ -4,6 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Local CoreML smart turn analyzer for on-device ML inference.
+
+This module provides a smart turn analyzer that uses CoreML models for
+local end-of-turn detection without requiring network connectivity.
+"""
 
 from typing import Any, Dict
 
@@ -25,7 +30,24 @@ except ModuleNotFoundError as e:
 
 
 class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
+    """Local smart turn analyzer using CoreML models.
+
+    Provides end-of-turn detection using locally-stored CoreML models,
+    enabling offline operation without network dependencies. Optimized
+    for Apple Silicon and other CoreML-compatible hardware.
+    """
+
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
+        """Initialize the local CoreML smart turn analyzer.
+
+        Args:
+            smart_turn_model_path: Path to directory containing the CoreML model
+                and feature extractor files.
+            **kwargs: Additional arguments passed to BaseSmartTurn.
+
+        Raises:
+            Exception: If smart_turn_model_path is not provided or model loading fails.
+        """
         super().__init__(**kwargs)
 
         if not smart_turn_model_path:
@@ -41,6 +63,7 @@ class LocalCoreMLSmartTurnAnalyzer(BaseSmartTurn):
         logger.debug("Loaded Local Smart Turn")
 
     async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+        """Predict end-of-turn using local CoreML model."""
         inputs = self._turn_processor(
             audio_array,
             sampling_rate=16000,

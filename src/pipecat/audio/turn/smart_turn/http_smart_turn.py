@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""HTTP-based smart turn analyzer for remote ML inference.
+
+This module provides a smart turn analyzer that sends audio data to remote
+HTTP endpoints for ML-based end-of-turn detection.
+"""
+
 import asyncio
 import io
 from typing import Any, Dict, Optional
@@ -16,6 +22,12 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn, SmartTu
 
 
 class HttpSmartTurnAnalyzer(BaseSmartTurn):
+    """Smart turn analyzer using HTTP-based ML inference.
+
+    Sends audio data to remote HTTP endpoints for ML-based end-of-turn
+    prediction. Handles serialization, HTTP communication, and error recovery.
+    """
+
     def __init__(
         self,
         *,
@@ -24,12 +36,21 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         headers: Optional[Dict[str, str]] = None,
         **kwargs,
     ):
+        """Initialize the HTTP smart turn analyzer.
+
+        Args:
+            url: HTTP endpoint URL for the smart turn ML service.
+            aiohttp_session: HTTP client session for making requests.
+            headers: Optional HTTP headers to include in requests.
+            **kwargs: Additional arguments passed to BaseSmartTurn.
+        """
         super().__init__(**kwargs)
         self._url = url
         self._headers = headers or {}
         self._aiohttp_session = aiohttp_session
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
+        """Serialize NumPy audio array to bytes for HTTP transmission."""
         logger.trace("Serializing NumPy array to bytes...")
         buffer = io.BytesIO()
         np.save(buffer, audio_array)
@@ -38,6 +59,7 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         return serialized_bytes
 
     async def _send_raw_request(self, data_bytes: bytes) -> Dict[str, Any]:
+        """Send raw audio data to the HTTP endpoint for prediction."""
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
 
@@ -83,6 +105,7 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
             raise Exception("Failed to send raw request to Daily Smart Turn.")
 
     async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+        """Predict end-of-turn using remote HTTP ML service."""
         try:
             serialized_array = self._serialize_array(audio_array)
             return await self._send_raw_request(serialized_array)

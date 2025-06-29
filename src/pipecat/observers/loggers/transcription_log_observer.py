@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Transcription logging observer for Pipecat.
+
+This module provides an observer that logs transcription frames to the console,
+allowing developers to monitor speech-to-text activity in real-time.
+"""
+
 from loguru import logger
 
 from pipecat.frames.frames import (
@@ -17,17 +23,23 @@ from pipecat.services.stt_service import STTService
 class TranscriptionLogObserver(BaseObserver):
     """Observer to log transcription activity to the console.
 
-    Logs all frame instances (only from STT service) of:
+    Monitors and logs all transcription frames from STT services, including
+    both final transcriptions and interim results. This allows developers
+    to track speech recognition activity and debug transcription issues.
 
-    - TranscriptionFrame
-    - InterimTranscriptionFrame
-
-    This allows you to track when the LLM starts responding, what it generates,
-    and when it finishes.
-
+    Only processes frames from STTService instances to avoid logging
+    unrelated transcription frames from other sources.
     """
 
     async def on_push_frame(self, data: FramePushed):
+        """Handle frame push events and log transcription frames.
+
+        Logs TranscriptionFrame and InterimTranscriptionFrame instances
+        with timestamps and user information for debugging purposes.
+
+        Args:
+            data: Frame push event data containing source, frame, and timestamp.
+        """
         src = data.source
         frame = data.frame
         timestamp = data.timestamp

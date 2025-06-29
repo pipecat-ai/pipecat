@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Daily.co room configuration utilities for Pipecat examples."""
+
 import argparse
 import os
 from typing import Optional
@@ -14,6 +16,17 @@ from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 
 
 async def configure(aiohttp_session: aiohttp.ClientSession):
+    """Configure Daily.co room URL and token from arguments or environment.
+
+    Args:
+        aiohttp_session: HTTP session for making API requests.
+
+    Returns:
+        Tuple containing the room URL and authentication token.
+
+    Raises:
+        Exception: If room URL or API key are not provided.
+    """
     (url, token, _) = await configure_with_args(aiohttp_session)
     return (url, token)
 
@@ -21,6 +34,18 @@ async def configure(aiohttp_session: aiohttp.ClientSession):
 async def configure_with_args(
     aiohttp_session: aiohttp.ClientSession, parser: Optional[argparse.ArgumentParser] = None
 ):
+    """Configure Daily.co room with command-line argument parsing.
+
+    Args:
+        aiohttp_session: HTTP session for making API requests.
+        parser: Optional argument parser. If None, creates a default one.
+
+    Returns:
+        Tuple containing room URL, authentication token, and parsed arguments.
+
+    Raises:
+        Exception: If room URL or API key are not provided via arguments or environment.
+    """
     if not parser:
         parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
     parser.add_argument(

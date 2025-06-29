@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Twilio Media Streams WebSocket protocol serializer for Pipecat."""
+
 import base64
 import json
 from typing import Optional
@@ -38,22 +40,12 @@ class TwilioFrameSerializer(FrameSerializer):
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Twilio call when an EndFrame or CancelFrame is processed, but requires Twilio
     credentials to be provided.
-
-    Attributes:
-        _stream_sid: The Twilio Media Stream SID.
-        _call_sid: The associated Twilio Call SID.
-        _account_sid: Twilio account SID for API access.
-        _auth_token: Twilio authentication token for API access.
-        _params: Configuration parameters.
-        _twilio_sample_rate: Sample rate used by Twilio (typically 8kHz).
-        _sample_rate: Input sample rate for the pipeline.
-        _resampler: Audio resampler for format conversion.
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for TwilioFrameSerializer.
 
-        Attributes:
+        Parameters:
             twilio_sample_rate: Sample rate used by Twilio, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.

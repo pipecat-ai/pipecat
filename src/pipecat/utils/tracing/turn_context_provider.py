@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Turn context provider for OpenTelemetry tracing in Pipecat.
+
+This module provides a singleton context provider that manages the current
+turn's tracing context, allowing services to create child spans that are
+properly associated with the conversation turn.
+"""
+
 from typing import TYPE_CHECKING, Optional
 
 # Import types for type checking only
@@ -30,7 +37,11 @@ class TurnContextProvider:
 
     @classmethod
     def get_instance(cls):
-        """Get the singleton instance."""
+        """Get the singleton instance.
+
+        Returns:
+            The singleton TurnContextProvider instance.
+        """
         if cls._instance is None:
             cls._instance = TurnContextProvider()
         return cls._instance
@@ -60,7 +71,6 @@ class TurnContextProvider:
         return self._current_turn_context
 
 
-# Create a simple helper function to get the current turn context
 def get_current_turn_context() -> Optional["Context"]:
     """Get the OpenTelemetry context for the current turn.
 
