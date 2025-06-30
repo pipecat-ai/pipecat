@@ -14,10 +14,12 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_response import (
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.openai.base_llm import BaseOpenAILLMService
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -66,9 +68,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        params=BaseOpenAILLMService.InputParams(temperature=0.75),
+    llm = AzureLLMService(
+        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+        model=os.getenv("AZURE_CHATGPT_MODEL"),
     )
 
     messages = [
@@ -78,15 +81,18 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "You are a helpful British assistant called Alfred. "
                 "Your goal is to demonstrate your capabilities in a succinct way. "
                 "Your output will be converted to audio so don't include special characters in your answers. "
+                "Give very short replies - do not give longer replies unless strictly necessary. "
                 "Respond to what the user said in a concise, funny, creative and helpful way. "
-                "Do not give long replies unless stricly necessary. "
                 "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
             ),
         },
     ]
 
     context = OpenAILLMContext(messages)
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = llm.create_context_aggregator(
+        context,
+        user_params=LLMUserAggregatorParams(aggregation_timeout=0.005),
+    )
 
     pipeline = Pipeline(
         [
@@ -112,7 +118,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append({"role": "system", "content": "Say a short hello to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")

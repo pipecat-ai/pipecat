@@ -7,9 +7,9 @@
 import asyncio
 import datetime
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import urlencode
 
 from loguru import logger
 
@@ -23,18 +23,15 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.time import time_now_iso8601
 
 try:
     from speechmatics.rt import (
         AsyncClient,
         AudioEncoding,
         AudioFormat,
-        ConnectionConfig,
         OperatingPoint,
         ServerMessageType,
         TranscriptionConfig,
-        TranscriptResult,
         __version__,
     )
     from speechmatics.rt._models import ConversationConfig, SpeakerDiarizationConfig
@@ -362,23 +359,23 @@ class SpeechmaticsSTTService(STTService):
 
         # Recognition started event
         @self._client.on(ServerMessageType.RECOGNITION_STARTED)
-        def on_recognition_started(message: dict[str, Any]):
+        def _evt_on_recognition_started(message: dict[str, Any]):
             logger.debug(f"Recognition started (session: {message.get('id')})")
             self._start_time = datetime.datetime.now(datetime.timezone.utc)
 
         # Partial transcript event
         @self._client.on(ServerMessageType.ADD_PARTIAL_TRANSCRIPT)
-        def on_partial_transcript(message: dict[str, Any]):
+        def _evt_on_partial_transcript(message: dict[str, Any]):
             self._handle_transcript(message, is_final=False)
 
         # Final transcript event
         @self._client.on(ServerMessageType.ADD_TRANSCRIPT)
-        def on_final_transcript(message: dict[str, Any]):
+        def _evt_on_final_transcript(message: dict[str, Any]):
             self._handle_transcript(message, is_final=True)
 
         # End of Utterance
         @self._client.on(ServerMessageType.END_OF_UTTERANCE)
-        def on_end_of_utterance(message: dict[str, Any]):
+        def _evt_on_end_of_utterance(message: dict[str, Any]):
             logger.debug("End of utterance received from STT")
             asyncio.create_task(self._send_frames(finalized=True))
 
@@ -467,12 +464,21 @@ class SpeechmaticsSTTService(STTService):
         asyncio.create_task(self._send_frames())
 
     async def _send_frames(self, finalized: bool = False) -> None:
-        """Send frames to the pipeline."""
+        """Send frames to the pipeline.
+
+        Send speech frames to the pipeline. If VAD is enabled, then this will
+        also send an interruption and user started speaking frames. When the
+        final transcript is received, then this will send a user stopped speaking
+        and stop interruption frames.
+
+        Args:
+            finalized: Whether the data is final or partial.
+        """
         # Get speech frames (InterimTranscriptionFrame)
-        frames = self._get_frames_from_fragments()
+        speech_frames = self._get_frames_from_fragments()
 
         # Skip if no frames
-        if not frames:
+        if not speech_frames:
             return
 
         # If final, then re=parse into TranscriptionFrame
@@ -483,12 +489,17 @@ class SpeechmaticsSTTService(STTService):
             # Transform frames
             frames = [
                 TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
-                for frame in frames
+                for frame in speech_frames
             ]
+
+            # Log transcript(s)
+            logger.debug(f"Finalized transcript: {[f.text for f in frames]}")
 
         # Return as interim results
         else:
-            frames = [InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in frames]
+            frames = [
+                InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in speech_frames
+            ]
 
         # Send the frames back to pipecat
         for frame in frames:
