@@ -62,6 +62,7 @@ from pipecat.services.aws_nova_sonic.context import (
 )
 from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.asyncio.watchdog_coroutine import watchdog_coroutine
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -95,7 +96,13 @@ class AWSNovaSonicUnhandledFunctionException(Exception):
 
 
 class ContentType(Enum):
-    """Content types supported by AWS Nova Sonic."""
+    """Content types supported by AWS Nova Sonic.
+
+    Parameters:
+        AUDIO: Audio content type.
+        TEXT: Text content type.
+        TOOL: Tool content type.
+    """
 
     AUDIO = "AUDIO"
     TEXT = "TEXT"
@@ -103,7 +110,12 @@ class ContentType(Enum):
 
 
 class TextStage(Enum):
-    """Text generation stages in AWS Nova Sonic responses."""
+    """Text generation stages in AWS Nova Sonic responses.
+
+    Parameters:
+        FINAL: Final text that has been fully generated.
+        SPECULATIVE: Speculative text that is still being generated.
+    """
 
     FINAL = "FINAL"  # what has been said
     SPECULATIVE = "SPECULATIVE"  # what's planned to be said
@@ -126,6 +138,7 @@ class CurrentContent:
     text_content: str  # starts as None, then fills in if text
 
     def __str__(self):
+        """String representation of the current content."""
         return (
             f"CurrentContent(\n"
             f"  type={self.type.name},\n"
@@ -171,18 +184,6 @@ class AWSNovaSonicLLMService(LLMService):
 
     Provides bidirectional audio streaming, real-time transcription, text generation,
     and function calling capabilities using AWS Nova Sonic model.
-
-    Args:
-        secret_access_key: AWS secret access key for authentication.
-        access_key_id: AWS access key ID for authentication.
-        region: AWS region where the service is hosted.
-        model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
-        voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
-        params: Model parameters for audio configuration and inference.
-        system_instruction: System-level instruction for the model.
-        tools: Available tools/functions for the model to use.
-        send_transcription_frames: Whether to emit transcription frames.
-        **kwargs: Additional arguments passed to the parent LLMService.
     """
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
@@ -202,6 +203,20 @@ class AWSNovaSonicLLMService(LLMService):
         send_transcription_frames: bool = True,
         **kwargs,
     ):
+        """Initializes the AWS Nova Sonic LLM service.
+
+        Args:
+            secret_access_key: AWS secret access key for authentication.
+            access_key_id: AWS access key ID for authentication.
+            region: AWS region where the service is hosted.
+            model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
+            voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
+            params: Model parameters for audio configuration and inference.
+            system_instruction: System-level instruction for the model.
+            tools: Available tools/functions for the model to use.
+            send_transcription_frames: Whether to emit transcription frames.
+            **kwargs: Additional arguments passed to the parent LLMService.
+        """
         super().__init__(**kwargs)
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
@@ -776,9 +791,7 @@ class AWSNovaSonicLLMService(LLMService):
         try:
             while self._stream and not self._disconnecting:
                 output = await self._stream.await_output()
-                result = await asyncio.wait_for(output[1].receive(), timeout=1.0)
-
-                self.reset_watchdog()
+                result = await watchdog_coroutine(output[1].receive(), manager=self.task_manager)
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
@@ -807,8 +820,6 @@ class AWSNovaSonicLLMService(LLMService):
                         elif "completionEnd" in event_json:
                             # Handle the LLM completion ending
                             await self._handle_completion_end_event(event_json)
-        except asyncio.TimeoutError:
-            self.reset_watchdog()
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
             if self._wants_connection:

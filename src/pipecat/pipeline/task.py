@@ -463,7 +463,7 @@ class PipelineTask(BasePipelineTask):
             self._process_push_queue(), f"{self}::_process_push_queue"
         )
 
-        await self._observer.start(self._enable_watchdog_timers)
+        await self._observer.start()
 
         return self._process_push_task
 

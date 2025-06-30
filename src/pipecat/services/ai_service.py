@@ -32,12 +32,14 @@ class AIService(FrameProcessor):
     settings handling, session properties, and frame processing lifecycle.
     Subclasses should implement specific AI functionality while leveraging
     this base infrastructure.
-
-    Args:
-            **kwargs: Additional arguments passed to the parent FrameProcessor.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the AI service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent FrameProcessor.
+        """
         super().__init__(**kwargs)
         self._model_name: str = ""
         self._settings: Dict[str, Any] = {}

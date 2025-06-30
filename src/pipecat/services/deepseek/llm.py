@@ -21,12 +21,6 @@ class DeepSeekLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to DeepSeek's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing DeepSeek's API.
-        base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
-        model: The model identifier to use. Defaults to "deepseek-chat".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -37,6 +31,14 @@ class DeepSeekLLMService(OpenAILLMService):
         model: str = "deepseek-chat",
         **kwargs,
     ):
+        """Initialize the DeepSeek LLM service.
+
+        Args:
+            api_key: The API key for accessing DeepSeek's API.
+            base_url: The base URL for DeepSeek API. Defaults to "https://api.deepseek.com/v1".
+            model: The model identifier to use. Defaults to "deepseek-chat".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):

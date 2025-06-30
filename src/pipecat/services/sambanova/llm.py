@@ -29,12 +29,6 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
     This service extends OpenAILLMService to connect to SambaNova's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing SambaNova API.
-        model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
-        base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -45,6 +39,14 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         base_url: str = "https://api.sambanova.ai/v1",
         **kwargs: Dict[Any, Any],
     ) -> None:
+        """Initialize SambaNova LLM service.
+
+        Args:
+            api_key: The API key for accessing SambaNova API.
+            model: The model identifier to use. Defaults to "Llama-4-Maverick-17B-128E-Instruct".
+            base_url: The base URL for SambaNova API. Defaults to "https://api.sambanova.ai/v1".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(

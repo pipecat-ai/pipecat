@@ -25,12 +25,14 @@ class VisionService(AIService):
     Provides common functionality for vision services that process images and
     generate textual responses. Handles image frame processing and integrates
     with the AI service infrastructure for metrics and lifecycle management.
-
-    Args:
-        **kwargs: Additional arguments passed to the parent AIService.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the vision service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent AIService.
+        """
         super().__init__(**kwargs)
         self._describe_text = None
 

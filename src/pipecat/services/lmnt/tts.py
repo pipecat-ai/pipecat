@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""LMNT text-to-speech service implementation."""
+
 import json
 from typing import AsyncGenerator, Optional
 
@@ -35,6 +37,14 @@ except ModuleNotFoundError as e:
 
 
 def language_to_lmnt_language(language: Language) -> Optional[str]:
+    """Convert a Language enum to LMNT language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding LMNT language code, or None if not supported.
+    """
     BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
@@ -71,6 +81,13 @@ def language_to_lmnt_language(language: Language) -> Optional[str]:
 
 
 class LmntTTSService(InterruptibleTTSService):
+    """LMNT real-time text-to-speech service.
+
+    Provides real-time text-to-speech synthesis using LMNT's WebSocket API.
+    Supports streaming audio generation with configurable voice models and
+    language settings.
+    """
+
     def __init__(
         self,
         *,
@@ -81,6 +98,16 @@ class LmntTTSService(InterruptibleTTSService):
         model: str = "aurora",
         **kwargs,
     ):
+        """Initialize the LMNT TTS service.
+
+        Args:
+            api_key: LMNT API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            sample_rate: Audio sample rate. If None, uses default.
+            language: Language for synthesis. Defaults to English.
+            model: TTS model to use. Defaults to "aurora".
+            **kwargs: Additional arguments passed to parent InterruptibleTTSService.
+        """
         super().__init__(
             push_stop_frames=True,
             pause_frame_processing=True,
@@ -99,35 +126,71 @@ class LmntTTSService(InterruptibleTTSService):
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as LMNT service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to LMNT service language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The LMNT-specific language code, or None if not supported.
+        """
         return language_to_lmnt_language(language)
 
     async def start(self, frame: StartFrame):
+        """Start the LMNT TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the LMNT TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the LMNT TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with special handling for stop conditions.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
 
     async def _connect(self):
+        """Connect to LMNT WebSocket and start receive task."""
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
 
     async def _disconnect(self):
+        """Disconnect from LMNT WebSocket and clean up tasks."""
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -181,11 +244,13 @@ class LmntTTSService(InterruptibleTTSService):
             self._websocket = None
 
     def _get_websocket(self):
+        """Get the WebSocket connection if available."""
         if self._websocket:
             return self._websocket
         raise Exception("Websocket not connected")
 
     async def flush_audio(self):
+        """Flush any pending audio synthesis."""
         if not self._websocket or self._websocket.closed:
             return
         await self._get_websocket().send(json.dumps({"flush": True}))
@@ -216,7 +281,14 @@ class LmntTTSService(InterruptibleTTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate TTS audio from text."""
+        """Generate TTS audio from text using LMNT's streaming API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:

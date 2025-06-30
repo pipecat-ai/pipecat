@@ -77,7 +77,7 @@ class TaskObserver(BaseObserver):
         if observer in self._observers:
             self._observers.remove(observer)
 
-    async def start(self, watchdog_timers_enabled: bool = False):
+    async def start(self):
         """Starts all proxy observer tasks."""
         self._proxies = self._create_proxies(self._observers)
 

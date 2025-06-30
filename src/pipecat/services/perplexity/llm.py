@@ -27,12 +27,6 @@ class PerplexityLLMService(OpenAILLMService):
     This service extends OpenAILLMService to work with Perplexity's API while maintaining
     compatibility with the OpenAI-style interface. It specifically handles the difference
     in token usage reporting between Perplexity (incremental) and OpenAI (final summary).
-
-    Args:
-        api_key: The API key for accessing Perplexity's API.
-        base_url: The base URL for Perplexity's API. Defaults to "https://api.perplexity.ai".
-        model: The model identifier to use. Defaults to "sonar".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -43,6 +37,14 @@ class PerplexityLLMService(OpenAILLMService):
         model: str = "sonar",
         **kwargs,
     ):
+        """Initialize the Perplexity LLM service.
+
+        Args:
+            api_key: The API key for accessing Perplexity's API.
+            base_url: The base URL for Perplexity's API. Defaults to "https://api.perplexity.ai".
+            model: The model identifier to use. Defaults to "sonar".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
         # Counters for accumulating token usage metrics
         self._prompt_tokens = 0

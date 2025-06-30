@@ -16,12 +16,6 @@ class GroqLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Groq's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing Groq's API.
-        base_url: The base URL for Groq API. Defaults to "https://api.groq.com/openai/v1".
-        model: The model identifier to use. Defaults to "llama-3.3-70b-versatile".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -32,6 +26,14 @@ class GroqLLMService(OpenAILLMService):
         model: str = "llama-3.3-70b-versatile",
         **kwargs,
     ):
+        """Initialize Groq LLM service.
+
+        Args:
+            api_key: The API key for accessing Groq's API.
+            base_url: The base URL for Groq API. Defaults to "https://api.groq.com/openai/v1".
+            model: The model identifier to use. Defaults to "llama-3.3-70b-versatile".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
