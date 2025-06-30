@@ -298,13 +298,13 @@ class SpeechmaticsSTTService(STTService):
         if self._language and self._language_code:
             raise ValueError("Language and language code cannot both be specified")
         elif self._language:
-            self._language_code = language_to_speechmatics_language(self._language)
+            self._language_code = _language_to_speechmatics_language(self._language)
 
         # Validate the output locale code
         if self._output_locale and self._output_locale_code:
             raise ValueError("Output locale and output locale code cannot both be specified")
         elif self._output_locale:
-            self._output_locale_code = locale_to_speechmatics_locale(
+            self._output_locale_code = _locale_to_speechmatics_locale(
                 self._language_code, self._output_locale
             )
 
@@ -653,7 +653,7 @@ def _get_endpoint_url(url: str) -> str:
     return f"{url}?{query}"
 
 
-def language_to_speechmatics_language(language: Language) -> str:
+def _language_to_speechmatics_language(language: Language) -> str:
     """Convert a Language enum to a Speechmatics language code.
 
     Args:
@@ -731,7 +731,7 @@ def language_to_speechmatics_language(language: Language) -> str:
     return result
 
 
-def locale_to_speechmatics_locale(language: str, locale: Language) -> Optional[str]:
+def _locale_to_speechmatics_locale(language: str, locale: Language) -> Optional[str]:
     """Convert a Language enum to a Speechmatics language code.
 
     Args:
