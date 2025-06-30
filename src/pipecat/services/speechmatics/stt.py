@@ -7,9 +7,9 @@
 import asyncio
 import datetime
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import urlencode
 
 from loguru import logger
 
@@ -20,27 +20,23 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     StopInterruptionFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.pipeline.task import PipelineTask
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.time import time_now_iso8601
 
 try:
     from speechmatics.rt import (
         AsyncClient,
         AudioEncoding,
         AudioFormat,
-        ConnectionConfig,
         OperatingPoint,
         ServerMessageType,
         TranscriptionConfig,
-        TranscriptResult,
         __version__,
     )
     from speechmatics.rt._models import ConversationConfig, SpeakerDiarizationConfig
@@ -241,7 +237,6 @@ class SpeechmaticsSTTService(STTService):
         sample_rate: Audio sample rate in Hz. Defaults to `16000`.
         chunk_size: Audio chunk size for streaming. Defaults to `256`.
         audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
-        enable_vad: Enable voice activity detection. Defaults to `True`.
         end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
         operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
         enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
@@ -266,7 +261,6 @@ class SpeechmaticsSTTService(STTService):
         sample_rate: Optional[int] = 16000,
         chunk_size: int = 256,
         audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
-        enable_vad: bool = True,
         end_of_utterance_silence_trigger: Optional[float] = None,
         operating_point: OperatingPoint = OperatingPoint.ENHANCED,
         enable_speaker_diarization: bool = False,
@@ -290,7 +284,6 @@ class SpeechmaticsSTTService(STTService):
         self._sample_rate: int = sample_rate
         self._chunk_size: int = chunk_size
         self._audio_encoding: AudioEncoding = audio_encoding
-        self._enable_vad: bool = enable_vad
         self._end_of_utterance_silence_trigger: Optional[float] = end_of_utterance_silence_trigger
         self._operating_point: OperatingPoint = operating_point
         self._enable_speaker_diarization: bool = enable_speaker_diarization
@@ -329,9 +322,12 @@ class SpeechmaticsSTTService(STTService):
         # Current utterance speech data
         self._speech_fragments: list[SpeechFragment] = []
 
-        # Provide VAD events
-        if self._enable_vad:
-            self._is_speaking = False
+        # VAD
+        self._enable_vad: bool = False
+        self._is_speaking: bool = False
+
+        # Pipeline task
+        self._pipeline_task: Optional[PipelineTask] = None
 
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
@@ -352,6 +348,18 @@ class SpeechmaticsSTTService(STTService):
         """Adds audio to the audio buffer and yields None."""
         self._audio_buffer.write_audio(audio)
         yield None
+
+    def enable_vad(self, task: PipelineTask):
+        """Enable VAD for the STT service.
+
+        Args:
+            task: The pipeline task to enable VAD for.
+        """
+        logger.debug("Enabling VAD")
+
+        # Enable the VAD and register event handlers
+        self._enable_vad = True
+        self._pipeline_task = task
 
     async def _run_client(self) -> None:
         """Runs the Speechmatics client in a thread."""
@@ -387,23 +395,23 @@ class SpeechmaticsSTTService(STTService):
 
         # Recognition started event
         @self._client.on(ServerMessageType.RECOGNITION_STARTED)
-        def on_recognition_started(message: dict[str, Any]):
+        def _evt_on_recognition_started(message: dict[str, Any]):
             logger.debug(f"Recognition started (session: {message.get('id')})")
             self._start_time = datetime.datetime.now(datetime.timezone.utc)
 
         # Partial transcript event
         @self._client.on(ServerMessageType.ADD_PARTIAL_TRANSCRIPT)
-        def on_partial_transcript(message: dict[str, Any]):
+        def _evt_on_partial_transcript(message: dict[str, Any]):
             self._handle_transcript(message, is_final=False)
 
         # Final transcript event
         @self._client.on(ServerMessageType.ADD_TRANSCRIPT)
-        def on_final_transcript(message: dict[str, Any]):
+        def _evt_on_final_transcript(message: dict[str, Any]):
             self._handle_transcript(message, is_final=True)
 
         # End of Utterance
         @self._client.on(ServerMessageType.END_OF_UTTERANCE)
-        def on_end_of_utterance(message: dict[str, Any]):
+        def _evt_on_end_of_utterance(message: dict[str, Any]):
             logger.debug("End of utterance received from STT")
             asyncio.create_task(self._send_frames(finalized=True))
 
@@ -509,45 +517,43 @@ class SpeechmaticsSTTService(STTService):
         if not speech_frames:
             return
 
-        # Frames to send
-        frames = []
-
-        # speech started
-        if self._enable_vad and not self._is_speaking:
-            frames.extend([BotInterruptionFrame(), UserStartedSpeakingFrame()])
+        # Speech started
+        if self._enable_vad and self._pipeline_task and not self._is_speaking:
+            logger.debug("User started speaking")
+            await self._pipeline_task.queue_frames(
+                [BotInterruptionFrame(), UserStartedSpeakingFrame()]
+            )
             self._is_speaking = True
 
         # If final, then re=parse into TranscriptionFrame
         if finalized:
-            logger.warning("Final transcript received from STT")
+            logger.debug("Finalized transcript received from STT")
             # Reset the speech fragments
             self._speech_fragments.clear()
 
             # Transform frames
-            frames.extend(
-                [
-                    TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
-                    for frame in speech_frames
-                ]
-            )
+            frames = [
+                TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
+                for frame in speech_frames
+            ]
 
         # Return as interim results
         else:
-            frames.extend(
-                [
-                    InterimTranscriptionFrame(**frame._as_frame_attributes())
-                    for frame in speech_frames
-                ]
-            )
-
-        # Add user stopped speaking
-        if self._enable_vad and finalized and self._is_speaking:
-            frames.extend([StopInterruptionFrame(), UserStoppedSpeakingFrame()])
-            self._is_speaking = False
+            frames = [
+                InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in speech_frames
+            ]
 
         # Send the frames back to pipecat
         for frame in frames:
             await self.push_frame(frame)
+
+        # Add user stopped speaking
+        if finalized and self._enable_vad and self._pipeline_task and self._is_speaking:
+            logger.debug("User stopped speaking")
+            await self._pipeline_task.queue_frames(
+                [StopInterruptionFrame(), UserStoppedSpeakingFrame()]
+            )
+            self._is_speaking = False
 
     def _add_speech_fragments(self, message: dict[str, Any], is_final: bool = False) -> bool:
         """Takes a new Partial or Final from the STT engine.

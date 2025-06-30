@@ -10,7 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -49,7 +48,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     """Run example using Speechmatics STT."""
     logger.info(f"Starting bot")
 
-    stt_smx = SpeechmaticsSTTService(
+    stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
         output_locale=Language.EN_GB,
@@ -88,7 +87,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt_smx,
+            stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
@@ -104,6 +103,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_usage_metrics=True,
         ),
     )
+
+    # Enable VAD within the Speechmatics TTS service
+    stt.enable_vad(task)
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
