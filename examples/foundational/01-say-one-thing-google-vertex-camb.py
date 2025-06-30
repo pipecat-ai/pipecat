@@ -19,7 +19,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
-load_dotenv(override=True)
+load_dotenv()
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -36,8 +36,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     logger.info(f"Starting bot")
 
     # Check required environment variables
-    project_id = os.getenv("PROJECT_ID", "cambai-public")
-    location = os.getenv("LOCATION", "us-central1")
+    project_id = os.getenv("PROJECT_ID")
+    location = os.getenv("LOCATION")
     endpoint_id = os.getenv("ENDPOINT_ID")
     credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 

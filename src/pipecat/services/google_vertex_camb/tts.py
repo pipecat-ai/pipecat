@@ -12,7 +12,7 @@ import time
 import uuid
 import warnings
 import io
-from typing import AsyncGenerator, List, Optional, Union
+from typing import AsyncGenerator, List, Optional, Union, Literal
 
 import aiohttp
 import soundfile as sf
@@ -21,7 +21,6 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 from google.cloud import aiplatform
-import base64
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -37,6 +36,10 @@ from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for Camb.AI configuration needed
+
+# Mars7 supported languages constant
+Mars7Language = Literal["de-de", "en-gb", "en-us", "es-us", "es-es", "fr-ca", "fr-fr", "ja-jp", "ko-kr", "zh-cn"]
+NUM_CHANNELS = 1
 
 class GoogleVertexCambClient:
     def __init__(
@@ -80,9 +83,9 @@ class GoogleVertexCambClient:
 
 class GoogleVertexCambTTSService(TTSService):
     class InputParams(BaseModel):
-        reference_audio_path: Optional[str] = None
+        reference_audio_path: str
         reference_text: Optional[str] = None
-        language: str = "en-us"
+        language: Mars7Language = "en-us"
 
     def __init__(
         self,
@@ -92,11 +95,10 @@ class GoogleVertexCambTTSService(TTSService):
         endpoint_id: str,
         credentials_path: str,
         sample_rate: Optional[int] = None,
-        params: Optional[InputParams] = None,
+        params: InputParams,
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
-        params = params or GoogleVertexCambTTSService.InputParams()
         self._settings = {
             "reference_audio_path": params.reference_audio_path,
             "reference_text": params.reference_text,
@@ -156,24 +158,20 @@ class GoogleVertexCambTTSService(TTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
             await self.start_ttfb_metrics()
-            if self._settings["reference_audio_path"] is not None:
-                try:
-                    with open(self._settings["reference_audio_path"], "rb") as f:
-                        audio_ref = base64.b64encode(f.read()).decode("utf-8")
-                except FileNotFoundError:
-                    raise ValueError(
-                        f"Reference audio file not found: {self._settings['reference_audio_path']}"
-                    )
-                except Exception as e:
-                    raise ValueError(f"Error reading reference audio file: {e}")
-            else:
-                audio_ref = None
+            try:
+                with open(self._settings["reference_audio_path"], "rb") as f:
+                    audio_ref = base64.b64encode(f.read()).decode("utf-8")
+            except FileNotFoundError:
+                raise ValueError(
+                    f"Reference audio file not found: {self._settings['reference_audio_path']}"
+                )
+            except Exception as e:
+                raise ValueError(f"Error reading reference audio file: {e}")
             instances =  {
                 "text": text,
-                "language": self._settings["language"]
+                "language": self._settings["language"],
+                "audio_ref": audio_ref
             }
-            if audio_ref is not None:
-                instances["audio_ref"] = audio_ref
 
             if self._settings["reference_text"] is not None:
                 instances["ref_text"] = self._settings["reference_text"]
@@ -181,7 +179,6 @@ class GoogleVertexCambTTSService(TTSService):
             yield TTSStartedFrame()
             
             # Run the synchronous endpoint call in a thread pool to avoid blocking
-            import asyncio
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None, 
@@ -213,7 +210,7 @@ class GoogleVertexCambTTSService(TTSService):
             frame = TTSAudioRawFrame(
                 audio=audio_data,
                 sample_rate=actual_sample_rate,
-                num_channels=1,
+                num_channels=NUM_CHANNELS,
             )
 
             yield frame

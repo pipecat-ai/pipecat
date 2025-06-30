@@ -22,7 +22,7 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
-load_dotenv(override=True)
+load_dotenv()
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -53,14 +53,14 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     # Configure Google Vertex CAMB TTS with voice cloning parameters
     params = GoogleVertexCambTTSService.InputParams(
-        reference_audio_path=os.getenv("REFERENCE_AUDIO_PATH"),  # Optional: path to reference audio for voice cloning
-        reference_text=os.getenv("REFERENCE_TEXT"),  # Optional: transcription of reference audio
+        reference_audio_path="/path/to/reference/audio.wav",  # Required: path to reference audio for voice cloning
+        reference_text="Optional reference transcription of audio.wav",  # Optional: transcription of reference audio
         language="en-us"  # Language for synthesis
     )
 
     tts = GoogleVertexCambTTSService(
-        project_id=os.getenv("PROJECT_ID", "cambai-public"),
-        location=os.getenv("LOCATION", "us-central1"),
+        project_id=os.getenv("PROJECT_ID"),
+        location=os.getenv("LOCATION"),
         endpoint_id=os.getenv("ENDPOINT_ID"),
         credentials_path=os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
         params=params,
