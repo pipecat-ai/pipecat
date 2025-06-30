@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Google Gemini Multimodal Live API service implementation.
+
+This module provides real-time conversational AI capabilities using Google's
+Gemini Multimodal Live API, supporting both text and audio modalities with
+voice transcription, streaming responses, and tool usage.
+"""
+
 import base64
 import json
 import time
@@ -62,9 +69,10 @@ from pipecat.services.openai.llm import (
     OpenAIUserContextAggregator,
 )
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
-from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt, traced_tts
+from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
 
@@ -88,7 +96,11 @@ def language_to_gemini_language(language: Language) -> Optional[str]:
     Source:
     https://ai.google.dev/api/generate-content#MediaResolution
 
-    Returns None if the language is not supported by Gemini Live.
+    Args:
+        language: The language enum value to convert.
+
+    Returns:
+        The Gemini language code string, or None if the language is not supported.
     """
     language_map = {
         # Arabic
@@ -175,8 +187,22 @@ def language_to_gemini_language(language: Language) -> Optional[str]:
 
 
 class GeminiMultimodalLiveContext(OpenAILLMContext):
+    """Extended OpenAI context for Gemini Multimodal Live API.
+
+    Provides Gemini-specific context management including system instruction
+    extraction and message format conversion for the Live API.
+    """
+
     @staticmethod
     def upgrade(obj: OpenAILLMContext) -> "GeminiMultimodalLiveContext":
+        """Upgrade an OpenAI context to Gemini context.
+
+        Args:
+            obj: The OpenAI context to upgrade.
+
+        Returns:
+            The upgraded Gemini context instance.
+        """
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, GeminiMultimodalLiveContext):
             logger.debug(f"Upgrading to Gemini Multimodal Live Context: {obj}")
             obj.__class__ = GeminiMultimodalLiveContext
@@ -187,6 +213,11 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
         pass
 
     def extract_system_instructions(self):
+        """Extract system instructions from context messages.
+
+        Returns:
+            Combined system instruction text from all system messages.
+        """
         system_instruction = ""
         for item in self.messages:
             if item.get("role") == "system":
@@ -221,6 +252,11 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
         logger.info(f"Added file reference to context: {file_uri}")
         
     def get_messages_for_initializing_history(self):
+        """Get messages formatted for Gemini history initialization.
+
+        Returns:
+            List of messages in Gemini format for conversation history.
+        """
         messages = []
         for item in self.messages:
             role = item.get("role")
@@ -256,7 +292,19 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
 
 
 class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
+    """User context aggregator for Gemini Multimodal Live.
+
+    Extends OpenAI user aggregator to handle Gemini-specific message passing
+    while maintaining compatibility with the standard aggregation pipeline.
+    """
+
     async def process_frame(self, frame, direction):
+        """Process incoming frames for user context aggregation.
+
+        Args:
+            frame: The frame to process.
+            direction: The frame processing direction.
+        """
         await super().process_frame(frame, direction)
         # kind of a hack just to pass the LLMMessagesAppendFrame through, but it's fine for now
         if isinstance(frame, LLMMessagesAppendFrame):
@@ -264,15 +312,33 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
 
 
 class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    # The LLMAssistantContextAggregator uses TextFrames to aggregate the LLM output,
-    # but the GeminiMultimodalLiveAssistantContextAggregator pushes LLMTextFrames and TTSTextFrames. We
-    # need to override this proces_frame for LLMTextFrame, so that only the TTSTextFrames
-    # are process. This ensures that the context gets only one set of messages.
+    """Assistant context aggregator for Gemini Multimodal Live.
+
+    Handles assistant response aggregation while filtering out LLMTextFrames
+    to prevent duplicate context entries, as Gemini Live pushes both
+    LLMTextFrames and TTSTextFrames.
+    """
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames for assistant context aggregation.
+
+        Args:
+            frame: The frame to process.
+            direction: The frame processing direction.
+        """
+        # The LLMAssistantContextAggregator uses TextFrames to aggregate the LLM output,
+        # but the GeminiMultimodalLiveAssistantContextAggregator pushes LLMTextFrames and TTSTextFrames. We
+        # need to override this proces_frame for LLMTextFrame, so that only the TTSTextFrames
+        # are process. This ensures that the context gets only one set of messages.
         if not isinstance(frame, LLMTextFrame):
             await super().process_frame(frame, direction)
 
     async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        """Handle user image frames.
+
+        Args:
+            frame: The user image frame to handle.
+        """
         # We don't want to store any images in the context. Revisit this later
         # when the API evolves.
         pass
@@ -280,17 +346,41 @@ class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggre
 
 @dataclass
 class GeminiMultimodalLiveContextAggregatorPair:
+    """Pair of user and assistant context aggregators for Gemini Multimodal Live.
+
+    Parameters:
+        _user: The user context aggregator instance.
+        _assistant: The assistant context aggregator instance.
+    """
+
     _user: GeminiMultimodalLiveUserContextAggregator
     _assistant: GeminiMultimodalLiveAssistantContextAggregator
 
     def user(self) -> GeminiMultimodalLiveUserContextAggregator:
+        """Get the user context aggregator.
+
+        Returns:
+            The user context aggregator instance.
+        """
         return self._user
 
     def assistant(self) -> GeminiMultimodalLiveAssistantContextAggregator:
+        """Get the assistant context aggregator.
+
+        Returns:
+            The assistant context aggregator instance.
+        """
         return self._assistant
 
 
 class GeminiMultimodalModalities(Enum):
+    """Supported modalities for Gemini Multimodal Live.
+
+    Parameters:
+        TEXT: Text responses.
+        AUDIO: Audio responses.
+    """
+
     TEXT = "TEXT"
     AUDIO = "AUDIO"
 
@@ -305,7 +395,15 @@ class GeminiMediaResolution(str, Enum):
 
 
 class GeminiVADParams(BaseModel):
-    """Voice Activity Detection parameters."""
+    """Voice Activity Detection parameters for Gemini Live.
+
+    Parameters:
+        disabled: Whether to disable VAD. Defaults to None.
+        start_sensitivity: Sensitivity for speech start detection. Defaults to None.
+        end_sensitivity: Sensitivity for speech end detection. Defaults to None.
+        prefix_padding_ms: Prefix padding in milliseconds. Defaults to None.
+        silence_duration_ms: Silence duration threshold in milliseconds. Defaults to None.
+    """
 
     disabled: Optional[bool] = Field(default=None)
     start_sensitivity: Optional[events.StartSensitivity] = Field(default=None)
@@ -315,7 +413,12 @@ class GeminiVADParams(BaseModel):
 
 
 class ContextWindowCompressionParams(BaseModel):
-    """Parameters for context window compression."""
+    """Parameters for context window compression in Gemini Live.
+
+    Parameters:
+        enabled: Whether compression is enabled. Defaults to False.
+        trigger_tokens: Token count to trigger compression. None uses 80% of context window.
+    """
 
     enabled: bool = Field(default=False)
     trigger_tokens: Optional[int] = Field(
@@ -324,6 +427,23 @@ class ContextWindowCompressionParams(BaseModel):
 
 
 class InputParams(BaseModel):
+    """Input parameters for Gemini Multimodal Live generation.
+
+    Parameters:
+        frequency_penalty: Frequency penalty for generation (0.0-2.0). Defaults to None.
+        max_tokens: Maximum tokens to generate. Must be >= 1. Defaults to 4096.
+        presence_penalty: Presence penalty for generation (0.0-2.0). Defaults to None.
+        temperature: Sampling temperature (0.0-2.0). Defaults to None.
+        top_k: Top-k sampling parameter. Must be >= 0. Defaults to None.
+        top_p: Top-p sampling parameter (0.0-1.0). Defaults to None.
+        modalities: Response modalities. Defaults to AUDIO.
+        language: Language for generation. Defaults to EN_US.
+        media_resolution: Media resolution setting. Defaults to UNSPECIFIED.
+        vad: Voice activity detection parameters. Defaults to None.
+        context_window_compression: Context compression settings. Defaults to None.
+        extra: Additional parameters. Defaults to empty dict.
+    """
+
     frequency_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(default=4096, ge=1)
     presence_penalty: Optional[float] = Field(default=None, ge=0.0, le=2.0)
@@ -348,25 +468,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
     This service enables real-time conversations with Gemini, supporting both
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
-
-    Args:
-        api_key (str): Google AI API key
-        base_url (str, optional): API endpoint base URL. Defaults to
-            "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent".
-        model (str, optional): Model identifier to use. Defaults to
-            "models/gemini-2.0-flash-live-001".
-        voice_id (str, optional): TTS voice identifier. Defaults to "Charon".
-        start_audio_paused (bool, optional): Whether to start with audio input paused.
-            Defaults to False.
-        start_video_paused (bool, optional): Whether to start with video input paused.
-            Defaults to False.
-        system_instruction (str, optional): System prompt for the model. Defaults to None.
-        tools (Union[List[dict], ToolsSchema], optional): Tools/functions available to the model.
-            Defaults to None.
-        params (InputParams, optional): Configuration parameters for the model.
-            Defaults to InputParams().
-        inference_on_context_initialization (bool, optional): Whether to generate a response
-            when context is first set. Defaults to True.
     """
 
     # Overriding the default adapter to use the Gemini one.
@@ -388,6 +489,22 @@ class GeminiMultimodalLiveLLMService(LLMService):
         file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
         **kwargs,
     ):
+        """Initialize the Gemini Multimodal Live LLM service.
+
+        Args:
+            api_key: Google AI API key for authentication.
+            base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
+            model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-001".
+            voice_id: TTS voice identifier. Defaults to "Charon".
+            start_audio_paused: Whether to start with audio input paused. Defaults to False.
+            start_video_paused: Whether to start with video input paused. Defaults to False.
+            system_instruction: System prompt for the model. Defaults to None.
+            tools: Tools/functions available to the model. Defaults to None.
+            params: Configuration parameters for the model. Defaults to InputParams().
+            inference_on_context_initialization: Whether to generate a response when context
+                is first set. Defaults to True.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         super().__init__(base_url=base_url, **kwargs)
 
         params = params or InputParams()
@@ -456,19 +573,43 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._accumulated_grounding_metadata = None
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate usage metrics.
+
+        Returns:
+            True as Gemini Live supports token usage metrics.
+        """
         return True
 
     def set_audio_input_paused(self, paused: bool):
+        """Set the audio input pause state.
+
+        Args:
+            paused: Whether to pause audio input.
+        """
         self._audio_input_paused = paused
 
     def set_video_input_paused(self, paused: bool):
+        """Set the video input pause state.
+
+        Args:
+            paused: Whether to pause video input.
+        """
         self._video_input_paused = paused
 
     def set_model_modalities(self, modalities: GeminiMultimodalModalities):
+        """Set the model response modalities.
+
+        Args:
+            modalities: The modalities to use for responses.
+        """
         self._settings["modalities"] = modalities
 
     def set_language(self, language: Language):
-        """Set the language for generation."""
+        """Set the language for generation.
+
+        Args:
+            language: The language to use for generation.
+        """
         self._language = language
         self._language_code = language_to_gemini_language(language) or "en-US"
         self._settings["language"] = self._language_code
@@ -481,6 +622,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         way to trigger the pipeline. This sends the history to the server. The `inference_on_context_initialization`
         flag controls whether to set the turnComplete flag when we do this. Without that flag, the model will
         not respond. This is often what we want when setting the context at the beginning of a conversation.
+
+        Args:
+            context: The OpenAI LLM context to set.
         """
         if self._context:
             logger.error(
@@ -495,14 +639,29 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def start(self, frame: StartFrame):
+        """Start the service and establish websocket connection.
+
+        Args:
+            frame: The start frame.
+        """
         await super().start(frame)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the service and close connections.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close connections.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
@@ -537,6 +696,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames for the Gemini Live service.
+
+        Args:
+            frame: The frame to process.
+            direction: The frame processing direction.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
@@ -592,6 +757,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def send_client_event(self, event):
+        """Send a client event to the Gemini Live API.
+
+        Args:
+            event: The event to send.
+        """
         await self._ws_send(event.model_dump(exclude_none=True))
 
     async def _connect(self):
@@ -735,9 +905,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def _receive_task_handler(self):
-        async for message in self._websocket:
-            self.start_watchdog()
-
+        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
             evt = events.parse_server_event(message)
             # logger.debug(f"Received event: {message[:500]}")
             # logger.debug(f"Received event: {evt}")
@@ -766,8 +934,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 logger.warning(f"Received unhandled server event type: {evt}")
                 pass
 
-
-            self.reset_watchdog()
 
     #
     #
@@ -1186,22 +1352,19 @@ class GeminiMultimodalLiveLLMService(LLMService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> GeminiMultimodalLiveContextAggregatorPair:
-        """Create an instance of GeminiMultimodalLiveContextAggregatorPair from
-        an OpenAILLMContext. Constructor keyword arguments for both the user and
-        assistant aggregators can be provided.
+        """Create an instance of GeminiMultimodalLiveContextAggregatorPair from an OpenAILLMContext.
+
+        Constructor keyword arguments for both the user and assistant aggregators can be provided.
 
         Args:
-            context (OpenAILLMContext): The LLM context.
-            user_params (LLMUserAggregatorParams, optional): User aggregator
-                parameters.
-            assistant_params (LLMAssistantAggregatorParams, optional): User
-                aggregator parameters.
+            context: The LLM context to use.
+            user_params: User aggregator parameters. Defaults to LLMUserAggregatorParams().
+            assistant_params: Assistant aggregator parameters. Defaults to LLMAssistantAggregatorParams().
 
         Returns:
             GeminiMultimodalLiveContextAggregatorPair: A pair of context
             aggregators, one for the user and one for the assistant,
             encapsulated in an GeminiMultimodalLiveContextAggregatorPair.
-
         """
         context.set_llm_adapter(self.get_llm_adapter())
 

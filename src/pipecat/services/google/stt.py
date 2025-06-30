@@ -4,11 +4,19 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Google Cloud Speech-to-Text V2 service implementation for Pipecat.
+
+This module provides a Google Cloud Speech-to-Text V2 service with streaming
+support, enabling real-time speech recognition with features like automatic
+punctuation, voice activity detection, and multi-language support.
+"""
+
 import asyncio
 import json
 import os
 import time
 
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 # Suppress gRPC fork warnings
@@ -352,9 +360,15 @@ class GoogleSTTService(STTService):
 
     Provides real-time speech recognition using Google Cloud's Speech-to-Text V2 API
     with streaming support. Handles audio transcription and optional voice activity detection.
+    Implements automatic stream reconnection to handle Google's 4-minute streaming limit.
 
     Attributes:
         InputParams: Configuration parameters for the STT service.
+        STREAMING_LIMIT: Google Cloud's streaming limit in milliseconds (4 minutes).
+
+    Raises:
+        ValueError: If neither credentials nor credentials_path is provided.
+        ValueError: If project ID is not found in credentials.
     """
 
     # Google Cloud's STT service has a connection time limit of 5 minutes per stream.
@@ -366,7 +380,7 @@ class GoogleSTTService(STTService):
     class InputParams(BaseModel):
         """Configuration parameters for Google Speech-to-Text.
 
-        Attributes:
+        Parameters:
             languages: Single language or list of recognition languages. First language is primary.
             model: Speech recognition model to use.
             use_separate_recognition_per_channel: Process each audio channel separately.
@@ -395,13 +409,25 @@ class GoogleSTTService(STTService):
         @field_validator("languages", mode="before")
         @classmethod
         def validate_languages(cls, v) -> List[Language]:
+            """Ensure languages is always a list.
+
+            Args:
+                v: Single Language enum or list of Language enums.
+
+            Returns:
+                List[Language]: List of configured languages.
+            """
             if isinstance(v, Language):
                 return [v]
             return v
 
         @property
         def language_list(self) -> List[Language]:
-            """Get languages as a guaranteed list."""
+            """Get languages as a guaranteed list.
+
+            Returns:
+                List[Language]: List of configured languages.
+            """
             assert isinstance(self.languages, list)
             return self.languages
 
@@ -424,10 +450,6 @@ class GoogleSTTService(STTService):
             sample_rate: Audio sample rate in Hertz.
             params: Configuration parameters for the service.
             **kwargs: Additional arguments passed to STTService.
-
-        Raises:
-            ValueError: If neither credentials nor credentials_path is provided.
-            ValueError: If project ID is not found in credentials.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
@@ -436,7 +458,6 @@ class GoogleSTTService(STTService):
         self._location = location
         self._stream = None
         self._config = None
-        self._request_queue = asyncio.Queue()
         self._streaming_task = None
 
         # Used for keep-alive logic
@@ -501,6 +522,11 @@ class GoogleSTTService(STTService):
         }
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate metrics.
+
+        Returns:
+            bool: True, as this service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language | List[Language]) -> str | List[str]:
@@ -548,7 +574,11 @@ class GoogleSTTService(STTService):
         await self._reconnect_if_needed()
 
     async def set_model(self, model: str):
-        """Update the service's recognition model."""
+        """Update the service's recognition model.
+
+        Args:
+            model: The new recognition model to use.
+        """
         logger.debug(f"Switching STT model to: {model}")
         await super().set_model(model)
         self._settings["model"] = model
@@ -556,14 +586,29 @@ class GoogleSTTService(STTService):
         await self._reconnect_if_needed()
 
     async def start(self, frame: StartFrame):
+        """Start the STT service and establish connection.
+
+        Args:
+            frame: The start frame triggering the service start.
+        """
         await super().start(frame)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the STT service and clean up resources.
+
+        Args:
+            frame: The end frame triggering the service stop.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the STT service and clean up resources.
+
+        Args:
+            frame: The cancel frame triggering the service cancellation.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
@@ -585,7 +630,7 @@ class GoogleSTTService(STTService):
         """Update service options dynamically.
 
         Args:
-            languages: New list of recongition languages.
+            languages: New list of recognition languages.
             model: New recognition model.
             enable_automatic_punctuation: Enable/disable automatic punctuation.
             enable_spoken_punctuation: Enable/disable spoken punctuation.
@@ -683,23 +728,15 @@ class GoogleSTTService(STTService):
             ),
         )
 
+        self._request_queue = asyncio.Queue()
         self._streaming_task = self.create_task(self._stream_audio())
 
     async def _disconnect(self):
         """Clean up streaming recognition resources."""
         if self._streaming_task:
             logger.debug("Disconnecting from Google Speech-to-Text")
-            # Send sentinel value to stop request generator
-            await self._request_queue.put(None)
             await self.cancel_task(self._streaming_task)
             self._streaming_task = None
-            # Clear any remaining items in the queue
-            while not self._request_queue.empty():
-                try:
-                    self._request_queue.get_nowait()
-                    self._request_queue.task_done()
-                except asyncio.QueueEmpty:
-                    break
 
     async def _request_generator(self):
         """Generates requests for the streaming recognize method."""
@@ -714,29 +751,23 @@ class GoogleSTTService(STTService):
             )
 
             while True:
-                try:
-                    audio_data = await self._request_queue.get()
-                    if audio_data is None:  # Sentinel value to stop
-                        break
+                audio_data = await self._request_queue.get()
 
-                    # Check streaming limit
-                    if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
-                        logger.debug("Streaming limit reached, initiating graceful reconnection")
-                        # Instead of immediate reconnection, we'll break and let the stream close naturally
-                        self._last_audio_input = self._audio_input
-                        self._audio_input = []
-                        self._restart_counter += 1
-                        # Put the current audio chunk back in the queue
-                        await self._request_queue.put(audio_data)
-                        break
+                self._request_queue.task_done()
 
-                    self._audio_input.append(audio_data)
-                    yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
-
-                except asyncio.CancelledError:
+                # Check streaming limit
+                if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
+                    logger.debug("Streaming limit reached, initiating graceful reconnection")
+                    # Instead of immediate reconnection, we'll break and let the stream close naturally
+                    self._last_audio_input = self._audio_input
+                    self._audio_input = []
+                    self._restart_counter += 1
+                    # Put the current audio chunk back in the queue
+                    await self._request_queue.put(audio_data)
                     break
-                finally:
-                    self._request_queue.task_done()
+
+                self._audio_input.append(audio_data)
+                yield cloud_speech.StreamingRecognizeRequest(audio=audio_data)
 
         except Exception as e:
             logger.error(f"Error in request generator: {e}")
@@ -747,8 +778,6 @@ class GoogleSTTService(STTService):
         try:
             while True:
                 try:
-                    self.start_watchdog()
-
                     if self._request_queue.empty():
                         # wait for 10ms in case we don't have audio
                         await asyncio.sleep(0.01)
@@ -762,8 +791,6 @@ class GoogleSTTService(STTService):
 
                     # Process responses
                     await self._process_responses(streaming_recognize)
-
-                    self.reset_watchdog()
 
                     # If we're here, check if we need to reconnect
                     if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
@@ -779,15 +806,20 @@ class GoogleSTTService(STTService):
 
                     await asyncio.sleep(1)  # Brief delay before reconnecting
                     self._stream_start_time = int(time.time() * 1000)
-                finally:
-                    self.reset_watchdog()
 
         except Exception as e:
             logger.error(f"Error in streaming task: {e}")
             await self.push_frame(ErrorFrame(str(e)))
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Process an audio chunk for STT transcription."""
+        """Process an audio chunk for STT transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (actual transcription frames are pushed via internal processing).
+        """
         if self._streaming_task:
             # Queue the audio data
             await self.start_ttfb_metrics()
@@ -804,17 +836,15 @@ class GoogleSTTService(STTService):
     async def _process_responses(self, streaming_recognize):
         """Process streaming recognition responses."""
         try:
-            async for response in streaming_recognize:
-                self.start_watchdog()
-
+            async for response in WatchdogAsyncIterator(
+                streaming_recognize, manager=self.task_manager
+            ):
                 # Check streaming limit
                 if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
                     logger.debug("Stream timeout reached in response processing")
-                    self.reset_watchdog()
                     break
 
                 if not response.results:
-                    self.reset_watchdog()
                     continue
 
                 for result in response.results:
@@ -856,11 +886,8 @@ class GoogleSTTService(STTService):
                                 result=result,
                             )
                         )
-
-                self.reset_watchdog()
         except Exception as e:
             logger.error(f"Error processing Google STT responses: {e}")
-            self.reset_watchdog()
             # Re-raise the exception to let it propagate (e.g. in the case of a
             # timeout, propagate to _stream_audio to reconnect)
             raise

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Base OpenAI LLM service implementation."""
+
 import base64
 import json
 from typing import Any, Dict, List, Mapping, Optional
@@ -35,20 +37,34 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
 class BaseOpenAILLMService(LLMService):
-    """This is the base for all services that use the AsyncOpenAI client.
+    """Base class for all services that use the AsyncOpenAI client.
 
     This service consumes OpenAILLMContextFrame frames, which contain a reference
-    to an OpenAILLMContext frame. The OpenAILLMContext object defines the context
-    sent to the LLM for a completion. This includes user, assistant and system messages
-    as well as tool choices and the tool, which is used if requesting function
-    calls from the LLM.
+    to an OpenAILLMContext object. The context defines what is sent to the LLM for
+    completion, including user, assistant, and system messages, as well as tool
+    choices and function call configurations.
     """
 
     class InputParams(BaseModel):
+        """Input parameters for OpenAI model configuration.
+
+        Parameters:
+            frequency_penalty: Penalty for frequent tokens (-2.0 to 2.0).
+            presence_penalty: Penalty for new tokens (-2.0 to 2.0).
+            seed: Random seed for deterministic outputs.
+            temperature: Sampling temperature (0.0 to 2.0).
+            top_k: Top-k sampling parameter (currently ignored by OpenAI).
+            top_p: Top-p (nucleus) sampling parameter (0.0 to 1.0).
+            max_tokens: Maximum tokens in response (deprecated, use max_completion_tokens).
+            max_completion_tokens: Maximum completion tokens to generate.
+            extra: Additional model-specific parameters.
+        """
+
         frequency_penalty: Optional[float] = Field(
             default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
         )
@@ -77,6 +93,18 @@ class BaseOpenAILLMService(LLMService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the BaseOpenAILLMService.
+
+        Args:
+            model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
+            api_key: OpenAI API key. If None, uses environment variable.
+            base_url: Custom base URL for OpenAI API. If None, uses default.
+            organization: OpenAI organization ID.
+            project: OpenAI project ID.
+            default_headers: Additional HTTP headers to include in requests.
+            params: Input parameters for model configuration and behavior.
+            **kwargs: Additional arguments passed to the parent LLMService.
+        """
         super().__init__(**kwargs)
 
         params = params or BaseOpenAILLMService.InputParams()
@@ -110,6 +138,19 @@ class BaseOpenAILLMService(LLMService):
         default_headers=None,
         **kwargs,
     ):
+        """Create an AsyncOpenAI client instance.
+
+        Args:
+            api_key: OpenAI API key.
+            base_url: Custom base URL for the API.
+            organization: OpenAI organization ID.
+            project: OpenAI project ID.
+            default_headers: Additional HTTP headers.
+            **kwargs: Additional client configuration arguments.
+
+        Returns:
+            Configured AsyncOpenAI client instance.
+        """
         return AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -124,11 +165,25 @@ class BaseOpenAILLMService(LLMService):
         )
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as OpenAI service supports metrics generation.
+        """
         return True
 
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> AsyncStream[ChatCompletionChunk]:
+        """Get streaming chat completions from OpenAI API.
+
+        Args:
+            context: The LLM context containing tools and configuration.
+            messages: List of chat completion messages to send.
+
+        Returns:
+            Async stream of chat completion chunks.
+        """
         params = {
             "model": self.model_name,
             "stream": True,
@@ -192,7 +247,7 @@ class BaseOpenAILLMService(LLMService):
             context
         )
 
-        async for chunk in chunk_stream:
+        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
@@ -274,6 +329,15 @@ class BaseOpenAILLMService(LLMService):
             await self.run_function_calls(function_calls)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames for LLM completion requests.
+
+        Handles OpenAILLMContextFrame, LLMMessagesFrame, VisionImageRawFrame,
+        and LLMUpdateSettingsFrame to trigger LLM completions and manage settings.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         context = None

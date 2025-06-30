@@ -61,7 +61,12 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
     )
 
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        model="gemini-2.5-flash",
+        # turn on thinking if you want it
+        # params=GoogleLLMService.InputParams(extra={"thinking_config": {"thinking_budget": 4096}}),)
+    )
 
     messages = [
         {

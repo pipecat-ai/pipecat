@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Azure OpenAI service implementation for the Pipecat AI framework."""
+
 from loguru import logger
 from openai import AsyncAzureOpenAI
 
@@ -15,13 +17,6 @@ class AzureLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Azure's OpenAI endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key (str): The API key for accessing Azure OpenAI
-        endpoint (str): The Azure endpoint URL
-        model (str): The model identifier to use
-        api_version (str, optional): Azure API version. Defaults to "2024-09-01-preview"
-        **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
     def __init__(
@@ -33,6 +28,15 @@ class AzureLLMService(OpenAILLMService):
         api_version: str = "2024-09-01-preview",
         **kwargs,
     ):
+        """Initialize the Azure LLM service.
+
+        Args:
+            api_key: The API key for accessing Azure OpenAI.
+            endpoint: The Azure endpoint URL.
+            model: The model identifier to use.
+            api_version: Azure API version. Defaults to "2024-09-01-preview".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint
@@ -40,7 +44,16 @@ class AzureLLMService(OpenAILLMService):
         super().__init__(api_key=api_key, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
-        """Create OpenAI-compatible client for Azure OpenAI endpoint."""
+        """Create OpenAI-compatible client for Azure OpenAI endpoint.
+
+        Args:
+            api_key: API key for authentication. Uses instance key if None.
+            base_url: Base URL for the client. Ignored for Azure implementation.
+            **kwargs: Additional keyword arguments. Ignored for Azure implementation.
+
+        Returns:
+            AsyncAzureOpenAI: Configured Azure OpenAI client instance.
+        """
         logger.debug(f"Creating Azure OpenAI client with endpoint {self._endpoint}")
         return AsyncAzureOpenAI(
             api_key=api_key,

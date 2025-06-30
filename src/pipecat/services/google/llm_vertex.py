@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Google Vertex AI LLM service implementation.
+
+This module provides integration with Google's AI models via Vertex AI while
+maintaining OpenAI API compatibility through Google's OpenAI-compatible endpoint.
+"""
+
 import json
 import os
 
@@ -31,16 +37,24 @@ except ModuleNotFoundError as e:
 
 
 class GoogleVertexLLMService(OpenAILLMService):
-    """Implements inference with Google's AI models via Vertex AI while
-    maintaining OpenAI API compatibility.
+    """Google Vertex AI LLM service with OpenAI API compatibility.
+
+    Provides access to Google's AI models via Vertex AI while maintaining
+    OpenAI API compatibility. Handles authentication using Google service
+    account credentials and constructs appropriate endpoint URLs for
+    different GCP regions and projects.
 
     Reference:
-    https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library
-
+        https://cloud.google.com/vertex-ai/generative-ai/docs/multimodal/call-vertex-using-openai-library
     """
 
     class InputParams(OpenAILLMService.InputParams):
-        """Input parameters specific to Vertex AI."""
+        """Input parameters specific to Vertex AI.
+
+        Parameters:
+            location: GCP region for Vertex AI endpoint (e.g., "us-east4").
+            project_id: Google Cloud project ID.
+        """
 
         # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
         location: str = "us-east4"
@@ -58,11 +72,11 @@ class GoogleVertexLLMService(OpenAILLMService):
         """Initializes the VertexLLMService.
 
         Args:
-            credentials (Optional[str]): JSON string of service account credentials.
-            credentials_path (Optional[str]): Path to the service account JSON file.
-            model (str): Model identifier. Defaults to "google/gemini-2.0-flash-001".
-            params (InputParams): Vertex AI input parameters.
-            **kwargs: Additional arguments for OpenAILLMService.
+            credentials: JSON string of service account credentials.
+            credentials_path: Path to the service account JSON file.
+            model: Model identifier (e.g., "google/gemini-2.0-flash-001").
+            params: Vertex AI input parameters including location and project.
+            **kwargs: Additional arguments passed to OpenAILLMService.
         """
         params = params or OpenAILLMService.InputParams()
         base_url = self._get_base_url(params)
@@ -74,7 +88,7 @@ class GoogleVertexLLMService(OpenAILLMService):
 
     @staticmethod
     def _get_base_url(params: InputParams) -> str:
-        """Constructs the base URL for Vertex AI API."""
+        """Construct the base URL for Vertex AI API."""
         return (
             f"https://{params.location}-aiplatform.googleapis.com/v1/"
             f"projects/{params.project_id}/locations/{params.location}/endpoints/openapi"
@@ -82,14 +96,22 @@ class GoogleVertexLLMService(OpenAILLMService):
 
     @staticmethod
     def _get_api_token(credentials: Optional[str], credentials_path: Optional[str]) -> str:
-        """Retrieves an authentication token using Google service account credentials.
+        """Retrieve an authentication token using Google service account credentials.
+
+        Supports multiple authentication methods:
+        1. Direct JSON credentials string
+        2. Path to service account JSON file
+        3. Default application credentials (ADC)
 
         Args:
-            credentials (Optional[str]): JSON string of service account credentials.
-            credentials_path (Optional[str]): Path to the service account JSON file.
+            credentials: JSON string of service account credentials.
+            credentials_path: Path to the service account JSON file.
 
         Returns:
-            str: OAuth token for API authentication.
+            OAuth token for API authentication.
+
+        Raises:
+            ValueError: If no valid credentials are provided or found.
         """
         creds: Optional[service_account.Credentials] = None
 

@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Perplexity LLM service implementation.
+
+This module provides a service for interacting with Perplexity's API using
+an OpenAI-compatible interface. It handles Perplexity's unique token usage
+reporting patterns while maintaining compatibility with the Pipecat framework.
+"""
+
 from typing import List
 
 from openai import NOT_GIVEN, AsyncStream
@@ -20,12 +27,6 @@ class PerplexityLLMService(OpenAILLMService):
     This service extends OpenAILLMService to work with Perplexity's API while maintaining
     compatibility with the OpenAI-style interface. It specifically handles the difference
     in token usage reporting between Perplexity (incremental) and OpenAI (final summary).
-
-    Args:
-        api_key (str): The API key for accessing Perplexity's API
-        base_url (str, optional): The base URL for Perplexity's API. Defaults to "https://api.perplexity.ai"
-        model (str, optional): The model identifier to use. Defaults to "sonar"
-        **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
     def __init__(
@@ -36,6 +37,14 @@ class PerplexityLLMService(OpenAILLMService):
         model: str = "sonar",
         **kwargs,
     ):
+        """Initialize the Perplexity LLM service.
+
+        Args:
+            api_key: The API key for accessing Perplexity's API.
+            base_url: The base URL for Perplexity's API. Defaults to "https://api.perplexity.ai".
+            model: The model identifier to use. Defaults to "sonar".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
         # Counters for accumulating token usage metrics
         self._prompt_tokens = 0
@@ -50,11 +59,11 @@ class PerplexityLLMService(OpenAILLMService):
         """Get chat completions from Perplexity API using OpenAI-compatible parameters.
 
         Args:
-            context: The context containing conversation history and settings
-            messages: The messages to send to the API
+            context: The context containing conversation history and settings.
+            messages: The messages to send to the API.
 
         Returns:
-            A stream of chat completion chunks
+            A stream of chat completion chunks from the Perplexity API.
         """
         params = {
             "model": self.model_name,
@@ -85,8 +94,8 @@ class PerplexityLLMService(OpenAILLMService):
         and reporting them once at the end of processing.
 
         Args:
-            context (OpenAILLMContext): The context to process, containing messages
-                and other information needed for the LLM interaction.
+            context: The context to process, containing messages and other
+                information needed for the LLM interaction.
         """
         # Reset all counters and flags at the start of processing
         self._prompt_tokens = 0
@@ -115,6 +124,9 @@ class PerplexityLLMService(OpenAILLMService):
         Perplexity reports token usage incrementally during streaming,
         unlike OpenAI which provides a final summary. We accumulate the
         counts and report the total at the end of processing.
+
+        Args:
+            tokens: Token usage information to accumulate.
         """
         if not self._is_processing:
             return

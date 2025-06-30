@@ -27,7 +27,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSet
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from livekit import rtc
@@ -341,8 +342,9 @@ class LiveKitTransportClient:
                 logger.warning(f"Received unexpected event type: {type(event)}")
 
     async def get_next_audio_frame(self):
-        frame, participant_id = await self._audio_queue.get()
-        return frame, participant_id
+        while True:
+            frame, participant_id = await self._audio_queue.get()
+            yield frame, participant_id
 
     def __str__(self):
         return f"{self._transport_name}::LiveKitTransportClient"
@@ -413,9 +415,8 @@ class LiveKitInputTransport(BaseInputTransport):
 
     async def _audio_in_task_handler(self):
         logger.info("Audio input task started")
-        while True:
-            audio_data = await self._client.get_next_audio_frame()
-            self.start_watchdog()
+        audio_iterator = self._client.get_next_audio_frame()
+        async for audio_data in WatchdogAsyncIterator(audio_iterator, manager=self.task_manager):
             if audio_data:
                 audio_frame_event, participant_id = audio_data
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
@@ -428,7 +429,6 @@ class LiveKitInputTransport(BaseInputTransport):
                     num_channels=pipecat_audio_frame.num_channels,
                 )
                 await self.push_audio_frame(input_audio_frame)
-            self.reset_watchdog()
 
     async def _convert_livekit_audio_to_pipecat(
         self, audio_frame_event: rtc.AudioFrameEvent

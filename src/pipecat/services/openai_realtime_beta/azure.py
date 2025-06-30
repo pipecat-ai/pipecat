@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Azure OpenAI Realtime Beta LLM service implementation."""
+
 from loguru import logger
 
 from .openai import OpenAIRealtimeBetaLLMService
@@ -19,7 +21,12 @@ except ModuleNotFoundError as e:
 
 
 class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
-    """Subclass of OpenAI Realtime API Service with adjustments for Azure's wss connection."""
+    """Azure OpenAI Realtime Beta LLM service with Azure-specific authentication.
+
+    Extends the OpenAI Realtime service to work with Azure OpenAI endpoints,
+    using Azure's authentication headers and endpoint format. Provides the same
+    real-time audio and text communication capabilities as the base OpenAI service.
+    """
 
     def __init__(
         self,
@@ -28,15 +35,13 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
         base_url: str,
         **kwargs,
     ):
-        """Constructor takes the same arguments as the parent class, OpenAIRealtimeBetaLLMService.
+        """Initialize Azure Realtime Beta LLM service.
 
-        Note that the following are required arguments:
+        Args:
             api_key: The API key for the Azure OpenAI service.
-            base_url: The base URL for the Azure OpenAI service.
-
-        base_url should be set to the full Azure endpoint URL including the api-version and the deployment name. For example,
-
-        wss://my-project.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=my-realtime-deployment
+            base_url: The full Azure WebSocket endpoint URL including api-version and deployment.
+                Example: "wss://my-project.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=my-realtime-deployment"
+            **kwargs: Additional arguments passed to parent OpenAIRealtimeBetaLLMService.
         """
         super().__init__(base_url=base_url, api_key=api_key, **kwargs)
         self.api_key = api_key
