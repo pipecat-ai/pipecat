@@ -127,6 +127,9 @@ class Language(StrEnum):
     EN_US = "en-US"
     EN_ZA = "en-ZA"
 
+    # Esperanto
+    EO = "eo"
+
     # Spanish
     ES = "es"
     ES_AR = "es-AR"
@@ -455,6 +458,9 @@ class Language(StrEnum):
 
     # Tatar
     TT = "tt"
+
+    # Uyghur
+    UG = "ug"
 
     # Ukrainian
     UK = "uk"
