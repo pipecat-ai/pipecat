@@ -19,6 +19,7 @@ from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
+from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
@@ -53,6 +54,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
+        language=Language.EN,
+        output_locale=Language.EN_NZ,
         end_of_utterance_silence_trigger=0.5,
         enable_speaker_diarization=True,
         text_format="<{speaker_id}>{text}</{speaker_id}>",

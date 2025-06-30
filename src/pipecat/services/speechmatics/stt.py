@@ -224,8 +224,12 @@ class SpeechmaticsSTTService(STTService):
 
     Args:
         api_key: Speechmatics API key for authentication.
-        language: Language code for transcription. Defaults to `Language.EN`.
+        language: Language code for transcription. Defaults to `None`.
+        language_code: Language code string for transcription. Defaults to `None`.
         base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
+        domain: Domain for Speechmatics API. Defaults to `None`.
+        output_locale: Output locale for transcription, e.g. `Language.EN_GB`. Defaults to `None`.
+        output_locale_code: Output locale code for transcription. Defaults to `None`.
         enable_partials: Enable partial transcription results. Defaults to `True`.
         max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
         sample_rate: Audio sample rate in Hz. Defaults to `16000`.
@@ -244,8 +248,12 @@ class SpeechmaticsSTTService(STTService):
         self,
         *,
         api_key: str,
-        language: Language = Language.EN,
+        language: Optional[Language] = None,
+        language_code: Optional[str] = None,
         base_url: str = "wss://eu2.rt.speechmatics.com/v2",
+        domain: Optional[str] = None,
+        output_locale: Optional[Language] = None,
+        output_locale_code: Optional[str] = None,
         enable_partials: bool = True,
         max_delay: float = 2.0,
         sample_rate: Optional[int] = 16000,
@@ -263,8 +271,12 @@ class SpeechmaticsSTTService(STTService):
 
         # Client configuration
         self._api_key: str = api_key
-        self._language: Language = language
+        self._language: Optional[Language] = language
+        self._language_code: Optional[str] = language_code
         self._base_url: str = base_url
+        self._domain: Optional[str] = domain
+        self._output_locale: Optional[Language] = output_locale
+        self._output_locale_code: Optional[str] = None
         self._enable_partials: bool = enable_partials
         self._max_delay: float = max_delay
         self._sample_rate: int = sample_rate
@@ -275,6 +287,26 @@ class SpeechmaticsSTTService(STTService):
         self._enable_speaker_diarization: bool = enable_speaker_diarization
         self._text_format: str = text_format
         self._max_speakers: Optional[int] = max_speakers
+
+        # Check we have required attributes
+        if not self._api_key:
+            raise ValueError("Missing Speechmatics API key")
+        if not self._base_url:
+            raise ValueError("Missing Speechmatics base URL")
+
+        # Validate the language code
+        if self._language and self._language_code:
+            raise ValueError("Language and language code cannot both be specified")
+        elif self._language:
+            self._language_code = language_to_speechmatics_language(self._language)
+
+        # Validate the output locale code
+        if self._output_locale and self._output_locale_code:
+            raise ValueError("Output locale and output locale code cannot both be specified")
+        elif self._output_locale:
+            self._output_locale_code = locale_to_speechmatics_locale(
+                self._language_code, self._output_locale
+            )
 
         # Complete configuration objects
         self._transcription_config: TranscriptionConfig = None
@@ -375,15 +407,21 @@ class SpeechmaticsSTTService(STTService):
         # Transcription config
         if not transcription_config:
             transcription_config = TranscriptionConfig(
-                language=self._language,
+                language=self._language_code or "en",
+                domain=self._domain,
+                output_locale=self._output_locale_code,
                 operating_point=self._operating_point,
                 diarization="speaker" if self._enable_speaker_diarization else None,
                 enable_partials=self._enable_partials,
                 max_delay=self._max_delay or 2.0,
             )
         else:
-            if self._language:
-                transcription_config.language = self._language
+            if self._language_code:
+                transcription_config.language = self._language_code
+            if self._domain:
+                transcription_config.domain = self._domain
+            if self._output_locale_code:
+                transcription_config.output_locale = self._output_locale_code
             if self._operating_point:
                 transcription_config.operating_point = self._operating_point
             if self._enable_speaker_diarization:
@@ -613,3 +651,111 @@ def _get_endpoint_url(url: str) -> str:
     query = urlencode(query_params)
 
     return f"{url}?{query}"
+
+
+def language_to_speechmatics_language(language: Language) -> str:
+    """Convert a Language enum to a Speechmatics language code.
+
+    Args:
+        language: The Language enum to convert.
+
+    Returns:
+        str: The Speechmatics language code, if found.
+    """
+    # List of supported input languages
+    BASE_LANGUAGES = {
+        Language.AR: "ar",
+        Language.BA: "ba",
+        Language.EU: "eu",
+        Language.BE: "be",
+        Language.BG: "bg",
+        Language.BN: "bn",
+        Language.YUE: "yue",
+        Language.CA: "ca",
+        Language.HR: "hr",
+        Language.CS: "cs",
+        Language.DA: "da",
+        Language.NL: "nl",
+        Language.EN: "en",
+        Language.EO: "eo",
+        Language.ET: "et",
+        Language.FA: "fa",
+        Language.FI: "fi",
+        Language.FR: "fr",
+        Language.GL: "gl",
+        Language.DE: "de",
+        Language.EL: "el",
+        Language.HE: "he",
+        Language.HI: "hi",
+        Language.HU: "hu",
+        Language.IT: "it",
+        Language.ID: "id",
+        Language.GA: "ga",
+        Language.JA: "ja",
+        Language.KO: "ko",
+        Language.LV: "lv",
+        Language.LT: "lt",
+        Language.MS: "ms",
+        Language.MT: "mt",
+        Language.CMN: "cmn",
+        Language.MR: "mr",
+        Language.MN: "mn",
+        Language.NO: "no",
+        Language.PL: "pl",
+        Language.PT: "pt",
+        Language.RO: "ro",
+        Language.RU: "ru",
+        Language.SK: "sk",
+        Language.SL: "sl",
+        Language.ES: "es",
+        Language.SV: "sv",
+        Language.SW: "sw",
+        Language.TA: "ta",
+        Language.TH: "th",
+        Language.TR: "tr",
+        Language.UG: "ug",
+        Language.UK: "uk",
+        Language.UR: "ur",
+        Language.VI: "vi",
+        Language.CY: "cy",
+    }
+
+    # Get the language code
+    result = BASE_LANGUAGES.get(language)
+
+    # Fail if language is not supported
+    if not result:
+        raise ValueError(f"Unsupported language: {language}")
+
+    # Return the language code
+    return result
+
+
+def locale_to_speechmatics_locale(language: str, locale: Language) -> Optional[str]:
+    """Convert a Language enum to a Speechmatics language code.
+
+    Args:
+        language: The language code.
+        locale: The Language enum to convert.
+
+    Returns:
+        str: The Speechmatics language code, if found.
+    """
+    # Languages and output locales
+    LOCALES = {
+        "en": {
+            Language.EN_GB: "en-GB",
+            Language.EN_US: "en-US",
+            Language.EN_AU: "en-AU",
+        },
+    }
+
+    # Get the locale code
+    result = LOCALES.get(language, {}).get(locale)
+
+    # Fail if locale is not supported
+    if not result:
+        logger.warning(f"Unsupported output locale: {locale}, defaulting to {language}")
+
+    # Return the locale code
+    return result
