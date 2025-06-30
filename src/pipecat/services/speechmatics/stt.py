@@ -505,47 +505,51 @@ class SpeechmaticsSTTService(STTService):
         if not speech_frames:
             return
 
-        # Frames to emit
-        frames = []
-
         # Speech started
-        if self._enable_vad and not self._is_speaking:
+        if self._enable_vad and self._pipeline_task and not self._is_speaking:
             logger.debug("User started speaking")
-            frames.extend([BotInterruptionFrame(), UserStartedSpeakingFrame()])
+            await self._pipeline_task.queue_frames(
+                [BotInterruptionFrame(), UserStartedSpeakingFrame()]
+            )
             self._is_speaking = True
 
         # If final, then re=parse into TranscriptionFrame
         if finalized:
-            logger.debug("Finalized transcript received from STT")
+            logger.warning("Finalized transcript received from STT")
             # Reset the speech fragments
             self._speech_fragments.clear()
 
             # Transform frames
-            frames.extend(
-                [
-                    TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
-                    for frame in speech_frames
-                ]
-            )
+            frames = [
+                TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
+                for frame in speech_frames
+            ]
 
         # Return as interim results
         else:
-            frames.extend(
-                [
-                    InterimTranscriptionFrame(**frame._as_frame_attributes())
-                    for frame in speech_frames
-                ]
-            )
+            frames = [
+                InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in speech_frames
+            ]
 
         # Add user stopped speaking
         if finalized and self._enable_vad and self._pipeline_task and self._is_speaking:
             logger.debug("User stopped speaking")
-            frames.extend([StopInterruptionFrame(), UserStoppedSpeakingFrame()])
+            await self._pipeline_task.queue_frames(
+                [StopInterruptionFrame(), UserStoppedSpeakingFrame()]
+            )
             self._is_speaking = False
 
         # Send the frames back to pipecat
         for frame in frames:
             await self.push_frame(frame)
+
+        # Add user stopped speaking
+        if finalized and self._enable_vad and self._pipeline_task and self._is_speaking:
+            logger.debug("User stopped speaking")
+            await self._pipeline_task.queue_frames(
+                [StopInterruptionFrame(), UserStoppedSpeakingFrame()]
+            )
+            self._is_speaking = False
 
     def _add_speech_fragments(self, message: dict[str, Any], is_final: bool = False) -> bool:
         """Takes a new Partial or Final from the STT engine.

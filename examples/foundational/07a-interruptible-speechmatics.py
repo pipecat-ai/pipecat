@@ -17,9 +17,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.openai.base_llm import BaseOpenAILLMService
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.debug import SpeechmaticsDebugService
 from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
@@ -66,9 +65,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        params=BaseOpenAILLMService.InputParams(temperature=0.75),
+    llm = AzureLLMService(
+        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+        model=os.getenv("AZURE_CHATGPT_MODEL"),
     )
 
     messages = [
@@ -93,11 +93,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            SpeechmaticsDebugService(name="STT"),
+            # SpeechmaticsDebugService(name="STT"),
             stt,
             SpeechmaticsDebugService(name="context"),
             context_aggregator.user(),  # User responses
-            SpeechmaticsDebugService(name="LLM"),
+            # SpeechmaticsDebugService(name="LLM"),
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
