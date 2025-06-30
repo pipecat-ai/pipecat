@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from typing import Any, Callable, Dict, Mapping, Optional
@@ -61,6 +62,33 @@ async def maybe_capture_participant_screen(
         )
 
 
+def smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
+    result = []
+    lines = text.splitlines()
+    for line in lines:
+        if re.search("a=candidate", line):
+            if re.search(pattern, line) and not re.search("raddr", line):
+                result.append(line)
+        else:
+            result.append(line)
+    return "\r\n".join(result)
+
+
+def smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
+    result = []
+    lines = text.splitlines()
+    for line in lines:
+        if not re.search("sha-384", line) and not re.search("sha-512", line):
+            result.append(line)
+    return "\r\n".join(result)
+
+
+def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
+    sdp = smallwebrtc_sdp_cleanup_fingerprints(sdp)
+    sdp = smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
+    return sdp
+
+
 def run_example_daily(
     run_example: Callable,
     args: argparse.Namespace,
@@ -96,12 +124,6 @@ def run_example_webrtc(
     # Store connections by pc_id
     pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
-    ice_servers = [
-        IceServer(
-            urls="stun:stun.l.google.com:19302",
-        )
-    ]
-
     # Mount the frontend at /
     app.mount("/client", SmallWebRTCPrebuiltUI)
 
@@ -122,7 +144,7 @@ def run_example_webrtc(
                 restart_pc=request.get("restart_pc", False),
             )
         else:
-            pipecat_connection = SmallWebRTCConnection(ice_servers)
+            pipecat_connection = SmallWebRTCConnection()
             await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
 
             @pipecat_connection.event_handler("closed")
@@ -136,6 +158,10 @@ def run_example_webrtc(
             background_tasks.add_task(run_example, transport, args, False)
 
         answer = pipecat_connection.get_answer()
+
+        if args.esp32 and args.host:
+            answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], args.host)
+
         # Updating the peer connection inside the map
         pcs_map[answer["pc_id"]] = pipecat_connection
 
@@ -254,8 +280,15 @@ def main(
     parser.add_argument(
         "--proxy", "-x", help="A public proxy host name (no protocol, e.g. proxy.example.com)"
     )
+    parser.add_argument(
+        "--esp32", action="store_true", default=False, help="Perform SDP munging for the ESP32"
+    )
     parser.add_argument("--verbose", "-v", action="count", default=0)
     args = parser.parse_args()
+
+    if args.esp32 and args.host == "localhost":
+        logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
+        return
 
     # Log level
     logger.remove(0)
