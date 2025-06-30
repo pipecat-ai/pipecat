@@ -11,7 +11,8 @@ from typing import Dict, List, Optional
 from attr import dataclass
 
 from pipecat.observers.base_observer import BaseObserver, FramePushed
-from pipecat.utils.asyncio import BaseTaskManager
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 @dataclass
@@ -82,6 +83,9 @@ class TaskObserver(BaseObserver):
 
     async def stop(self):
         """Stops all proxy observer tasks."""
+        if not self._proxies:
+            return
+
         for proxy in self._proxies.values():
             await self._task_manager.cancel_task(proxy.task)
 
@@ -93,7 +97,7 @@ class TaskObserver(BaseObserver):
         return self._proxies is not None
 
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
-        queue = asyncio.Queue()
+        queue = WatchdogQueue(self._task_manager)
         task = self._task_manager.create_task(
             self._proxy_task_handler(queue, observer),
             f"TaskObserver::{observer}::_proxy_task_handler",

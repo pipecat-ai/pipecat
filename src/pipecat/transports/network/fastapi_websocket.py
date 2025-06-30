@@ -26,11 +26,12 @@ from pipecat.frames.frames import (
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from fastapi import WebSocket
@@ -178,11 +179,11 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
 
     async def _receive_messages(self):
         try:
-            async for message in self._client.receive():
+            async for message in WatchdogAsyncIterator(
+                self._client.receive(), manager=self.task_manager
+            ):
                 if not self._params.serializer:
                     continue
-
-                self.start_watchdog()
 
                 frame = await self._params.serializer.deserialize(message)
 
@@ -193,12 +194,8 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
                     await self.push_audio_frame(frame)
                 else:
                     await self.push_frame(frame)
-
-                self.reset_watchdog()
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
-
-        self.reset_watchdog()
 
         await self._client.trigger_client_disconnected()
 

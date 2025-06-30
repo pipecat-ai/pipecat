@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 class ParallelPipelineSource(FrameProcessor):
@@ -76,20 +77,36 @@ class ParallelPipeline(BasePipeline):
         if len(args) == 0:
             raise Exception(f"ParallelPipeline needs at least one argument")
 
+        self._args = args
         self._sources = []
         self._sinks = []
+        self._pipelines = []
+
         self._seen_ids = set()
         self._endframe_counter: Dict[int, int] = {}
 
         self._up_task = None
         self._down_task = None
-        self._up_queue = asyncio.Queue()
-        self._down_queue = asyncio.Queue()
 
-        self._pipelines = []
+    #
+    # BasePipeline
+    #
+
+    def processors_with_metrics(self) -> List[FrameProcessor]:
+        return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
+
+    #
+    # Frame processor
+    #
+
+    async def setup(self, setup: FrameProcessorSetup):
+        await super().setup(setup)
+
+        self._up_queue = WatchdogQueue(setup.task_manager)
+        self._down_queue = WatchdogQueue(setup.task_manager)
 
         logger.debug(f"Creating {self} pipelines")
-        for processors in args:
+        for processors in self._args:
             if not isinstance(processors, list):
                 raise TypeError(f"ParallelPipeline argument {processors} is not a list")
 
@@ -107,19 +124,6 @@ class ParallelPipeline(BasePipeline):
 
         logger.debug(f"Finished creating {self} pipelines")
 
-    #
-    # BasePipeline
-    #
-
-    def processors_with_metrics(self) -> List[FrameProcessor]:
-        return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
-
-    #
-    # Frame processor
-    #
-
-    async def setup(self, setup: FrameProcessorSetup):
-        await super().setup(setup)
         await asyncio.gather(*[s.setup(setup) for s in self._sources])
         await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
         await asyncio.gather(*[s.setup(setup) for s in self._sinks])
@@ -134,7 +138,7 @@ class ParallelPipeline(BasePipeline):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self._start()
+            await self._start(frame)
         elif isinstance(frame, EndFrame):
             self._endframe_counter[frame.id] = len(self._pipelines)
         elif isinstance(frame, CancelFrame):
@@ -154,7 +158,7 @@ class ParallelPipeline(BasePipeline):
         elif isinstance(frame, EndFrame):
             await self._stop()
 
-    async def _start(self):
+    async def _start(self, frame: StartFrame):
         await self._create_tasks()
 
     async def _stop(self):
@@ -202,17 +206,13 @@ class ParallelPipeline(BasePipeline):
     async def _process_up_queue(self):
         while True:
             frame = await self._up_queue.get()
-            self.start_watchdog()
             await self._parallel_push_frame(frame, FrameDirection.UPSTREAM)
             self._up_queue.task_done()
-            self.reset_watchdog()
 
     async def _process_down_queue(self):
         running = True
         while running:
             frame = await self._down_queue.get()
-
-            self.start_watchdog()
 
             endframe_counter = self._endframe_counter.get(frame.id, 0)
 
@@ -228,5 +228,3 @@ class ParallelPipeline(BasePipeline):
             running = not (endframe_counter == 0 and isinstance(frame, EndFrame))
 
             self._down_queue.task_done()
-
-            self.reset_watchdog()

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""OpenAI Speech-to-Text service implementation using OpenAI's transcription API."""
+
 from typing import Optional
 
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
@@ -15,15 +17,6 @@ class OpenAISTTService(BaseWhisperSTTService):
 
     Uses OpenAI's transcription API to convert audio to text. Requires an OpenAI API key
     set via the api_key parameter or OPENAI_API_KEY environment variable.
-
-    Args:
-        model: Model to use — either gpt-4o or Whisper. Defaults to "gpt-4o-transcribe".
-        api_key: OpenAI API key. Defaults to None.
-        base_url: API base URL. Defaults to None.
-        language: Language of the audio input. Defaults to English.
-        prompt: Optional text to guide the model's style or continue a previous segment.
-        temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
-        **kwargs: Additional arguments passed to BaseWhisperSTTService.
     """
 
     def __init__(
@@ -37,6 +30,17 @@ class OpenAISTTService(BaseWhisperSTTService):
         temperature: Optional[float] = None,
         **kwargs,
     ):
+        """Initialize OpenAI STT service.
+
+        Args:
+            model: Model to use — either gpt-4o or Whisper. Defaults to "gpt-4o-transcribe".
+            api_key: OpenAI API key. Defaults to None.
+            base_url: API base URL. Defaults to None.
+            language: Language of the audio input. Defaults to English.
+            prompt: Optional text to guide the model's style or continue a previous segment.
+            temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
+            **kwargs: Additional arguments passed to BaseWhisperSTTService.
+        """
         super().__init__(
             model=model,
             api_key=api_key,
