@@ -20,7 +20,9 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -235,6 +237,7 @@ class SpeechmaticsSTTService(STTService):
         sample_rate: Audio sample rate in Hz. Defaults to `16000`.
         chunk_size: Audio chunk size for streaming. Defaults to `256`.
         audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
+        enable_vad: Enable voice activity detection. Defaults to `True`.
         end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
         operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
         enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
@@ -259,6 +262,7 @@ class SpeechmaticsSTTService(STTService):
         sample_rate: Optional[int] = 16000,
         chunk_size: int = 256,
         audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
+        enable_vad: bool = True,
         end_of_utterance_silence_trigger: Optional[float] = None,
         operating_point: OperatingPoint = OperatingPoint.ENHANCED,
         enable_speaker_diarization: bool = False,
@@ -282,6 +286,7 @@ class SpeechmaticsSTTService(STTService):
         self._sample_rate: int = sample_rate
         self._chunk_size: int = chunk_size
         self._audio_encoding: AudioEncoding = audio_encoding
+        self._enable_vad: bool = enable_vad
         self._end_of_utterance_silence_trigger: Optional[float] = end_of_utterance_silence_trigger
         self._operating_point: OperatingPoint = operating_point
         self._enable_speaker_diarization: bool = enable_speaker_diarization
@@ -320,6 +325,13 @@ class SpeechmaticsSTTService(STTService):
         # Current utterance speech data
         self._speech_fragments: list[SpeechFragment] = []
 
+        # Frames to intercept
+        self._intercept_frames: list[type[Frame]] = []
+
+        # Prevent Pipecat VAD from prematurely triggering end of utterance
+        if self._enable_vad:
+            self._intercept_frames.append(UserStoppedSpeakingFrame)
+
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
         await super().start(frame)
@@ -351,6 +363,18 @@ class SpeechmaticsSTTService(STTService):
                 chunk_size=self._chunk_size,
             ),
         )
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Handle frames in the pipeline."""
+        logger.debug(f"Processing frame: {frame}")
+        # Frames to trap
+        for frame_type in self._intercept_frames:
+            if isinstance(frame, frame_type):
+                logger.debug(f"Intercepted frame: {frame}")
+                return
+
+        # Pass through pipeline
+        await super().process_frame(frame, direction)
 
     async def _connect(self) -> None:
         """Connect to the STT service."""
@@ -477,13 +501,17 @@ class SpeechmaticsSTTService(STTService):
 
         # If final, then re=parse into TranscriptionFrame
         if finalized:
+            logger.warning("Final transcript received from STT")
             # Reset the speech fragments
             self._speech_fragments.clear()
 
             # Transform frames
             frames = [
-                TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
-                for frame in frames
+                UserStoppedSpeakingFrame(),
+                *[
+                    TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
+                    for frame in frames
+                ],
             ]
 
         # Return as interim results

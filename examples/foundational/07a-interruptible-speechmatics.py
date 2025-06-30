@@ -33,17 +33,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -52,7 +49,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     """Run example using Speechmatics STT."""
     logger.info(f"Starting bot")
 
-    stt = SpeechmaticsSTTService(
+    stt_smx = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
         output_locale=Language.EN_GB,
@@ -78,8 +75,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "You are a helpful British assistant called Alfred. "
                 "Your goal is to demonstrate your capabilities in a succinct way. "
                 "Your output will be converted to audio so don't include special characters in your answers. "
+                "Give very short replies - do not give longer replies unless strictly necessary. "
                 "Respond to what the user said in a concise, funny, creative and helpful way. "
-                "Do not give long replies unless stricly necessary. "
                 "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
             ),
         },
@@ -91,7 +88,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
+            stt_smx,
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
