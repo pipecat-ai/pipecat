@@ -66,6 +66,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     tts = ElevenLabsTTSService(
         api_key=os.getenv("ELEVENLABS_API_KEY", ""),
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+        model="eleven_turbo_v2_5",
     )
 
     llm = AzureLLMService(
@@ -81,6 +82,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "You are a helpful British assistant called Alfred. "
                 "Your goal is to demonstrate your capabilities in a succinct way. "
                 "Your output will be converted to audio so don't include special characters in your answers. "
+                "Always include punctuation in your responses. "
                 "Give very short replies - do not give longer replies unless strictly necessary. "
                 "Respond to what the user said in a concise, funny, creative and helpful way. "
                 "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
