@@ -373,18 +373,6 @@ class SpeechmaticsSTTService(STTService):
             ),
         )
 
-    # async def process_frame(self, frame: Frame, direction: FrameDirection):
-    #     """Handle frames in the pipeline."""
-    #     logger.debug(f"Processing frame: {frame}")
-    #     # Frames to trap
-    #     for frame_type in self._intercept_frames:
-    #         if isinstance(frame, frame_type):
-    #             logger.debug(f"Intercepted frame: {frame}")
-    #             return
-
-    #     # Pass through pipeline
-    #     await super().process_frame(frame, direction)
-
     async def _connect(self) -> None:
         """Connect to the STT service."""
         # Create new STT RT client
@@ -517,12 +505,13 @@ class SpeechmaticsSTTService(STTService):
         if not speech_frames:
             return
 
+        # Frames to emit
+        frames = []
+
         # Speech started
-        if self._enable_vad and self._pipeline_task and not self._is_speaking:
+        if self._enable_vad and not self._is_speaking:
             logger.debug("User started speaking")
-            await self._pipeline_task.queue_frames(
-                [BotInterruptionFrame(), UserStartedSpeakingFrame()]
-            )
+            frames.extend([BotInterruptionFrame(), UserStartedSpeakingFrame()])
             self._is_speaking = True
 
         # If final, then re=parse into TranscriptionFrame
@@ -532,28 +521,31 @@ class SpeechmaticsSTTService(STTService):
             self._speech_fragments.clear()
 
             # Transform frames
-            frames = [
-                TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
-                for frame in speech_frames
-            ]
+            frames.extend(
+                [
+                    TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
+                    for frame in speech_frames
+                ]
+            )
 
         # Return as interim results
         else:
-            frames = [
-                InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in speech_frames
-            ]
-
-        # Send the frames back to pipecat
-        for frame in frames:
-            await self.push_frame(frame)
+            frames.extend(
+                [
+                    InterimTranscriptionFrame(**frame._as_frame_attributes())
+                    for frame in speech_frames
+                ]
+            )
 
         # Add user stopped speaking
         if finalized and self._enable_vad and self._pipeline_task and self._is_speaking:
             logger.debug("User stopped speaking")
-            await self._pipeline_task.queue_frames(
-                [StopInterruptionFrame(), UserStoppedSpeakingFrame()]
-            )
+            frames.extend([StopInterruptionFrame(), UserStoppedSpeakingFrame()])
             self._is_speaking = False
+
+        # Send the frames back to pipecat
+        for frame in frames:
+            await self.push_frame(frame)
 
     def _add_speech_fragments(self, message: dict[str, Any], is_final: bool = False) -> bool:
         """Takes a new Partial or Final from the STT engine.
