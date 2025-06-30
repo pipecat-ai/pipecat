@@ -82,8 +82,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         human_agent_name = params.arguments.get("human_agent_name", "Unknown")
         logger.info(f"Transfer starting... {caller_name} wants to transfer to {human_agent_name}")
         await task.queue_frame(STTMuteFrame(True))
-        await asyncio.sleep(5)  # 5-second delay
-        logger.info("Transfer complete, calling result callback")
+        await asyncio.sleep(
+            5
+        )  # 5-second delay to simulate a transfer. You could play hold music here too.
         messages.clear()
         messages.append(
             {
@@ -92,6 +93,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             }
         )
         await params.llm.push_frame(LLMMessagesFrame(messages))
+        logger.info("Transfer complete, calling result callback")
         await params.result_callback({"transfer_successful": True})
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
