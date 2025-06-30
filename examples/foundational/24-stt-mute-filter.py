@@ -14,7 +14,9 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSTextFrame, UserStartedSpeakingFrame
+from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
+from pipecat.observers.loggers.llm_log_observer import LLMLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -29,6 +31,8 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_input import BaseInputTransport
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
@@ -89,7 +93,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         messages.append(
             {
                 "role": "system",
-                "content": f"You are now an agent named {human_agent_name}. Greet {caller_name} and let them know you are taking over the conversation.",
+                "content": f"You are an agent named {human_agent_name}. Greet {caller_name} and let them know you are taking over the conversation.",
             }
         )
         await params.llm.push_frame(LLMMessagesFrame(messages))
@@ -119,7 +123,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     messages = [
         {
             "role": "system",
-            "content": "You are a cheerful and helpful assistant named James. It is your job to ask the user their name, and the name of the person they want to transfer the conversation to.",
+            "content": "You are a cheerful and helpful assistant named Bob. It is your job to ask the user their name, and the name of the person they want to transfer the conversation to. Start by introducing yourself and asking for the user's name.",
         },
     ]
 
@@ -145,6 +149,16 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[
+            LLMLogObserver(),
+            DebugLogObserver(
+                frame_types={
+                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.DESTINATION),
+                    UserStartedSpeakingFrame: (BaseInputTransport, FrameEndpoint.SOURCE),
+                    EndFrame: None,
+                }
+            ),
+        ],
     )
 
     @transport.event_handler("on_client_connected")
