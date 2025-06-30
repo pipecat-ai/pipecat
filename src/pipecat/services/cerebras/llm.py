@@ -21,12 +21,6 @@ class CerebrasLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Cerebras's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing Cerebras's API.
-        base_url: The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1".
-        model: The model identifier to use. Defaults to "llama-3.3-70b".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -37,6 +31,14 @@ class CerebrasLLMService(OpenAILLMService):
         model: str = "llama-3.3-70b",
         **kwargs,
     ):
+        """Initialize the Cerebras LLM service.
+
+        Args:
+            api_key: The API key for accessing Cerebras's API.
+            base_url: The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1".
+            model: The model identifier to use. Defaults to "llama-3.3-70b".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):

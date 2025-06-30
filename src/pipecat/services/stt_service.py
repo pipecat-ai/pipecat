@@ -33,13 +33,6 @@ class STTService(AIService):
     Provides common functionality for STT services including audio passthrough,
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
-
-    Args:
-            audio_passthrough: Whether to pass audio frames downstream after processing.
-                Defaults to True.
-            sample_rate: The sample rate for audio input. If None, will be determined
-                from the start frame.
-            **kwargs: Additional arguments passed to the parent AIService.
     """
 
     def __init__(
@@ -49,6 +42,15 @@ class STTService(AIService):
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
+        """Initialize the STT service.
+
+        Args:
+            audio_passthrough: Whether to pass audio frames downstream after processing.
+                Defaults to True.
+            sample_rate: The sample rate for audio input. If None, will be determined
+                from the start frame.
+            **kwargs: Additional arguments passed to the parent AIService.
+        """
         super().__init__(**kwargs)
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
@@ -173,14 +175,16 @@ class SegmentedSTTService(STTService):
     Requires VAD to be enabled in the pipeline to function properly. Maintains a
     small audio buffer to account for the delay between actual speech start and
     VAD detection.
-
-    Args:
-            sample_rate: The sample rate for audio input. If None, will be determined
-                from the start frame.
-            **kwargs: Additional arguments passed to the parent STTService.
     """
 
     def __init__(self, *, sample_rate: Optional[int] = None, **kwargs):
+        """Initialize the segmented STT service.
+
+        Args:
+            sample_rate: The sample rate for audio input. If None, will be determined
+                from the start frame.
+            **kwargs: Additional arguments passed to the parent STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._content = None
         self._wave = None

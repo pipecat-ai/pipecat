@@ -43,8 +43,8 @@ We follow Google-style docstrings with these specific conventions:
 
 **Regular Classes:**
 
-- Class docstring describes the class purpose and documents all `__init__` parameters in an `Args:` section
-- No separate `__init__` docstring needed
+- Class docstring describes the class purpose and key functionality
+- `__init__` method has its own docstring with complete `Args:` section documenting all parameters
 - All public methods must have docstrings with `Args:` and `Returns:` sections as appropriate
 
 **Dataclasses:**
@@ -60,6 +60,17 @@ We follow Google-style docstrings with these specific conventions:
 
 - Must have docstrings explaining what subclasses should implement
 
+**`__init__.py` Files:**
+
+- **Skip docstrings** for pure import/re-export modules
+- **Add brief docstrings** for top-level packages or those with initialization logic
+
+**Enums:**
+
+- Class docstring describes the enumeration purpose
+- Use `Parameters:` section to document each enum value and its meaning
+- No `__init__` docstring (Enums don't have custom constructors)
+
 #### Examples:
 
 ```python
@@ -67,14 +78,18 @@ We follow Google-style docstrings with these specific conventions:
 class MyService(BaseService):
     """Description of what the service does.
 
-    Args:
-        param1: Description of param1.
-        param2: Description of param2. Defaults to True.
-        **kwargs: Additional arguments passed to parent.
+    Provides detailed explanation of the service's functionality,
+    key features, and usage patterns.
     """
 
     def __init__(self, param1: str, param2: bool = True, **kwargs):
-        # No docstring - parameters documented above
+        """Initialize the service.
+
+        Args:
+            param1: Description of param1.
+            param2: Description of param2. Defaults to True.
+            **kwargs: Additional arguments passed to parent.
+        """
         super().__init__(**kwargs)
 
     @property
@@ -111,6 +126,22 @@ class ConfigParams:
     host: str
     port: int = 8080
     timeout: float = 30.0
+
+# Enum class
+class Status(Enum):
+    """Status codes for processing operations.
+
+    Parameters:
+        PENDING: Operation is queued but not started.
+        RUNNING: Operation is currently in progress.
+        COMPLETED: Operation finished successfully.
+        FAILED: Operation encountered an error.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
 ```
 
 # Contributor Covenant Code of Conduct

@@ -21,12 +21,6 @@ class NimLLMService(OpenAILLMService):
     This service extends OpenAILLMService to work with NVIDIA's NIM API while maintaining
     compatibility with the OpenAI-style interface. It specifically handles the difference
     in token usage reporting between NIM (incremental) and OpenAI (final summary).
-
-    Args:
-        api_key: The API key for accessing NVIDIA's NIM API.
-        base_url: The base URL for NIM API. Defaults to "https://integrate.api.nvidia.com/v1".
-        model: The model identifier to use. Defaults to "nvidia/llama-3.1-nemotron-70b-instruct".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -37,6 +31,14 @@ class NimLLMService(OpenAILLMService):
         model: str = "nvidia/llama-3.1-nemotron-70b-instruct",
         **kwargs,
     ):
+        """Initialize the NimLLMService.
+
+        Args:
+            api_key: The API key for accessing NVIDIA's NIM API.
+            base_url: The base URL for NIM API. Defaults to "https://integrate.api.nvidia.com/v1".
+            model: The model identifier to use. Defaults to "nvidia/llama-3.1-nemotron-70b-instruct".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
         # Counters for accumulating token usage metrics
         self._prompt_tokens = 0

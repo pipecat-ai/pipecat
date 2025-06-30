@@ -55,7 +55,8 @@ class WatchdogAsyncIterator:
 
                 self._manager.task_reset_watchdog()
 
-                # The task has finish, so we will create a new one for th next item.
+                # The task has finished, so we will create a new one for the
+                # next item.
                 self._current_anext_task = None
 
                 return item

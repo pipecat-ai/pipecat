@@ -39,12 +39,17 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 class STTMuteStrategy(Enum):
     """Strategies determining when STT should be muted.
 
-    Attributes:
-        FIRST_SPEECH: Mute only during first detected bot speech
-        MUTE_UNTIL_FIRST_BOT_COMPLETE: Start muted and remain muted until first bot speech completes
-        FUNCTION_CALL: Mute during function calls
-        ALWAYS: Mute during all bot speech
-        CUSTOM: Allow custom logic via callback
+    Each strategy defines different conditions under which speech-to-text
+    processing should be temporarily disabled to prevent unwanted audio
+    processing during specific conversation states.
+
+    Parameters:
+        FIRST_SPEECH: Mute STT until the first bot speech is detected.
+        MUTE_UNTIL_FIRST_BOT_COMPLETE: Mute STT until the first bot completes speaking,
+        regardless of whether it is the first speech.
+        FUNCTION_CALL: Mute STT during function calls to prevent interruptions.
+        ALWAYS: Always mute STT when the bot is speaking.
+        CUSTOM: Use a custom callback to determine muting logic dynamically.
     """
 
     FIRST_SPEECH = "first_speech"
@@ -58,10 +63,15 @@ class STTMuteStrategy(Enum):
 class STTMuteConfig:
     """Configuration for STT muting behavior.
 
-    Args:
-        strategies: Set of muting strategies to apply
+    Defines which muting strategies to apply and provides optional custom
+    callback for advanced muting logic. Multiple strategies can be combined
+    to create sophisticated muting behavior.
+
+    Parameters:
+        strategies: Set of muting strategies to apply simultaneously.
         should_mute_callback: Optional callback for custom muting logic.
-            Only required when using STTMuteStrategy.CUSTOM
+            Only required when using STTMuteStrategy.CUSTOM. Called with
+            the STTMuteFilter instance to determine muting state.
 
     Note:
         MUTE_UNTIL_FIRST_BOT_COMPLETE and FIRST_SPEECH strategies should not be used together
@@ -69,10 +79,14 @@ class STTMuteConfig:
     """
 
     strategies: set[STTMuteStrategy]
-    # Optional callback for custom muting logic
     should_mute_callback: Optional[Callable[["STTMuteFilter"], Awaitable[bool]]] = None
 
     def __post_init__(self):
+        """Validate configuration after initialization.
+
+        Raises:
+            ValueError: If incompatible strategies are used together.
+        """
         if (
             STTMuteStrategy.MUTE_UNTIL_FIRST_BOT_COMPLETE in self.strategies
             and STTMuteStrategy.FIRST_SPEECH in self.strategies
@@ -86,15 +100,18 @@ class STTMuteFilter(FrameProcessor):
     """A processor that handles STT muting and interruption control.
 
     This processor combines STT muting and interruption control as a coordinated
-    feature. When STT is muted, interruptions are automatically disabled.
-
-    Args:
-        config: Configuration specifying muting strategies
-        stt_service: STT service instance (deprecated, will be removed in future version)
-        **kwargs: Additional arguments passed to parent class
+    feature. When STT is muted, interruptions are automatically disabled by
+    suppressing VAD-related frames. This prevents unwanted speech detection
+    during bot speech, function calls, or other specified conditions.
     """
 
     def __init__(self, *, config: STTMuteConfig, **kwargs):
+        """Initialize the STT mute filter.
+
+        Args:
+            config: Configuration specifying muting strategies and behavior.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(**kwargs)
         self._config = config
         self._first_speech_handled = False
@@ -104,18 +121,22 @@ class STTMuteFilter(FrameProcessor):
 
     @property
     def is_muted(self) -> bool:
-        """Returns whether STT is currently muted."""
+        """Check if STT is currently muted.
+
+        Returns:
+            True if STT is currently muted and audio frames are being suppressed.
+        """
         return self._is_muted
 
     async def _handle_mute_state(self, should_mute: bool):
-        """Handles both STT muting and interruption control."""
+        """Handle STT muting and interruption control state changes."""
         if should_mute != self.is_muted:
             logger.debug(f"STTMuteFilter {'muting' if should_mute else 'unmuting'}")
             self._is_muted = should_mute
             await self.push_frame(STTMuteFrame(mute=should_mute))
 
     async def _should_mute(self) -> bool:
-        """Determines if STT should be muted based on current state and strategy."""
+        """Determine if STT should be muted based on current state and strategies."""
         for strategy in self._config.strategies:
             match strategy:
                 case STTMuteStrategy.FUNCTION_CALL:
@@ -144,7 +165,16 @@ class STTMuteFilter(FrameProcessor):
         return False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Processes incoming frames and manages muting state."""
+        """Process incoming frames and manage muting state.
+
+        Monitors conversation state through frame types and applies muting
+        strategies accordingly. Suppresses VAD-related frames when muted
+        while allowing other frames to pass through.
+
+        Args:
+            frame: The incoming frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
         await super().process_frame(frame, direction)
 
         # Determine if we need to change mute state based on frame type
