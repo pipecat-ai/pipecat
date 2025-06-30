@@ -417,29 +417,32 @@ class TranscriptionUpdateFrame(DataFrame):
     Messages have normalized roles (user/assistant) regardless of the LLM service used.
     Messages are always in the OpenAI standard message format, which supports both:
 
-    Simple format:
-    [
-        {
-            "role": "user",
-            "content": "Hi, how are you?"
-        },
-        {
-            "role": "assistant",
-            "content": "Great! And you?"
-        }
-    ]
+    Examples:
+        Simple format::
 
-    Content list format:
-    [
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "Hi, how are you?"}]
-        },
-        {
-            "role": "assistant",
-            "content": [{"type": "text", "text": "Great! And you?"}]
-        }
-    ]
+            [
+                {
+                    "role": "user",
+                    "content": "Hi, how are you?"
+                },
+                {
+                    "role": "assistant",
+                    "content": "Great! And you?"
+                }
+            ]
+
+        Content list format::
+
+            [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Hi, how are you?"}]
+                },
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Great! And you?"}]
+                }
+            ]
 
     OpenAI supports both formats. Anthropic and Google messages are converted to the
     content list format.

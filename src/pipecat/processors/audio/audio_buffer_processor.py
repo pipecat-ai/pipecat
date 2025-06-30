@@ -39,17 +39,19 @@ class AudioBufferProcessor(FrameProcessor):
     including sample rate conversion and mono/stereo output.
 
     Events:
-        on_audio_data: Triggered when buffer_size is reached, providing merged audio
-        on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
-        on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's audio
-        on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's audio
+
+    - on_audio_data: Triggered when buffer_size is reached, providing merged audio
+    - on_track_audio_data: Triggered when buffer_size is reached, providing separate tracks
+    - on_user_turn_audio_data: Triggered when user turn has ended, providing that user turn's audio
+    - on_bot_turn_audio_data: Triggered when bot turn has ended, providing that bot turn's audio
 
     Audio handling:
-        - Mono output (num_channels=1): User and bot audio are mixed
-        - Stereo output (num_channels=2): User audio on left, bot audio on right
-        - Automatic resampling of incoming audio to match desired sample_rate
-        - Silence insertion for non-continuous audio streams
-        - Buffer synchronization between user and bot audio
+
+    - Mono output (num_channels=1): User and bot audio are mixed
+    - Stereo output (num_channels=2): User audio on left, bot audio on right
+    - Automatic resampling of incoming audio to match desired sample_rate
+    - Silence insertion for non-continuous audio streams
+    - Buffer synchronization between user and bot audio
     """
 
     def __init__(

@@ -50,7 +50,8 @@ def setup_tracing(
     Returns:
         True if setup was successful, False otherwise.
 
-    Example:
+    Example::
+
         # With OTLP exporter
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 

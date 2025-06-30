@@ -138,6 +138,7 @@ class PatternPairAggregator(BaseTextAggregator):
 
         Returns:
             Tuple of (processed_text, was_modified) where:
+
             - processed_text is the text after processing patterns
             - was_modified indicates whether any changes were made
         """

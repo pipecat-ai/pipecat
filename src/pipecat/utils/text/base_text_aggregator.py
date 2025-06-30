@@ -50,6 +50,7 @@ class BaseTextAggregator(ABC):
         it's ready to be processed, or None otherwise.
 
         Subclasses should implement their specific logic for:
+
         - How to combine new text with existing accumulated text
         - When to consider the aggregated text ready for processing
         - What criteria determine text completion (e.g., sentence boundaries)

@@ -29,22 +29,7 @@ def _warn_deprecated_access(globals: Dict[str, Any], attr, old: str, new: str):
 
 
 class DeprecatedModuleProxy:
-    """Proxy class to handle access to deprecated modules.
-
-    This class is used to redirect access from an old module to a new one,
-    while issuing a deprecation warning. It should be used in the `__init__.py` of a module
-    that has been renamed or moved, to ensure that users are informed about
-    the change when they try to access the old module.
-    """
-
     def __init__(self, globals: Dict[str, Any], old: str, new: str):
-        """Initialize the DeprecatedModuleProxy.
-
-        Args:
-            globals (Dict[str, Any]): The globals dictionary of the module.
-            old (str): The name of the old module.
-            new (str): The name of the new module to redirect to.
-        """
         self._globals = globals
         self._old = old
         self._new = new

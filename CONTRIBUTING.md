@@ -71,6 +71,21 @@ We follow Google-style docstrings with these specific conventions:
 - Use `Parameters:` section to document each enum value and its meaning
 - No `__init__` docstring (Enums don't have custom constructors)
 
+**Code Examples in Docstrings:**
+
+- Use `Examples:` as a section header for multiple examples
+- Use descriptive text followed by double colons (`::`) for each example
+- **Always include a blank line after the `::"`**
+- Indent all code consistently within each block
+- Separate multiple examples with blank lines for readability
+
+**Lists and Bullets in Docstrings:**
+
+- Use dashes (`-`) for bullet points, not asterisks (`*`)
+- **Add a blank line before bullet lists** when they follow a colon
+- Use section headers like "Supported features:" or "Behavior:" before lists
+- For complex nested information, consider using paragraph format instead
+
 #### Examples:
 
 ```python
@@ -80,6 +95,12 @@ class MyService(BaseService):
 
     Provides detailed explanation of the service's functionality,
     key features, and usage patterns.
+
+    Supported features:
+
+    - Feature one with detailed explanation
+    - Feature two with additional context
+    - Feature three for advanced use cases
     """
 
     def __init__(self, param1: str, param2: bool = True, **kwargs):
@@ -126,6 +147,34 @@ class ConfigParams:
     host: str
     port: int = 8080
     timeout: float = 30.0
+
+# Dataclass with code examples
+@dataclass
+class MessageFrame:
+    """Frame containing messages in OpenAI format.
+
+    Supports both simple and content list message formats.
+
+    Examples:
+        Simple format::
+
+            [
+                {"role": "user", "content": "Hello"},
+                {"role": "assistant", "content": "Hi there!"}
+            ]
+
+        Content list format::
+
+            [
+                {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
+                {"role": "assistant", "content": [{"type": "text", "text": "Hi there!"}]}
+            ]
+
+    Parameters:
+        messages: List of messages in OpenAI format.
+    """
+
+    messages: List[dict]
 
 # Enum class
 class Status(Enum):

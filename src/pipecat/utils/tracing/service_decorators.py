@@ -102,6 +102,7 @@ def traced_tts(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     """Trace TTS service methods with TTS-specific attributes.
 
     Automatically captures and records:
+
     - Service name and model information
     - Voice ID and settings
     - Character count and text content
@@ -218,6 +219,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     """Trace STT service methods with transcription attributes.
 
     Automatically captures and records:
+
     - Service name and model information
     - Transcription text and final status
     - Language information
@@ -295,6 +297,7 @@ def traced_llm(func: Optional[Callable] = None, *, name: Optional[str] = None) -
     """Trace LLM service methods with LLM-specific attributes.
 
     Automatically captures and records:
+
     - Service name and model information
     - Context content and messages
     - Tool configurations
@@ -499,6 +502,7 @@ def traced_gemini_live(operation: str) -> Callable:
     """Trace Gemini Live service methods with operation-specific attributes.
 
     This decorator automatically captures relevant information based on the operation type:
+
     - llm_setup: Configuration, tools definitions, and system instructions
     - llm_tool_call: Function call information
     - llm_tool_result: Function execution results
@@ -803,6 +807,7 @@ def traced_openai_realtime(operation: str) -> Callable:
     """Trace OpenAI Realtime service methods with operation-specific attributes.
 
     This decorator automatically captures relevant information based on the operation type:
+
     - llm_setup: Session configuration and tools
     - llm_request: Context and input messages
     - llm_response: Usage metadata, output, and function calls

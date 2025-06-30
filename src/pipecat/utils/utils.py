@@ -26,7 +26,8 @@ def obj_id() -> int:
     Returns:
         A unique integer identifier that increments globally across all objects.
 
-    Examples:
+    Examples::
+
         >>> obj_id()
         0
         >>> obj_id()
@@ -47,7 +48,8 @@ def obj_count(obj) -> int:
     Returns:
         A unique integer count that increments per class type.
 
-    Examples:
+    Examples::
+
         >>> obj_count(object())
         0
         >>> obj_count(object())

@@ -137,6 +137,7 @@ ignore = [
 "**/__init__.py" = ["D104"]
 # Skip specific rules for generated protobuf files
 "**/*_pb2.py" = ["D"]
+"src/pipecat/services/__init__.py" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

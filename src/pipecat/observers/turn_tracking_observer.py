@@ -34,9 +34,11 @@ class TurnTrackingObserver(BaseObserver):
     interruptions, timeouts, and maintains turn state throughout the pipeline.
 
     Turn tracking logic:
+
     - The first turn starts immediately when the pipeline starts (StartFrame)
     - Subsequent turns start when the user starts speaking
     - A turn ends when the bot stops speaking and either:
+
       - The user starts speaking again
       - A timeout period elapses with no more bot speech
     """

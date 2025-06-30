@@ -170,6 +170,7 @@ class PipelineTask(BasePipelineTask):
     and observer integration.
 
     Event handlers available:
+
     - on_frame_reached_upstream: Called when upstream frames reach the source
     - on_frame_reached_downstream: Called when downstream frames reach the sink
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
@@ -178,7 +179,8 @@ class PipelineTask(BasePipelineTask):
     - on_pipeline_ended: Called when pipeline ends with EndFrame
     - on_pipeline_cancelled: Called when pipeline is cancelled
 
-    Example usage:
+    Example::
+
         @task.event_handler("on_frame_reached_upstream")
         async def on_frame_reached_upstream(task, frame):
             ...

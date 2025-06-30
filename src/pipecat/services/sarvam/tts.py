@@ -59,8 +59,8 @@ class SarvamTTSService(TTSService):
     Indian languages. Provides control over voice characteristics like pitch, pace,
     and loudness.
 
-    Example:
-        ```python
+    Example::
+
         tts = SarvamTTSService(
             api_key="your-api-key",
             voice_id="anushka",
@@ -72,7 +72,6 @@ class SarvamTTSService(TTSService):
                 pace=1.2
             )
         )
-        ```
     """
 
     class InputParams(BaseModel):

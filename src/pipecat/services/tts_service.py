@@ -549,12 +549,11 @@ class WebsocketTTSService(TTSService, WebsocketService):
     Event handlers:
         on_connection_error: Called when a websocket connection error occurs.
 
-    Example:
-        ```python
+    Example::
+
         @tts.event_handler("on_connection_error")
         async def on_connection_error(tts: TTSService, error: str):
             logger.error(f"TTS connection error: {error}")
-        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -622,12 +621,11 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
     Event handlers:
         on_connection_error: Called when a websocket connection error occurs.
 
-    Example:
-        ```python
+    Example::
+
         @tts.event_handler("on_connection_error")
         async def on_connection_error(tts: TTSService, error: str):
             logger.error(f"TTS connection error: {error}")
-        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
