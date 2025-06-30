@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for providing "direct" functions, which don't need an
+  accompanying `FlowsFunctionSchema` or function definition dict. Instead,
+  metadata (i.e. `name`, `description`, `properties`, and `required`) are
+  automatically extracted from a combination of the function signature and
+  docstring.
+
+  Usage:
+
+  ```python
+  # "Direct" function
+  # `params` must be the first parameter
+  async def do_something(params: FunctionCallParams, foo: int, bar: str = ""):
+    """
+    Do something interesting.
+
+    Args:
+      foo (int): The foo to do something interesting with.
+      bar (string): The bar to do something interesting with.
+    """
+
+    result = await process(foo, bar)
+    await params.result_callback({"result": result})
+
+  # ...
+
+  llm.register_direct_function(do_something)
+
+  # ...
+
+  tools = ToolsSchema(standard_tools=[do_something])
+  ```
+
 - Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
   if you have a coroutine that is waiting for a result and that takes a long
   time, you will need to wrap it with `watchdog_coroutine()` so the watchdog
