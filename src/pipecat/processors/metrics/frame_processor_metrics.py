@@ -165,9 +165,12 @@ class FrameProcessorMetrics(BaseObject):
         Returns:
             MetricsFrame containing LLM usage data.
         """
-        logger.debug(
-            f"{self._processor_name()} prompt tokens: {tokens.prompt_tokens}, completion tokens: {tokens.completion_tokens}"
-        )
+        logstr = f"{self._processor_name()} prompt tokens: {tokens.prompt_tokens}, completion tokens: {tokens.completion_tokens}"
+        if tokens.cache_read_input_tokens:
+            logstr += f", cache read input tokens: {tokens.cache_read_input_tokens}"
+        if tokens.reasoning_tokens:
+            logstr += f", reasoning tokens: {tokens.reasoning_tokens}"
+        logger.debug(logstr)
         value = LLMUsageMetricsData(
             processor=self._processor_name(), model=self._model_name(), value=tokens
         )
