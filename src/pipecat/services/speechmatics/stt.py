@@ -14,12 +14,16 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from loguru import logger
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
+    StartInterruptionFrame,
+    StopInterruptionFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -325,12 +329,9 @@ class SpeechmaticsSTTService(STTService):
         # Current utterance speech data
         self._speech_fragments: list[SpeechFragment] = []
 
-        # Frames to intercept
-        self._intercept_frames: list[type[Frame]] = []
-
-        # Prevent Pipecat VAD from prematurely triggering end of utterance
+        # Provide VAD events
         if self._enable_vad:
-            self._intercept_frames.append(UserStoppedSpeakingFrame)
+            self._is_speaking = False
 
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
@@ -364,17 +365,17 @@ class SpeechmaticsSTTService(STTService):
             ),
         )
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Handle frames in the pipeline."""
-        logger.debug(f"Processing frame: {frame}")
-        # Frames to trap
-        for frame_type in self._intercept_frames:
-            if isinstance(frame, frame_type):
-                logger.debug(f"Intercepted frame: {frame}")
-                return
+    # async def process_frame(self, frame: Frame, direction: FrameDirection):
+    #     """Handle frames in the pipeline."""
+    #     logger.debug(f"Processing frame: {frame}")
+    #     # Frames to trap
+    #     for frame_type in self._intercept_frames:
+    #         if isinstance(frame, frame_type):
+    #             logger.debug(f"Intercepted frame: {frame}")
+    #             return
 
-        # Pass through pipeline
-        await super().process_frame(frame, direction)
+    #     # Pass through pipeline
+    #     await super().process_frame(frame, direction)
 
     async def _connect(self) -> None:
         """Connect to the STT service."""
@@ -491,13 +492,30 @@ class SpeechmaticsSTTService(STTService):
         asyncio.create_task(self._send_frames())
 
     async def _send_frames(self, finalized: bool = False) -> None:
-        """Send frames to the pipeline."""
+        """Send frames to the pipeline.
+
+        Send speech frames to the pipeline. If VAD is enabled, then this will
+        also send an interruption and user started speaking frames. When the
+        final transcript is received, then this will send a user stopped speaking
+        and stop interruption frames.
+
+        Args:
+            finalized: Whether the data is final or partial.
+        """
         # Get speech frames (InterimTranscriptionFrame)
-        frames = self._get_frames_from_fragments()
+        speech_frames = self._get_frames_from_fragments()
 
         # Skip if no frames
-        if not frames:
+        if not speech_frames:
             return
+
+        # Frames to send
+        frames = []
+
+        # speech started
+        if self._enable_vad and not self._is_speaking:
+            frames.extend([BotInterruptionFrame(), UserStartedSpeakingFrame()])
+            self._is_speaking = True
 
         # If final, then re=parse into TranscriptionFrame
         if finalized:
@@ -506,17 +524,26 @@ class SpeechmaticsSTTService(STTService):
             self._speech_fragments.clear()
 
             # Transform frames
-            frames = [
-                UserStoppedSpeakingFrame(),
-                *[
+            frames.extend(
+                [
                     TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
-                    for frame in frames
-                ],
-            ]
+                    for frame in speech_frames
+                ]
+            )
 
         # Return as interim results
         else:
-            frames = [InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in frames]
+            frames.extend(
+                [
+                    InterimTranscriptionFrame(**frame._as_frame_attributes())
+                    for frame in speech_frames
+                ]
+            )
+
+        # Add user stopped speaking
+        if self._enable_vad and finalized and self._is_speaking:
+            frames.extend([StopInterruptionFrame(), UserStoppedSpeakingFrame()])
+            self._is_speaking = False
 
         # Send the frames back to pipecat
         for frame in frames:
