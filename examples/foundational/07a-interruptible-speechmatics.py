@@ -13,6 +13,9 @@ from loguru import logger
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_response import (
+    LLMUserAggregatorParams,
+)
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
@@ -83,7 +86,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     ]
 
     context = OpenAILLMContext(messages)
-    context_aggregator = llm.create_context_aggregator(context)
+    context_aggregator = llm.create_context_aggregator(
+        context, user_params=LLMUserAggregatorParams(aggregation_timeout=0.001)
+    )
 
     pipeline = Pipeline(
         [
