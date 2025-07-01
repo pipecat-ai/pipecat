@@ -1,3 +1,17 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""Direct function wrapper utilities for LLM function calling.
+
+This module provides utilities for wrapping "direct" functions that handle LLM
+function calls. Direct functions have their metadata automatically extracted
+from function signatures and docstrings, allowing them to be used without
+manual configuration.
+"""
+
 import inspect
 import types
 from typing import (
@@ -29,29 +43,58 @@ class DirectFunction(Protocol):
     `FunctionSchema`s or in provider-specific formats).
     """
 
-    async def __call__(self, params: "FunctionCallParams", **kwargs: Any) -> None: ...
+    async def __call__(self, params: "FunctionCallParams", **kwargs: Any) -> None:
+        """Execute the direct function.
+
+        Args:
+            params: Function call parameters from the LLM service.
+            **kwargs: Additional keyword arguments passed to the function.
+        """
+        ...
 
 
 class BaseDirectFunctionWrapper:
-    """Base class for a wrapper around a DirectFunction that:
-    - extracts metadata from the function signature and docstring
-    - using that metadata, generates a corresponding FunctionSchema
+    """Base class for a wrapper around a DirectFunction.
+
+    Provides functionality to:
+
+    - extract metadata from the function signature and docstring
+    - use that metadata to generate a corresponding FunctionSchema
     """
 
-    @classmethod
-    def special_first_param_name(cls) -> str:
-        """The name of the "special" first function parameter that is ignored by the metadata
-        extraction, as it's not relevant to the LLM.
-        """
-        raise NotImplementedError("Subclasses must define the special first parameter name.")
-
     def __init__(self, function: Callable):
+        """Initialize the direct function wrapper.
+
+        Args:
+            function: The function to wrap and extract metadata from.
+        """
         self.__class__.validate_function(function)
         self.function = function
         self._initialize_metadata()
 
     @classmethod
+    def special_first_param_name(cls) -> str:
+        """Get the name of the special first function parameter.
+
+        The special first parameter is ignored by metadata extraction as it's
+        not relevant to the LLM (e.g., 'params' for FunctionCallParams).
+
+        Returns:
+            The name of the special first parameter.
+        """
+        raise NotImplementedError("Subclasses must define the special first parameter name.")
+
+    @classmethod
     def validate_function(cls, function: Callable) -> None:
+        """Validate that the function meets direct function requirements.
+
+        Args:
+            function: The function to validate.
+
+        Raises:
+            Exception: If function doesn't meet requirements (not async, missing
+                parameters, incorrect first parameter name).
+        """
         if not inspect.iscoroutinefunction(function):
             raise Exception(f"Direct function {function.__name__} must be async")
         params = list(inspect.signature(function).parameters.items())
@@ -67,6 +110,11 @@ class BaseDirectFunctionWrapper:
             )
 
     def to_function_schema(self) -> FunctionSchema:
+        """Convert the wrapped function to a FunctionSchema.
+
+        Returns:
+            A FunctionSchema instance with extracted metadata.
+        """
         return FunctionSchema(
             name=self.name,
             description=self.description,
@@ -75,6 +123,7 @@ class BaseDirectFunctionWrapper:
         )
 
     def _initialize_metadata(self):
+        """Initialize metadata from function signature and docstring."""
         # Get function name
         self.name = self.function.__name__
 
@@ -94,16 +143,18 @@ class BaseDirectFunctionWrapper:
         self, func: Callable, docstring_params: List[docstring_parser.DocstringParam]
     ) -> Tuple[Dict[str, Any], List[str]]:
         """Get function parameters as a dictionary of JSON schemas and a list of required parameters.
+
         Ignore the first parameter, as it's expected to be the "special" one.
 
         Args:
-            func: Function to get parameters from
-            docstring_params: List of parameters extracted from the function's docstring
+            func: Function to get parameters from.
+            docstring_params: List of parameters extracted from the function's docstring.
 
         Returns:
             A tuple containing:
-                - A dictionary mapping each function parameter to its JSON schema
-                - A list of required parameter names
+
+            - A dictionary mapping each function parameter to its JSON schema
+            - A list of required parameter names
         """
         sig = inspect.signature(func)
         hints = get_type_hints(func)
@@ -210,15 +261,32 @@ class BaseDirectFunctionWrapper:
 
 
 class DirectFunctionWrapper(BaseDirectFunctionWrapper):
-    """Wrapper around a DirectFunction that:
-    - extracts metadata from the function signature and docstring
-    - generates a corresponding FunctionSchema
-    - helps with function invocation
+    """Wrapper around a DirectFunction for LLM function calling.
+
+    This class:
+
+    - Extracts metadata from the function signature and docstring
+    - Generates a corresponding FunctionSchema
+    - Helps with function invocation
     """
 
     @classmethod
     def special_first_param_name(cls) -> str:
+        """Get the special first parameter name for direct functions.
+
+        Returns:
+            The string "params" which is expected as the first parameter.
+        """
         return "params"
 
     async def invoke(self, args: Mapping[str, Any], params: "FunctionCallParams"):
+        """Invoke the wrapped function with the provided arguments.
+
+        Args:
+            args: Arguments to pass to the function.
+            params: Function call parameters from the LLM service.
+
+        Returns:
+            The result of the function call.
+        """
         return await self.function(params=params, **args)
