@@ -16,6 +16,7 @@ formats).
 import inspect
 import types
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -33,6 +34,9 @@ from typing import (
 import docstring_parser
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
+
+if TYPE_CHECKING:
+    from pipecat.services.llm_service import FunctionCallParams
 
 
 class DirectFunction(Protocol):
