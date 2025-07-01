@@ -291,7 +291,7 @@ class FalSTTService(SegmentedSTTService):
                     logger.debug(f"Transcription: [{text}]")
                     yield TranscriptionFrame(
                         text,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         Language(self._settings["language"]),
                         result=response,

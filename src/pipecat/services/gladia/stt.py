@@ -567,7 +567,7 @@ class GladiaSTTService(STTService):
                             await self.push_frame(
                                 TranscriptionFrame(
                                     transcript,
-                                    "",
+                                    self._user_id,
                                     time_now_iso8601(),
                                     language,
                                     result=content,
@@ -582,7 +582,7 @@ class GladiaSTTService(STTService):
                             await self.push_frame(
                                 InterimTranscriptionFrame(
                                     transcript,
-                                    "",
+                                    self._user_id,
                                     time_now_iso8601(),
                                     language,
                                     result=content,
