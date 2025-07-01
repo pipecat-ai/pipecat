@@ -62,6 +62,7 @@ class WatchdogEvent(asyncio.Event):
                 self._manager.task_reset_watchdog()
 
     def clear(self):
+        """Clear the event while resetting watchdog timer."""
         if self._manager.task_watchdog_enabled:
             self._manager.task_reset_watchdog()
         super().clear()
