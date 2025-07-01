@@ -32,7 +32,6 @@ from typing import (
 import docstring_parser
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.services.llm_service import FunctionCallParams
 
 
 class DirectFunction(Protocol):
