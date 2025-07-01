@@ -9,7 +9,8 @@
 This module provides utilities for wrapping "direct" functions that handle LLM
 function calls. Direct functions have their metadata automatically extracted
 from function signatures and docstrings, allowing them to be used without
-manual configuration.
+accompanying configurations (as FunctionSchemas or in provider-specific
+formats).
 """
 
 import inspect

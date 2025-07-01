@@ -306,7 +306,8 @@ class LLMService(AIService):
         """Register a direct function handler for LLM function calls.
 
         Direct functions have their metadata automatically extracted from their
-        signature and docstring, eliminating the need for manual configuration.
+        signature and docstring, eliminating the need for accompanying
+        configurations (as FunctionSchemas or in provider-specific formats).
 
         Args:
             handler: The direct function to register. Must follow DirectFunction protocol.
