@@ -14,13 +14,17 @@ from urllib.parse import urlencode
 from loguru import logger
 
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 
@@ -122,6 +126,42 @@ class AudioBuffer:
 
 
 @dataclass
+class DiarizationKnownSpeakers:
+    """Known speakers for speaker diarization.
+
+    Attributes:
+        speaker_id: The ID of the speaker.
+        centroids: One or more centroids for the speaker.
+    """
+
+    speaker_id: str
+    centroids: list[str]
+
+
+@dataclass
+class DiarizationConfig:
+    """Configuration for speaker diarization.
+
+    Attributes:
+        enable: Whether to enable speaker diarization. Defaults to `False`.
+        max_speakers: Maximum number of speakers. Defaults to `4`.
+        speaker_sensitivity: Speaker sensitivity. Defaults to `None`.
+        prefer_current_speaker: Whether to prefer the current speaker. Defaults to `None`.
+        ignore_speakers: List of speakers to ignore.
+        passive_speakers: List of speakers to consider passive.
+        known_speakers: List of known speakers.
+    """
+
+    enable: bool = False
+    max_speakers: int = 4
+    speaker_sensitivity: Optional[float] = None
+    prefer_current_speaker: Optional[bool] = None
+    ignore_speakers: list[str] = field(default_factory=list)
+    passive_speakers: list[str] = field(default_factory=list)
+    known_speakers: list[DiarizationKnownSpeakers] = field(default_factory=list)
+
+
+@dataclass
 class SpeechFragment:
     """Fragment of an utterance.
 
@@ -131,6 +171,8 @@ class SpeechFragment:
         language: Language of the fragment. Defaults to `Language.EN`.
         is_eos: Whether the fragment is the end of a sentence. Defaults to `False`.
         is_final: Whether the fragment is the final fragment. Defaults to `False`.
+        is_disfluency: Whether the fragment is a disfluency. Defaults to `False`.
+        is_punctuation: Whether the fragment is a punctuation. Defaults to `False`.
         attaches_to: Whether the fragment attaches to the previous or next fragment (punctuation). Defaults to empty string.
         content: Content of the fragment. Defaults to empty string.
         speaker: Speaker of the fragment (if diarization is enabled). Defaults to `None`.
@@ -143,6 +185,8 @@ class SpeechFragment:
     language: Language = Language.EN
     is_eos: bool = False
     is_final: bool = False
+    is_disfluency: bool = False
+    is_punctuation: bool = False
     attaches_to: str = ""
     content: str = ""
     speaker: Optional[str] = None
@@ -156,12 +200,14 @@ class SpeakerFragments:
 
     Attributes:
         speaker_id: The ID of the speaker.
+        is_passive: Whether the speaker is passive (does not emit frame).
         timestamp: The timestamp of the frame.
         language: The language of the frame.
         fragments: The list of SpeechFragment items.
     """
 
     speaker_id: Optional[str] = None
+    is_passive: bool = False
     timestamp: Optional[str] = None
     language: Optional[Language] = None
     fragments: list[SpeechFragment] = field(default_factory=list)
@@ -221,22 +267,23 @@ class SpeechmaticsSTTService(STTService):
 
     Args:
         api_key: Speechmatics API key for authentication.
+        operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
+        base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
         language: Language code for transcription. Defaults to `None`.
         language_code: Language code string for transcription. Defaults to `None`.
-        base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
         domain: Domain for Speechmatics API. Defaults to `None`.
         output_locale: Output locale for transcription, e.g. `Language.EN_GB`. Defaults to `None`.
         output_locale_code: Output locale code for transcription. Defaults to `None`.
-        enable_partials: Enable partial transcription results. Defaults to `True`.
         max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
+        enable_partials: Enable partial transcriptions. Defaults to `True`.
         sample_rate: Audio sample rate in Hz. Defaults to `16000`.
         chunk_size: Audio chunk size for streaming. Defaults to `256`.
         audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
+        enable_vad: Enable VAD to trigger end of utterance detection. Defaults to `False`.
         end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
         operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
-        enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
         text_format: Wrapper for speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
-        max_speakers: Maximum number of speakers to detect. Defaults to `None` (auto-detect).
+        diarization_config: Configuration for speaker diarization. Defaults to `None`.
         transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
         **kwargs: Additional arguments passed to STTService.
     """
@@ -245,22 +292,22 @@ class SpeechmaticsSTTService(STTService):
         self,
         *,
         api_key: str,
+        operating_point: OperatingPoint = OperatingPoint.ENHANCED,
+        base_url: str = "wss://eu2.rt.speechmatics.com/v2",
         language: Optional[Language] = None,
         language_code: Optional[str] = None,
-        base_url: str = "wss://eu2.rt.speechmatics.com/v2",
         domain: Optional[str] = None,
         output_locale: Optional[Language] = None,
         output_locale_code: Optional[str] = None,
-        enable_partials: bool = True,
         max_delay: float = 2.0,
+        enable_partials: bool = True,
         sample_rate: Optional[int] = 16000,
         chunk_size: int = 256,
         audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
+        enable_vad: bool = False,
         end_of_utterance_silence_trigger: Optional[float] = None,
-        operating_point: OperatingPoint = OperatingPoint.ENHANCED,
-        enable_speaker_diarization: bool = False,
+        diarization_config: DiarizationConfig = DiarizationConfig(),
         text_format: str = "<{speaker_id}>{text}</{speaker_id}>",
-        max_speakers: Optional[int] = None,
         transcription_config: Optional[TranscriptionConfig] = None,
         **kwargs,
     ):
@@ -274,16 +321,16 @@ class SpeechmaticsSTTService(STTService):
         self._domain: Optional[str] = domain
         self._output_locale: Optional[Language] = output_locale
         self._output_locale_code: Optional[str] = None
-        self._enable_partials: bool = enable_partials
         self._max_delay: float = max_delay
+        self._enable_partials: bool = enable_partials
         self._sample_rate: int = sample_rate
         self._chunk_size: int = chunk_size
         self._audio_encoding: AudioEncoding = audio_encoding
+        self._enable_vad: bool = enable_vad
         self._end_of_utterance_silence_trigger: Optional[float] = end_of_utterance_silence_trigger
         self._operating_point: OperatingPoint = operating_point
-        self._enable_speaker_diarization: bool = enable_speaker_diarization
         self._text_format: str = text_format
-        self._max_speakers: Optional[int] = max_speakers
+        self._diarization_config: Optional[DiarizationConfig] = diarization_config
 
         # Check we have required attributes
         if not self._api_key:
@@ -317,6 +364,13 @@ class SpeechmaticsSTTService(STTService):
         # Current utterance speech data
         self._speech_fragments: list[SpeechFragment] = []
 
+        # Speaking states
+        self._is_speaking: bool = False
+
+        # Performance metrics
+        self._base_time: Optional[datetime.datetime] = None
+        self._total_time: Optional[datetime.timedelta] = None
+
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
         await super().start(frame)
@@ -336,6 +390,18 @@ class SpeechmaticsSTTService(STTService):
         """Adds audio to the audio buffer and yields None."""
         self._audio_buffer.write_audio(audio)
         yield None
+
+    def update_diarization(self, diarization_config: DiarizationConfig) -> None:
+        """Updates the diarization configuration.
+
+        This can update the speakers to listen to or ignore during an in-flight
+        transcription. This cannot change whether diarization is enabled or
+        the number of speakers.
+
+        Args:
+            diarization_config: Diarization configuration to use.
+        """
+        self._diarization_config = diarization_config
 
     async def _run_client(self) -> None:
         """Runs the Speechmatics client in a thread."""
@@ -408,7 +474,7 @@ class SpeechmaticsSTTService(STTService):
                 domain=self._domain,
                 output_locale=self._output_locale_code,
                 operating_point=self._operating_point,
-                diarization="speaker" if self._enable_speaker_diarization else None,
+                diarization="speaker" if self._diarization_config.enable else None,
                 enable_partials=self._enable_partials,
                 max_delay=self._max_delay or 2.0,
             )
@@ -421,7 +487,7 @@ class SpeechmaticsSTTService(STTService):
                 transcription_config.output_locale = self._output_locale_code
             if self._operating_point:
                 transcription_config.operating_point = self._operating_point
-            if self._enable_speaker_diarization:
+            if self._diarization_config.enable:
                 transcription_config.diarization = "speaker"
             if self._enable_partials:
                 transcription_config.enable_partials = self._enable_partials
@@ -429,9 +495,11 @@ class SpeechmaticsSTTService(STTService):
                 transcription_config.max_delay = self._max_delay
 
         # Diarization
-        if self._enable_speaker_diarization and self._max_speakers:
+        if self._diarization_config.enable:
             transcription_config.speaker_diarization_config = SpeakerDiarizationConfig(
-                max_speakers=self._max_speakers,
+                max_speakers=self._diarization_config.max_speakers,
+                speaker_sensitivity=self._diarization_config.speaker_sensitivity,
+                prefer_current_speaker=self._diarization_config.prefer_current_speaker,
             )
 
         # End of Utterance
@@ -481,29 +549,48 @@ class SpeechmaticsSTTService(STTService):
         if not speech_frames:
             return
 
-        # If final, then re=parse into TranscriptionFrame
+        # Frames to send
+        upstream_frames: list[Frame] = []
+        downstream_frames: list[Frame] = []
+
+        # If VAD is enabled, then send a speaking frame
+        if self._enable_vad and not self._is_speaking:
+            self._is_speaking = True
+            upstream_frames += [BotInterruptionFrame()]
+            downstream_frames += [UserStartedSpeakingFrame()]
+
+        # If final, then re-parse into TranscriptionFrame
         if finalized:
             # Reset the speech fragments
             self._speech_fragments.clear()
 
             # Transform frames
-            frames = [
+            downstream_frames += [
                 TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
                 for frame in speech_frames
             ]
 
             # Log transcript(s)
-            logger.debug(f"Finalized transcript: {[f.text for f in frames]}")
+            logger.debug(f"Finalized transcript: {[f.text for f in downstream_frames]}")
 
         # Return as interim results
         else:
-            frames = [
+            downstream_frames += [
                 InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in speech_frames
             ]
 
-        # Send the frames back to pipecat
-        for frame in frames:
-            await self.push_frame(frame)
+        # If VAD is enabled, then send a speaking frame
+        if self._enable_vad and self._is_speaking and finalized:
+            self._is_speaking = False
+            downstream_frames += [UserStoppedSpeakingFrame()]
+
+        # Send UPSTREAM frames
+        for frame in upstream_frames:
+            await self.push_frame(frame, FrameDirection.UPSTREAM)
+
+        # Send the DOWNSTREAM frames
+        for frame in downstream_frames:
+            await self.push_frame(frame, FrameDirection.DOWNSTREAM)
 
     def _add_speech_fragments(self, message: dict[str, Any], is_final: bool = False) -> bool:
         """Takes a new Partial or Final from the STT engine.
