@@ -18,67 +18,87 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.gemini_multimodal_live.gemini import (
-    GeminiMultimodalLiveLLMService,
     GeminiMultimodalLiveContext,
+    GeminiMultimodalLiveLLMService,
 )
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
 
+# We store functions so objects (e.g. SileroVADAnalyzer) don't get
+# instantiated. The function will be called when the desired transport gets
+# selected.
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=False,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=False,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+        video_in_enabled=False,
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
+    ),
+}
+
+
+sample_file_path = ""
+
+
 async def create_sample_file():
-    """Create a sample text file for testing the File API."""
-    content = """# Sample Document for Gemini File API Test
+    if sample_file_path:
+        return sample_file_path
+    else:
+        """Create a sample text file for testing the File API."""
+        content = """# Sample Document for Gemini File API Test
 
-This is a test document to demonstrate the Gemini File API functionality.
+    This is a test document to demonstrate the Gemini File API functionality.
 
-## Key Information:
-- This document was created for testing purposes
-- It contains information about AI assistants
-- The document should be analyzed by Gemini
-- The secret phrase for the test is "Pineapple Pizza"
+    ## Key Information:
+    - This document was created for testing purposes
+    - It contains information about AI assistants
+    - The document should be analyzed by Gemini
+    - The secret phrase for the test is "Pineapple Pizza"
 
-## AI Assistant Capabilities:
-1. Natural language processing
-2. File analysis and understanding
-3. Context-aware conversations
-4. Multi-modal interactions
+    ## AI Assistant Capabilities:
+    1. Natural language processing
+    2. File analysis and understanding
+    3. Context-aware conversations
+    4. Multi-modal interactions
 
-## Conclusion:
-This document serves as a test case for the Gemini File API integration with Pipecat.
-The AI should be able to reference and discuss the contents of this file.
-"""
-    
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-        f.write(content)
-        return f.name
+    ## Conclusion:
+    This document serves as a test case for the Gemini File API integration with Pipecat.
+    The AI should be able to reference and discuss the contents of this file.
+    """
+
+        # Create a temporary file
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write(content)
+            return f.name
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting File API bot")
 
     # Create a sample file to upload
     sample_file_path = await create_sample_file()
     logger.info(f"Created sample file: {sample_file_path}")
 
-    # Initialize the SmallWebRTCTransport with the connection
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            video_in_enabled=False,
-            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
-        ),
-    )
-
     system_instruction = """
     You are a helpful AI assistant with access to a document that has been uploaded for analysis.
     
-    The document contains test information including a secret phrase. You should be able to:
+    The document contains test information.
+    You should be able to:
     - Reference and discuss the contents of the uploaded document
     - Answer questions about what's in the document
     - Use the information from the document in our conversation
@@ -100,15 +120,14 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     file_info = None
     try:
         file_info = await llm.file_api.upload_file(
-            sample_file_path, 
-            display_name="Sample Test Document"
+            sample_file_path, display_name="Sample Test Document"
         )
         logger.info(f"File uploaded successfully: {file_info['file']['name']}")
-        
+
         # Get file URI and mime type
         file_uri = file_info["file"]["uri"]
         mime_type = "text/plain"
-        
+
         # Create context with file reference
         context = OpenAILLMContext(
             [
@@ -117,22 +136,19 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
                     "content": [
                         {
                             "type": "text",
-                            "text": "Greet the user and let them know you have access to a document they can ask you about. Mention that you can discuss its contents."
+                            "text": "Greet the user and let them know you have access to a document they can ask you about. Mention that you can discuss its contents.",
                         },
                         {
                             "type": "file_data",
-                            "file_data": {
-                                "mime_type": mime_type,
-                                "file_uri": file_uri
-                            }
-                        }
-                    ]
+                            "file_data": {"mime_type": mime_type, "file_uri": file_uri},
+                        },
+                    ],
                 }
             ]
         )
-        
+
         logger.info("File reference added to conversation context")
-        
+
     except Exception as e:
         logger.error(f"Error uploading file: {e}")
         # Continue with a basic context if file upload fails
@@ -140,7 +156,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             [
                 {
                     "role": "user",
-                    "content": "Greet the user and explain that there was an issue with file upload, but you're ready to help with other tasks."
+                    "content": "Greet the user and explain that there was an issue with file upload, but you're ready to help with other tasks.",
                 }
             ]
         )
@@ -149,13 +165,15 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
     context_aggregator = llm.create_context_aggregator(context)
 
     # Build the pipeline
-    pipeline = Pipeline([
-        transport.input(),
-        context_aggregator.user(),
-        llm,
-        transport.output(),
-        context_aggregator.assistant(),
-    ])
+    pipeline = Pipeline(
+        [
+            transport.input(),
+            context_aggregator.user(),
+            llm,
+            transport.output(),
+            context_aggregator.assistant(),
+        ]
+    )
 
     # Configure the pipeline task
     task = PipelineTask(
@@ -195,7 +213,7 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
             logger.info("Cleaned up uploaded file from Gemini")
         except Exception as e:
             logger.error(f"Error cleaning up file: {e}")
-    
+
     # Remove temporary file
     try:
         os.unlink(sample_file_path)
@@ -205,6 +223,20 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main() 
+    upload_example_file = input("""
+
+        Please pass in a TEXT filepath to test upload.
+        NOTE: Files are stored on Google's servers for 48 hours.
+
+        Press Enter to use a default test file.
+
+        text filepath : """)
+    if upload_example_file:
+        print(f"Uploading file: {upload_example_file}")
+        sample_file_path = upload_example_file.strip()
+    else:
+        print(f"Using default file")
+
+    main(run_example, transport_params=transport_params)
