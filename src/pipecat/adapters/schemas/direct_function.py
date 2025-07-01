@@ -18,6 +18,7 @@ from typing import (
 import docstring_parser
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.services.llm_service import FunctionCallParams
 
 
 class DirectFunction(Protocol):
@@ -32,8 +33,7 @@ class DirectFunction(Protocol):
 
 
 class BaseDirectFunctionWrapper:
-    """
-    Base class for a wrapper around a DirectFunction that:
+    """Base class for a wrapper around a DirectFunction that:
     - extracts metadata from the function signature and docstring
     - using that metadata, generates a corresponding FunctionSchema
     """
@@ -93,8 +93,7 @@ class BaseDirectFunctionWrapper:
     def _get_parameters_as_jsonschema(
         self, func: Callable, docstring_params: List[docstring_parser.DocstringParam]
     ) -> Tuple[Dict[str, Any], List[str]]:
-        """
-        Get function parameters as a dictionary of JSON schemas and a list of required parameters.
+        """Get function parameters as a dictionary of JSON schemas and a list of required parameters.
         Ignore the first parameter, as it's expected to be the "special" one.
 
         Args:
@@ -106,7 +105,6 @@ class BaseDirectFunctionWrapper:
                 - A dictionary mapping each function parameter to its JSON schema
                 - A list of required parameter names
         """
-
         sig = inspect.signature(func)
         hints = get_type_hints(func)
         properties = {}
@@ -141,8 +139,7 @@ class BaseDirectFunctionWrapper:
         return properties, required
 
     def _typehint_to_jsonschema(self, type_hint: Any) -> Dict[str, Any]:
-        """
-        Convert a Python type hint to a JSON Schema.
+        """Convert a Python type hint to a JSON Schema.
 
         Args:
             type_hint: A Python type hint
@@ -213,8 +210,7 @@ class BaseDirectFunctionWrapper:
 
 
 class DirectFunctionWrapper(BaseDirectFunctionWrapper):
-    """
-    Wrapper around a DirectFunction that:
+    """Wrapper around a DirectFunction that:
     - extracts metadata from the function signature and docstring
     - generates a corresponding FunctionSchema
     - helps with function invocation
