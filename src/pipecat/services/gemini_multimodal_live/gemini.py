@@ -524,8 +524,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
         """
         return True
 
-    def needs_mcp_clean_schema(self) -> bool:
-        """Check if this LLM service requires MCP schema cleaning.
+    def needs_mcp_alternate_schema(self) -> bool:
+        """Check if this LLM service requires alternate MCP schema.
 
         Google/Gemini has stricter JSON schema validation and requires
         certain properties to be removed or modified for compatibility.
