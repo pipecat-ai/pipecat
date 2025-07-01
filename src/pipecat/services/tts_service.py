@@ -805,6 +805,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     async def _stop_audio_context_task(self):
         if self._audio_context_task:
+            self._contexts_queue.cancel()
             await self.cancel_task(self._audio_context_task)
             self._audio_context_task = None
 

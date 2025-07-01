@@ -295,6 +295,9 @@ class TaskManager(BaseTaskManager):
             raise
         except Exception as e:
             logger.exception(f"{name}: unexpected exception while stopping task: {e}")
+        except BaseException as e:
+            logger.critical(f"{name}: fatal base exception while stopping task: {e}")
+            raise
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Cancels the given asyncio Task and awaits its completion with an optional timeout.
@@ -394,6 +397,10 @@ class TaskManager(BaseTaskManager):
 
         while True:
             try:
+                if task_data.task.done():
+                    logger.debug(f"{name}: task is already done, cancelling watchdog task.")
+                    break
+
                 start_time = time.time()
                 await asyncio.wait_for(timer.wait(), timeout=watchdog_timeout)
                 total_time = time.time() - start_time
@@ -417,7 +424,22 @@ class TaskManager(BaseTaskManager):
             task_data = self._tasks[name]
             if task_data.watchdog_task:
                 task_data.watchdog_task.cancel()
+                # In Python 3.10, simply calling task.cancel() looks like is not enough.
+                # Without this, some tasks appear that are never canceled.
+                # Python 3.12 handles this more gracefully, but we keep this for compatibility
+                # and to avoid "Task exception was never retrieved" warnings.
+                self.get_event_loop().create_task(
+                    self._cleanup_watchdog(name, task_data.watchdog_task)
+                )
                 task_data.watchdog_task = None
             del self._tasks[name]
         except KeyError as e:
             logger.trace(f"{name}: unable to remove task data (already removed?): {e}")
+
+    async def _cleanup_watchdog(self, name: str, watchdog_task: asyncio.Task):
+        try:
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"{name}: watchdog task raised exception: {e}")

@@ -60,3 +60,8 @@ class WatchdogEvent(asyncio.Event):
                 return True
             except asyncio.TimeoutError:
                 self._manager.task_reset_watchdog()
+
+    def clear(self):
+        if self._manager.task_watchdog_enabled:
+            self._manager.task_reset_watchdog()
+        super().clear()

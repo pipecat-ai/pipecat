@@ -1086,10 +1086,12 @@ class RTVIProcessor(FrameProcessor):
     async def _cancel_tasks(self):
         """Cancel all running tasks."""
         if self._action_task:
+            self._action_queue.cancel()
             await self.cancel_task(self._action_task)
             self._action_task = None
 
         if self._message_task:
+            self._message_queue.cancel()
             await self.cancel_task(self._message_task)
             self._message_task = None
 
