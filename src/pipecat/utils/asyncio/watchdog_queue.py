@@ -12,8 +12,16 @@ timeouts during legitimate queue operations.
 """
 
 import asyncio
+from dataclasses import dataclass
+
+from loguru import logger
 
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+
+
+@dataclass
+class WatchdogQueueCancelSentinel:
+    pass
 
 
 class WatchdogQueue(asyncio.Queue):
@@ -49,9 +57,17 @@ class WatchdogQueue(asyncio.Queue):
             The next item from the queue.
         """
         if self._manager.task_watchdog_enabled:
-            return await self._watchdog_get()
+            get_result = await self._watchdog_get()
         else:
-            return await super().get()
+            get_result = await super().get()
+
+        if isinstance(get_result, WatchdogQueueCancelSentinel):
+            logger.debug(
+                "Received WatchdogQueueCancelFrame, throwing CancelledError to force cancelling"
+            )
+            raise asyncio.CancelledError("Cancelling watchdog queue get() call.")
+        else:
+            return get_result
 
     def task_done(self):
         """Mark a task as done and reset watchdog if enabled.
@@ -61,6 +77,20 @@ class WatchdogQueue(asyncio.Queue):
         if self._manager.task_watchdog_enabled:
             self._manager.task_reset_watchdog()
         super().task_done()
+
+    def cancel(self):
+        """Ensures reliable task cancellation by preventing a common race condition.
+
+        The race condition occurs in Python 3.10+ when:
+        1. A value is put in the queue just before task cancellation
+        2. queue.get() completes before the cancellation signal is delivered
+        3. The task misses the CancelledError and continues running indefinitely
+
+        This method prevents the issue by injecting a special sentinel value that
+        forces the task to raise CancelledError when consumed, ensuring proper
+        task termination.
+        """
+        super().put_nowait(WatchdogQueueCancelSentinel())
 
     async def _watchdog_get(self):
         """Get item from queue while periodically resetting watchdog timer."""
