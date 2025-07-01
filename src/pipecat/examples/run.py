@@ -93,6 +93,15 @@ async def maybe_capture_participant_screen(
 
 
 def smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
+    """Clean up ICE candidates in SDP text for SmallWebRTC.
+
+    Args:
+        text: SDP text to clean up.
+        pattern: Pattern to match for candidate filtering.
+
+    Returns:
+        Cleaned SDP text with filtered ICE candidates.
+    """
     result = []
     lines = text.splitlines()
     for line in lines:
@@ -105,6 +114,14 @@ def smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
 
 
 def smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
+    """Remove unsupported fingerprint algorithms from SDP text.
+
+    Args:
+        text: SDP text to clean up.
+
+    Returns:
+        SDP text with sha-384 and sha-512 fingerprints removed.
+    """
     result = []
     lines = text.splitlines()
     for line in lines:
@@ -114,6 +131,15 @@ def smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
 
 
 def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
+    """Apply SDP modifications for SmallWebRTC compatibility.
+
+    Args:
+        sdp: Original SDP string.
+        host: Host address for ICE candidate filtering.
+
+    Returns:
+        Modified SDP string with fingerprint and ICE candidate cleanup.
+    """
     sdp = smallwebrtc_sdp_cleanup_fingerprints(sdp)
     sdp = smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
     return sdp
@@ -232,6 +258,9 @@ def run_example_webrtc(
 
         Args:
             app: The FastAPI application instance.
+
+        Yields:
+            Control to the FastAPI application runtime.
         """
         yield  # Run app
         coros = [pc.disconnect() for pc in pcs_map.values()]
