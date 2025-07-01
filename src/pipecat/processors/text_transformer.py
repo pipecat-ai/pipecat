@@ -19,6 +19,9 @@ class StatelessTextTransformer(FrameProcessor):
     transformation function to the text content. The function can be either
     synchronous or asynchronous (coroutine).
 
+    >>> import asyncio
+    >>> from pipecat.frames.frames import TextFrame
+    >>>
     >>> async def print_frames(aggregator, frame):
     ...     async for frame in aggregator.process_frame(frame):
     ...         print(frame.text)
