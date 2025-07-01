@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Base input transport implementation for Pipecat.
+
+This module provides the BaseInputTransport class which handles audio and video
+input processing, including VAD, turn analysis, and interruption management.
+"""
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
@@ -47,7 +53,20 @@ AUDIO_INPUT_TIMEOUT_SECS = 0.5
 
 
 class BaseInputTransport(FrameProcessor):
+    """Base class for input transport implementations.
+
+    Handles audio and video input processing including Voice Activity Detection,
+    turn analysis, audio filtering, and user interaction management. Supports
+    interruption handling and provides hooks for transport-specific implementations.
+    """
+
     def __init__(self, params: TransportParams, **kwargs):
+        """Initialize the base input transport.
+
+        Args:
+            params: Transport configuration parameters.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(**kwargs)
 
         self._params = params
@@ -115,25 +134,54 @@ class BaseInputTransport(FrameProcessor):
             self._params.video_out_color_format = self._params.camera_out_color_format
 
     def enable_audio_in_stream_on_start(self, enabled: bool) -> None:
+        """Enable or disable audio streaming on transport start.
+
+        Args:
+            enabled: Whether to start audio streaming immediately on transport start.
+        """
         logger.debug(f"Enabling audio on start. {enabled}")
         self._params.audio_in_stream_on_start = enabled
 
     async def start_audio_in_streaming(self):
+        """Start audio input streaming.
+
+        Override in subclasses to implement transport-specific audio streaming.
+        """
         pass
 
     @property
     def sample_rate(self) -> int:
+        """Get the current audio sample rate.
+
+        Returns:
+            The sample rate in Hz.
+        """
         return self._sample_rate
 
     @property
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
+        """Get the Voice Activity Detection analyzer.
+
+        Returns:
+            The VAD analyzer instance if configured, None otherwise.
+        """
         return self._params.vad_analyzer
 
     @property
     def turn_analyzer(self) -> Optional[BaseTurnAnalyzer]:
+        """Get the turn-taking analyzer.
+
+        Returns:
+            The turn analyzer instance if configured, None otherwise.
+        """
         return self._params.turn_analyzer
 
     async def start(self, frame: StartFrame):
+        """Start the input transport and initialize components.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         self._paused = False
         self._user_speaking = False
 
@@ -152,6 +200,11 @@ class BaseInputTransport(FrameProcessor):
             await self._params.audio_in_filter.start(self._sample_rate)
 
     async def stop(self, frame: EndFrame):
+        """Stop the input transport and cleanup resources.
+
+        Args:
+            frame: The end frame signaling transport shutdown.
+        """
         # Cancel and wait for the audio input task to finish.
         await self._cancel_audio_task()
         # Stop audio filter.
@@ -159,6 +212,11 @@ class BaseInputTransport(FrameProcessor):
             await self._params.audio_in_filter.stop()
 
     async def pause(self, frame: StopFrame):
+        """Pause the input transport temporarily.
+
+        Args:
+            frame: The stop frame signaling transport pause.
+        """
         self._paused = True
         # Cancel task so we clear the queue
         await self._cancel_audio_task()
@@ -166,19 +224,38 @@ class BaseInputTransport(FrameProcessor):
         self._create_audio_task()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the input transport and stop all processing.
+
+        Args:
+            frame: The cancel frame signaling immediate cancellation.
+        """
         # Cancel and wait for the audio input task to finish.
         await self._cancel_audio_task()
 
     async def set_transport_ready(self, frame: StartFrame):
-        """To be called when the transport is ready to stream."""
+        """Called when the transport is ready to stream.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         # Create audio input queue and task if needed.
         self._create_audio_task()
 
     async def push_video_frame(self, frame: InputImageRawFrame):
+        """Push a video frame downstream if video input is enabled.
+
+        Args:
+            frame: The input video frame to process.
+        """
         if self._params.video_in_enabled and not self._paused:
             await self.push_frame(frame)
 
     async def push_audio_frame(self, frame: InputAudioRawFrame):
+        """Push an audio frame to the processing queue if audio input is enabled.
+
+        Args:
+            frame: The input audio frame to process.
+        """
         if self._params.audio_in_enabled and not self._paused:
             await self._audio_in_queue.put(frame)
 
@@ -187,6 +264,12 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle transport-specific logic.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
         await super().process_frame(frame, direction)
 
         # Specific system frames
@@ -238,12 +321,14 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def _handle_bot_interruption(self, frame: BotInterruptionFrame):
+        """Handle bot interruption frames."""
         logger.debug("Bot interruption")
         if self.interruptions_allowed:
             await self._start_interruption()
             await self.push_frame(StartInterruptionFrame())
 
     async def _handle_user_interruption(self, frame: Frame):
+        """Handle user interruption events based on speaking state."""
         if isinstance(frame, UserStartedSpeakingFrame):
             logger.debug("User started speaking")
             self._user_speaking = True
@@ -281,9 +366,11 @@ class BaseInputTransport(FrameProcessor):
     #
 
     async def _handle_bot_started_speaking(self, frame: BotStartedSpeakingFrame):
+        """Update bot speaking state when bot starts speaking."""
         self._bot_speaking = True
 
     async def _handle_bot_stopped_speaking(self, frame: BotStoppedSpeakingFrame):
+        """Update bot speaking state when bot stops speaking."""
         self._bot_speaking = False
 
     #
@@ -291,16 +378,19 @@ class BaseInputTransport(FrameProcessor):
     #
 
     def _create_audio_task(self):
+        """Create the audio processing task if audio input is enabled."""
         if not self._audio_task and self._params.audio_in_enabled:
             self._audio_in_queue = asyncio.Queue()
             self._audio_task = self.create_task(self._audio_task_handler())
 
     async def _cancel_audio_task(self):
+        """Cancel and cleanup the audio processing task."""
         if self._audio_task:
             await self.cancel_task(self._audio_task)
             self._audio_task = None
 
     async def _vad_analyze(self, audio_frame: InputAudioRawFrame) -> VADState:
+        """Analyze audio frame for voice activity."""
         state = VADState.QUIET
         if self.vad_analyzer:
             state = await self.get_event_loop().run_in_executor(
@@ -309,6 +399,7 @@ class BaseInputTransport(FrameProcessor):
         return state
 
     async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState):
+        """Handle Voice Activity Detection results and generate appropriate frames."""
         new_vad_state = await self._vad_analyze(audio_frame)
         if (
             new_vad_state != vad_state
@@ -339,18 +430,21 @@ class BaseInputTransport(FrameProcessor):
         return vad_state
 
     async def _handle_end_of_turn(self):
+        """Handle end-of-turn analysis and generate prediction results."""
         if self.turn_analyzer:
             state, prediction = await self.turn_analyzer.analyze_end_of_turn()
             await self._handle_prediction_result(prediction)
             await self._handle_end_of_turn_complete(state)
 
     async def _handle_end_of_turn_complete(self, state: EndOfTurnState):
+        """Handle completion of end-of-turn analysis."""
         if state == EndOfTurnState.COMPLETE:
             await self._handle_user_interruption(UserStoppedSpeakingFrame())
 
     async def _run_turn_analyzer(
         self, frame: InputAudioRawFrame, vad_state: VADState, previous_vad_state: VADState
     ):
+        """Run turn analysis on audio frame and handle results."""
         is_speech = vad_state == VADState.SPEAKING or vad_state == VADState.STARTING
         # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
         end_of_turn_state = self._params.turn_analyzer.append_audio(frame.audio, is_speech)
@@ -361,6 +455,7 @@ class BaseInputTransport(FrameProcessor):
             await self._handle_end_of_turn()
 
     async def _audio_task_handler(self):
+        """Main audio processing task handler for VAD and turn analysis."""
         vad_state: VADState = VADState.QUIET
         while True:
             try:
@@ -399,9 +494,5 @@ class BaseInputTransport(FrameProcessor):
                 self.reset_watchdog()
 
     async def _handle_prediction_result(self, result: MetricsData):
-        """Handle a prediction result event from the turn analyzer.
-
-        Args:
-            result: The prediction result MetricsData.
-        """
+        """Handle a prediction result event from the turn analyzer."""
         await self.push_frame(MetricsFrame(data=[result]))

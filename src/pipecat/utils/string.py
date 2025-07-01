@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Text processing utilities for sentence boundary detection and tag parsing.
+
+This module provides utilities for natural language text processing including
+sentence boundary detection, email and number pattern handling, and XML-style
+tag parsing for structured text content.
+"""
+
 import re
 from typing import Optional, Sequence, Tuple
 
@@ -30,18 +37,16 @@ StartEndTags = Tuple[str, str]
 
 
 def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
-    """Replace occurrences of a substring within a matched section of a given
-    text.
+    """Replace occurrences of a substring within a matched section of text.
 
     Args:
-        text (str): The input text in which replacements will be made.
-        match (re.Match): A regex match object representing the section of text to modify.
-        old (str): The substring to be replaced.
-        new (str): The substring to replace `old` with.
+        text: The input text in which replacements will be made.
+        match: A regex match object representing the section of text to modify.
+        old: The substring to be replaced.
+        new: The substring to replace `old` with.
 
     Returns:
-        str: The modified text with the specified replacements made within the matched section.
-
+        The modified text with the specified replacements made within the matched section.
     """
     start = match.start()
     end = match.end()
@@ -51,7 +56,7 @@ def replace_match(text: str, match: re.Match, old: str, new: str) -> str:
 
 
 def match_endofsentence(text: str) -> int:
-    """Finds the position of the end of a sentence in the provided text string.
+    """Find the position of the end of a sentence in the provided text.
 
     This function processes the input text by replacing periods in email
     addresses and numbers with ampersands to prevent them from being
@@ -59,11 +64,10 @@ def match_endofsentence(text: str) -> int:
     sentence using a specified regex pattern.
 
     Args:
-        text (str): The input text in which to find the end of the sentence.
+        text: The input text in which to find the end of the sentence.
 
     Returns:
-        int: The position of the end of the sentence if found, otherwise 0.
-
+        The position of the end of the sentence if found, otherwise 0.
     """
     text = text.rstrip()
 
@@ -90,24 +94,22 @@ def parse_start_end_tags(
     current_tag: Optional[StartEndTags],
     current_tag_index: int,
 ) -> Tuple[Optional[StartEndTags], int]:
-    """Parses the given text to identify a pair of start/end tags.
+    """Parse text to identify start and end tag pairs.
 
-    If a start tag was previously found (i.e. current_tags is valid), wait for
-    the corresponding end tag.  Otherwise, wait for a start tag.
+    If a start tag was previously found (i.e., current_tag is valid), wait for
+    the corresponding end tag. Otherwise, wait for a start tag.
 
-    This function will return the index in the text that we should start parsing
+    This function returns the index in the text where parsing should continue
     in the next call and the current or new tags.
 
-    Parameters:
-    - text (str): The text to be parsed.
-    - tags (Sequence[StartEndTags]): List of tuples containing start and end tags.
-    - current_tags (Optional[StartEndTags]): The currently active tags, if any.
-    - current_tags_index (int): The current index in the text.
+    Args:
+        text: The text to be parsed.
+        tags: List of tuples containing start and end tags.
+        current_tag: The currently active tags, if any.
+        current_tag_index: The current index in the text.
 
     Returns:
-    Tuple[Optional[StartEndTags], int]: A tuple containing None or the current
-    tag and the index of the text.
-
+        A tuple containing None or the current tag and the index of the text.
     """
     # If we are already inside a tag, check if the end tag is in the text.
     if current_tag:

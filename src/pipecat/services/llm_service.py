@@ -128,13 +128,14 @@ class LLMService(AIService):
     parallel and sequential execution modes. Provides event handlers for
     completion timeouts and function call lifecycle events.
 
-    Event handlers:
-        on_completion_timeout: Called when an LLM completion timeout occurs.
-        on_function_calls_started: Called when function calls are received and
-            execution is about to start.
+    The service supports the following event handlers:
 
-    Example:
-        ```python
+    - on_completion_timeout: Called when an LLM completion timeout occurs
+    - on_function_calls_started: Called when function calls are received and
+      execution is about to start
+
+    Example::
+
         @task.event_handler("on_completion_timeout")
         async def on_completion_timeout(service):
             logger.warning("LLM completion timed out")
@@ -142,7 +143,6 @@ class LLMService(AIService):
         @task.event_handler("on_function_calls_started")
         async def on_function_calls_started(service, function_calls):
             logger.info(f"Starting {len(function_calls)} function calls")
-        ```
     """
 
     # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.

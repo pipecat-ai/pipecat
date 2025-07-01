@@ -92,7 +92,7 @@ class LLMFullResponseAggregator(FrameProcessor):
     the complete response via an event handler.
 
     The aggregator provides an "on_completion" event that fires when a full
-    completion is available:
+    completion is available::
 
         @aggregator.event_handler("on_completion")
         async def on_completion(
@@ -363,6 +363,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     This aggregator handles the complex logic of aggregating user speech transcriptions
     from STT services. It manages multiple scenarios including:
+
     - Transcriptions received between VAD events
     - Transcriptions received outside VAD events
     - Interim vs final transcriptions
@@ -654,6 +655,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
     """Assistant LLM aggregator that processes bot responses and function calls.
 
     This aggregator handles the complex logic of processing assistant responses including:
+
     - Text frame aggregation between response start/end markers
     - Function call lifecycle management
     - Context updates with timestamps

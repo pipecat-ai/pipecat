@@ -26,6 +26,10 @@ extensions = [
     "sphinx.ext.intersphinx",
 ]
 
+suppress_warnings = [
+    "autodoc.mocked_object",
+]
+
 # Napoleon settings
 napoleon_google_docstring = True
 napoleon_include_init_with_doc = True
@@ -71,7 +75,6 @@ autodoc_mock_imports = [
     "langchain",
     "lmnt",
     "noisereduce",
-    "openai",
     "openpipe",
     "simli",
     "soundfile",
@@ -81,10 +84,6 @@ autodoc_mock_imports = [
     "tkinter",
     "daily",
     "daily_python",
-    "pydantic.BaseModel",
-    "pydantic.Field",
-    "pydantic._internal._model_construction",
-    "pydantic._internal._fields",
     # Moondream dependencies
     "torch",
     "transformers",
@@ -167,6 +166,19 @@ autodoc_mock_imports = [
     "mcp.client.stdio",
     "mcp.ClientSession",
     "mcp.StdioServerParameters",
+    # gstreamer
+    "gi",
+    "gi.require_version",
+    "gi.repository",
+    # Protobuf mocks
+    "pipecat.frames.protobufs.frames_pb2",
+    "pipecat.serializers.protobuf",
+    "google.protobuf",
+    "google.protobuf.descriptor",
+    "google.protobuf.descriptor_pool",
+    "google.protobuf.runtime_version",
+    "google.protobuf.symbol_database",
+    "google.protobuf.internal.builder",
 ]
 
 # HTML output settings
@@ -176,76 +188,32 @@ autodoc_typehints = "signature"  # Show type hints in the signature only, not in
 html_show_sphinx = False
 
 
-def verify_modules():
-    """Verify that required modules are available."""
-    required_modules = {
-        "services": [
-            "assemblyai",
-            "aws",
-            "cartesia",
-            "deepgram",
-            "google",
-            "lmnt",
-            "riva",
-            "simli",
-        ],
-        "serializers": ["livekit"],
-        "vad": ["silero", "vad_analyzer"],
-        "transports": {
-            "services": ["daily", "livekit"],
-            "local": ["audio", "tk"],
-            "network": ["fastapi_websocket", "websocket_server"],
-        },
-    }
+def import_core_modules():
+    """Import core pipecat modules for autodoc to discover."""
+    core_modules = [
+        "pipecat",
+        "pipecat.frames",
+        "pipecat.pipeline",
+        "pipecat.processors",
+        "pipecat.services",
+        "pipecat.transports",
+        "pipecat.audio",
+        "pipecat.adapters",
+        "pipecat.clocks",
+        "pipecat.metrics",
+        "pipecat.observers",
+        "pipecat.serializers",
+        "pipecat.sync",
+        "pipecat.transcriptions",
+        "pipecat.utils",
+    ]
 
-    # Skip importing modules that are in autodoc_mock_imports
-    skipped_modules = set(autodoc_mock_imports)
-
-    missing = []
-    for category, modules in required_modules.items():
-        if isinstance(modules, dict):
-            # Handle nested structure
-            for subcategory, submodules in modules.items():
-                for module in submodules:
-                    # Check if module is in autodoc_mock_imports
-                    if (
-                        f"pipecat.{category}.{subcategory}.{module}" in skipped_modules
-                        or module in skipped_modules
-                    ):
-                        logger.info(
-                            f"Skipping import of mocked module: pipecat.{category}.{subcategory}.{module}"
-                        )
-                        continue
-
-                    try:
-                        __import__(f"pipecat.{category}.{subcategory}.{module}")
-                        logger.info(
-                            f"Successfully imported pipecat.{category}.{subcategory}.{module}"
-                        )
-                    except (ImportError, TypeError, NameError) as e:
-                        missing.append(f"pipecat.{category}.{subcategory}.{module}")
-                        logger.warning(
-                            f"Optional module not available: pipecat.{category}.{subcategory}.{module} - {str(e)}"
-                        )
-        else:
-            # Handle flat structure
-            for module in modules:
-                # Check if module is in autodoc_mock_imports
-                if f"pipecat.{category}.{module}" in skipped_modules or module in skipped_modules:
-                    logger.info(f"Skipping import of mocked module: pipecat.{category}.{module}")
-                    continue
-
-                try:
-                    __import__(f"pipecat.{category}.{module}")
-                    logger.info(f"Successfully imported pipecat.{category}.{module}")
-                except (ImportError, TypeError, NameError) as e:
-                    missing.append(f"pipecat.{category}.{module}")
-                    logger.warning(
-                        f"Optional module not available: pipecat.{category}.{module} - {str(e)}"
-                    )
-
-    if missing:
-        logger.warning(f"Some optional modules are not available: {missing}")
+    for module_name in core_modules:
+        try:
+            __import__(module_name)
+            logger.info(f"Successfully imported {module_name}")
+        except ImportError as e:
+            logger.warning(f"Failed to import {module_name}: {e}")
 
 
 def clean_title(title: str) -> str:
@@ -257,40 +225,7 @@ def clean_title(title: str) -> str:
     parts = title.split(".")
     title = parts[-1]
 
-    # Special cases for service names and common acronyms
-    special_cases = {
-        "ai": "AI",
-        "aws": "AWS",
-        "api": "API",
-        "vad": "VAD",
-        "assemblyai": "AssemblyAI",
-        "deepgram": "Deepgram",
-        "elevenlabs": "ElevenLabs",
-        "openai": "OpenAI",
-        "openpipe": "OpenPipe",
-        "playht": "PlayHT",
-        "xtts": "XTTS",
-        "lmnt": "LMNT",
-        "stt": "STT",
-        "tts": "TTS",
-        "llm": "LLM",
-        "rtvi": "RTVI",
-    }
-
-    # Check if the entire title is a special case
-    if title.lower() in special_cases:
-        return special_cases[title.lower()]
-
-    # Otherwise, capitalize each word
-    words = title.split("_")
-    cleaned_words = []
-    for word in words:
-        if word.lower() in special_cases:
-            cleaned_words.append(special_cases[word.lower()])
-        else:
-            cleaned_words.append(word.capitalize())
-
-    return " ".join(cleaned_words)
+    return title
 
 
 def setup(app):
@@ -315,9 +250,8 @@ def setup(app):
 
     excludes = [
         str(project_root / "src/pipecat/pipeline/to_be_updated"),
-        str(project_root / "src/pipecat/processors/gstreamer"),
-        str(project_root / "src/pipecat/services/to_be_updated"),
-        str(project_root / "src/pipecat/vad"),  # deprecated
+        str(project_root / "src/pipecat/examples"),
+        str(project_root / "src/pipecat/tests"),
         "**/test_*.py",
         "**/tests/*.py",
     ]
@@ -358,5 +292,4 @@ def setup(app):
         logger.error(f"Error generating API documentation: {e}", exc_info=True)
 
 
-# Run module verification
-verify_modules()
+import_core_modules()

@@ -639,6 +639,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         """Maybe handle an error event related to retrieving a conversation item.
 
         If the given error event is an error retrieving a conversation item:
+
         - set an exception on the future that retrieve_conversation_item() is waiting on
         - return true
         Otherwise:

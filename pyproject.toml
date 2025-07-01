@@ -123,9 +123,21 @@ select = [
     "D", # Docstring rules
     "I", # Import rules
 ]
+ignore = [
+    "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)
+]
 
 [tool.ruff.lint.per-file-ignores]
+# Skip docstring checks for non-source code
+"examples/**/*.py" = ["D"]
+"tests/**/*.py" = ["D"] 
+"scripts/**/*.py" = ["D"]
+"docs/**/*.py" = ["D"]
+# Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]
+# Skip specific rules for generated protobuf files
+"**/*_pb2.py" = ["D"]
+"src/pipecat/services/__init__.py" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

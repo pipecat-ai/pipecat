@@ -538,20 +538,37 @@ class AnthropicLLMContext(OpenAILLMContext):
         Handles text content and function calls for both user and assistant messages.
 
         Args:
-            obj: Message in Anthropic format:
-                {
-                    "role": "user/assistant",
-                    "content": str | [{"type": "text/tool_use/tool_result", ...}]
-                }
+            obj: Message in Anthropic format.
 
         Returns:
-            List of messages in standard format:
-            [
+            List of messages in standard format.
+
+        Examples:
+            Input Anthropic format::
+
                 {
-                    "role": "user/assistant/tool",
-                    "content": [{"type": "text", "text": str}]
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Hello"},
+                        {"type": "tool_use", "id": "123", "name": "search", "input": {"q": "test"}}
+                    ]
                 }
-            ]
+
+            Output standard format::
+
+                [
+                    {"role": "assistant", "content": [{"type": "text", "text": "Hello"}]},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "id": "123",
+                                "function": {"name": "search", "arguments": '{"q": "test"}'}
+                            }
+                        ]
+                    }
+                ]
         """
         # todo: image format (?)
         # tool_use
@@ -613,23 +630,37 @@ class AnthropicLLMContext(OpenAILLMContext):
         Empty text content is converted to "(empty)".
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/tool",
-                    "content": str | [{"type": "text", ...}],
-                    "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}]
-                }
+            message: Message in standard format.
 
         Returns:
-            Message in Anthropic format:
-            {
-                "role": "user/assistant",
-                "content": str | [
-                    {"type": "text", "text": str} |
-                    {"type": "tool_use", "id": str, "name": str, "input": dict} |
-                    {"type": "tool_result", "tool_use_id": str, "content": str}
-                ]
-            }
+            Message in Anthropic format.
+
+        Examples:
+            Input standard format::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "123",
+                            "function": {"name": "search", "arguments": '{"q": "test"}'}
+                        }
+                    ]
+                }
+
+            Output Anthropic format::
+
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "123",
+                            "name": "search",
+                            "input": {"q": "test"}
+                        }
+                    ]
+                }
         """
         # todo: image messages (?)
         if message["role"] == "tool":
