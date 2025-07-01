@@ -18,7 +18,6 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from loguru import logger
-from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -27,11 +26,13 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
+    LLMMessagesFrame,
     StartFrame,
     StartInterruptionFrame,
     StopFrame,
     StopInterruptionFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -47,6 +48,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIProcessor
 from pipecat.processors.metrics.sentry import SentryMetrics
+from pipecat.processors.user_idle_processor import UserIdleProcessor
 from pipecat.serializers.protobuf import ProtobufFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -77,9 +79,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Mount the frontend at /
-app.mount("/client", SmallWebRTCPrebuiltUI)
 
 
 class SimulateFreezeInput(FrameProcessor):
@@ -188,6 +187,37 @@ async def run_example(websocket_client):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
+    async def handle_user_idle(user_idle: UserIdleProcessor, retry_count: int) -> bool:
+        if retry_count == 1:
+            # First attempt: Add a gentle prompt to the conversation
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "The user has been quiet. Politely and briefly ask if they're still there.",
+                }
+            )
+            await user_idle.push_frame(LLMMessagesFrame(messages))
+            return True
+        elif retry_count == 2:
+            # Second attempt: More direct prompt
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
+                }
+            )
+            await user_idle.push_frame(LLMMessagesFrame(messages))
+            return True
+        else:
+            # Third attempt: End the conversation
+            await user_idle.push_frame(
+                TTSSpeakFrame("It seems like you're busy right now. Have a nice day!")
+            )
+            await task.queue_frame(EndFrame())
+            return False
+
+    user_idle = UserIdleProcessor(callback=handle_user_idle, timeout=10.0)
+
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
         voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
@@ -222,6 +252,7 @@ async def run_example(websocket_client):
                     stt,
                 ],
             ),
+            user_idle,
             rtvi,
             context_aggregator.user(),  # User responses
             llm,  # LLM
@@ -238,6 +269,8 @@ async def run_example(websocket_client):
             enable_metrics=True,
             enable_usage_metrics=True,
             report_only_initial_ttfb=True,
+            audio_in_sample_rate=8000,
+            audio_out_sample_rate=8000,
         ),
         idle_timeout_secs=120,
         observers=[
@@ -249,6 +282,10 @@ async def run_example(websocket_client):
                     # LLMTextFrame: None,
                     OpenAILLMContextFrame: None,
                     LLMFullResponseEndFrame: None,
+                    UserStartedSpeakingFrame: None,
+                    UserStoppedSpeakingFrame: None,
+                    StartInterruptionFrame: None,
+                    StopInterruptionFrame: None,
                 },
                 exclude_fields={
                     "result",
