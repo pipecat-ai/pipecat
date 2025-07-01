@@ -15,6 +15,7 @@ import mimetypes
 from typing import Any, Dict, Optional
 
 import aiohttp
+from google import genai
 from loguru import logger
 
 
@@ -39,29 +40,24 @@ class GeminiFileAPI:
             base_url: Base URL for the Gemini File API (default is the v1beta endpoint)
         """
         self._api_key = api_key
-        self._base_url = base_url
+        self._client = genai.Client(api_key=self._api_key)
+        self.base_url = base_url
         # Upload URL uses the /upload/ path
         self.upload_base_url = "https://generativelanguage.googleapis.com/upload/v1beta/files"
 
-    async def upload_file(
-        self, file_path: str, display_name: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def upload_file(self, file_path: str) -> Dict[str, Any]:
         """Upload a file to the Gemini File API using the correct resumable upload protocol.
 
         Args:
             file_path: Path to the file to upload
-            display_name: Optional display name for the file
 
         Returns:
             File metadata including uri, name, and display_name
         """
         logger.info(f"Uploading file: {file_path}")
 
-        from google import genai
-
-        client = genai.Client(api_key=self._api_key)
-        myfile = client.files.upload(file=file_path)
-        return myfile
+        file_info = self._client.files.upload(file=file_path)
+        return file_info
 
     async def get_file(self, name: str) -> Dict[str, Any]:
         """Get metadata for a file.
@@ -73,18 +69,12 @@ class GeminiFileAPI:
             File metadata
         """
         # Extract just the name part if a full path is provided
+        # client.files.get(name=file_name)
         if "/" in name:
             name = name.split("/")[-1]
 
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.base_url}/{name}?key={self._api_key}") as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    logger.error(f"Error getting file metadata: {error_text}")
-                    raise Exception(f"Failed to get file metadata: {response.status}")
-
-                file_info = await response.json()
-                return file_info
+        file_info = self._client.files.get(name=f"files/{name}")
+        return file_info
 
     async def list_files(
         self, page_size: int = 10, page_token: Optional[str] = None
@@ -98,6 +88,8 @@ class GeminiFileAPI:
         Returns:
             List of files and next page token if available
         """
+        # Maximum pageSize is 100.
+        page_size = page_size % 101
         params = {"key": self._api_key, "pageSize": page_size}
 
         if page_token:
