@@ -183,7 +183,7 @@ class AzureSTTService(STTService):
             language = getattr(event.result, "language", None) or self._settings.get("language")
             frame = TranscriptionFrame(
                 event.result.text,
-                "",
+                self._user_id,
                 time_now_iso8601(),
                 language,
                 result=event,

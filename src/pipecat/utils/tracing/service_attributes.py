@@ -125,6 +125,7 @@ def add_stt_span_attributes(
     transcript: Optional[str] = None,
     is_final: Optional[bool] = None,
     language: Optional[str] = None,
+    user_id: Optional[str] = None,
     settings: Optional[Dict[str, Any]] = None,
     vad_enabled: bool = False,
     ttfb: Optional[float] = None,
@@ -140,6 +141,7 @@ def add_stt_span_attributes(
         transcript: The transcribed text.
         is_final: Whether this is a final transcript.
         language: Detected or configured language.
+        user_id: User ID associated with the audio being transcribed.
         settings: Service configuration settings.
         vad_enabled: Whether voice activity detection is enabled.
         ttfb: Time to first byte in seconds.
@@ -160,6 +162,9 @@ def add_stt_span_attributes(
 
     if language:
         span.set_attribute("language", language)
+
+    if user_id:
+        span.set_attribute("user_id", user_id)
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)

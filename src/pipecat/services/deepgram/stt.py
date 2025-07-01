@@ -278,7 +278,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,
@@ -291,7 +291,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,

@@ -862,7 +862,7 @@ class GoogleSTTService(STTService):
                         await self.push_frame(
                             TranscriptionFrame(
                                 transcript,
-                                "",
+                                self._user_id,
                                 time_now_iso8601(),
                                 primary_language,
                                 result=result,
@@ -880,7 +880,7 @@ class GoogleSTTService(STTService):
                         await self.push_frame(
                             InterimTranscriptionFrame(
                                 transcript,
-                                "",
+                                self._user_id,
                                 time_now_iso8601(),
                                 primary_language,
                                 result=result,
