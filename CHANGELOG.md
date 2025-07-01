@@ -10,10 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added support for providing "direct" functions, which don't need an
-  accompanying `FlowsFunctionSchema` or function definition dict. Instead,
-  metadata (i.e. `name`, `description`, `properties`, and `required`) are
-  automatically extracted from a combination of the function signature and
-  docstring.
+  accompanying `FunctionSchema` or function definition dict. Instead, metadata
+  (i.e. `name`, `description`, `properties`, and `required`) are automatically
+  extracted from a combination of the function signature and docstring.
 
   Usage:
 
