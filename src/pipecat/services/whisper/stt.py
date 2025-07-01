@@ -395,7 +395,12 @@ class WhisperSTTService(SegmentedSTTService):
         if text:
             await self._handle_transcription(text, True, self._settings["language"])
             logger.debug(f"Transcription: [{text}]")
-            yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
+            yield TranscriptionFrame(
+                text,
+                self._user_id,
+                time_now_iso8601(),
+                self._settings["language"],
+            )
 
 
 class WhisperSTTServiceMLX(WhisperSTTService):
@@ -500,7 +505,12 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             if text:
                 await self._handle_transcription(text, True, self._settings["language"])
                 logger.debug(f"Transcription: [{text}]")
-                yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
+                yield TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                    self._settings["language"],
+                )
 
         except Exception as e:
             logger.exception(f"MLX Whisper transcription error: {e}")
