@@ -13,6 +13,7 @@ and custom adapter-specific tools in the Pipecat framework.
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 
 
@@ -36,7 +37,7 @@ class ToolsSchema:
 
     def __init__(
         self,
-        standard_tools: List[FunctionSchema],
+        standard_tools: List[FunctionSchema | DirectFunction],
         custom_tools: Optional[Dict[AdapterType, List[Dict[str, Any]]]] = None,
     ) -> None:
         """Initialize the tools schema.
@@ -46,7 +47,20 @@ class ToolsSchema:
             custom_tools: Dictionary mapping adapter types to their custom tool definitions.
                 These tools may not follow the FunctionSchema format (e.g., search_tool).
         """
-        self._standard_tools = standard_tools
+
+        def _map_standard_tools(tools):
+            schemas = []
+            for tool in tools:
+                if isinstance(tool, FunctionSchema):
+                    schemas.append(tool)
+                elif callable(tool):
+                    wrapper = DirectFunctionWrapper(tool)
+                    schemas.append(wrapper.to_function_schema())
+                else:
+                    raise TypeError(f"Unsupported tool type: {type(tool)}")
+            return schemas
+
+        self._standard_tools = _map_standard_tools(standard_tools)
         self._custom_tools = custom_tools
 
     @property
