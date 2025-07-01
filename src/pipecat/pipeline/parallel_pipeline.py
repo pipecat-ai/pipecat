@@ -258,9 +258,11 @@ class ParallelPipeline(BasePipeline):
     async def _cancel(self):
         """Cancel all parallel pipeline processing tasks."""
         if self._up_task:
+            self._up_queue.cancel()
             await self.cancel_task(self._up_task)
             self._up_task = None
         if self._down_task:
+            self._down_queue.cancel()
             await self.cancel_task(self._down_task)
             self._down_task = None
 
