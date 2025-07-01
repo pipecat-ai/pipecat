@@ -31,8 +31,8 @@ class GeminiFileAPI:
             api_key: Google AI API key
             base_url: Base URL for the Gemini File API (default is the v1beta endpoint)
         """
-        self.api_key = api_key
-        self.base_url = base_url
+        self._api_key = api_key
+        self._base_url = base_url
         # Upload URL uses the /upload/ path
         self.upload_base_url = "https://generativelanguage.googleapis.com/upload/v1beta/files"
 
@@ -76,7 +76,7 @@ class GeminiFileAPI:
 
             logger.debug(f"Step 1: Getting upload URL from {self.upload_base_url}")
             async with session.post(
-                f"{self.upload_base_url}?key={self.api_key}", headers=headers, json=metadata
+                f"{self.upload_base_url}?key={self._api_key}", headers=headers, json=metadata
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
@@ -123,7 +123,7 @@ class GeminiFileAPI:
             name = name.split("/")[-1]
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.base_url}/{name}?key={self.api_key}") as response:
+            async with session.get(f"{self._base_url}/{name}?key={self._api_key}") as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Error getting file metadata: {error_text}")
@@ -144,13 +144,13 @@ class GeminiFileAPI:
         Returns:
             List of files and next page token if available
         """
-        params = {"key": self.api_key, "pageSize": page_size}
+        params = {"key": self._api_key, "pageSize": page_size}
 
         if page_token:
             params["pageToken"] = page_token
 
         async with aiohttp.ClientSession() as session:
-            async with session.get(self.base_url, params=params) as response:
+            async with session.get(self._base_url, params=params) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Error listing files: {error_text}")
@@ -173,7 +173,7 @@ class GeminiFileAPI:
             name = name.split("/")[-1]
 
         async with aiohttp.ClientSession() as session:
-            async with session.delete(f"{self.base_url}/{name}?key={self.api_key}") as response:
+            async with session.delete(f"{self._base_url}/{name}?key={self._api_key}") as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Error deleting file: {error_text}")
