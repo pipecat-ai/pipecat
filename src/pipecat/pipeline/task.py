@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Pipeline task implementation for managing frame processing pipelines.
+
+This module provides the main PipelineTask class that orchestrates pipeline
+execution, frame routing, lifecycle management, and monitoring capabilities
+including heartbeats, idle detection, and observer integration.
+"""
+
 import asyncio
 import time
 from collections import deque
@@ -53,12 +60,13 @@ HEARTBEAT_MONITOR_SECONDS = HEARTBEAT_SECONDS * 10
 
 
 class PipelineParams(BaseModel):
-    """Configuration parameters for pipeline execution. These parameters are
-    usually passed to all frame processors using through `StartFrame`. For other
-    generic pipeline task parameters use `PipelineTask` constructor arguments
-    instead.
+    """Configuration parameters for pipeline execution.
 
-    Attributes:
+    These parameters are usually passed to all frame processors through
+    StartFrame. For other generic pipeline task parameters use PipelineTask
+    constructor arguments instead.
+
+    Parameters:
         allow_interruptions: Whether to allow pipeline interruptions.
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
@@ -66,12 +74,11 @@ class PipelineParams(BaseModel):
         enable_metrics: Whether to enable metrics collection.
         enable_usage_metrics: Whether to enable usage metrics.
         heartbeats_period_secs: Period between heartbeats in seconds.
+        interruption_strategies: Strategies for bot interruption behavior.
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
-        interruption_strategies: Strategies for bot interruption behavior.
-
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -97,17 +104,25 @@ class PipelineTaskSource(FrameProcessor):
     pipeline given to the pipeline task. It allows us to easily push frames
     downstream to the pipeline and also receive upstream frames coming from the
     pipeline.
-
-    Args:
-        up_queue: Queue for upstream frame processing.
-
     """
 
     def __init__(self, up_queue: asyncio.Queue, **kwargs):
+        """Initialize the pipeline task source.
+
+        Args:
+            up_queue: Queue for upstream frame processing.
+            **kwargs: Additional arguments passed to the parent class.
+        """
         super().__init__(**kwargs)
         self._up_queue = up_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and route them based on direction.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
         await super().process_frame(frame, direction)
 
         match direction:
@@ -123,16 +138,25 @@ class PipelineTaskSink(FrameProcessor):
     This is the sink processor that is linked at the end of the pipeline
     given to the pipeline task. It allows us to receive downstream frames and
     act on them, for example, waiting to receive an EndFrame.
-
-    Args:
-        down_queue: Queue for downstream frame processing.
     """
 
     def __init__(self, down_queue: asyncio.Queue, **kwargs):
+        """Initialize the pipeline task sink.
+
+        Args:
+            down_queue: Queue for downstream frame processing.
+            **kwargs: Additional arguments passed to the parent class.
+        """
         super().__init__(**kwargs)
         self._down_queue = down_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and route them to the downstream queue.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
         await super().process_frame(frame, direction)
         await self._down_queue.put(frame)
 
@@ -140,69 +164,30 @@ class PipelineTaskSink(FrameProcessor):
 class PipelineTask(BasePipelineTask):
     """Manages the execution of a pipeline, handling frame processing and task lifecycle.
 
-    It has a couple of event handlers `on_frame_reached_upstream` and
-    `on_frame_reached_downstream` that are called when upstream frames or
-    downstream frames reach both ends of pipeline. By default, the events
-    handlers will not be called unless some filters are set using
-    `set_reached_upstream_filter` and `set_reached_downstream_filter`.
+    This class orchestrates pipeline execution with comprehensive monitoring,
+    event handling, and lifecycle management. It provides event handlers for
+    various pipeline states and frame types, idle detection, heartbeat monitoring,
+    and observer integration.
 
-       @task.event_handler("on_frame_reached_upstream")
-       async def on_frame_reached_upstream(task, frame):
-           ...
+    Event handlers available:
 
-       @task.event_handler("on_frame_reached_downstream")
-       async def on_frame_reached_downstream(task, frame):
-           ...
+    - on_frame_reached_upstream: Called when upstream frames reach the source
+    - on_frame_reached_downstream: Called when downstream frames reach the sink
+    - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
+    - on_pipeline_started: Called when pipeline starts with StartFrame
+    - on_pipeline_stopped: Called when pipeline stops with StopFrame
+    - on_pipeline_ended: Called when pipeline ends with EndFrame
+    - on_pipeline_cancelled: Called when pipeline is cancelled
 
-    It also has an event handler that detects when the pipeline is idle. By
-    default, a pipeline is idle if no `BotSpeakingFrame` or
-    `LLMFullResponseEndFrame` are received within `idle_timeout_secs`.
+    Example::
 
-       @task.event_handler("on_idle_timeout")
-       async def on_pipeline_idle_timeout(task):
-           ...
+        @task.event_handler("on_frame_reached_upstream")
+        async def on_frame_reached_upstream(task, frame):
+            ...
 
-    There are also events to know if a pipeline has been started, stopped, ended
-    or cancelled.
-
-       @task.event_handler("on_pipeline_started")
-       async def on_pipeline_started(task, frame: StartFrame):
-           ...
-
-       @task.event_handler("on_pipeline_stopped")
-       async def on_pipeline_stopped(task, frame: StopFrame):
-           ...
-
-       @task.event_handler("on_pipeline_ended")
-       async def on_pipeline_ended(task, frame: EndFrame):
-           ...
-
-       @task.event_handler("on_pipeline_cancelled")
-       async def on_pipeline_cancelled(task, frame: CancelFrame):
-           ...
-
-    Args:
-        pipeline: The pipeline to execute.
-        params: Configuration parameters for the pipeline.
-        additional_span_attributes: Optional dictionary of attributes to propagate as
-            OpenTelemetry conversation span attributes.
-        cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
-            the idle timeout is reached.
-        check_dangling_tasks: Whether to check for processors' tasks finishing properly.
-        clock: Clock implementation for timing operations.
-        conversation_id: Optional custom ID for the conversation.
-        enable_tracing: Whether to enable tracing.
-        enable_turn_tracking: Whether to enable turn tracking.
-        enable_watchdog_logging: Whether to print task processing times.
-        enable_watchdog_timers: Whether to enable task watchdog timers.
-        idle_timeout_frames: A tuple with the frames that should trigger an idle
-            timeout if not received withing `idle_timeout_seconds`.
-        idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
-            None. If a pipeline is idle the pipeline task will be cancelled
-            automatically.
-        observers: List of observers for monitoring pipeline execution.
-        watchdog_timeout_secs: Watchdog timer timeout (in seconds). A warning
-            will be logged if the watchdog timer is not reset before this timeout.
+        @task.event_handler("on_idle_timeout")
+        async def on_pipeline_idle_timeout(task):
+            ...
     """
 
     def __init__(
@@ -228,6 +213,32 @@ class PipelineTask(BasePipelineTask):
         task_manager: Optional[BaseTaskManager] = None,
         watchdog_timeout_secs: float = WATCHDOG_TIMEOUT,
     ):
+        """Initialize the PipelineTask.
+
+        Args:
+            pipeline: The pipeline to execute.
+            params: Configuration parameters for the pipeline.
+            additional_span_attributes: Optional dictionary of attributes to propagate as
+                OpenTelemetry conversation span attributes.
+            cancel_on_idle_timeout: Whether the pipeline task should be cancelled if
+                the idle timeout is reached.
+            check_dangling_tasks: Whether to check for processors' tasks finishing properly.
+            clock: Clock implementation for timing operations.
+            conversation_id: Optional custom ID for the conversation.
+            enable_tracing: Whether to enable tracing.
+            enable_turn_tracking: Whether to enable turn tracking.
+            enable_watchdog_logging: Whether to print task processing times.
+            enable_watchdog_timers: Whether to enable task watchdog timers.
+            idle_timeout_frames: A tuple with the frames that should trigger an idle
+                timeout if not received within `idle_timeout_seconds`.
+            idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
+                None. If a pipeline is idle the pipeline task will be cancelled
+                automatically.
+            observers: List of observers for monitoring pipeline execution.
+            task_manager: Optional task manager for handling asyncio tasks.
+            watchdog_timeout_secs: Watchdog timer timeout (in seconds). A warning
+                will be logged if the watchdog timer is not reset before this timeout.
+        """
         super().__init__()
         self._pipeline = pipeline
         self._params = params or PipelineParams()
@@ -331,60 +342,97 @@ class PipelineTask(BasePipelineTask):
 
     @property
     def params(self) -> PipelineParams:
-        """Returns the pipeline parameters of this task."""
+        """Get the pipeline parameters for this task.
+
+        Returns:
+            The pipeline parameters configuration.
+        """
         return self._params
 
     @property
     def turn_tracking_observer(self) -> Optional[TurnTrackingObserver]:
-        """Return the turn tracking observer if enabled."""
+        """Get the turn tracking observer if enabled.
+
+        Returns:
+            The turn tracking observer instance or None if not enabled.
+        """
         return self._turn_tracking_observer
 
     @property
     def turn_trace_observer(self) -> Optional[TurnTraceObserver]:
-        """Return the turn trace observer if enabled."""
+        """Get the turn trace observer if enabled.
+
+        Returns:
+            The turn trace observer instance or None if not enabled.
+        """
         return self._turn_trace_observer
 
     def add_observer(self, observer: BaseObserver):
+        """Add an observer to monitor pipeline execution.
+
+        Args:
+            observer: The observer to add to the pipeline monitoring.
+        """
         self._observer.add_observer(observer)
 
     async def remove_observer(self, observer: BaseObserver):
+        """Remove an observer from pipeline monitoring.
+
+        Args:
+            observer: The observer to remove from pipeline monitoring.
+        """
         await self._observer.remove_observer(observer)
 
     def set_reached_upstream_filter(self, types: Tuple[Type[Frame], ...]):
-        """Sets which frames will be checked before calling the
-        on_frame_reached_upstream event handler.
+        """Set which frame types trigger the on_frame_reached_upstream event.
 
+        Args:
+            types: Tuple of frame types to monitor for upstream events.
         """
         self._reached_upstream_types = types
 
     def set_reached_downstream_filter(self, types: Tuple[Type[Frame], ...]):
-        """Sets which frames will be checked before calling the
-        on_frame_reached_downstream event handler.
+        """Set which frame types trigger the on_frame_reached_downstream event.
 
+        Args:
+            types: Tuple of frame types to monitor for downstream events.
         """
         self._reached_downstream_types = types
 
     def has_finished(self) -> bool:
-        """Indicates whether the tasks has finished. That is, all processors
+        """Check if the pipeline task has finished execution.
+
+        This indicates whether the tasks has finished, meaninig all processors
         have stopped.
 
+        Returns:
+            True if all processors have stopped and the task is complete.
         """
         return self._finished
 
     async def stop_when_done(self):
-        """This is a helper function that sends an EndFrame to the pipeline in
-        order to stop the task after everything in it has been processed.
+        """Schedule the pipeline to stop after processing all queued frames.
 
+        Sends an EndFrame to gracefully terminate the pipeline once all
+        current processing is complete.
         """
         logger.debug(f"Task {self} scheduled to stop when done")
         await self.queue_frame(EndFrame())
 
     async def cancel(self):
-        """Stops the running pipeline immediately."""
+        """Immediately stop the running pipeline.
+
+        Cancels all running tasks and stops frame processing without
+        waiting for completion.
+        """
         await self._cancel()
 
     async def run(self, params: PipelineTaskParams):
-        """Starts and manages the pipeline execution until completion or cancellation."""
+        """Start and manage the pipeline execution until completion or cancellation.
+
+        Args:
+            params: Configuration parameters for pipeline execution.
+        """
         if self.has_finished():
             return
         cleanup_pipeline = True
@@ -440,6 +488,7 @@ class PipelineTask(BasePipelineTask):
                 await self.queue_frame(frame)
 
     async def _cancel(self):
+        """Internal cancellation logic for the pipeline task."""
         if not self._cancelled:
             logger.debug(f"Canceling pipeline task {self}")
             self._cancelled = True
@@ -453,6 +502,7 @@ class PipelineTask(BasePipelineTask):
                 self._process_push_task = None
 
     async def _create_tasks(self):
+        """Create and start all pipeline processing tasks."""
         self._process_up_task = self._task_manager.create_task(
             self._process_up_queue(), f"{self}::_process_up_queue"
         )
@@ -468,6 +518,7 @@ class PipelineTask(BasePipelineTask):
         return self._process_push_task
 
     def _maybe_start_heartbeat_tasks(self):
+        """Start heartbeat tasks if heartbeats are enabled and not already running."""
         if self._params.enable_heartbeats and self._heartbeat_push_task is None:
             self._heartbeat_push_task = self._task_manager.create_task(
                 self._heartbeat_push_handler(), f"{self}::_heartbeat_push_handler"
@@ -477,12 +528,14 @@ class PipelineTask(BasePipelineTask):
             )
 
     def _maybe_start_idle_task(self):
+        """Start idle monitoring task if idle timeout is configured."""
         if self._idle_timeout_secs:
             self._idle_monitor_task = self._task_manager.create_task(
                 self._idle_monitor_handler(), f"{self}::_idle_monitor_handler"
             )
 
     async def _cancel_tasks(self):
+        """Cancel all running pipeline tasks."""
         await self._observer.stop()
 
         if self._process_up_task:
@@ -497,6 +550,7 @@ class PipelineTask(BasePipelineTask):
         await self._maybe_cancel_idle_task()
 
     async def _maybe_cancel_heartbeat_tasks(self):
+        """Cancel heartbeat tasks if they are running."""
         if not self._params.enable_heartbeats:
             return
 
@@ -509,11 +563,13 @@ class PipelineTask(BasePipelineTask):
             self._heartbeat_monitor_task = None
 
     async def _maybe_cancel_idle_task(self):
+        """Cancel idle monitoring task if it is running."""
         if self._idle_timeout_secs and self._idle_monitor_task:
             await self._task_manager.cancel_task(self._idle_monitor_task)
             self._idle_monitor_task = None
 
     def _initial_metrics_frame(self) -> MetricsFrame:
+        """Create an initial metrics frame with zero values for all processors."""
         processors = self._pipeline.processors_with_metrics()
         data = []
         for p in processors:
@@ -522,10 +578,12 @@ class PipelineTask(BasePipelineTask):
         return MetricsFrame(data=data)
 
     async def _wait_for_pipeline_end(self):
+        """Wait for the pipeline to signal completion."""
         await self._pipeline_end_event.wait()
         self._pipeline_end_event.clear()
 
     async def _setup(self, params: PipelineTaskParams):
+        """Set up the pipeline task and all processors."""
         mgr_params = TaskManagerParams(
             loop=params.loop,
             enable_watchdog_logging=self._enable_watchdog_logging,
@@ -545,6 +603,7 @@ class PipelineTask(BasePipelineTask):
         await self._sink.setup(setup)
 
     async def _cleanup(self, cleanup_pipeline: bool):
+        """Clean up the pipeline task and processors."""
         # Cleanup base object.
         await self.cleanup()
 
@@ -559,10 +618,11 @@ class PipelineTask(BasePipelineTask):
         await self._sink.cleanup()
 
     async def _process_push_queue(self):
-        """This is the task that runs the pipeline for the first time by sending
+        """Process frames from the push queue and send them through the pipeline.
+
+        This is the task that runs the pipeline for the first time by sending
         a StartFrame and by pushing any other frames queued by the user. It runs
         until the tasks is cancelled or stopped (e.g. with an EndFrame).
-
         """
         self._clock.start()
 
@@ -596,11 +656,12 @@ class PipelineTask(BasePipelineTask):
         await self._cleanup(cleanup_pipeline)
 
     async def _process_up_queue(self):
-        """This is the task that processes frames coming upstream from the
+        """Process frames coming upstream from the pipeline.
+
+        This is the task that processes frames coming upstream from the
         pipeline. These frames might indicate, for example, that we want the
         pipeline to be stopped (e.g. EndTaskFrame) in which case we would send
         an EndFrame down the pipeline.
-
         """
         while True:
             frame = await self._up_queue.get()
@@ -629,11 +690,12 @@ class PipelineTask(BasePipelineTask):
             self._up_queue.task_done()
 
     async def _process_down_queue(self):
-        """This tasks process frames coming downstream from the pipeline. For
+        """Process frames coming downstream from the pipeline.
+
+        This tasks process frames coming downstream from the pipeline. For
         example, heartbeat frames or an EndFrame which would indicate all
         processors have handled the EndFrame and therefore we can exit the task
         cleanly.
-
         """
         while True:
             frame = await self._down_queue.get()
@@ -664,7 +726,7 @@ class PipelineTask(BasePipelineTask):
             self._down_queue.task_done()
 
     async def _heartbeat_push_handler(self):
-        """This tasks pushes a heartbeat frame every heartbeat period."""
+        """Push heartbeat frames at regular intervals."""
         while True:
             # Don't use `queue_frame()` because if an EndFrame is queued the
             # task will just stop waiting for the pipeline to finish not
@@ -673,11 +735,12 @@ class PipelineTask(BasePipelineTask):
             await asyncio.sleep(self._params.heartbeats_period_secs)
 
     async def _heartbeat_monitor_handler(self):
-        """This tasks monitors heartbeat frames. If a heartbeat frame has not
+        """Monitor heartbeat frames for processing time and timeout detection.
+
+        This task monitors heartbeat frames. If a heartbeat frame has not
         been received for a long period a warning will be logged. It also logs
         the time that a heartbeat frame takes to processes, that is how long it
         takes for the heartbeat frame to traverse all the pipeline.
-
         """
         wait_time = HEARTBEAT_MONITOR_SECONDS
         while True:
@@ -692,9 +755,12 @@ class PipelineTask(BasePipelineTask):
                 )
 
     async def _idle_monitor_handler(self):
-        """This tasks monitors activity in the pipeline. If no frames are
-        received (heartbeats don't count) the pipeline is considered idle.
+        """Monitor pipeline activity and detect idle conditions.
 
+        Tracks frame activity and triggers idle timeout events when the
+        pipeline hasn't received relevant frames within the timeout period.
+
+        Note: Heartbeats are excluded from idle detection.
         """
         running = True
         last_frame_time = 0
@@ -732,10 +798,13 @@ class PipelineTask(BasePipelineTask):
                 running = await self._idle_timeout_detected(frame_buffer)
 
     async def _idle_timeout_detected(self, last_frames: Deque[Frame]) -> bool:
-        """Logic for when the pipeline is idle.
+        """Handle idle timeout detection and optional cancellation.
+
+        Args:
+            last_frames: Recent frames received before timeout for debugging.
 
         Returns:
-            bool: Whther the pipeline task is being cancelled or not.
+            Whether the pipeline task should continue running.
         """
         logger.warning("Idle timeout detected. Last 10 frames received:")
         for i, frame in enumerate(last_frames, 1):
@@ -749,6 +818,7 @@ class PipelineTask(BasePipelineTask):
         return True
 
     def _print_dangling_tasks(self):
+        """Log any dangling tasks that haven't been properly cleaned up."""
         tasks = [t.get_name() for t in self._task_manager.current_tasks()]
         if tasks:
             logger.warning(f"Dangling tasks detected: {tasks}")

@@ -84,6 +84,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
 
     This processor aggregates TTS text frames into complete utterances and emits them as
     transcript messages. Utterances are completed when:
+
     - The bot stops speaking (BotStoppedSpeakingFrame)
     - The bot is interrupted (StartInterruptionFrame)
     - The pipeline ends (EndFrame)
@@ -108,34 +109,34 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         TTS services with different formatting patterns.
 
         Examples:
-            Fragments with embedded spacing (concatenated):
-                ```
+            Fragments with embedded spacing (concatenated)::
+
                 TTSTextFrame: ["Hello"]
                 TTSTextFrame: [" there"]  # Leading space
                 TTSTextFrame: ["!"]
                 TTSTextFrame: [" How"]    # Leading space
                 TTSTextFrame: ["'s"]
                 TTSTextFrame: [" it"]     # Leading space
-                ```
+
                 Result: "Hello there! How's it"
 
-            Fragments with trailing spaces (concatenated):
-                ```
+            Fragments with trailing spaces (concatenated)::
+
                 TTSTextFrame: ["Hel"]
                 TTSTextFrame: ["lo "]     # Trailing space
                 TTSTextFrame: ["to "]     # Trailing space
                 TTSTextFrame: ["you"]
-                ```
+
                 Result: "Hello to you"
 
-            Word-by-word fragments without spacing (joined with spaces):
-                ```
+            Word-by-word fragments without spacing (joined with spaces)::
+
                 TTSTextFrame: ["Hello"]
                 TTSTextFrame: ["there"]
                 TTSTextFrame: ["how"]
                 TTSTextFrame: ["are"]
                 TTSTextFrame: ["you"]
-                ```
+
                 Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
@@ -179,6 +180,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """Process frames into assistant conversation messages.
 
         Handles different frame types:
+
         - TTSTextFrame: Aggregates text for current utterance
         - BotStoppedSpeakingFrame: Completes current utterance
         - StartInterruptionFrame: Completes current utterance due to interruption
@@ -221,8 +223,8 @@ class TranscriptProcessor:
     Provides unified access to user and assistant transcript processors
     with shared event handling.
 
-    Example:
-        ```python
+    Example::
+
         transcript = TranscriptProcessor()
 
         pipeline = Pipeline(
@@ -242,7 +244,6 @@ class TranscriptProcessor:
         @transcript.event_handler("on_transcript_update")
         async def handle_update(processor, frame):
             print(f"New messages: {frame.messages}")
-        ```
     """
 
     def __init__(self):

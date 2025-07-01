@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Debug logging observer for frame activity monitoring.
+
+This module provides a debug observer that logs detailed frame activity
+to the console, making it useful for debugging pipeline behavior and
+understanding frame flow between processors.
+"""
+
 from dataclasses import fields, is_dataclass
 from enum import Enum, auto
 from typing import Dict, Optional, Set, Tuple, Type, Union
@@ -16,7 +23,12 @@ from pipecat.processors.frame_processor import FrameDirection
 
 
 class FrameEndpoint(Enum):
-    """Specifies which endpoint (source or destination) to filter on."""
+    """Specifies which endpoint (source or destination) to filter on.
+
+    Parameters:
+        SOURCE: Filter on the source component that is pushing the frame.
+        DESTINATION: Filter on the destination component receiving the frame.
+    """
 
     SOURCE = auto()
     DESTINATION = auto()
@@ -28,44 +40,36 @@ class DebugLogObserver(BaseObserver):
     Automatically extracts and formats data from any frame type, making it useful
     for debugging pipeline behavior without needing frame-specific observers.
 
-    Args:
-        frame_types: Optional tuple of frame types to log, or a dict with frame type
-            filters. If None, logs all frame types.
-        exclude_fields: Optional set of field names to exclude from logging.
-
     Examples:
-        Log all frames from all services:
-        ```python
-        observers = DebugLogObserver()
-        ```
+        Log all frames from all services::
 
-        Log specific frame types from any source/destination:
-        ```python
-        from pipecat.frames.frames import TranscriptionFrame, InterimTranscriptionFrame
-        observers=[
-            DebugLogObserver(frame_types=(LLMTextFrame,TranscriptionFrame,)),
-        ],
-        ```
+            observers = DebugLogObserver()
 
-        Log frames with specific source/destination filters:
-        ```python
-        from pipecat.frames.frames import StartInterruptionFrame, UserStartedSpeakingFrame, LLMTextFrame
-        from pipecat.transports.base_output_transport import BaseOutputTransport
-        from pipecat.services.stt_service import STTService
+        Log specific frame types from any source/destination::
 
-        observers=[
-            DebugLogObserver(
-                frame_types={
-                    # Only log StartInterruptionFrame when source is BaseOutputTransport
-                    StartInterruptionFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
-                    # Only log UserStartedSpeakingFrame when destination is STTService
-                    UserStartedSpeakingFrame: (STTService, FrameEndpoint.DESTINATION),
-                    # Log LLMTextFrame regardless of source or destination type
-                    LLMTextFrame: None,
-                }
-            ),
-        ],
-        ```
+            from pipecat.frames.frames import TranscriptionFrame, InterimTranscriptionFrame
+            observers=[
+                DebugLogObserver(frame_types=(LLMTextFrame,TranscriptionFrame,)),
+            ]
+
+        Log frames with specific source/destination filters::
+
+            from pipecat.frames.frames import StartInterruptionFrame, UserStartedSpeakingFrame, LLMTextFrame
+            from pipecat.transports.base_output_transport import BaseOutputTransport
+            from pipecat.services.stt_service import STTService
+
+            observers=[
+                DebugLogObserver(
+                    frame_types={
+                        # Only log StartInterruptionFrame when source is BaseOutputTransport
+                        StartInterruptionFrame: (BaseOutputTransport, FrameEndpoint.SOURCE),
+                        # Only log UserStartedSpeakingFrame when destination is STTService
+                        UserStartedSpeakingFrame: (STTService, FrameEndpoint.DESTINATION),
+                        # Log LLMTextFrame regardless of source or destination type
+                        LLMTextFrame: None,
+                    }
+                ),
+            ]
     """
 
     def __init__(
@@ -79,14 +83,17 @@ class DebugLogObserver(BaseObserver):
         """Initialize the debug log observer.
 
         Args:
-            frame_types: Tuple of frame types to log, or a dict mapping frame types to
-                filter configurations. Filter configs can be:
-                - None to log all instances of the frame type
-                - A tuple of (service_type, endpoint) to filter on a specific service
-                  and endpoint (SOURCE or DESTINATION)
-                If None is provided instead of a tuple/dict, log all frames.
-            exclude_fields: Set of field names to exclude from logging. If None, only binary
-                data fields are excluded.
+            frame_types: Frame types to log. Can be:
+
+                - Tuple of frame types to log all instances
+                - Dict mapping frame types to filter configurations
+                - None to log all frames
+
+                Filter configurations can be None (log all instances) or a tuple
+                of (service_type, endpoint) to filter on specific services.
+            exclude_fields: Field names to exclude from logging. Defaults to
+                excluding binary data fields like 'audio', 'image', 'images'.
+            **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
 
@@ -113,14 +120,7 @@ class DebugLogObserver(BaseObserver):
         )
 
     def _format_value(self, value):
-        """Format a value for logging.
-
-        Args:
-            value: The value to format.
-
-        Returns:
-            str: A string representation of the value suitable for logging.
-        """
+        """Format a value for logging."""
         if value is None:
             return "None"
         elif isinstance(value, str):
@@ -143,16 +143,7 @@ class DebugLogObserver(BaseObserver):
             return str(value)
 
     def _should_log_frame(self, frame, src, dst):
-        """Determine if a frame should be logged based on filters.
-
-        Args:
-            frame: The frame being processed
-            src: The source component
-            dst: The destination component
-
-        Returns:
-            bool: True if the frame should be logged, False otherwise
-        """
+        """Determine if a frame should be logged based on filters."""
         # If no filters, log all frames
         if not self.frame_filters:
             return True

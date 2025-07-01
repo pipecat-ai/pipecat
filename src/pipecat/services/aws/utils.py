@@ -39,10 +39,8 @@ def get_presigned_url(
 
     Args:
         region: AWS region for the service.
-        credentials: Dictionary containing AWS credentials with keys:
-            - access_key: AWS access key ID
-            - secret_key: AWS secret access key
-            - session_token: AWS session token (optional)
+        credentials: Dictionary containing AWS credentials. Must include
+            'access_key' and 'secret_key', with optional 'session_token'.
         language_code: Language code for transcription (e.g., "en-US").
         media_encoding: Audio encoding format. Defaults to "pcm".
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
@@ -325,9 +323,10 @@ def decode_event(message):
         message: Raw event stream message bytes received from AWS.
 
     Returns:
-        Tuple containing:
-        - Dictionary of parsed headers
-        - Dictionary of parsed JSON payload
+        A tuple of (headers, payload) where:
+
+        - headers: Dictionary of parsed headers
+        - payload: Dictionary of parsed JSON payload
 
     Raises:
         AssertionError: If CRC checksum verification fails.

@@ -380,18 +380,48 @@ class GoogleLLMContext(OpenAILLMContext):
         System messages are stored separately and return None.
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/system/tool",
-                    "content": str | [{"type": "text/image_url", ...}] | None,
-                    "tool_calls": [{"function": {"name": str, "arguments": str}}]
-                }
+            message: Message in standard format.
 
         Returns:
-            Content object with:
-                - role: "user" or "model" (converted from "assistant")
-                - parts: List[Part] containing text, inline_data, or function calls
-            Returns None for system messages.
+            Content object with role and parts, or None for system messages.
+
+        Examples:
+            Standard text message::
+
+                {
+                    "role": "user",
+                    "content": "Hello there"
+                }
+
+            Converts to Google Content with::
+
+                Content(
+                    role="user",
+                    parts=[Part(text="Hello there")]
+                )
+
+            Standard function call message::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "search",
+                                "arguments": '{"query": "test"}'
+                            }
+                        }
+                    ]
+                }
+
+            Converts to Google Content with::
+
+                Content(
+                    role="model",
+                    parts=[Part(function_call=FunctionCall(name="search", args={"query": "test"}))]
+                )
+
+            System message returns None and stores content in self.system_message.
         """
         role = message["role"]
         content = message.get("content", [])
@@ -447,21 +477,73 @@ class GoogleLLMContext(OpenAILLMContext):
         Handles text, images, and function calls from Google's Content/Part objects.
 
         Args:
-            obj: Google Content object with:
-                - role: "model" (converted to "assistant") or "user"
-                - parts: List[Part] containing text, inline_data, or function calls
+            obj: Google Content object with role and parts.
 
         Returns:
-            List of messages in standard format:
-            [
-                {
-                    "role": "user/assistant/tool",
-                    "content": [
-                        {"type": "text", "text": str} |
-                        {"type": "image_url", "image_url": {"url": str}}
-                    ]
-                }
-            ]
+            List containing a single message in standard format.
+
+        Examples:
+            Google Content with text::
+
+                Content(
+                    role="user",
+                    parts=[Part(text="Hello")]
+                )
+
+            Converts to::
+
+                [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "Hello"}]
+                    }
+                ]
+
+            Google Content with function call::
+
+                Content(
+                    role="model",
+                    parts=[Part(function_call=FunctionCall(name="search", args={"q": "test"}))]
+                )
+
+            Converts to::
+
+                [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "search",
+                                "type": "function",
+                                "function": {
+                                    "name": "search",
+                                    "arguments": '{"q": "test"}'
+                                }
+                            }
+                        ]
+                    }
+                ]
+
+            Google Content with image::
+
+                Content(
+                    role="user",
+                    parts=[Part(inline_data=Blob(mime_type="image/jpeg", data=bytes_data))]
+                )
+
+            Converts to::
+
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/jpeg;base64,<encoded_data>"}
+                            }
+                        ]
+                    }
+                ]
         """
         msg = {"role": obj.role, "content": []}
         if msg["role"] == "model":

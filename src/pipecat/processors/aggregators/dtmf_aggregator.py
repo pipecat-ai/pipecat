@@ -33,6 +33,7 @@ class DTMFAggregator(FrameProcessor):
 
     The aggregator accumulates digits from InputDTMFFrame instances and flushes
     when:
+
     - Timeout occurs (configurable idle period)
     - Termination digit is received (default: '#')
     - EndFrame or CancelFrame is received
