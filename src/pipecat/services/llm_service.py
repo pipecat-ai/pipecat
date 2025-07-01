@@ -8,28 +8,19 @@
 
 import asyncio
 import inspect
-import types
 from dataclasses import dataclass
 from typing import (
     Any,
     Awaitable,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
     Sequence,
-    Set,
-    Tuple,
     Type,
-    Union,
-    get_args,
-    get_origin,
-    get_type_hints,
 )
 
-import docstring_parser
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
@@ -312,6 +303,17 @@ class LLMService(AIService):
         *,
         cancel_on_interruption: bool = True,
     ):
+        """Register a direct function handler for LLM function calls.
+
+        Direct functions have their metadata automatically extracted from their
+        signature and docstring, eliminating the need for accompanying
+        configurations (as FunctionSchemas or in provider-specific formats).
+
+        Args:
+            handler: The direct function to register. Must follow DirectFunction protocol.
+            cancel_on_interruption: Whether to cancel this function call when an
+                interruption occurs. Defaults to True.
+        """
         wrapper = DirectFunctionWrapper(handler)
         self._functions[wrapper.name] = FunctionCallRegistryItem(
             function_name=wrapper.name,
@@ -330,6 +332,11 @@ class LLMService(AIService):
             del self._start_callbacks[function_name]
 
     def unregister_direct_function(self, handler: Any):
+        """Remove a registered direct function handler.
+
+        Args:
+            handler: The direct function handler to remove.
+        """
         wrapper = DirectFunctionWrapper(handler)
         del self._functions[wrapper.name]
         # Note: no need to remove start callback here, as direct functions don't support start callbacks.
