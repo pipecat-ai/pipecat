@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time, you will need to wrap it with `watchdog_coroutine()` so the watchdog
   timers are reset regularly.
 
+- Added `session_token` parameter to `AWSNovaSonicLLMService`.
+
 ### Fixed
 
 - Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.
