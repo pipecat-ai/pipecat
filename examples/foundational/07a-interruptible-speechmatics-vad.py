@@ -56,11 +56,12 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         output_locale=Language.EN_GB,
         enable_vad=True,
         end_of_utterance_silence_trigger=0.5,
-        text_format="<{speaker_id}>{text}</{speaker_id}>",
+        speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+        speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         diarization_config=DiarizationConfig(
             enable=True,
             max_speakers=10,
-            ignore_speakers=["S2"],
+            focus_speakers=["S1"],
         ),
     )
 
@@ -86,7 +87,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "Always include punctuation in your responses. "
                 "Give very short replies - do not give longer replies unless strictly necessary. "
                 "Respond to what the user said in a concise, funny, creative and helpful way. "
-                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
+                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies. "
+                "Do not respond to speakers within `<PASSIVE/>` tags unless explicitly asked to. "
             ),
         },
     ]

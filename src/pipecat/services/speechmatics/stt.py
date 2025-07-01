@@ -147,8 +147,8 @@ class DiarizationConfig:
         max_speakers: Maximum number of speakers. Defaults to `4`.
         speaker_sensitivity: Speaker sensitivity. Defaults to `None`.
         prefer_current_speaker: Whether to prefer the current speaker. Defaults to `None`.
+        focus_speakers: List of speakers to focus on.
         ignore_speakers: List of speakers to ignore.
-        passive_speakers: List of speakers to consider passive.
         known_speakers: List of known speakers.
     """
 
@@ -156,8 +156,8 @@ class DiarizationConfig:
     max_speakers: int = 4
     speaker_sensitivity: Optional[float] = None
     prefer_current_speaker: Optional[bool] = None
+    focus_speakers: list[str] = field(default_factory=list)
     ignore_speakers: list[str] = field(default_factory=list)
-    passive_speakers: list[str] = field(default_factory=list)
     known_speakers: list[DiarizationKnownSpeakers] = field(default_factory=list)
 
 
@@ -200,14 +200,14 @@ class SpeakerFragments:
 
     Attributes:
         speaker_id: The ID of the speaker.
-        is_passive: Whether the speaker is passive (does not emit frame).
+        is_active: Whether the speaker is active (emits frame).
         timestamp: The timestamp of the frame.
         language: The language of the frame.
         fragments: The list of SpeechFragment items.
     """
 
     speaker_id: Optional[str] = None
-    is_passive: bool = False
+    is_active: bool = False
     timestamp: Optional[str] = None
     language: Optional[Language] = None
     fragments: list[SpeechFragment] = field(default_factory=list)
@@ -240,17 +240,22 @@ class SpeakerFragments:
             return content
         return format.format(**{"speaker_id": self.speaker_id, "text": content})
 
-    def _as_frame_attributes(self, format: Optional[str] = None) -> dict[str, Any]:
+    def _as_frame_attributes(
+        self, active_format: Optional[str] = None, passive_format: Optional[str] = None
+    ) -> dict[str, Any]:
         """Return a dictionary of attributes for a TranscriptionFrame.
 
         Args:
-            format: Format to wrap the text with.
+            active_format: Format to wrap the text with.
+            passive_format: Format to wrap the text with. Defaults to `active_format`.
 
         Returns:
             dict[str, Any]: The dictionary of attributes.
         """
+        if not passive_format:
+            passive_format = active_format
         return {
-            "text": self._format_text(format),
+            "text": self._format_text(active_format if self.is_active else passive_format),
             "user_id": self.speaker_id,
             "timestamp": self.timestamp,
             "language": self.language,
@@ -282,7 +287,8 @@ class SpeechmaticsSTTService(STTService):
         enable_vad: Enable VAD to trigger end of utterance detection. Defaults to `False`.
         end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
         operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
-        text_format: Wrapper for speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
+        speaker_active_format: Formatter for active speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
+        speaker_passive_format: Formatter for passive speaker ID. Defaults to `<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>`.
         diarization_config: Configuration for speaker diarization. Defaults to `None`.
         transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
         **kwargs: Additional arguments passed to STTService.
@@ -307,7 +313,8 @@ class SpeechmaticsSTTService(STTService):
         enable_vad: bool = False,
         end_of_utterance_silence_trigger: Optional[float] = None,
         diarization_config: DiarizationConfig = DiarizationConfig(),
-        text_format: str = "<{speaker_id}>{text}</{speaker_id}>",
+        speaker_active_format: str = "<{speaker_id}>{text}</{speaker_id}>",
+        speaker_passive_format: str = "<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         transcription_config: Optional[TranscriptionConfig] = None,
         **kwargs,
     ):
@@ -329,7 +336,8 @@ class SpeechmaticsSTTService(STTService):
         self._enable_vad: bool = enable_vad
         self._end_of_utterance_silence_trigger: Optional[float] = end_of_utterance_silence_trigger
         self._operating_point: OperatingPoint = operating_point
-        self._text_format: str = text_format
+        self._speaker_active_format: str = speaker_active_format
+        self._speaker_passive_format: str = speaker_passive_format
         self._diarization_config: Optional[DiarizationConfig] = diarization_config
 
         # Check we have required attributes
@@ -549,6 +557,10 @@ class SpeechmaticsSTTService(STTService):
         if not speech_frames:
             return
 
+        # Check at least one frame is active
+        if not any(frame.is_active for frame in speech_frames):
+            return
+
         # Frames to send
         upstream_frames: list[Frame] = []
         downstream_frames: list[Frame] = []
@@ -566,14 +578,18 @@ class SpeechmaticsSTTService(STTService):
 
             # Transform frames
             downstream_frames += [
-                TranscriptionFrame(**frame._as_frame_attributes(self._text_format))
+                TranscriptionFrame(
+                    **frame._as_frame_attributes(
+                        self._speaker_active_format, self._speaker_passive_format
+                    )
+                )
                 for frame in speech_frames
             ]
 
             # Log transcript(s)
             logger.debug(f"Finalized transcript: {[f.text for f in downstream_frames]}")
 
-        # Return as interim results
+        # Return as interim results (unformatted)
         else:
             downstream_frames += [
                 InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in speech_frames
@@ -633,9 +649,15 @@ class SpeechmaticsSTTService(STTService):
                     result=result,
                 )
 
-                # Drop `__XX__` speakers
-                if fragment.speaker and re.match(r"^__[A-Z0-9_]{2,}__$", fragment.speaker):
-                    continue
+                # Speaker filtering
+                if fragment.speaker:
+                    # Drop `__XX__` speakers
+                    if re.match(r"^__[A-Z0-9_]{2,}__$", fragment.speaker):
+                        continue
+
+                    # Drop ignored speakers
+                    if fragment.speaker in self._diarization_config.ignore_speakers:
+                        continue
 
                 # Add the fragment
                 fragments.append(fragment)
@@ -726,12 +748,18 @@ class SpeechmaticsSTTService(STTService):
             timespec="milliseconds"
         )
 
+        # Determine if the speaker is considered active
+        is_active = True
+        if self._diarization_config.enable:
+            is_active = group[0].speaker in self._diarization_config.focus_speakers
+
         # Return the SpeakerFragments object
         return SpeakerFragments(
             speaker_id=group[0].speaker,
             timestamp=ts,
             language=group[0].language,
             fragments=group,
+            is_active=is_active,
         )
 
 
