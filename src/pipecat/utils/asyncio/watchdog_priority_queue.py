@@ -20,7 +20,7 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 @dataclass
-class WatchdogPriorityCancelSentinel:
+class _WatchdogPriorityCancelSentinel:
     def __lt__(self, other):
         return True
 
@@ -62,7 +62,7 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
         else:
             get_result = await super().get()
 
-        if isinstance(get_result, WatchdogPriorityCancelSentinel):
+        if isinstance(get_result, _WatchdogPriorityCancelSentinel):
             logger.debug(
                 "Received WatchdogPriorityCancelSentinel, throwing CancelledError to force cancelling"
             )
@@ -91,7 +91,7 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
         forces the task to raise CancelledError when consumed, ensuring proper
         task termination.
         """
-        super().put_nowait(WatchdogPriorityCancelSentinel())
+        super().put_nowait(_WatchdogPriorityCancelSentinel())
 
     async def _watchdog_get(self):
         """Get item from queue while periodically resetting watchdog timer."""
