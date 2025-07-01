@@ -8,28 +8,19 @@
 
 import asyncio
 import inspect
-import types
 from dataclasses import dataclass
 from typing import (
     Any,
     Awaitable,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
     Sequence,
-    Set,
-    Tuple,
     Type,
-    Union,
-    get_args,
-    get_origin,
-    get_type_hints,
 )
 
-import docstring_parser
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
