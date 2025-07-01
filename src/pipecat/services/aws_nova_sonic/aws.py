@@ -194,6 +194,7 @@ class AWSNovaSonicLLMService(LLMService):
         *,
         secret_access_key: str,
         access_key_id: str,
+        session_token: Optional[str] = None,
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
@@ -208,6 +209,7 @@ class AWSNovaSonicLLMService(LLMService):
         Args:
             secret_access_key: AWS secret access key for authentication.
             access_key_id: AWS access key ID for authentication.
+            session_token: AWS session token for authentication.
             region: AWS region where the service is hosted.
             model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
             voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
@@ -220,6 +222,7 @@ class AWSNovaSonicLLMService(LLMService):
         super().__init__(**kwargs)
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
+        self._session_token = session_token
         self._region = region
         self._model = model
         self._client: Optional[BedrockRuntimeClient] = None
@@ -523,7 +526,9 @@ class AWSNovaSonicLLMService(LLMService):
             region=self._region,
             aws_credentials_identity_resolver=StaticCredentialsResolver(
                 credentials=AWSCredentialsIdentity(
-                    access_key_id=self._access_key_id, secret_access_key=self._secret_access_key
+                    access_key_id=self._access_key_id,
+                    secret_access_key=self._secret_access_key,
+                    session_token=self._session_token,
                 )
             ),
             http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
