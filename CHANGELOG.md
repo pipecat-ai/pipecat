@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+<<<<<<< HEAD
 - Added support for providing "direct" functions, which don't need an
   accompanying `FunctionSchema` or function definition dict. Instead, metadata
   (i.e. `name`, `description`, `properties`, and `required`) are automatically
@@ -39,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   tools = ToolsSchema(standard_tools=[do_something])
   ```
+=======
+- `user_id` is now populated in the `TranscriptionFrame` and
+  `InterimTranscriptionFrame` when using a service that provides a `user_id`,
+  like `DailyTransport` or `LiveKitTransport`.
+>>>>>>> 5f958226 (Add user_id to TranscriptionFrame and InterimTranscriptionFrame pushed by STTServices)
 
 - Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
   if you have a coroutine that is waiting for a result and that takes a long
