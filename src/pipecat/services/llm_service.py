@@ -307,8 +307,8 @@ class LLMService(AIService):
             return True
         return function_name in self._functions.keys()
 
-    def needs_mcp_clean_schema(self) -> bool:
-        """Check if this LLM service requires MCP schema cleaning.
+    def needs_mcp_alternate_schema(self) -> bool:
+        """Check if this LLM service requires alternate MCP schema.
 
         Some LLM services have stricter JSON schema validation and require
         certain properties to be removed or modified for compatibility.
