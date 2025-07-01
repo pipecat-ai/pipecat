@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -59,6 +60,7 @@ try:
         EventHandler,
         VideoFrame,
         VirtualCameraDevice,
+        VirtualSpeakerDevice,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -177,6 +179,7 @@ class DailyParams(TransportParams):
     Parameters:
         api_url: Daily API base URL.
         api_key: Daily API authentication key.
+        audio_in_user_tracks: Receive users' audio in separate tracks
         dialin_settings: Optional settings for dial-in functionality.
         camera_out_enabled: Whether to enable the main camera output track.
         microphone_out_enabled: Whether to enable the main microphone track.
@@ -186,6 +189,7 @@ class DailyParams(TransportParams):
 
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
+    audio_in_user_tracks: bool = True
     dialin_settings: Optional[DailyDialinSettings] = None
     camera_out_enabled: bool = True
     microphone_out_enabled: bool = True
@@ -372,12 +376,17 @@ class DailyTransportClient(EventHandler):
         self._out_sample_rate = 0
 
         self._camera: Optional[VirtualCameraDevice] = None
+        self._speaker: Optional[VirtualSpeakerDevice] = None
         self._microphone_track: Optional[DailyAudioTrack] = None
         self._custom_audio_tracks: Dict[str, DailyAudioTrack] = {}
 
     def _camera_name(self):
-        """Generate a unique camera name for this client instance."""
+        """Generate a unique virtual camera name for this client instance."""
         return f"camera-{self}"
+
+    def _speaker_name(self):
+        """Generate a unique virtual speaker name for this client instance."""
+        return f"speaker-{self}"
 
     @property
     def room_url(self) -> str:
@@ -433,6 +442,30 @@ class DailyTransportClient(EventHandler):
             frame.message, participant_id, completion=completion_callback(future)
         )
         await future
+
+    async def read_next_audio_frame(self) -> Optional[InputAudioRawFrame]:
+        """Reads the next 20ms audio frame from the virtual speaker."""
+        if not self._speaker:
+            return None
+
+        sample_rate = self._in_sample_rate
+        num_channels = self._params.audio_in_channels
+        num_frames = int(sample_rate / 100) * 2  # 20ms of audio
+
+        future = self._get_event_loop().create_future()
+        self._speaker.read_frames(num_frames, completion=completion_callback(future))
+        audio = await future
+
+        if len(audio) > 0:
+            return InputAudioRawFrame(
+                audio=audio, sample_rate=sample_rate, num_channels=num_channels
+            )
+        else:
+            # If we don't read any audio it could be there's no participant
+            # connected. daily-python will return immediately if that's the
+            # case, so let's sleep for a little bit (i.e. busy wait).
+            await asyncio.sleep(0.01)
+            return None
 
     async def register_audio_destination(self, destination: str):
         """Register a custom audio destination for multi-track output.
@@ -518,12 +551,21 @@ class DailyTransportClient(EventHandler):
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
-        if self._params.audio_in_enabled and not self._audio_task and self._task_manager:
-            self._audio_queue = WatchdogQueue(self._task_manager)
-            self._audio_task = self._task_manager.create_task(
-                self._callback_task_handler(self._audio_queue),
-                f"{self}::audio_callback_task",
-            )
+        if self._params.audio_in_enabled:
+            if self._params.audio_in_user_tracks and not self._audio_task:
+                self._audio_queue = WatchdogQueue(self._task_manager)
+                self._audio_task = self._task_manager.create_task(
+                    self._callback_task_handler(self._audio_queue),
+                    f"{self}::audio_callback_task",
+                )
+            elif not self._speaker:
+                self._speaker = Daily.create_speaker_device(
+                    self._speaker_name(),
+                    sample_rate=self._in_sample_rate,
+                    channels=self._params.audio_in_channels,
+                    non_blocking=True,
+                )
+                Daily.select_speaker_device(self._speaker_name())
 
         if self._params.video_in_enabled and not self._video_task and self._task_manager:
             self._video_queue = WatchdogQueue(self._task_manager)
@@ -1332,6 +1374,9 @@ class DailyInputTransport(BaseInputTransport):
         # case we don't start streaming right away.
         self._capture_participant_audio = []
 
+        # Audio task when using a virtual speaker (i.e. no user tracks).
+        self._audio_in_task: Optional[asyncio.Task] = None
+
         self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
 
     @property
@@ -1349,10 +1394,18 @@ class DailyInputTransport(BaseInputTransport):
             return
 
         logger.debug(f"Start receiving audio")
-        for participant_id, audio_source, sample_rate in self._capture_participant_audio:
-            await self._client.capture_participant_audio(
-                participant_id, self._on_participant_audio_data, audio_source, sample_rate
-            )
+
+        if self._params.audio_in_enabled:
+            if self._params.audio_in_user_tracks:
+                # Capture invididual participant tracks.
+                for participant_id, audio_source, sample_rate in self._capture_participant_audio:
+                    await self._client.capture_participant_audio(
+                        participant_id, self._on_participant_audio_data, audio_source, sample_rate
+                    )
+            elif not self._audio_in_task:
+                # Create audio task. It reads audio frames from a single room
+                # track and pushes them internally for VAD processing.
+                self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
         self._streaming_started = True
 
@@ -1407,6 +1460,10 @@ class DailyInputTransport(BaseInputTransport):
         await super().stop(frame)
         # Leave the room.
         await self._client.leave()
+        # Stop audio thread.
+        if self._audio_in_task:
+            await self.cancel_task(self._audio_in_task)
+            self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the input transport and leave the Daily room.
@@ -1418,6 +1475,10 @@ class DailyInputTransport(BaseInputTransport):
         await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
+        # Stop audio thread.
+        if self._audio_in_task:
+            await self.cancel_task(self._audio_in_task)
+            self._audio_in_task = None
 
     #
     # FrameProcessor
@@ -1493,6 +1554,12 @@ class DailyInputTransport(BaseInputTransport):
         )
         frame.transport_source = audio_source
         await self.push_audio_frame(frame)
+
+    async def _audio_in_task_handler(self):
+        while True:
+            frame = await self._client.read_next_audio_frame()
+            if frame:
+                await self.push_audio_frame(frame)
 
     #
     # Camera in
@@ -2175,7 +2242,7 @@ class DailyTransport(BaseTransport):
         id = participant["id"]
         logger.info(f"Participant joined {id}")
 
-        if self._input and self._params.audio_in_enabled:
+        if self._input and self._params.audio_in_enabled and self._params.audio_in_user_tracks:
             await self._input.capture_participant_audio(
                 id, "microphone", self._client.in_sample_rate
             )
