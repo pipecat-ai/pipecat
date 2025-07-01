@@ -45,11 +45,12 @@ class ContentPart(BaseModel):
 
     text: Optional[str] = Field(default=None, validate_default=False)
     inlineData: Optional[MediaChunk] = Field(default=None, validate_default=False)
-    fileData: Optional['FileData'] = Field(default=None, validate_default=False)
+    fileData: Optional["FileData"] = Field(default=None, validate_default=False)
 
 
 class FileData(BaseModel):
     """Represents a file reference in the Gemini File API."""
+
     mimeType: str
     fileUri: str
 
@@ -255,22 +256,26 @@ class Config(BaseModel):
 
 class SearchEntryPoint(BaseModel):
     """Represents the search entry point with rendered content for search suggestions."""
+
     renderedContent: Optional[str] = None
 
 
 class WebSource(BaseModel):
     """Represents a web source from grounding chunks."""
+
     uri: Optional[str] = None
     title: Optional[str] = None
 
 
 class GroundingChunk(BaseModel):
     """Represents a grounding chunk containing web source information."""
+
     web: Optional[WebSource] = None
 
 
 class GroundingSegment(BaseModel):
     """Represents a segment of text that is grounded."""
+
     startIndex: Optional[int] = None
     endIndex: Optional[int] = None
     text: Optional[str] = None
@@ -278,6 +283,7 @@ class GroundingSegment(BaseModel):
 
 class GroundingSupport(BaseModel):
     """Represents support information for grounded text segments."""
+
     segment: Optional[GroundingSegment] = None
     groundingChunkIndices: Optional[List[int]] = None
     confidenceScores: Optional[List[float]] = None
@@ -285,6 +291,7 @@ class GroundingSupport(BaseModel):
 
 class GroundingMetadata(BaseModel):
     """Represents grounding metadata from Google Search."""
+
     searchEntryPoint: Optional[SearchEntryPoint] = None
     groundingChunks: Optional[List[GroundingChunk]] = None
     groundingSupports: Optional[List[GroundingSupport]] = None
@@ -485,15 +492,15 @@ def parse_server_event(message_str):
         ServerEvent instance if parsing succeeds, None otherwise.
     """
     from loguru import logger  # Import logger locally to avoid scoping issues
-    
+
     try:
         evt_dict = json.loads(message_str)
-        
+
         # Only log grounding metadata detection if truly needed for debugging
         # In production, this could be removed entirely or moved to TRACE level
-        if 'serverContent' in evt_dict:
-            server_content = evt_dict['serverContent']
-            if 'groundingMetadata' in server_content:
+        if "serverContent" in evt_dict:
+            server_content = evt_dict["serverContent"]
+            if "groundingMetadata" in server_content:
                 # Consider removing this log entirely for production
                 pass
 

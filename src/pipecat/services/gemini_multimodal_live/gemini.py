@@ -59,11 +59,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
-from pipecat.services.llm_service import LLMService
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -75,7 +72,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
-from .audio_transcriber import AudioTranscriber
 from .file_api import GeminiFileAPI
 
 try:
@@ -226,9 +222,9 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
 
     def add_file_reference(self, file_uri: str, mime_type: str, text: Optional[str] = None):
         """Add a file reference to the context.
-        
+
         This adds a user message with a file reference that will be sent during context initialization.
-        
+
         Args:
             file_uri: URI of the uploaded file
             mime_type: MIME type of the file
@@ -238,15 +234,17 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
         parts = []
         if text:
             parts.append({"type": "text", "text": text})
-        
+
         # Add file reference part
-        parts.append({"type": "file_data", "file_data": {"mime_type": mime_type, "file_uri": file_uri}})
-        
+        parts.append(
+            {"type": "file_data", "file_data": {"mime_type": mime_type, "file_uri": file_uri}}
+        )
+
         # Add to messages
         message = {"role": "user", "content": parts}
         self.messages.append(message)
         logger.info(f"Added file reference to context: {file_uri}")
-        
+
     def get_messages_for_initializing_history(self):
         """Get messages formatted for Gemini history initialization.
 
@@ -273,12 +271,14 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
-                        parts.append({
-                            "fileData": {
-                                "mimeType": file_data.get("mime_type"),
-                                "fileUri": file_data.get("file_uri")
+                        parts.append(
+                            {
+                                "fileData": {
+                                    "mimeType": file_data.get("mime_type"),
+                                    "fileUri": file_data.get("file_uri"),
+                                }
                             }
-                        })
+                        )
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
@@ -468,7 +468,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
-    
+
     def __init__(
         self,
         *,
@@ -560,7 +560,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             else {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
-        
+
         # Initialize the File API client
         self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
 
@@ -1015,12 +1015,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
-                        parts.append({
-                            "fileData": {
-                                "mimeType": file_data.get("mime_type"),
-                                "fileUri": file_data.get("file_uri")
+                        parts.append(
+                            {
+                                "fileData": {
+                                    "mimeType": file_data.get("mime_type"),
+                                    "fileUri": file_data.get("file_uri"),
+                                }
                             }
-                        })
+                        )
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
@@ -1167,7 +1169,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Process grounding metadata if we have accumulated any
         if self._accumulated_grounding_metadata:
             logger.debug("Processing grounding metadata...")
-            await self._process_grounding_metadata(self._accumulated_grounding_metadata, self._search_result_buffer)
+            await self._process_grounding_metadata(
+                self._accumulated_grounding_metadata, self._search_result_buffer
+            )
         else:
             logger.debug("No grounding metadata to process")
 
@@ -1285,17 +1289,23 @@ class GeminiMultimodalLiveLLMService(LLMService):
     async def _handle_evt_grounding_metadata(self, evt):
         """Handle dedicated grounding metadata events."""
         logger.debug("Received dedicated grounding metadata event.")
-        
+
         if evt.serverContent and evt.serverContent.groundingMetadata:
             grounding_metadata = evt.serverContent.groundingMetadata
-            logger.debug(f"Grounding data: {len(grounding_metadata.groundingChunks or [])} chunks, {len(grounding_metadata.groundingSupports or [])} supports")
-            
+            logger.debug(
+                f"Grounding data: {len(grounding_metadata.groundingChunks or [])} chunks, {len(grounding_metadata.groundingSupports or [])} supports"
+            )
+
             # Process the grounding metadata immediately
             await self._process_grounding_metadata(grounding_metadata, self._search_result_buffer)
 
-    async def _process_grounding_metadata(self, grounding_metadata: events.GroundingMetadata, search_result: str = ""):
+    async def _process_grounding_metadata(
+        self, grounding_metadata: events.GroundingMetadata, search_result: str = ""
+    ):
         """Process grounding metadata and emit LLMSearchResponseFrame."""
-        logger.debug(f"Processing grounding metadata. Search result text length: {len(search_result)}")
+        logger.debug(
+            f"Processing grounding metadata. Search result text length: {len(search_result)}"
+        )
         if not grounding_metadata:
             logger.warning("No grounding metadata provided to _process_grounding_metadata")
             return
@@ -1304,49 +1314,47 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         # Extract rendered content for search suggestions
         rendered_content = None
-        if grounding_metadata.searchEntryPoint and grounding_metadata.searchEntryPoint.renderedContent:
+        if (
+            grounding_metadata.searchEntryPoint
+            and grounding_metadata.searchEntryPoint.renderedContent
+        ):
             rendered_content = grounding_metadata.searchEntryPoint.renderedContent
 
         # Convert grounding chunks and supports to LLMSearchOrigin format
         origins = []
-        
+
         if grounding_metadata.groundingChunks and grounding_metadata.groundingSupports:
             # Create a mapping of chunk indices to origins
             chunk_to_origin = {}
-            
+
             for index, chunk in enumerate(grounding_metadata.groundingChunks):
                 if chunk.web:
                     origin = LLMSearchOrigin(
-                        site_uri=chunk.web.uri,
-                        site_title=chunk.web.title,
-                        results=[]
+                        site_uri=chunk.web.uri, site_title=chunk.web.title, results=[]
                     )
                     chunk_to_origin[index] = origin
                     origins.append(origin)
-            
+
             # Add grounding support results to the appropriate origins
             for support in grounding_metadata.groundingSupports:
                 if support.segment and support.groundingChunkIndices:
                     text = support.segment.text or ""
                     confidence_scores = support.confidenceScores or []
-                    
+
                     # Add this result to all origins referenced by this support
                     for chunk_index in support.groundingChunkIndices:
                         if chunk_index in chunk_to_origin:
-                            result = LLMSearchResult(
-                                text=text,
-                                confidence=confidence_scores
-                            )
+                            result = LLMSearchResult(text=text, confidence=confidence_scores)
                             chunk_to_origin[chunk_index].results.append(result)
 
         # Create and push the search response frame
         search_frame = LLMSearchResponseFrame(
-            search_result=search_result,
-            origins=origins,
-            rendered_content=rendered_content
+            search_result=search_result, origins=origins, rendered_content=rendered_content
         )
-        
-        logger.debug(f"Emitting LLMSearchResponseFrame with {len(origins)} origins, rendered_content available: {rendered_content is not None}")
+
+        logger.debug(
+            f"Emitting LLMSearchResponseFrame with {len(origins)} origins, rendered_content available: {rendered_content is not None}"
+        )
         await self.push_frame(search_frame)
 
     def create_context_aggregator(
