@@ -17,7 +17,7 @@ import aiohttp
 from daily.daily import AudioData, VideoFrame
 from loguru import logger
 
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -75,7 +75,7 @@ class TavusVideoService(AIService):
         self._client: Optional[TavusTransportClient] = None
 
         self._conversation_id: str
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
 
         self._audio_buffer = bytearray()
         self._send_task: Optional[asyncio.Task] = None
