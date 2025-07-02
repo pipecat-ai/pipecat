@@ -19,6 +19,7 @@ from pipecat.processors.aggregators.llm_response import (
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import OperatingPoint, SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language

@@ -743,11 +743,11 @@ def _language_to_speechmatics_language(language: Language) -> str:
     return result
 
 
-def _locale_to_speechmatics_locale(language: str, locale: Language) -> Optional[str]:
+def _locale_to_speechmatics_locale(language_code: str, locale: Language) -> Optional[str]:
     """Convert a Language enum to a Speechmatics language code.
 
     Args:
-        language: The language code.
+        language_code: The language code.
         locale: The Language enum to convert.
 
     Returns:
@@ -763,11 +763,11 @@ def _locale_to_speechmatics_locale(language: str, locale: Language) -> Optional[
     }
 
     # Get the locale code
-    result = LOCALES.get(language, {}).get(locale)
+    result = LOCALES.get(language_code, {}).get(locale)
 
     # Fail if locale is not supported
     if not result:
-        logger.warning(f"Unsupported output locale: {locale}, defaulting to {language}")
+        logger.warning(f"Unsupported output locale: {locale}, defaulting to {language_code}")
 
     # Return the locale code
     return result
