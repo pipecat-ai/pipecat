@@ -78,10 +78,11 @@ class CallContainerModel: ObservableObject {
         self.saveCredentials(backendURL: baseUrl)
     }
     
-    @MainActor
     func disconnect() {
-        self.rtviClientIOS?.disconnect(completion: nil)
-        self.rtviClientIOS?.release()
+        Task { @MainActor in
+            try await self.rtviClientIOS?.disconnect()
+            self.rtviClientIOS?.release()
+        }
     }
     
     func showError(message: String) {
