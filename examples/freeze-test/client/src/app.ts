@@ -191,7 +191,17 @@ class WebsocketClientApp {
       const startTime = Date.now();
 
       this.recordingSerializer = new RecordingSerializer()
-      const transport = this.ENABLE_RECORDING_MODE ? new WebSocketTransport({serializer: this.recordingSerializer}) : new WebSocketTransport();
+      const transport = this.ENABLE_RECORDING_MODE ?
+          new WebSocketTransport({
+            serializer: this.recordingSerializer,
+            recorderSampleRate: 8000,
+            playerSampleRate:8000
+          }) :
+          new WebSocketTransport({
+            serializer: new ProtobufFrameSerializer(),
+            recorderSampleRate: 8000,
+            playerSampleRate:8000
+          });
       this.websocketTransport = transport
 
       const RTVIConfig: RTVIClientOptions = {

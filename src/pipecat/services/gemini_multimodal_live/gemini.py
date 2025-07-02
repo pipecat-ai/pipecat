@@ -59,6 +59,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
@@ -71,6 +72,8 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
+
+from .file_api import GeminiFileAPI
 
 try:
     import websockets
@@ -218,6 +221,29 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                     system_instruction += str(content)
         return system_instruction
 
+    def add_file_reference(self, file_uri: str, mime_type: str, text: Optional[str] = None):
+        """Add a file reference to the context.
+        
+        This adds a user message with a file reference that will be sent during context initialization.
+        
+        Args:
+            file_uri: URI of the uploaded file
+            mime_type: MIME type of the file
+            text: Optional text prompt to accompany the file
+        """
+        # Create parts list with file reference
+        parts = []
+        if text:
+            parts.append({"type": "text", "text": text})
+        
+        # Add file reference part
+        parts.append({"type": "file_data", "file_data": {"mime_type": mime_type, "file_uri": file_uri}})
+        
+        # Add to messages
+        message = {"role": "user", "content": parts}
+        self.messages.append(message)
+        logger.info(f"Added file reference to context: {file_uri}")
+        
     def get_messages_for_initializing_history(self):
         """Get messages formatted for Gemini history initialization.
 
@@ -242,6 +268,14 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                 for part in content:
                     if part.get("type") == "text":
                         parts.append({"text": part.get("text")})
+                    elif part.get("type") == "file_data":
+                        file_data = part.get("file_data", {})
+                        parts.append({
+                            "fileData": {
+                                "mimeType": file_data.get("mime_type"),
+                                "fileUri": file_data.get("file_uri")
+                            }
+                        })
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
@@ -333,7 +367,12 @@ class GeminiMultimodalLiveContextAggregatorPair:
 
 
 class GeminiMultimodalModalities(Enum):
-    """Supported modalities for Gemini Multimodal Live."""
+    """Supported modalities for Gemini Multimodal Live.
+
+    Parameters:
+        TEXT: Text responses.
+        AUDIO: Audio responses.
+    """
 
     TEXT = "TEXT"
     AUDIO = "AUDIO"
@@ -422,25 +461,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
     This service enables real-time conversations with Gemini, supporting both
     text and audio modalities. It handles voice transcription, streaming audio
     responses, and tool usage.
-
-    Args:
-        api_key: Google AI API key for authentication.
-        base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
-        model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-001".
-        voice_id: TTS voice identifier. Defaults to "Charon".
-        start_audio_paused: Whether to start with audio input paused. Defaults to False.
-        start_video_paused: Whether to start with video input paused. Defaults to False.
-        system_instruction: System prompt for the model. Defaults to None.
-        tools: Tools/functions available to the model. Defaults to None.
-        params: Configuration parameters for the model. Defaults to InputParams().
-        inference_on_context_initialization: Whether to generate a response when context
-            is first set. Defaults to True.
-        **kwargs: Additional arguments passed to parent LLMService.
     """
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
-
+    
     def __init__(
         self,
         *,
@@ -454,8 +479,25 @@ class GeminiMultimodalLiveLLMService(LLMService):
         tools: Optional[Union[List[dict], ToolsSchema]] = None,
         params: Optional[InputParams] = None,
         inference_on_context_initialization: bool = True,
+        file_api_base_url: str = "https://generativelanguage.googleapis.com/v1beta/files",
         **kwargs,
     ):
+        """Initialize the Gemini Multimodal Live LLM service.
+
+        Args:
+            api_key: Google AI API key for authentication.
+            base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
+            model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-001".
+            voice_id: TTS voice identifier. Defaults to "Charon".
+            start_audio_paused: Whether to start with audio input paused. Defaults to False.
+            start_video_paused: Whether to start with video input paused. Defaults to False.
+            system_instruction: System prompt for the model. Defaults to None.
+            tools: Tools/functions available to the model. Defaults to None.
+            params: Configuration parameters for the model. Defaults to InputParams().
+            inference_on_context_initialization: Whether to generate a response when context
+                is first set. Defaults to True.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         super().__init__(base_url=base_url, **kwargs)
 
         params = params or InputParams()
@@ -515,6 +557,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
             else {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
+        
+        # Initialize the File API client
+        self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
+
+        # Initialize the File API client
+        self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
@@ -942,7 +990,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._needs_turn_complete_message = True
 
     async def _create_single_response(self, messages_list):
-        # refactor to combine this logic with same logic in GeminiMultimodalLiveContext
+        # Refactor to combine this logic with same logic in GeminiMultimodalLiveContext
         messages = []
         for item in messages_list:
             role = item.get("role")
@@ -961,6 +1009,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 for part in content:
                     if part.get("type") == "text":
                         parts.append({"text": part.get("text")})
+                    elif part.get("type") == "file_data":
+                        file_data = part.get("file_data", {})
+                        parts.append({
+                            "fileData": {
+                                "mimeType": file_data.get("mime_type"),
+                                "fileUri": file_data.get("file_uri")
+                            }
+                        })
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:

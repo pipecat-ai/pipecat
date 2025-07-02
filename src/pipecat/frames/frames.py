@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Core frame definitions for the Pipecat AI framework.
+
+This module contains all frame types used throughout the Pipecat pipeline system,
+including data frames, system frames, and control frames for audio, video, text,
+and LLM processing.
+"""
+
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -32,7 +39,22 @@ if TYPE_CHECKING:
 
 
 class KeypadEntry(str, Enum):
-    """DTMF entries."""
+    """DTMF keypad entries for phone system integration.
+
+    Parameters:
+        ONE: Number key 1.
+        TWO: Number key 2.
+        THREE: Number key 3.
+        FOUR: Number key 4.
+        FIVE: Number key 5.
+        SIX: Number key 6.
+        SEVEN: Number key 7.
+        EIGHT: Number key 8.
+        NINE: Number key 9.
+        ZERO: Number key 0.
+        POUND: Pound/hash key (#).
+        STAR: Star/asterisk key (*).
+    """
 
     ONE = "1"
     TWO = "2"
@@ -49,12 +71,31 @@ class KeypadEntry(str, Enum):
 
 
 def format_pts(pts: Optional[int]):
+    """Format presentation timestamp (PTS) in nanoseconds to a human-readable string.
+
+    Converts a PTS value in nanoseconds to a string representation.
+
+    Args:
+        pts: Presentation timestamp in nanoseconds, or None if not set.
+    """
     return nanoseconds_to_str(pts) if pts else None
 
 
 @dataclass
 class Frame:
-    """Base frame class."""
+    """Base frame class for all frames in the Pipecat pipeline.
+
+    All frames inherit from this base class and automatically receive
+    unique identifiers, names, and metadata support.
+
+    Parameters:
+        id: Unique identifier for the frame instance.
+        name: Human-readable name combining class name and instance count.
+        pts: Presentation timestamp in nanoseconds.
+        metadata: Dictionary for arbitrary frame metadata.
+        transport_source: Name of the transport source that created this frame.
+        transport_destination: Name of the transport destination for this frame.
+    """
 
     id: int = field(init=False)
     name: str = field(init=False)
@@ -77,9 +118,10 @@ class Frame:
 
 @dataclass
 class SystemFrame(Frame):
-    """System frames are frames that are not internally queued by any of the
-    frame processors and should be processed immediately.
+    """System frame class for immediate processing.
 
+    System frames are frames that are not internally queued by any of the
+    frame processors and should be processed immediately.
     """
 
     pass
@@ -87,9 +129,10 @@ class SystemFrame(Frame):
 
 @dataclass
 class DataFrame(Frame):
-    """Data frames are frames that will be processed in order and usually
-    contain data such as LLM context, text, audio or images.
+    """Data frame class for processing data in order.
 
+    Data frames are frames that will be processed in order and usually
+    contain data such as LLM context, text, audio or images.
     """
 
     pass
@@ -97,10 +140,11 @@ class DataFrame(Frame):
 
 @dataclass
 class ControlFrame(Frame):
-    """Control frames are frames that, similar to data frames, will be processed
+    """Control frame class for processing control information in order.
+
+    Control frames are frames that, similar to data frames, will be processed
     in order and usually contain control information such as frames to update
     settings or to end the pipeline.
-
     """
 
     pass
@@ -113,7 +157,14 @@ class ControlFrame(Frame):
 
 @dataclass
 class AudioRawFrame:
-    """A chunk of audio."""
+    """A frame containing a chunk of raw audio.
+
+    Parameters:
+        audio: Raw audio bytes in PCM format.
+        sample_rate: Audio sample rate in Hz.
+        num_channels: Number of audio channels.
+        num_frames: Number of audio frames (calculated automatically).
+    """
 
     audio: bytes
     sample_rate: int
@@ -126,7 +177,13 @@ class AudioRawFrame:
 
 @dataclass
 class ImageRawFrame:
-    """A raw image."""
+    """A frame containing a raw image.
+
+    Parameters:
+        image: Raw image bytes.
+        size: Image dimensions as (width, height) tuple.
+        format: Image format (e.g., 'JPEG', 'PNG').
+    """
 
     image: bytes
     size: Tuple[int, int]
@@ -140,10 +197,11 @@ class ImageRawFrame:
 
 @dataclass
 class OutputAudioRawFrame(DataFrame, AudioRawFrame):
-    """A chunk of audio. Will be played by the output transport. If the
-    transport supports multiple audio destinations (e.g. multiple audio tracks) the
-    destination name can be specified.
+    """Audio data frame for output to transport.
 
+    A chunk of raw audio that will be played by the output transport. If the
+    transport supports multiple audio destinations (e.g. multiple audio tracks)
+    the destination name can be specified in transport_destination.
     """
 
     def __post_init__(self):
@@ -157,10 +215,11 @@ class OutputAudioRawFrame(DataFrame, AudioRawFrame):
 
 @dataclass
 class OutputImageRawFrame(DataFrame, ImageRawFrame):
-    """An image that will be shown by the transport. If the transport supports
-    multiple video destinations (e.g. multiple video tracks) the destination
-    name can be specified.
+    """Image data frame for output to transport.
 
+    An image that will be shown by the transport. If the transport supports
+    multiple video destinations (e.g. multiple video tracks) the destination
+    name can be specified in transport_destination.
     """
 
     def __str__(self):
@@ -170,16 +229,23 @@ class OutputImageRawFrame(DataFrame, ImageRawFrame):
 
 @dataclass
 class TTSAudioRawFrame(OutputAudioRawFrame):
-    """A chunk of output audio generated by a TTS service."""
+    """Audio data frame generated by Text-to-Speech services.
+
+    A chunk of output audio generated by a TTS service, ready for playback.
+    """
 
     pass
 
 
 @dataclass
 class URLImageRawFrame(OutputImageRawFrame):
-    """An output image with an associated URL. These images are usually
+    """Image frame with an associated URL.
+
+    An output image with an associated URL. These images are usually
     generated by third-party services that provide a URL to download the image.
 
+    Parameters:
+        url: URL where the image can be downloaded from.
     """
 
     url: Optional[str] = None
@@ -191,10 +257,14 @@ class URLImageRawFrame(OutputImageRawFrame):
 
 @dataclass
 class SpriteFrame(DataFrame):
-    """An animated sprite. Will be shown by the transport if the transport's
+    """Animated sprite frame containing multiple images.
+
+    An animated sprite that will be shown by the transport if the transport's
     camera is enabled. Will play at the framerate specified in the transport's
     `camera_out_framerate` constructor parameter.
 
+    Parameters:
+        images: List of image frames that make up the sprite animation.
     """
 
     images: List[OutputImageRawFrame]
@@ -206,9 +276,14 @@ class SpriteFrame(DataFrame):
 
 @dataclass
 class TextFrame(DataFrame):
-    """A chunk of text. Emitted by LLM services, consumed by TTS services, can
-    be used to send text through processors.
+    """Text data frame for passing text through the pipeline.
 
+    A chunk of text. Emitted by LLM services, consumed by context
+    aggregators, TTS services and more. Can be used to send text
+    through processors.
+
+    Parameters:
+        text: The text content.
     """
 
     text: str
@@ -220,23 +295,30 @@ class TextFrame(DataFrame):
 
 @dataclass
 class LLMTextFrame(TextFrame):
-    """A text frame generated by LLM services."""
+    """Text frame generated by LLM services."""
 
     pass
 
 
 @dataclass
 class TTSTextFrame(TextFrame):
-    """A text frame generated by TTS services."""
+    """Text frame generated by Text-to-Speech services."""
 
     pass
 
 
 @dataclass
 class TranscriptionFrame(TextFrame):
-    """A text frame with transcription-specific data. The `result` field
+    """Text frame containing speech transcription data.
+
+    A text frame with transcription-specific data. The `result` field
     contains the result from the STT service if available.
 
+    Parameters:
+        user_id: Identifier for the user who spoke.
+        timestamp: When the transcription occurred.
+        language: Detected or specified language of the speech.
+        result: Raw result from the STT service.
     """
 
     user_id: str
@@ -250,9 +332,17 @@ class TranscriptionFrame(TextFrame):
 
 @dataclass
 class InterimTranscriptionFrame(TextFrame):
-    """A text frame with interim transcription-specific data. The `result` field
+    """Text frame containing partial/interim transcription data.
+
+    A text frame with interim transcription-specific data that represents
+    partial results before final transcription. The `result` field
     contains the result from the STT service if available.
 
+    Parameters:
+        user_id: Identifier for the user who spoke.
+        timestamp: When the interim transcription occurred.
+        language: Detected or specified language of the speech.
+        result: Raw result from the STT service.
     """
 
     text: str
@@ -267,10 +357,15 @@ class InterimTranscriptionFrame(TextFrame):
 
 @dataclass
 class TranslationFrame(TextFrame):
-    """A text frame with translated transcription data.
+    """Text frame containing translated transcription data.
 
-    Will be placed in the transport's receive queue when a participant speaks.
+    A text frame with translated transcription data that will be placed
+    in the transport's receive queue when a participant speaks.
 
+    Parameters:
+        user_id: Identifier for the user who spoke.
+        timestamp: When the translation occurred.
+        language: Target language of the translation.
     """
 
     user_id: str
@@ -283,16 +378,27 @@ class TranslationFrame(TextFrame):
 
 @dataclass
 class OpenAILLMContextAssistantTimestampFrame(DataFrame):
-    """Timestamp information for assistant message in LLM context."""
+    """Timestamp information for assistant messages in LLM context.
+
+    Parameters:
+        timestamp: Timestamp when the assistant message was created.
+    """
 
     timestamp: str
 
 
 @dataclass
 class TranscriptionMessage:
-    """A message in a conversation transcript containing the role and content.
+    """A message in a conversation transcript.
 
+    A message in a conversation transcript containing the role and content.
     Messages are in standard format with roles normalized to user/assistant.
+
+    Parameters:
+        role: The role of the message sender (user or assistant).
+        content: The message content/text.
+        user_id: Optional identifier for the user.
+        timestamp: Optional timestamp when the message was created.
     """
 
     role: Literal["user", "assistant"]
@@ -303,39 +409,46 @@ class TranscriptionMessage:
 
 @dataclass
 class TranscriptionUpdateFrame(DataFrame):
-    """A frame containing new messages added to the conversation transcript.
+    """Frame containing new messages added to conversation transcript.
 
+    A frame containing new messages added to the conversation transcript.
     This frame is emitted when new messages are added to the conversation history,
     containing only the newly added messages rather than the full transcript.
     Messages have normalized roles (user/assistant) regardless of the LLM service used.
     Messages are always in the OpenAI standard message format, which supports both:
 
-    Simple format:
-    [
-        {
-            "role": "user",
-            "content": "Hi, how are you?"
-        },
-        {
-            "role": "assistant",
-            "content": "Great! And you?"
-        }
-    ]
+    Examples:
+        Simple format::
 
-    Content list format:
-    [
-        {
-            "role": "user",
-            "content": [{"type": "text", "text": "Hi, how are you?"}]
-        },
-        {
-            "role": "assistant",
-            "content": [{"type": "text", "text": "Great! And you?"}]
-        }
-    ]
+            [
+                {
+                    "role": "user",
+                    "content": "Hi, how are you?"
+                },
+                {
+                    "role": "assistant",
+                    "content": "Great! And you?"
+                }
+            ]
+
+        Content list format::
+
+            [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Hi, how are you?"}]
+                },
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Great! And you?"}]
+                }
+            ]
 
     OpenAI supports both formats. Anthropic and Google messages are converted to the
     content list format.
+
+    Parameters:
+        messages: List of new transcript messages that were added.
     """
 
     messages: List[TranscriptionMessage]
@@ -347,12 +460,16 @@ class TranscriptionUpdateFrame(DataFrame):
 
 @dataclass
 class LLMMessagesFrame(DataFrame):
-    """A frame containing a list of LLM messages. Used to signal that an LLM
+    """Frame containing LLM messages for chat completion.
+
+    A frame containing a list of LLM messages. Used to signal that an LLM
     service should run a chat completion and emit an LLMFullResponseStartFrame,
     TextFrames and an LLMFullResponseEndFrame. Note that the `messages`
-    property in this class is mutable, and will be be updated by various
+    property in this class is mutable, and will be updated by various
     aggregators.
 
+    Parameters:
+        messages: List of message dictionaries in LLM format.
     """
 
     messages: List[dict]
@@ -360,9 +477,13 @@ class LLMMessagesFrame(DataFrame):
 
 @dataclass
 class LLMMessagesAppendFrame(DataFrame):
-    """A frame containing a list of LLM messages that need to be added to the
+    """Frame containing LLM messages to append to current context.
+
+    A frame containing a list of LLM messages that need to be added to the
     current context.
 
+    Parameters:
+        messages: List of message dictionaries to append.
     """
 
     messages: List[dict]
@@ -370,10 +491,14 @@ class LLMMessagesAppendFrame(DataFrame):
 
 @dataclass
 class LLMMessagesUpdateFrame(DataFrame):
-    """A frame containing a list of new LLM messages. These messages will
+    """Frame containing LLM messages to replace current context.
+
+    A frame containing a list of new LLM messages. These messages will
     replace the current context LLM messages and should generate a new
     LLMMessagesFrame.
 
+    Parameters:
+        messages: List of message dictionaries to replace current context.
     """
 
     messages: List[dict]
@@ -381,9 +506,14 @@ class LLMMessagesUpdateFrame(DataFrame):
 
 @dataclass
 class LLMSetToolsFrame(DataFrame):
-    """A frame containing a list of tools for an LLM to use for function calling.
+    """Frame containing tools for LLM function calling.
+
+    A frame containing a list of tools for an LLM to use for function calling.
     The specific format depends on the LLM being used, but it should typically
     contain JSON Schema objects.
+
+    Parameters:
+        tools: List of tool/function definitions for the LLM.
     """
 
     tools: List[dict]
@@ -391,23 +521,35 @@ class LLMSetToolsFrame(DataFrame):
 
 @dataclass
 class LLMSetToolChoiceFrame(DataFrame):
-    """A frame containing a tool choice for an LLM to use for function calling."""
+    """Frame containing tool choice configuration for LLM function calling.
+
+    Parameters:
+        tool_choice: Tool choice setting - 'none', 'auto', 'required', or specific tool dict.
+    """
 
     tool_choice: Literal["none", "auto", "required"] | dict
 
 
 @dataclass
 class LLMEnablePromptCachingFrame(DataFrame):
-    """A frame to enable/disable prompt caching in certain LLMs."""
+    """Frame to enable/disable prompt caching in LLMs.
+
+    Parameters:
+        enable: Whether to enable prompt caching.
+    """
 
     enable: bool
 
 
 @dataclass
 class TTSSpeakFrame(DataFrame):
-    """A frame that contains a text that should be spoken by the TTS in the
-    pipeline (if any).
+    """Frame containing text that should be spoken by TTS.
 
+    A frame that contains text that should be spoken by the TTS service
+    in the pipeline (if any).
+
+    Parameters:
+        text: The text to be spoken.
     """
 
     text: str
@@ -415,6 +557,12 @@ class TTSSpeakFrame(DataFrame):
 
 @dataclass
 class TransportMessageFrame(DataFrame):
+    """Frame containing transport-specific message data.
+
+    Parameters:
+        message: The transport message payload.
+    """
+
     message: Any
 
     def __str__(self):
@@ -423,17 +571,22 @@ class TransportMessageFrame(DataFrame):
 
 @dataclass
 class DTMFFrame:
-    """A DTMF button frame"""
+    """Base class for DTMF (Dual-Tone Multi-Frequency) keypad frames.
+
+    Parameters:
+        button: The DTMF keypad entry that was pressed.
+    """
 
     button: KeypadEntry
 
 
 @dataclass
 class OutputDTMFFrame(DTMFFrame, DataFrame):
-    """A DTMF keypress output that will be queued. If your transport supports
+    """DTMF keypress output frame for transport queuing.
+
+    A DTMF keypress output that will be queued. If your transport supports
     multiple dial-out destinations, use the `transport_destination` field to
     specify where the DTMF keypress should be sent.
-
     """
 
     pass
@@ -446,7 +599,20 @@ class OutputDTMFFrame(DTMFFrame, DataFrame):
 
 @dataclass
 class StartFrame(SystemFrame):
-    """This is the first frame that should be pushed down a pipeline."""
+    """Initial frame to start pipeline processing.
+
+    This is the first frame that should be pushed down a pipeline to
+    initialize all processors with their configuration parameters.
+
+    Parameters:
+        audio_in_sample_rate: Input audio sample rate in Hz.
+        audio_out_sample_rate: Output audio sample rate in Hz.
+        allow_interruptions: Whether to allow user interruptions.
+        enable_metrics: Whether to enable performance metrics collection.
+        enable_usage_metrics: Whether to enable usage metrics collection.
+        interruption_strategies: List of interruption handling strategies.
+        report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
+    """
 
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
@@ -459,17 +625,26 @@ class StartFrame(SystemFrame):
 
 @dataclass
 class CancelFrame(SystemFrame):
-    """Indicates that a pipeline needs to stop right away."""
+    """Frame indicating pipeline should stop immediately.
+
+    Indicates that a pipeline needs to stop right away without
+    processing remaining queued frames.
+    """
 
     pass
 
 
 @dataclass
 class ErrorFrame(SystemFrame):
-    """This is used notify upstream that an error has occurred downstream the
-    pipeline. A fatal error indicates the error is unrecoverable and that the
+    """Frame notifying of errors in the pipeline.
+
+    This is used to notify upstream that an error has occurred downstream in
+    the pipeline. A fatal error indicates the error is unrecoverable and that the
     bot should exit.
 
+    Parameters:
+        error: Description of the error that occurred.
+        fatal: Whether the error is fatal and requires bot shutdown.
     """
 
     error: str
@@ -481,9 +656,13 @@ class ErrorFrame(SystemFrame):
 
 @dataclass
 class FatalErrorFrame(ErrorFrame):
-    """This is used notify upstream that an unrecoverable error has occurred and
-    that the bot should exit.
+    """Frame notifying of unrecoverable errors requiring bot shutdown.
 
+    This is used to notify upstream that an unrecoverable error has occurred and
+    that the bot should exit immediately.
+
+    Parameters:
+        fatal: Always True for fatal errors.
     """
 
     fatal: bool = field(default=True, init=False)
@@ -491,10 +670,11 @@ class FatalErrorFrame(ErrorFrame):
 
 @dataclass
 class EndTaskFrame(SystemFrame):
-    """This is used to notify the pipeline task that the pipeline should be
-    closed nicely (flushing all the queued frames) by pushing an EndFrame
-    downstream.
+    """Frame to request graceful pipeline task closure.
 
+    This is used to notify the pipeline task that the pipeline should be
+    closed nicely (flushing all the queued frames) by pushing an EndFrame
+    downstream. This frame should be pushed upstream.
     """
 
     pass
@@ -502,9 +682,11 @@ class EndTaskFrame(SystemFrame):
 
 @dataclass
 class CancelTaskFrame(SystemFrame):
-    """This is used to notify the pipeline task that the pipeline should be
-    stopped immediately by pushing a CancelFrame downstream.
+    """Frame to request immediate pipeline task cancellation.
 
+    This is used to notify the pipeline task that the pipeline should be
+    stopped immediately by pushing a CancelFrame downstream. This frame
+    should be pushed upstream.
     """
 
     pass
@@ -512,10 +694,12 @@ class CancelTaskFrame(SystemFrame):
 
 @dataclass
 class StopTaskFrame(SystemFrame):
-    """This is used to notify the pipeline task that it should be stopped as
-    soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state.
+    """Frame to request pipeline task stop while keeping processors running.
 
+    This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state. This frame should be pushed
+    upstream.
     """
 
     pass
@@ -523,11 +707,15 @@ class StopTaskFrame(SystemFrame):
 
 @dataclass
 class FrameProcessorPauseUrgentFrame(SystemFrame):
-    """This frame is used to pause frame processing for the given processor as
+    """Frame to pause frame processing immediately.
+
+    This frame is used to pause frame processing for the given processor as
     fast as possible. Pausing frame processing will keep frames in the internal
     queue which will then be processed when frame processing is resumed with
     `FrameProcessorResumeFrame`.
 
+    Parameters:
+        processor: The frame processor to pause.
     """
 
     processor: "FrameProcessor"
@@ -535,10 +723,14 @@ class FrameProcessorPauseUrgentFrame(SystemFrame):
 
 @dataclass
 class FrameProcessorResumeUrgentFrame(SystemFrame):
-    """This frame is used to resume frame processing for the given processor
+    """Frame to resume frame processing immediately.
+
+    This frame is used to resume frame processing for the given processor
     if it was previously paused as fast as possible. After resuming frame
     processing all queued frames will be processed in the order received.
 
+    Parameters:
+        processor: The frame processor to resume.
     """
 
     processor: "FrameProcessor"
@@ -546,11 +738,12 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
 
 @dataclass
 class StartInterruptionFrame(SystemFrame):
-    """Emitted by VAD to indicate that a user has started speaking (i.e. is
-    interruption). This is similar to UserStartedSpeakingFrame except that it
-    should be pushed concurrently with other frames (so the order is not
-    guaranteed).
+    """Frame indicating user started speaking (interruption detected).
 
+    Emitted by the BaseInputTransport to indicate that a user has started
+    speaking (i.e. is interrupting). This is similar to
+    UserStartedSpeakingFrame except that it should be pushed concurrently
+    with other frames (so the order is not guaranteed).
     """
 
     pass
@@ -558,11 +751,12 @@ class StartInterruptionFrame(SystemFrame):
 
 @dataclass
 class StopInterruptionFrame(SystemFrame):
-    """Emitted by VAD to indicate that a user has stopped speaking (i.e. no more
-    interruptions). This is similar to UserStoppedSpeakingFrame except that it
-    should be pushed concurrently with other frames (so the order is not
-    guaranteed).
+    """Frame indicating user stopped speaking (interruption ended).
 
+    Emitted by the BaseInputTransport to indicate that a user has stopped
+    speaking (i.e. no more interruptions). This is similar to
+    UserStoppedSpeakingFrame except that it should be pushed concurrently
+    with other frames (so the order is not guaranteed).
     """
 
     pass
@@ -570,11 +764,15 @@ class StopInterruptionFrame(SystemFrame):
 
 @dataclass
 class UserStartedSpeakingFrame(SystemFrame):
-    """Emitted by VAD to indicate that a user has started speaking. This can be
+    """Frame indicating user has started speaking.
+
+    Emitted by VAD to indicate that a user has started speaking. This can be
     used for interruptions or other times when detecting that someone is
     speaking is more important than knowing what they're saying (as you will
-    with a TranscriptionFrame)
+    get with a TranscriptionFrame).
 
+    Parameters:
+        emulated: Whether this event was emulated rather than detected by VAD.
     """
 
     emulated: bool = False
@@ -582,14 +780,22 @@ class UserStartedSpeakingFrame(SystemFrame):
 
 @dataclass
 class UserStoppedSpeakingFrame(SystemFrame):
-    """Emitted by the VAD to indicate that a user stopped speaking."""
+    """Frame indicating user has stopped speaking.
+
+    Emitted by the VAD to indicate that a user stopped speaking.
+
+    Parameters:
+        emulated: Whether this event was emulated rather than detected by VAD.
+    """
 
     emulated: bool = False
 
 
 @dataclass
 class EmulateUserStartedSpeakingFrame(SystemFrame):
-    """Emitted by internal processors upstream to emulate VAD behavior when a
+    """Frame to emulate user started speaking behavior.
+
+    Emitted by internal processors upstream to emulate VAD behavior when a
     user starts speaking.
     """
 
@@ -598,7 +804,9 @@ class EmulateUserStartedSpeakingFrame(SystemFrame):
 
 @dataclass
 class EmulateUserStoppedSpeakingFrame(SystemFrame):
-    """Emitted by internal processors upstream to emulate VAD behavior when a
+    """Frame to emulate user stopped speaking behavior.
+
+    Emitted by internal processors upstream to emulate VAD behavior when a
     user stops speaking.
     """
 
@@ -607,24 +815,27 @@ class EmulateUserStoppedSpeakingFrame(SystemFrame):
 
 @dataclass
 class VADUserStartedSpeakingFrame(SystemFrame):
-    """Frame emitted when VAD detects the user has definitively started speaking."""
+    """Frame emitted when VAD definitively detects user started speaking."""
 
     pass
 
 
 @dataclass
 class VADUserStoppedSpeakingFrame(SystemFrame):
-    """Frame emitted when VAD detects the user has definitively stopped speaking."""
+    """Frame emitted when VAD definitively detects user stopped speaking."""
 
     pass
 
 
 @dataclass
 class BotInterruptionFrame(SystemFrame):
-    """Emitted by when the bot should be interrupted. This will mainly cause the
+    """Frame indicating the bot should be interrupted.
+
+    Emitted when the bot should be interrupted. This will mainly cause the
     same actions as if the user interrupted except that the
     UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
-
+    This frame should be pushed upstreams. It results in the BaseInputTransport
+    starting an interruption by pushing a StartInterruptionFrame downstream.
     """
 
     pass
@@ -632,25 +843,34 @@ class BotInterruptionFrame(SystemFrame):
 
 @dataclass
 class BotStartedSpeakingFrame(SystemFrame):
-    """Emitted upstream by transport outputs to indicate the bot started speaking."""
+    """Frame indicating the bot started speaking.
+
+    Emitted upstream and downstream by the BaseTransportOutput to indicate the
+    bot started speaking.
+    """
 
     pass
 
 
 @dataclass
 class BotStoppedSpeakingFrame(SystemFrame):
-    """Emitted upstream by transport outputs to indicate the bot stopped speaking."""
+    """Frame indicating the bot stopped speaking.
+
+    Emitted upstream and downstream by the BaseTransportOutput to indicate the
+    bot stopped speaking.
+    """
 
     pass
 
 
 @dataclass
 class BotSpeakingFrame(SystemFrame):
-    """Emitted upstream by transport outputs while the bot is still
-    speaking. This can be used, for example, to detect when a user is idle. That
-    is, while the bot is speaking we don't want to trigger any user idle timeout
-    since the user might be listening.
+    """Frame indicating the bot is currently speaking.
 
+    Emitted upstream and downstream by the BaseOutputTransport while the bot is
+    still speaking. This can be used, for example, to detect when a user is
+    idle. That is, while the bot is speaking we don't want to trigger any user
+    idle timeout since the user might be listening.
     """
 
     pass
@@ -658,21 +878,28 @@ class BotSpeakingFrame(SystemFrame):
 
 @dataclass
 class MetricsFrame(SystemFrame):
-    """Emitted by processor that can compute metrics like latencies."""
+    """Frame containing performance metrics data.
+
+    Emitted by processors that can compute metrics like latencies.
+
+    Parameters:
+        data: List of metrics data collected by the processor.
+    """
 
     data: List[MetricsData]
 
 
 @dataclass
 class FunctionCallFromLLM:
-    """Represents a function call returned by the LLM to be registered for execution.
+    """Represents a function call returned by the LLM.
 
-    Attributes:
-        function_name (str): The name of the function.
-        tool_call_id (str): A unique identifier for the function call.
-        arguments (Mapping[str, Any]): The arguments for the function.
-        context (OpenAILLMContext): The LLM context.
+    Represents a function call returned by the LLM to be registered for execution.
 
+    Parameters:
+        function_name: The name of the function to call.
+        tool_call_id: A unique identifier for the function call.
+        arguments: The arguments to pass to the function.
+        context: The LLM context when the function call was made.
     """
 
     function_name: str
@@ -683,15 +910,28 @@ class FunctionCallFromLLM:
 
 @dataclass
 class FunctionCallsStartedFrame(SystemFrame):
-    """A frame signaling that one or more function call execution is going to
-    start."""
+    """Frame signaling that function call execution is starting.
+
+    A frame signaling that one or more function call execution is going to
+    start.
+
+    Parameters:
+        function_calls: Sequence of function calls that will be executed.
+    """
 
     function_calls: Sequence[FunctionCallFromLLM]
 
 
 @dataclass
 class FunctionCallInProgressFrame(SystemFrame):
-    """A frame signaling that a function call is in progress."""
+    """Frame signaling that a function call is currently executing.
+
+    Parameters:
+        function_name: Name of the function being executed.
+        tool_call_id: Unique identifier for this function call.
+        arguments: Arguments passed to the function.
+        cancel_on_interruption: Whether to cancel this call if interrupted.
+    """
 
     function_name: str
     tool_call_id: str
@@ -701,7 +941,12 @@ class FunctionCallInProgressFrame(SystemFrame):
 
 @dataclass
 class FunctionCallCancelFrame(SystemFrame):
-    """A frame to signal a function call has been cancelled."""
+    """Frame signaling that a function call has been cancelled.
+
+    Parameters:
+        function_name: Name of the function that was cancelled.
+        tool_call_id: Unique identifier for the cancelled function call.
+    """
 
     function_name: str
     tool_call_id: str
@@ -709,7 +954,12 @@ class FunctionCallCancelFrame(SystemFrame):
 
 @dataclass
 class FunctionCallResultProperties:
-    """Properties for a function call result frame."""
+    """Properties for configuring function call result behavior.
+
+    Parameters:
+        run_llm: Whether to run the LLM after receiving this result.
+        on_context_updated: Callback to execute when context is updated.
+    """
 
     run_llm: Optional[bool] = None
     on_context_updated: Optional[Callable[[], Awaitable[None]]] = None
@@ -717,7 +967,16 @@ class FunctionCallResultProperties:
 
 @dataclass
 class FunctionCallResultFrame(SystemFrame):
-    """A frame containing the result of an LLM function (tool) call."""
+    """Frame containing the result of an LLM function call.
+
+    Parameters:
+        function_name: Name of the function that was executed.
+        tool_call_id: Unique identifier for the function call.
+        arguments: Arguments that were passed to the function.
+        result: The result returned by the function.
+        run_llm: Whether to run the LLM after this result.
+        properties: Additional properties for result handling.
+    """
 
     function_name: str
     tool_call_id: str
@@ -729,13 +988,23 @@ class FunctionCallResultFrame(SystemFrame):
 
 @dataclass
 class STTMuteFrame(SystemFrame):
-    """System frame to mute/unmute the STT service."""
+    """Frame to mute/unmute the Speech-to-Text service.
+
+    Parameters:
+        mute: Whether to mute (True) or unmute (False) the STT service.
+    """
 
     mute: bool
 
 
 @dataclass
 class TransportMessageUrgentFrame(SystemFrame):
+    """Frame for urgent transport messages that need immediate processing.
+
+    Parameters:
+        message: The urgent transport message payload.
+    """
+
     message: Any
 
     def __str__(self):
@@ -744,10 +1013,18 @@ class TransportMessageUrgentFrame(SystemFrame):
 
 @dataclass
 class UserImageRequestFrame(SystemFrame):
-    """A frame to request an image from the given user. The frame might be
+    """Frame requesting an image from a specific user.
+
+    A frame to request an image from the given user. The frame might be
     generated by a function call in which case the corresponding fields will be
     properly set.
 
+    Parameters:
+        user_id: Identifier of the user to request image from.
+        context: Optional context for the image request.
+        function_name: Name of function that generated this request (if any).
+        tool_call_id: Tool call ID if generated by function call.
+        video_source: Specific video source to capture from.
     """
 
     user_id: str
@@ -762,10 +1039,11 @@ class UserImageRequestFrame(SystemFrame):
 
 @dataclass
 class InputAudioRawFrame(SystemFrame, AudioRawFrame):
-    """A chunk of audio usually coming from an input transport. If the transport
-    supports multiple audio sources (e.g. multiple audio tracks) the source name
-    will be specified.
+    """Raw audio input frame from transport.
 
+    A chunk of audio usually coming from an input transport. If the transport
+    supports multiple audio sources (e.g. multiple audio tracks) the source name
+    will be specified in transport_source.
     """
 
     def __post_init__(self):
@@ -779,10 +1057,11 @@ class InputAudioRawFrame(SystemFrame, AudioRawFrame):
 
 @dataclass
 class InputImageRawFrame(SystemFrame, ImageRawFrame):
-    """An image usually coming from an input transport. If the transport
-    supports multiple video sources (e.g. multiple video tracks) the source name
-    will be specified.
+    """Raw image input frame from transport.
 
+    An image usually coming from an input transport. If the transport
+    supports multiple video sources (e.g. multiple video tracks) the source name
+    will be specified in transport_source.
     """
 
     def __str__(self):
@@ -792,7 +1071,13 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
 
 @dataclass
 class UserAudioRawFrame(InputAudioRawFrame):
-    """A chunk of audio, usually coming from an input transport, associated to a user."""
+    """Raw audio input frame associated with a specific user.
+
+    A chunk of audio, usually coming from an input transport, associated to a user.
+
+    Parameters:
+        user_id: Identifier of the user who provided this audio.
+    """
 
     user_id: str = ""
 
@@ -803,7 +1088,14 @@ class UserAudioRawFrame(InputAudioRawFrame):
 
 @dataclass
 class UserImageRawFrame(InputImageRawFrame):
-    """An image associated to a user."""
+    """Raw image input frame associated with a specific user.
+
+    An image associated to a user, potentially in response to an image request.
+
+    Parameters:
+        user_id: Identifier of the user who provided this image.
+        request: The original image request frame if this is a response.
+    """
 
     user_id: str = ""
     request: Optional[UserImageRequestFrame] = None
@@ -815,7 +1107,13 @@ class UserImageRawFrame(InputImageRawFrame):
 
 @dataclass
 class VisionImageRawFrame(InputImageRawFrame):
-    """An image with an associated text to ask for a description of it."""
+    """Image frame for vision/image analysis with associated text prompt.
+
+    An image with an associated text to ask for a description of it.
+
+    Parameters:
+        text: Optional text prompt describing what to analyze in the image.
+    """
 
     text: Optional[str] = None
 
@@ -826,17 +1124,18 @@ class VisionImageRawFrame(InputImageRawFrame):
 
 @dataclass
 class InputDTMFFrame(DTMFFrame, SystemFrame):
-    """A DTMF keypress input."""
+    """DTMF keypress input frame from transport."""
 
     pass
 
 
 @dataclass
 class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
-    """A DTMF keypress output that will be sent right away. If your transport
+    """DTMF keypress output frame for immediate sending.
+
+    A DTMF keypress output that will be sent right away. If your transport
     supports multiple dial-out destinations, use the `transport_destination`
     field to specify where the DTMF keypress should be sent.
-
     """
 
     pass
@@ -849,12 +1148,13 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
 
 @dataclass
 class EndFrame(ControlFrame):
-    """Indicates that a pipeline has ended and frame processors and pipelines
+    """Frame indicating pipeline has ended and should shut down.
+
+    Indicates that a pipeline has ended and frame processors and pipelines
     should be shut down. If the transport receives this frame, it will stop
     sending frames to its output channel(s) and close all its threads. Note,
-    that this is a control frame, which means it will received in the order it
-    was sent (unline system frames).
-
+    that this is a control frame, which means it will be received in the order it
+    was sent (unlike system frames).
     """
 
     pass
@@ -862,10 +1162,11 @@ class EndFrame(ControlFrame):
 
 @dataclass
 class StopFrame(ControlFrame):
-    """Indicates that a pipeline should be stopped but that the pipeline
+    """Frame indicating pipeline should stop but keep processors running.
+
+    Indicates that a pipeline should be stopped but that the pipeline
     processors should be kept in a running state. This is normally queued from
     the pipeline task.
-
     """
 
     pass
@@ -873,9 +1174,13 @@ class StopFrame(ControlFrame):
 
 @dataclass
 class HeartbeatFrame(ControlFrame):
-    """This frame is used by the pipeline task as a mechanism to know if the
+    """Frame used by pipeline task to monitor pipeline health.
+
+    This frame is used by the pipeline task as a mechanism to know if the
     pipeline is running properly.
 
+    Parameters:
+        timestamp: Timestamp when the heartbeat was generated.
     """
 
     timestamp: int
@@ -883,11 +1188,15 @@ class HeartbeatFrame(ControlFrame):
 
 @dataclass
 class FrameProcessorPauseFrame(ControlFrame):
-    """This frame is used to pause frame processing for the given
+    """Frame to pause frame processing for a specific processor.
+
+    This frame is used to pause frame processing for the given
     processor. Pausing frame processing will keep frames in the internal queue
     which will then be processed when frame processing is resumed with
     `FrameProcessorResumeFrame`.
 
+    Parameters:
+        processor: The frame processor to pause.
     """
 
     processor: "FrameProcessor"
@@ -895,10 +1204,14 @@ class FrameProcessorPauseFrame(ControlFrame):
 
 @dataclass
 class FrameProcessorResumeFrame(ControlFrame):
-    """This frame is used to resume frame processing for the given processor if
+    """Frame to resume frame processing for a specific processor.
+
+    This frame is used to resume frame processing for the given processor if
     it was previously paused. After resuming frame processing all queued frames
     will be processed in the order received.
 
+    Parameters:
+        processor: The frame processor to resume.
     """
 
     processor: "FrameProcessor"
@@ -906,8 +1219,10 @@ class FrameProcessorResumeFrame(ControlFrame):
 
 @dataclass
 class LLMFullResponseStartFrame(ControlFrame):
-    """Used to indicate the beginning of an LLM response. Following by one or
-    more TextFrame and a final LLMFullResponseEndFrame.
+    """Frame indicating the beginning of an LLM response.
+
+    Used to indicate the beginning of an LLM response. Followed by one or
+    more TextFrames and a final LLMFullResponseEndFrame.
     """
 
     pass
@@ -915,19 +1230,20 @@ class LLMFullResponseStartFrame(ControlFrame):
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
-    """Indicates the end of an LLM response."""
+    """Frame indicating the end of an LLM response."""
 
     pass
 
 
 @dataclass
 class TTSStartedFrame(ControlFrame):
-    """Used to indicate the beginning of a TTS response. Following
-    TTSAudioRawFrames are part of the TTS response until an
+    """Frame indicating the beginning of a TTS response.
+
+    Used to indicate the beginning of a TTS response. Following
+    TTSAudioRawFrames are part of the TTS response until a
     TTSStoppedFrame. These frames can be used for aggregating audio frames in a
     transport to optimize the size of frames sent to the session, without
     needing to control this in the TTS service.
-
     """
 
     pass
@@ -935,37 +1251,54 @@ class TTSStartedFrame(ControlFrame):
 
 @dataclass
 class TTSStoppedFrame(ControlFrame):
-    """Indicates the end of a TTS response."""
+    """Frame indicating the end of a TTS response."""
 
     pass
 
 
 @dataclass
 class ServiceUpdateSettingsFrame(ControlFrame):
-    """A control frame containing a request to update service settings."""
+    """Base frame for updating service settings.
+
+    A control frame containing a request to update service settings.
+
+    Parameters:
+        settings: Dictionary of setting name to value mappings.
+    """
 
     settings: Mapping[str, Any]
 
 
 @dataclass
 class LLMUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+    """Frame for updating LLM service settings."""
+
     pass
 
 
 @dataclass
 class TTSUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+    """Frame for updating TTS service settings."""
+
     pass
 
 
 @dataclass
 class STTUpdateSettingsFrame(ServiceUpdateSettingsFrame):
+    """Frame for updating STT service settings."""
+
     pass
 
 
 @dataclass
 class VADParamsUpdateFrame(ControlFrame):
-    """A control frame containing a request to update VAD params. Intended
+    """Frame for updating VAD parameters.
+
+    A control frame containing a request to update VAD params. Intended
     to be pushed upstream from RTVI processor.
+
+    Parameters:
+        params: New VAD parameters to apply.
     """
 
     params: VADParams
@@ -973,41 +1306,57 @@ class VADParamsUpdateFrame(ControlFrame):
 
 @dataclass
 class FilterControlFrame(ControlFrame):
-    """Base control frame for other audio filter frames."""
+    """Base control frame for audio filter operations."""
 
     pass
 
 
 @dataclass
 class FilterUpdateSettingsFrame(FilterControlFrame):
-    """Control frame to update filter settings."""
+    """Frame for updating audio filter settings.
+
+    Parameters:
+        settings: Dictionary of filter setting name to value mappings.
+    """
 
     settings: Mapping[str, Any]
 
 
 @dataclass
 class FilterEnableFrame(FilterControlFrame):
-    """Control frame to enable or disable the filter at runtime."""
+    """Frame for enabling/disabling audio filters at runtime.
+
+    Parameters:
+        enable: Whether to enable (True) or disable (False) the filter.
+    """
 
     enable: bool
 
 
 @dataclass
 class MixerControlFrame(ControlFrame):
-    """Base control frame for other audio mixer frames."""
+    """Base control frame for audio mixer operations."""
 
     pass
 
 
 @dataclass
 class MixerUpdateSettingsFrame(MixerControlFrame):
-    """Control frame to update mixer settings."""
+    """Frame for updating audio mixer settings.
+
+    Parameters:
+        settings: Dictionary of mixer setting name to value mappings.
+    """
 
     settings: Mapping[str, Any]
 
 
 @dataclass
 class MixerEnableFrame(MixerControlFrame):
-    """Control frame to enable or disable the mixer at runtime."""
+    """Frame for enabling/disabling audio mixer at runtime.
+
+    Parameters:
+        enable: Whether to enable (True) or disable (False) the mixer.
+    """
 
     enable: bool

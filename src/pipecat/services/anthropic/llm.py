@@ -101,13 +101,6 @@ class AnthropicLLMService(LLMService):
     Provides inference capabilities with Claude models including support for
     function calling, vision processing, streaming responses, and prompt caching.
     Can use custom clients like AsyncAnthropicBedrock and AsyncAnthropicVertex.
-
-    Args:
-        api_key: Anthropic API key for authentication.
-        model: Model name to use. Defaults to "claude-sonnet-4-20250514".
-        params: Optional model parameters for inference.
-        client: Optional custom Anthropic client instance.
-        **kwargs: Additional arguments passed to parent LLMService.
     """
 
     # Overriding the default adapter to use the Anthropic one.
@@ -141,6 +134,15 @@ class AnthropicLLMService(LLMService):
         client=None,
         **kwargs,
     ):
+        """Initialize the Anthropic LLM service.
+
+        Args:
+            api_key: Anthropic API key for authentication.
+            model: Model name to use. Defaults to "claude-sonnet-4-20250514".
+            params: Optional model parameters for inference.
+            client: Optional custom Anthropic client instance.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         super().__init__(**kwargs)
         params = params or AnthropicLLMService.InputParams()
         self._client = client or AsyncAnthropic(
@@ -425,12 +427,6 @@ class AnthropicLLMContext(OpenAILLMContext):
     Extends OpenAILLMContext to handle Anthropic-specific features like
     system messages, prompt caching, and message format conversions.
     Manages conversation state and message history formatting.
-
-    Args:
-        messages: Initial list of conversation messages.
-        tools: Available function calling tools.
-        tool_choice: Tool selection preference.
-        system: System message content.
     """
 
     def __init__(
@@ -441,6 +437,14 @@ class AnthropicLLMContext(OpenAILLMContext):
         *,
         system: Union[str, NotGiven] = NOT_GIVEN,
     ):
+        """Initialize the Anthropic LLM context.
+
+        Args:
+            messages: Initial list of conversation messages.
+            tools: Available function calling tools.
+            tool_choice: Tool selection preference.
+            system: System message content.
+        """
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
 
         # For beta prompt caching. This is a counter that tracks the number of turns
@@ -534,20 +538,37 @@ class AnthropicLLMContext(OpenAILLMContext):
         Handles text content and function calls for both user and assistant messages.
 
         Args:
-            obj: Message in Anthropic format:
-                {
-                    "role": "user/assistant",
-                    "content": str | [{"type": "text/tool_use/tool_result", ...}]
-                }
+            obj: Message in Anthropic format.
 
         Returns:
-            List of messages in standard format:
-            [
+            List of messages in standard format.
+
+        Examples:
+            Input Anthropic format::
+
                 {
-                    "role": "user/assistant/tool",
-                    "content": [{"type": "text", "text": str}]
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Hello"},
+                        {"type": "tool_use", "id": "123", "name": "search", "input": {"q": "test"}}
+                    ]
                 }
-            ]
+
+            Output standard format::
+
+                [
+                    {"role": "assistant", "content": [{"type": "text", "text": "Hello"}]},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "id": "123",
+                                "function": {"name": "search", "arguments": '{"q": "test"}'}
+                            }
+                        ]
+                    }
+                ]
         """
         # todo: image format (?)
         # tool_use
@@ -609,23 +630,37 @@ class AnthropicLLMContext(OpenAILLMContext):
         Empty text content is converted to "(empty)".
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/tool",
-                    "content": str | [{"type": "text", ...}],
-                    "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}]
-                }
+            message: Message in standard format.
 
         Returns:
-            Message in Anthropic format:
-            {
-                "role": "user/assistant",
-                "content": str | [
-                    {"type": "text", "text": str} |
-                    {"type": "tool_use", "id": str, "name": str, "input": dict} |
-                    {"type": "tool_result", "tool_use_id": str, "content": str}
-                ]
-            }
+            Message in Anthropic format.
+
+        Examples:
+            Input standard format::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "123",
+                            "function": {"name": "search", "arguments": '{"q": "test"}'}
+                        }
+                    ]
+                }
+
+            Output Anthropic format::
+
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "123",
+                            "name": "search",
+                            "input": {"q": "test"}
+                        }
+                    ]
+                }
         """
         # todo: image messages (?)
         if message["role"] == "tool":

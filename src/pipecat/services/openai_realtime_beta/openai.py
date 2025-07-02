@@ -96,17 +96,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     Implements the OpenAI Realtime API Beta with WebSocket communication for low-latency
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
-
-    Args:
-        api_key: OpenAI API key for authentication.
-        model: OpenAI model name. Defaults to "gpt-4o-realtime-preview-2025-06-03".
-        base_url: WebSocket base URL for the realtime API.
-            Defaults to "wss://api.openai.com/v1/realtime".
-        session_properties: Configuration properties for the realtime session.
-            If None, uses default SessionProperties.
-        start_audio_paused: Whether to start with audio input paused. Defaults to False.
-        send_transcription_frames: Whether to emit transcription frames. Defaults to True.
-        **kwargs: Additional arguments passed to parent LLMService.
     """
 
     # Overriding the default adapter to use the OpenAIRealtimeLLMAdapter one.
@@ -123,6 +112,19 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         send_transcription_frames: bool = True,
         **kwargs,
     ):
+        """Initialize the OpenAI Realtime Beta LLM service.
+
+        Args:
+            api_key: OpenAI API key for authentication.
+            model: OpenAI model name. Defaults to "gpt-4o-realtime-preview-2025-06-03".
+            base_url: WebSocket base URL for the realtime API.
+                Defaults to "wss://api.openai.com/v1/realtime".
+            session_properties: Configuration properties for the realtime session.
+                If None, uses default SessionProperties.
+            start_audio_paused: Whether to start with audio input paused. Defaults to False.
+            send_transcription_frames: Whether to emit transcription frames. Defaults to True.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
@@ -637,6 +639,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         """Maybe handle an error event related to retrieving a conversation item.
 
         If the given error event is an error retrieving a conversation item:
+
         - set an exception on the future that retrieve_conversation_item() is waiting on
         - return true
         Otherwise:
