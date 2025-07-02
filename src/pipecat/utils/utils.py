@@ -25,15 +25,6 @@ def obj_id() -> int:
 
     Returns:
         A unique integer identifier that increments globally across all objects.
-
-    Examples::
-
-        >>> obj_id()
-        0
-        >>> obj_id()
-        1
-        >>> obj_id()
-        2
     """
     with _ID_LOCK:
         return next(_ID)
@@ -47,16 +38,6 @@ def obj_count(obj) -> int:
 
     Returns:
         A unique integer count that increments per class type.
-
-    Examples::
-
-        >>> obj_count(object())
-        0
-        >>> obj_count(object())
-        1
-        >>> new_type = type('NewType', (object,), {})
-        >>> obj_count(new_type())
-        0
     """
     with _COUNTS_LOCK:
         return next(_COUNTS[obj.__class__.__name__])
