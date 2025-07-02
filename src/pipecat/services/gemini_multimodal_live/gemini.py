@@ -72,7 +72,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
-
 from .file_api import GeminiFileAPI
 
 try:
@@ -223,9 +222,9 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
 
     def add_file_reference(self, file_uri: str, mime_type: str, text: Optional[str] = None):
         """Add a file reference to the context.
-        
+
         This adds a user message with a file reference that will be sent during context initialization.
-        
+
         Args:
             file_uri: URI of the uploaded file
             mime_type: MIME type of the file
@@ -235,15 +234,17 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
         parts = []
         if text:
             parts.append({"type": "text", "text": text})
-        
+
         # Add file reference part
-        parts.append({"type": "file_data", "file_data": {"mime_type": mime_type, "file_uri": file_uri}})
-        
+        parts.append(
+            {"type": "file_data", "file_data": {"mime_type": mime_type, "file_uri": file_uri}}
+        )
+
         # Add to messages
         message = {"role": "user", "content": parts}
         self.messages.append(message)
         logger.info(f"Added file reference to context: {file_uri}")
-        
+
     def get_messages_for_initializing_history(self):
         """Get messages formatted for Gemini history initialization.
 
@@ -270,12 +271,14 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
-                        parts.append({
-                            "fileData": {
-                                "mimeType": file_data.get("mime_type"),
-                                "fileUri": file_data.get("file_uri")
+                        parts.append(
+                            {
+                                "fileData": {
+                                    "mimeType": file_data.get("mime_type"),
+                                    "fileUri": file_data.get("file_uri"),
+                                }
                             }
-                        })
+                        )
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
@@ -465,7 +468,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
-    
+
     def __init__(
         self,
         *,
@@ -557,7 +560,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             else {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
-        
+
         # Initialize the File API client
         self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
 
@@ -1011,12 +1014,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
                         parts.append({"text": part.get("text")})
                     elif part.get("type") == "file_data":
                         file_data = part.get("file_data", {})
-                        parts.append({
-                            "fileData": {
-                                "mimeType": file_data.get("mime_type"),
-                                "fileUri": file_data.get("file_uri")
+                        parts.append(
+                            {
+                                "fileData": {
+                                    "mimeType": file_data.get("mime_type"),
+                                    "fileUri": file_data.get("file_uri"),
+                                }
                             }
-                        })
+                        )
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
