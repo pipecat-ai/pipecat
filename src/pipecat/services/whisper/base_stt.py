@@ -219,7 +219,11 @@ class BaseWhisperSTTService(SegmentedSTTService):
             if text:
                 await self._handle_transcription(text, True, self._language)
                 logger.debug(f"Transcription: [{text}]")
-                yield TranscriptionFrame(text, "", time_now_iso8601())
+                yield TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                )
             else:
                 logger.warning("Received empty transcription from API")
 

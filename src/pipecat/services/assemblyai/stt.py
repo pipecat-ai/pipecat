@@ -311,7 +311,7 @@ class AssemblyAISTTService(STTService):
             await self.push_frame(
                 TranscriptionFrame(
                     message.transcript,
-                    "",  # participant
+                    self._user_id,
                     time_now_iso8601(),
                     self._language,
                     message,
@@ -323,7 +323,7 @@ class AssemblyAISTTService(STTService):
             await self.push_frame(
                 InterimTranscriptionFrame(
                     message.transcript,
-                    "",  # participant
+                    self._user_id,
                     time_now_iso8601(),
                     self._language,
                     message,
