@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""GStreamer pipeline source integration for Pipecat."""
+
 import asyncio
 from typing import Optional
 
@@ -36,7 +38,24 @@ except ModuleNotFoundError as e:
 
 
 class GStreamerPipelineSource(FrameProcessor):
+    """A frame processor that uses GStreamer pipelines as media sources.
+
+    This processor creates and manages GStreamer pipelines to generate audio and video
+    output frames. It handles pipeline lifecycle, decoding, format conversion, and
+    frame generation with configurable output parameters.
+    """
+
     class OutputParams(BaseModel):
+        """Output configuration parameters for GStreamer pipeline.
+
+        Parameters:
+            video_width: Width of output video frames in pixels.
+            video_height: Height of output video frames in pixels.
+            audio_sample_rate: Sample rate for audio output. If None, uses frame sample rate.
+            audio_channels: Number of audio channels for output.
+            clock_sync: Whether to synchronize output with pipeline clock.
+        """
+
         video_width: int = 1280
         video_height: int = 720
         audio_sample_rate: Optional[int] = None
@@ -44,6 +63,13 @@ class GStreamerPipelineSource(FrameProcessor):
         clock_sync: bool = True
 
     def __init__(self, *, pipeline: str, out_params: Optional[OutputParams] = None, **kwargs):
+        """Initialize the GStreamer pipeline source.
+
+        Args:
+            pipeline: GStreamer pipeline description string for the source.
+            out_params: Output configuration parameters. If None, uses defaults.
+            **kwargs: Additional arguments passed to parent FrameProcessor.
+        """
         super().__init__(**kwargs)
 
         self._out_params = out_params or GStreamerPipelineSource.OutputParams()
@@ -67,6 +93,12 @@ class GStreamerPipelineSource(FrameProcessor):
         bus.connect("message", self._on_gstreamer_message)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and manage GStreamer pipeline lifecycle.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         # Specific system frames
@@ -92,13 +124,16 @@ class GStreamerPipelineSource(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _start(self, frame: StartFrame):
+        """Start the GStreamer pipeline."""
         self._sample_rate = self._out_params.audio_sample_rate or frame.audio_out_sample_rate
         self._player.set_state(Gst.State.PLAYING)
 
     async def _stop(self, frame: EndFrame):
+        """Stop the GStreamer pipeline."""
         self._player.set_state(Gst.State.NULL)
 
     async def _cancel(self, frame: CancelFrame):
+        """Cancel the GStreamer pipeline."""
         self._player.set_state(Gst.State.NULL)
 
     #
@@ -106,6 +141,7 @@ class GStreamerPipelineSource(FrameProcessor):
     #
 
     def _on_gstreamer_message(self, bus: Gst.Bus, message: Gst.Message):
+        """Handle GStreamer bus messages."""
         t = message.type
         if t == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
@@ -113,6 +149,7 @@ class GStreamerPipelineSource(FrameProcessor):
         return True
 
     def _decodebin_callback(self, decodebin: Gst.Element, pad: Gst.Pad):
+        """Handle new pads from decodebin element."""
         caps_string = pad.get_current_caps().to_string()
         if caps_string.startswith("audio"):
             self._decodebin_audio(pad)
@@ -120,6 +157,7 @@ class GStreamerPipelineSource(FrameProcessor):
             self._decodebin_video(pad)
 
     def _decodebin_audio(self, pad: Gst.Pad):
+        """Set up audio processing pipeline from decoded audio pad."""
         queue_audio = Gst.ElementFactory.make("queue", None)
         audioconvert = Gst.ElementFactory.make("audioconvert", None)
         audioresample = Gst.ElementFactory.make("audioresample", None)
@@ -153,6 +191,7 @@ class GStreamerPipelineSource(FrameProcessor):
         pad.link(queue_pad)
 
     def _decodebin_video(self, pad: Gst.Pad):
+        """Set up video processing pipeline from decoded video pad."""
         queue_video = Gst.ElementFactory.make("queue", None)
         videoconvert = Gst.ElementFactory.make("videoconvert", None)
         videoscale = Gst.ElementFactory.make("videoscale", None)
@@ -187,6 +226,7 @@ class GStreamerPipelineSource(FrameProcessor):
         pad.link(queue_pad)
 
     def _appsink_audio_new_sample(self, appsink: GstApp.AppSink):
+        """Handle new audio samples from GStreamer appsink."""
         buffer = appsink.pull_sample().get_buffer()
         (_, info) = buffer.map(Gst.MapFlags.READ)
         frame = OutputAudioRawFrame(
@@ -199,6 +239,7 @@ class GStreamerPipelineSource(FrameProcessor):
         return Gst.FlowReturn.OK
 
     def _appsink_video_new_sample(self, appsink: GstApp.AppSink):
+        """Handle new video samples from GStreamer appsink."""
         buffer = appsink.pull_sample().get_buffer()
         (_, info) = buffer.map(Gst.MapFlags.READ)
         frame = OutputImageRawFrame(

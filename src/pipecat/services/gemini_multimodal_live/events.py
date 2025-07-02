@@ -44,6 +44,17 @@ class ContentPart(BaseModel):
 
     text: Optional[str] = Field(default=None, validate_default=False)
     inlineData: Optional[MediaChunk] = Field(default=None, validate_default=False)
+    fileData: Optional["FileData"] = Field(default=None, validate_default=False)
+
+
+class FileData(BaseModel):
+    """Represents a file reference in the Gemini File API."""
+
+    mimeType: str
+    fileUri: str
+
+
+ContentPart.model_rebuild()  # Rebuild model to resolve forward reference
 
 
 class Turn(BaseModel):

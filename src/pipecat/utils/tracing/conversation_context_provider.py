@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Conversation context provider for OpenTelemetry tracing in Pipecat.
+
+This module provides a singleton context provider that manages the current
+conversation's tracing context, allowing services to create child spans
+that are properly associated with the conversation.
+"""
+
 import uuid
 from typing import TYPE_CHECKING, Optional
 
@@ -32,7 +39,11 @@ class ConversationContextProvider:
 
     @classmethod
     def get_instance(cls):
-        """Get the singleton instance."""
+        """Get the singleton instance.
+
+        Returns:
+            The singleton ConversationContextProvider instance.
+        """
         if cls._instance is None:
             cls._instance = ConversationContextProvider()
         return cls._instance
@@ -83,7 +94,6 @@ class ConversationContextProvider:
         return str(uuid.uuid4())
 
 
-# Create a simple helper function to get the current conversation context
 def get_current_conversation_context() -> Optional["Context"]:
     """Get the OpenTelemetry context for the current conversation.
 

@@ -4,14 +4,22 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-from typing import Optional
+"""Language conversion utilities for Azure services."""
 
-from loguru import logger
+from typing import Optional
 
 from pipecat.transcriptions.language import Language
 
 
 def language_to_azure_language(language: Language) -> Optional[str]:
+    """Convert a Language enum to Azure language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding Azure language code, or None if not supported.
+    """
     language_map = {
         # Afrikaans
         Language.AF: "af-ZA",

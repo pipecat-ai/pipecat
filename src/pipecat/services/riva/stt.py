@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""NVIDIA Riva Speech-to-Text service implementations for real-time and batch transcription."""
+
 import asyncio
 from typing import AsyncGenerator, List, Mapping, Optional
 
@@ -87,7 +89,20 @@ def language_to_riva_language(language: Language) -> Optional[str]:
 
 
 class RivaSTTService(STTService):
+    """Real-time speech-to-text service using NVIDIA Riva streaming ASR.
+
+    Provides real-time transcription capabilities using NVIDIA's Riva ASR models
+    through streaming recognition. Supports interim results and continuous audio
+    processing for low-latency applications.
+    """
+
     class InputParams(BaseModel):
+        """Configuration parameters for Riva STT service.
+
+        Parameters:
+            language: Target language for transcription. Defaults to EN_US.
+        """
+
         language: Optional[Language] = Language.EN_US
 
     def __init__(
@@ -103,6 +118,16 @@ class RivaSTTService(STTService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Riva STT service.
+
+        Args:
+            api_key: NVIDIA API key for authentication.
+            server: Riva server address. Defaults to NVIDIA Cloud Function endpoint.
+            model_function_map: Mapping containing 'function_id' and 'model_name' for the ASR model.
+            sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
+            params: Additional configuration parameters for Riva.
+            **kwargs: Additional arguments passed to STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or RivaSTTService.InputParams()
@@ -148,9 +173,23 @@ class RivaSTTService(STTService):
         self._response_task = None
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            False - this service does not support metrics generation.
+        """
         return False
 
     async def set_model(self, model: str):
+        """Set the ASR model for transcription.
+
+        Args:
+            model: Model name to set.
+
+        Note:
+            Model cannot be changed after initialization. Use model_function_map
+            parameter in constructor instead.
+        """
         logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
         example = {"function_id": "<UUID>", "model_name": "<model_name>"}
         logger.warning(
@@ -158,6 +197,11 @@ class RivaSTTService(STTService):
         )
 
     async def start(self, frame: StartFrame):
+        """Start the Riva STT service and initialize streaming configuration.
+
+        Args:
+            frame: StartFrame indicating pipeline start.
+        """
         await super().start(frame)
 
         if self._config:
@@ -203,10 +247,20 @@ class RivaSTTService(STTService):
             self._response_task = self.create_task(self._response_task_handler())
 
     async def stop(self, frame: EndFrame):
+        """Stop the Riva STT service and clean up resources.
+
+        Args:
+            frame: EndFrame indicating pipeline stop.
+        """
         await super().stop(frame)
         await self._stop_tasks()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the Riva STT service operation.
+
+        Args:
+            frame: CancelFrame indicating operation cancellation.
+        """
         await super().cancel(frame)
         await self._stop_tasks()
 
@@ -260,7 +314,7 @@ class RivaSTTService(STTService):
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
-                            "",
+                            self._user_id,
                             time_now_iso8601(),
                             self._language_code,
                             result=result,
@@ -275,7 +329,7 @@ class RivaSTTService(STTService):
                     await self.push_frame(
                         InterimTranscriptionFrame(
                             transcript,
-                            "",
+                            self._user_id,
                             time_now_iso8601(),
                             self._language_code,
                             result=result,
@@ -289,18 +343,39 @@ class RivaSTTService(STTService):
             self._response_queue.task_done()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Process audio data for speech-to-text transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            None - transcription results are pushed to the pipeline via frames.
+        """
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self._queue.put(audio)
         yield None
 
     def __next__(self) -> bytes:
+        """Get the next audio chunk for Riva processing.
+
+        Returns:
+            Audio bytes from the queue.
+
+        Raises:
+            StopIteration: When the thread is no longer running.
+        """
         if not self._thread_running:
             raise StopIteration
         future = asyncio.run_coroutine_threadsafe(self._queue.get(), self.get_event_loop())
         return future.result()
 
     def __iter__(self):
+        """Return iterator for audio chunk processing.
+
+        Returns:
+            Self as iterator.
+        """
         return self
 
 
@@ -310,17 +385,20 @@ class RivaSegmentedSTTService(SegmentedSTTService):
     By default, his service uses NVIDIA's Riva Canary ASR API to perform speech-to-text
     transcription on audio segments. It inherits from SegmentedSTTService to handle
     audio buffering and speech detection.
-
-    Args:
-        api_key: NVIDIA API key for authentication
-        server: Riva server address (defaults to NVIDIA Cloud Function endpoint)
-        model_function_map: Mapping of model name and its corresponding NVIDIA Cloud Function ID
-        sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
-        params: Additional configuration parameters for Riva
-        **kwargs: Additional arguments passed to SegmentedSTTService
     """
 
     class InputParams(BaseModel):
+        """Configuration parameters for Riva segmented STT service.
+
+        Parameters:
+            language: Target language for transcription. Defaults to EN_US.
+            profanity_filter: Whether to filter profanity from results.
+            automatic_punctuation: Whether to add automatic punctuation.
+            verbatim_transcripts: Whether to return verbatim transcripts.
+            boosted_lm_words: List of words to boost in language model.
+            boosted_lm_score: Score boost for specified words.
+        """
+
         language: Optional[Language] = Language.EN_US
         profanity_filter: bool = False
         automatic_punctuation: bool = True
@@ -341,6 +419,16 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Riva segmented STT service.
+
+        Args:
+            api_key: NVIDIA API key for authentication
+            server: Riva server address (defaults to NVIDIA Cloud Function endpoint)
+            model_function_map: Mapping of model name and its corresponding NVIDIA Cloud Function ID
+            sample_rate: Audio sample rate in Hz. If not provided, uses the pipeline's rate
+            params: Additional configuration parameters for Riva
+            **kwargs: Additional arguments passed to SegmentedSTTService
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or RivaSegmentedSTTService.InputParams()
@@ -380,7 +468,14 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         self._settings = {"language": self._language_enum}
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert pipecat Language enum to Riva's language code."""
+        """Convert pipecat Language enum to Riva's language code.
+
+        Args:
+            language: Language enum value.
+
+        Returns:
+            Riva language code or None if not supported.
+        """
         return language_to_riva_language(language)
 
     def _initialize_client(self):
@@ -435,10 +530,23 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         return config
 
     def can_generate_metrics(self) -> bool:
-        """Indicates whether this service can generate processing metrics."""
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True - this service supports metrics generation.
+        """
         return True
 
     async def set_model(self, model: str):
+        """Set the ASR model for transcription.
+
+        Args:
+            model: Model name to set.
+
+        Note:
+            Model cannot be changed after initialization. Use model_function_map
+            parameter in constructor instead.
+        """
         logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
         example = {"function_id": "<UUID>", "model_name": "<model_name>"}
         logger.warning(
@@ -446,13 +554,21 @@ class RivaSegmentedSTTService(SegmentedSTTService):
         )
 
     async def start(self, frame: StartFrame):
-        """Initialize the service when the pipeline starts."""
+        """Initialize the service when the pipeline starts.
+
+        Args:
+            frame: StartFrame indicating pipeline start.
+        """
         await super().start(frame)
         self._initialize_client()
         self._config = self._create_recognition_config()
 
     async def set_language(self, language: Language):
-        """Set the language for the STT service."""
+        """Set the language for the STT service.
+
+        Args:
+            language: Target language for transcription.
+        """
         logger.info(f"Switching STT language to: [{language}]")
         self._language_enum = language
         self._language = self.language_to_service_language(language) or "en-US"
@@ -520,7 +636,10 @@ class RivaSegmentedSTTService(SegmentedSTTService):
                         if text:
                             logger.debug(f"Transcription: [{text}]")
                             yield TranscriptionFrame(
-                                text, "", time_now_iso8601(), self._language_enum
+                                text,
+                                self._user_id,
+                                time_now_iso8601(),
+                                self._language_enum,
                             )
                             transcription_found = True
 
@@ -539,7 +658,11 @@ class RivaSegmentedSTTService(SegmentedSTTService):
 
 
 class ParakeetSTTService(RivaSTTService):
-    """Deprecated: Use RivaSTTService instead."""
+    """Deprecated speech-to-text service using NVIDIA Parakeet models.
+
+    This class is deprecated. Use RivaSTTService instead for equivalent functionality
+    with Parakeet models by specifying the appropriate model_function_map.
+    """
 
     def __init__(
         self,
@@ -554,6 +677,16 @@ class ParakeetSTTService(RivaSTTService):
         params: Optional[RivaSTTService.InputParams] = None,  # Use parent class's type
         **kwargs,
     ):
+        """Initialize the Parakeet STT service.
+
+        Args:
+            api_key: NVIDIA API key for authentication.
+            server: Riva server address. Defaults to NVIDIA Cloud Function endpoint.
+            model_function_map: Mapping containing 'function_id' and 'model_name' for Parakeet model.
+            sample_rate: Audio sample rate in Hz. If None, uses pipeline default.
+            params: Additional configuration parameters for Riva.
+            **kwargs: Additional arguments passed to RivaSTTService.
+        """
         super().__init__(
             api_key=api_key,
             server=server,

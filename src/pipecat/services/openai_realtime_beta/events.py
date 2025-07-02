@@ -18,13 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class InputAudioTranscription(BaseModel):
-    """Configuration for audio transcription settings.
-
-    Parameters:
-        model: Transcription model to use (e.g., "gpt-4o-transcribe", "whisper-1").
-        language: Optional language code for transcription.
-        prompt: Optional transcription hint text.
-    """
+    """Configuration for audio transcription settings."""
 
     model: str = "gpt-4o-transcribe"
     language: Optional[str]
@@ -36,6 +30,13 @@ class InputAudioTranscription(BaseModel):
         language: Optional[str] = None,
         prompt: Optional[str] = None,
     ):
+        """Initialize InputAudioTranscription.
+
+        Args:
+            model: Transcription model to use (e.g., "gpt-4o-transcribe", "whisper-1").
+            language: Optional language code for transcription.
+            prompt: Optional transcription hint text.
+        """
         super().__init__(model=model, language=language, prompt=prompt)
 
 
@@ -881,6 +882,8 @@ class TokenDetails(BaseModel):
     audio_tokens: Optional[int] = 0
 
     class Config:
+        """Pydantic configuration for TokenDetails."""
+
         extra = "allow"
 
 

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Google services module for Pipecat."""
+
 import sys
 
 from pipecat.services import DeprecatedModuleProxy

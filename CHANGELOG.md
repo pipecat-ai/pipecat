@@ -5,6 +5,59 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added support for providing "direct" functions, which don't need an
+  accompanying `FunctionSchema` or function definition dict. Instead, metadata
+  (i.e. `name`, `description`, `properties`, and `required`) are automatically
+  extracted from a combination of the function signature and docstring.
+
+  Usage:
+
+  ```python
+  # "Direct" function
+  # `params` must be the first parameter
+  async def do_something(params: FunctionCallParams, foo: int, bar: str = ""):
+    """
+    Do something interesting.
+
+    Args:
+      foo (int): The foo to do something interesting with.
+      bar (string): The bar to do something interesting with.
+    """
+
+    result = await process(foo, bar)
+    await params.result_callback({"result": result})
+
+  # ...
+
+  llm.register_direct_function(do_something)
+
+  # ...
+
+  tools = ToolsSchema(standard_tools=[do_something])
+  ```
+
+  - `user_id` is now populated in the `TranscriptionFrame` and
+    `InterimTranscriptionFrame` when using a transport that provides a
+    `user_id`, like `DailyTransport` or `LiveKitTransport`.
+
+- Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
+  if you have a coroutine that is waiting for a result and that takes a long
+  time, you will need to wrap it with `watchdog_coroutine()` so the watchdog
+  timers are reset regularly.
+
+- Added `session_token` parameter to `AWSNovaSonicLLMService`.
+
+### Fixed
+
+- Fixed a race condition that occurs in Python 3.10+ where the task could miss 
+  the `CancelledError` and continue running indefinitely, freezing the pipeline.
+
+- Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.
+
 ## [0.0.73] - 2025-06-26
 
 ### Fixed
