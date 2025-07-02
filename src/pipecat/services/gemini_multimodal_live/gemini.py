@@ -499,6 +499,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             params: Configuration parameters for the model. Defaults to InputParams().
             inference_on_context_initialization: Whether to generate a response when context
                 is first set. Defaults to True.
+            file_api_base_url: Base URL for the file API. Defaults to the official Gemini Live endpoint.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         super().__init__(base_url=base_url, **kwargs)
