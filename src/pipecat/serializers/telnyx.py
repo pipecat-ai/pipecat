@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from pipecat.audio.utils import (
     alaw_to_pcm,
-    create_default_resampler,
+    create_stream_resampler,
     pcm_to_alaw,
     pcm_to_ulaw,
     ulaw_to_pcm,
@@ -93,7 +93,8 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._telnyx_sample_rate = self._params.telnyx_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
-        self._resampler = create_default_resampler()
+        self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
 
     @property
@@ -145,11 +146,11 @@ class TelnyxFrameSerializer(FrameSerializer):
             # Output: Convert PCM at frame's rate to 8kHz encoded for Telnyx
             if self._params.inbound_encoding == "PCMU":
                 serialized_data = await pcm_to_ulaw(
-                    data, frame.sample_rate, self._telnyx_sample_rate, self._resampler
+                    data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
                 )
             elif self._params.inbound_encoding == "PCMA":
                 serialized_data = await pcm_to_alaw(
-                    data, frame.sample_rate, self._telnyx_sample_rate, self._resampler
+                    data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
@@ -249,14 +250,14 @@ class TelnyxFrameSerializer(FrameSerializer):
                     payload,
                     self._telnyx_sample_rate,
                     self._sample_rate,
-                    self._resampler,
+                    self._input_resampler,
                 )
             elif self._params.outbound_encoding == "PCMA":
                 deserialized_data = await alaw_to_pcm(
                     payload,
                     self._telnyx_sample_rate,
                     self._sample_rate,
-                    self._resampler,
+                    self._input_resampler,
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")

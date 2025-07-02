@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new `SOXRStreamAudioResampler` for processing audio in chunks or streams.
+
 - Added new `DailyParams.audio_in_user_tracks` to allow receiving one track per
   user (default) or a single track from the room (all participants mixed).
 
@@ -55,6 +57,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
 
 ### Changed
+
+- Updated all the services to use the new `SOXRStreamAudioResampler`, ensuring smooth
+  transitions and eliminating clicks.
 
 - Upgraded `daily-python` to 0.19.4.
 
