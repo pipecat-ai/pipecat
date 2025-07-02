@@ -18,9 +18,9 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.speechmatics.stt import OperatingPoint, SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -58,6 +58,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
         output_locale=Language.EN_GB,
+        operating_point=OperatingPoint.ENHANCED,
         end_of_utterance_silence_trigger=0.5,
         enable_speaker_diarization=True,
         text_format="<{speaker_id}>{text}</{speaker_id}>",
@@ -69,10 +70,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         model="eleven_turbo_v2_5",
     )
 
-    llm = AzureLLMService(
-        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-        model=os.getenv("AZURE_CHATGPT_MODEL"),
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        params=BaseOpenAILLMService.InputParams(temperature=0.75),
     )
 
     messages = [
