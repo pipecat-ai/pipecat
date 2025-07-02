@@ -15,14 +15,40 @@ import audioop
 
 import numpy as np
 import pyloudnorm as pyln
-import soxr
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
+from pipecat.audio.resamplers.soxr_stream_resampler import SOXRStreamAudioResampler
 
 
 def create_default_resampler(**kwargs) -> BaseAudioResampler:
     """Create a default audio resampler instance.
+
+    . deprecated:: 0.0.74
+        This function is deprecated and will be removed in a future version.
+        Use `create_stream_resampler` for real-time processing scenarios or
+        `create_file_resampler` for batch processing of complete audio files.
+
+    Args:
+        **kwargs: Additional keyword arguments passed to the resampler constructor.
+
+    Returns:
+        A configured SOXRAudioResampler instance.
+    """
+    import warnings
+
+    warnings.warn(
+        "`create_default_resampler` is deprecated. "
+        "Use `create_stream_resampler` for real-time processing scenarios or "
+        "`create_file_resampler` for batch processing of complete audio files.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return SOXRAudioResampler(**kwargs)
+
+
+def create_file_resampler(**kwargs) -> BaseAudioResampler:
+    """Create an audio resampler instance for batch processing of complete audio files.
 
     Args:
         **kwargs: Additional keyword arguments passed to the resampler constructor.
@@ -31,6 +57,18 @@ def create_default_resampler(**kwargs) -> BaseAudioResampler:
         A configured SOXRAudioResampler instance.
     """
     return SOXRAudioResampler(**kwargs)
+
+
+def create_stream_resampler(**kwargs) -> BaseAudioResampler:
+    """Create a stream audio resampler instance.
+
+    Args:
+        **kwargs: Additional keyword arguments passed to the resampler constructor.
+
+    Returns:
+        A configured SOXRStreamAudioResampler instance.
+    """
+    return SOXRStreamAudioResampler(**kwargs)
 
 
 def mix_audio(audio1: bytes, audio2: bytes) -> bytes:
