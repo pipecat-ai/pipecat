@@ -151,7 +151,7 @@ class CurrentContent:
 class Params(BaseModel):
     """Configuration parameters for AWS Nova Sonic.
 
-    Attributes:
+    Parameters:
         input_sample_rate: Audio input sample rate in Hz.
         input_sample_size: Audio input sample size in bits.
         input_channel_count: Number of input audio channels.

@@ -273,6 +273,10 @@ class LLMService(AIService):
                 parameter.
             start_callback: Legacy callback function (deprecated). Put initialization
                 code at the top of your handler instead.
+
+                .. deprecated:: 0.0.59
+                    The `start_callback` parameter is deprecated and will be removed in a future version.
+
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
         """

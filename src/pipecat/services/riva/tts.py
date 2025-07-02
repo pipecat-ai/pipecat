@@ -188,8 +188,9 @@ class RivaTTSService(TTSService):
 class FastPitchTTSService(RivaTTSService):
     """Deprecated FastPitch TTS service.
 
-    This class is deprecated. Use RivaTTSService instead for new implementations.
-    Provides backward compatibility for existing FastPitch TTS integrations.
+    .. deprecated:: 0.0.66
+        This class is deprecated. Use RivaTTSService instead for new implementations.
+        Provides backward compatibility for existing FastPitch TTS integrations.
     """
 
     def __init__(
