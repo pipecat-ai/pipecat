@@ -656,7 +656,10 @@ class SpeechmaticsSTTService(STTService):
                         continue
 
                     # Drop ignored speakers
-                    if fragment.speaker in self._diarization_config.ignore_speakers:
+                    if (
+                        self._diarization_config.ignore_speakers
+                        and fragment.speaker in self._diarization_config.ignore_speakers
+                    ):
                         continue
 
                 # Add the fragment
@@ -750,7 +753,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Determine if the speaker is considered active
         is_active = True
-        if self._diarization_config.enable:
+        if self._diarization_config.enable and self._diarization_config.focus_speakers:
             is_active = group[0].speaker in self._diarization_config.focus_speakers
 
         # Return the SpeakerFragments object
