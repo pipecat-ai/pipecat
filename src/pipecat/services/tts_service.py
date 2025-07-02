@@ -94,6 +94,10 @@ class TTSService(AIService):
             text_aggregator: Custom text aggregator for processing incoming text.
             text_filters: Sequence of text filters to apply after aggregation.
             text_filter: Single text filter (deprecated, use text_filters).
+
+                .. deprecated:: 0.0.59
+                    Use `text_filters` instead, which allows multiple filters.
+
             transport_destination: Destination for generated audio frames.
             **kwargs: Additional arguments passed to the parent AIService.
         """

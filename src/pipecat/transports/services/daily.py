@@ -1977,6 +1977,9 @@ class DailyTransport(BaseTransport):
     async def send_dtmf(self, settings):
         """Send DTMF tones during a call (deprecated).
 
+        .. deprecated:: 0.0.69
+            Push an `OutputDTMFFrame` or an `OutputDTMFUrgentFrame` instead.
+
         Args:
             settings: DTMF settings including tones and target session.
         """

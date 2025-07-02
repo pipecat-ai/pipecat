@@ -29,13 +29,53 @@ class TransportParams(BaseModel):
 
     Parameters:
         camera_in_enabled: Enable camera input (deprecated, use video_in_enabled).
+
+            .. deprecated:: 0.0.66
+               The `camera_in_enabled` parameter is deprecated, use
+               `video_in_enabled` instead.
+
         camera_out_enabled: Enable camera output (deprecated, use video_out_enabled).
+
+            .. deprecated:: 0.0.66
+               The `camera_out_enabled` parameter is deprecated, use
+               `video_out_enabled` instead.
+
         camera_out_is_live: Enable real-time camera output (deprecated).
+
+            .. deprecated:: 0.0.66
+               The `camera_out_is_live` parameter is deprecated, use
+               `video_out_is_live` instead.
+
         camera_out_width: Camera output width in pixels (deprecated).
+
+            .. deprecated:: 0.0.66
+               The `camera_out_width` parameter is deprecated, use
+               `video_out_width` instead.
+
         camera_out_height: Camera output height in pixels (deprecated).
+
+            .. deprecated:: 0.0.66
+                The `camera_out_height` parameter is deprecated, use
+                `video_out_height` instead.
+
         camera_out_bitrate: Camera output bitrate in bits per second (deprecated).
+
+            .. deprecated:: 0.0.66
+                The `camera_out_bitrate` parameter is deprecated, use
+                `video_out_bitrate` instead.
+
         camera_out_framerate: Camera output frame rate in FPS (deprecated).
+
+            .. deprecated:: 0.0.66
+                The `camera_out_framerate` parameter is deprecated, use
+                `video_out_framerate` instead.
+
         camera_out_color_format: Camera output color format string (deprecated).
+
+            .. deprecated:: 0.0.66
+                The `camera_out_color_format` parameter is deprecated, use
+                `video_out_color_format` instead.
+
         audio_out_enabled: Enable audio output streaming.
         audio_out_sample_rate: Output audio sample rate in Hz.
         audio_out_channels: Number of output audio channels.
@@ -59,7 +99,17 @@ class TransportParams(BaseModel):
         video_out_color_format: Video output color format string.
         video_out_destinations: List of video output destination identifiers.
         vad_enabled: Enable Voice Activity Detection (deprecated).
+
+            .. deprecated:: 0.0.66
+               The `vad_enabled` parameter is deprecated, use `audio_in_enabled`
+               and `TransportParams.vad_analyzer` instead.
+
         vad_audio_passthrough: Enable VAD audio passthrough (deprecated).
+
+            .. deprecated:: 0.0.66
+                The `vad_audio_passthrough` parameter is deprecated, use `audio_in_passthrough`
+                instead.
+
         vad_analyzer: Voice Activity Detection analyzer instance.
         turn_analyzer: Turn-taking analyzer instance for conversation management.
     """

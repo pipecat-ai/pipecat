@@ -343,7 +343,12 @@ class AWSPollyTTSService(TTSService):
 
 
 class PollyTTSService(AWSPollyTTSService):
-    """Deprecated alias for AWSPollyTTSService."""
+    """Deprecated alias for AWSPollyTTSService.
+
+    .. deprecated:: 0.0.67
+        `PollyTTSService` is deprecated, use `AWSPollyTTSService` instead.
+
+    """
 
     def __init__(self, **kwargs):
         """Initialize the deprecated PollyTTSService.
