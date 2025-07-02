@@ -13,7 +13,6 @@ and frame observation for the RTVI protocol.
 
 import asyncio
 import base64
-import time
 from dataclasses import dataclass
 from typing import (
     Any,
@@ -334,10 +333,14 @@ class RTVIClientMessageFrame(SystemFrame):
 
 @dataclass
 class RTVIServerResponseFrame(SystemFrame):
-    """A frame for sending messages from the client to the RTVI server.
+    """A frame for responding to a client RTVI message.
 
-    This frame is meant for custom messaging from the client to the server
-    and expects a server-response message.
+    This frame should be sent in response to an RTVIClientMessageFrame
+    and include the original RTVIClientMessageFrame to ensure the response
+    is properly attributed to the original request. To respond with an error,
+    set the `error` field to a string describing the error. This will result
+    in the client receiving a `response-error` message instead of a
+    `server-response` message.
     """
 
     client_msg: RTVIClientMessageFrame
@@ -353,9 +356,9 @@ class RTVIRawServerResponseData(BaseModel):
 
 
 class RTVIServerResponse(BaseModel):
-    """A response message from the client to the RTVI server.
+    """The RTVI-formatted message response from the server to the client.
 
-    This message is used to respond to custom messages sent by the server.
+    This message is used to respond to custom messages sent by the client.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -564,6 +567,8 @@ class RTVIBotReadyData(BaseModel):
     """
 
     version: str
+    # The config field is deprecated and will not be included if
+    # the client's rtvi version is 1.0.0 or higher.
     config: Optional[List[RTVIServiceConfig]] = None
     about: Optional[Mapping[str, Any]] = None
 
@@ -1428,7 +1433,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_function_call_result(data)
                 case "append-to-context":
                     data = RTVIAppendToContextData.model_validate(message.data)
-                    await self._handle_update_context(data)
+                    await self._handle_update_context(data, message.id)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
 
@@ -1578,22 +1583,23 @@ class RTVIProcessor(FrameProcessor):
         await self._update_config(RTVIConfig(config=data.config), data.interrupt)
         await self._handle_get_config(request_id)
 
-    async def _handle_update_context(self, data: RTVIAppendToContextData):
+    async def _handle_update_context(self, data: RTVIAppendToContextData, request_id: str):
         if data.run_immediately:
             await self.interrupt_bot()
         frame = LLMMessagesAppendFrame(messages=[{"role": data.role, "content": data.content}])
         await self.push_frame(frame)
         if data.run_immediately and self._context_aggregator:
             # If specified, immediately push the full context frame to trigger an LLM run.
-            match data.role:
-                case "user":
-                    frame = self._context_aggregator.user().get_context_frame()
-                    await self.push_frame(frame)
-                case "assistant":
-                    frame = self._context_aggregator.assistant().get_context_frame()
-                    await self.push_frame(frame)
-                case _:
-                    logger.warning(f"Unknown role {data.role} in RTVIAppendToContext")
+            if data.role not in ["user", "assistant"]:
+                logger.warning(f"Unknown role {data.role} in RTVIAppendToContext")
+                await self._send_error_response(
+                    request_id, f"Invalid role {data.role} for RTVIAppendToContext"
+                )
+
+            # note that _context_aggregator.assistant().get_context_frame() returns
+            # the same frame, so we can just use user() here no matter the role.
+            frame = self._context_aggregator.user().get_context_frame()
+            await self.push_frame(frame)
 
     async def _handle_client_message(self, msg_id: str, data: RTVIRawClientMessageData):
         """Handle a client message frame."""
