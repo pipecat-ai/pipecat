@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
 
+### Changed
+
+- Upgraded `daily-python` to 0.19.4.
+
 ### Fixed
 
 - Fixed a race condition that occurs in Python 3.10+ where the task could miss
