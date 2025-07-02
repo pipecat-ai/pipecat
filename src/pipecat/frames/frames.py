@@ -484,9 +484,11 @@ class LLMMessagesAppendFrame(DataFrame):
 
     Parameters:
         messages: List of message dictionaries to append.
+        run_llm: Whether the context update should be sent to the LLM.
     """
 
     messages: List[dict]
+    run_llm: Optional[bool] = None
 
 
 @dataclass
@@ -499,9 +501,11 @@ class LLMMessagesUpdateFrame(DataFrame):
 
     Parameters:
         messages: List of message dictionaries to replace current context.
+        run_llm: Whether the context update should be sent to the LLM.
     """
 
     messages: List[dict]
+    run_llm: Optional[bool] = None
 
 
 @dataclass
