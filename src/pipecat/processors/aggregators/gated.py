@@ -26,29 +26,6 @@ class GatedAggregator(FrameProcessor):
     until and not including the gate-closed frame. The aggregator maintains an
     internal gate state that controls whether frames are passed through immediately
     or accumulated for later release.
-
-    Doctest: FIXME to work with asyncio
-    >>> from pipecat.frames.frames import ImageRawFrame
-
-    >>> async def print_frames(aggregator, frame):
-    ...     async for frame in aggregator.process_frame(frame):
-    ...         if isinstance(frame, TextFrame):
-    ...             print(frame.text)
-    ...         else:
-    ...             print(frame.__class__.__name__)
-
-    >>> aggregator = GatedAggregator(
-    ...     gate_close_fn=lambda x: isinstance(x, LLMResponseStartFrame),
-    ...     gate_open_fn=lambda x: isinstance(x, ImageRawFrame),
-    ...     start_open=False)
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello")))
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello again.")))
-    >>> asyncio.run(print_frames(aggregator, ImageRawFrame(image=bytes([]), size=(0, 0))))
-    ImageRawFrame
-    Hello
-    Hello again.
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Goodbye.")))
-    Goodbye.
     """
 
     def __init__(
