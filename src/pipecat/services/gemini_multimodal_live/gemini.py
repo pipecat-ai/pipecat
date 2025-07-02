@@ -72,7 +72,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
-from .audio_transcriber import AudioTranscriber
 from .file_api import GeminiFileAPI
 
 try:
