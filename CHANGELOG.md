@@ -58,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Upgraded `daily-python` to 0.19.4.
 
+- Updated `google` optional dependency to use `google-genai` version `1.24.0`.
+
 ### Fixed
 
 - Fixed a race condition that occurs in Python 3.10+ where the task could miss
