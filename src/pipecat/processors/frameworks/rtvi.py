@@ -1122,7 +1122,6 @@ class RTVIProcessor(FrameProcessor):
         *,
         config: Optional[RTVIConfig] = None,
         transport: Optional[BaseTransport] = None,
-        context_aggregator: Optional[OpenAIContextAggregatorPair] = None,
         **kwargs,
     ):
         """Initialize the RTVI processor.
@@ -1130,8 +1129,6 @@ class RTVIProcessor(FrameProcessor):
         Args:
             config: Initial RTVI configuration.
             transport: Transport layer for communication.
-            context_aggregator: Context aggregator for OpenAI LLMs.
-                Needed to support the append-to-context message.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -1163,7 +1160,6 @@ class RTVIProcessor(FrameProcessor):
             if isinstance(input_transport, BaseInputTransport):
                 self._input_transport = input_transport
                 self._input_transport.enable_audio_in_stream_on_start(False)
-        self._context_aggregator = context_aggregator
 
     def register_action(self, action: RTVIAction):
         """Register an action that can be executed via RTVI.
@@ -1584,22 +1580,19 @@ class RTVIProcessor(FrameProcessor):
         await self._handle_get_config(request_id)
 
     async def _handle_update_context(self, data: RTVIAppendToContextData, request_id: str):
+        if data.role not in ["user", "assistant"]:
+            logger.warning(f"Unknown role {data.role} in RTVIAppendToContext")
+            await self._send_error_response(
+                request_id, f"Invalid role {data.role} for RTVIAppendToContext"
+            )
+
         if data.run_immediately:
             await self.interrupt_bot()
-        frame = LLMMessagesAppendFrame(messages=[{"role": data.role, "content": data.content}])
+        frame = LLMMessagesAppendFrame(
+            messages=[{"role": data.role, "content": data.content}],
+            run_llm=data.run_immediately,
+        )
         await self.push_frame(frame)
-        if data.run_immediately and self._context_aggregator:
-            # If specified, immediately push the full context frame to trigger an LLM run.
-            if data.role not in ["user", "assistant"]:
-                logger.warning(f"Unknown role {data.role} in RTVIAppendToContext")
-                await self._send_error_response(
-                    request_id, f"Invalid role {data.role} for RTVIAppendToContext"
-                )
-
-            # note that _context_aggregator.assistant().get_context_frame() returns
-            # the same frame, so we can just use user() here no matter the role.
-            frame = self._context_aggregator.user().get_context_frame()
-            await self.push_frame(frame)
 
     async def _handle_client_message(self, msg_id: str, data: RTVIRawClientMessageData):
         """Handle a client message frame."""

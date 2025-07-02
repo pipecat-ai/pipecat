@@ -273,7 +273,7 @@ async def main():
         context = OpenAILLMContext(messages, tools)
         context_aggregator = llm.create_context_aggregator(context)
 
-        rtvi = RTVIProcessor(config=RTVIConfig(config=[]), context_aggregator=context_aggregator)
+        rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
 
         ta = TalkingAnimation()
 
