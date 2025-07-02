@@ -14,9 +14,8 @@ configurations and event-driven processing.
 import time
 from typing import Optional
 
-from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
+from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 from pipecat.frames.frames import (
-    AudioRawFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -106,7 +105,8 @@ class AudioBufferProcessor(FrameProcessor):
 
         self._recording = False
 
-        self._resampler = create_default_resampler()
+        self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
 
         self._register_event_handler("on_audio_data")
         self._register_event_handler("on_track_audio_data")
@@ -210,7 +210,7 @@ class AudioBufferProcessor(FrameProcessor):
             silence = self._compute_silence(self._last_user_frame_at)
             self._user_audio_buffer.extend(silence)
             # Add user audio.
-            resampled = await self._resample_audio(frame)
+            resampled = await self._resample_input_audio(frame)
             self._user_audio_buffer.extend(resampled)
             # Save time of frame so we can compute silence.
             self._last_user_frame_at = time.time()
@@ -219,7 +219,7 @@ class AudioBufferProcessor(FrameProcessor):
             silence = self._compute_silence(self._last_bot_frame_at)
             self._bot_audio_buffer.extend(silence)
             # Add bot audio.
-            resampled = await self._resample_audio(frame)
+            resampled = await self._resample_output_audio(frame)
             self._bot_audio_buffer.extend(resampled)
             # Save time of frame so we can compute silence.
             self._last_bot_frame_at = time.time()
@@ -247,7 +247,7 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_turn_audio_buffer = bytearray()
 
         if isinstance(frame, InputAudioRawFrame):
-            resampled = await self._resample_audio(frame)
+            resampled = await self._resample_input_audio(frame)
             self._user_turn_audio_buffer += resampled
             # In the case of the user, we need to keep a short buffer of audio
             # since VAD notification of when the user starts speaking comes
@@ -259,7 +259,7 @@ class AudioBufferProcessor(FrameProcessor):
                 discarded = len(self._user_turn_audio_buffer) - self._audio_buffer_size_1s
                 self._user_turn_audio_buffer = self._user_turn_audio_buffer[discarded:]
         elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame):
-            resampled = await self._resample_audio(frame)
+            resampled = await self._resample_output_audio(frame)
             self._bot_turn_audio_buffer += resampled
 
     async def _call_on_audio_data_handler(self):
@@ -301,9 +301,17 @@ class AudioBufferProcessor(FrameProcessor):
         self._user_turn_audio_buffer = bytearray()
         self._bot_turn_audio_buffer = bytearray()
 
-    async def _resample_audio(self, frame: AudioRawFrame) -> bytes:
+    async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
         """Resample audio frame to the target sample rate."""
-        return await self._resampler.resample(frame.audio, frame.sample_rate, self._sample_rate)
+        return await self._input_resampler.resample(
+            frame.audio, frame.sample_rate, self._sample_rate
+        )
+
+    async def _resample_output_audio(self, frame: OutputAudioRawFrame) -> bytes:
+        """Resample audio frame to the target sample rate."""
+        return await self._output_resampler.resample(
+            frame.audio, frame.sample_rate, self._sample_rate
+        )
 
     def _compute_silence(self, from_time: float) -> bytes:
         """Compute silence to insert based on time gap."""
