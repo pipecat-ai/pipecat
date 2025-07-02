@@ -7,7 +7,12 @@
 """SoX-based audio resampler implementation.
 
 This module provides an audio resampler that uses the SoX resampler library
-for very high quality audio sample rate conversion.
+for very high-quality audio sample rate conversion.
+
+When to use the SOXRAudioResampler:
+1. For batch processing of complete audio files
+2. When you have all the audio data available at once
+
 """
 
 import numpy as np
