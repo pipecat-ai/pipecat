@@ -314,7 +314,7 @@ class RivaSTTService(STTService):
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
-                            "",
+                            self._user_id,
                             time_now_iso8601(),
                             self._language_code,
                             result=result,
@@ -329,7 +329,7 @@ class RivaSTTService(STTService):
                     await self.push_frame(
                         InterimTranscriptionFrame(
                             transcript,
-                            "",
+                            self._user_id,
                             time_now_iso8601(),
                             self._language_code,
                             result=result,
@@ -636,7 +636,10 @@ class RivaSegmentedSTTService(SegmentedSTTService):
                         if text:
                             logger.debug(f"Transcription: [{text}]")
                             yield TranscriptionFrame(
-                                text, "", time_now_iso8601(), self._language_enum
+                                text,
+                                self._user_id,
+                                time_now_iso8601(),
+                                self._language_enum,
                             )
                             transcription_found = True
 

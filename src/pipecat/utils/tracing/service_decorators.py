@@ -270,6 +270,7 @@ def traced_stt(func: Optional[Callable] = None, *, name: Optional[str] = None) -
                             transcript=transcript,
                             is_final=is_final,
                             language=str(language) if language else None,
+                            user_id=getattr(self, "_user_id", None),
                             vad_enabled=getattr(self, "vad_enabled", False),
                             settings=settings,
                             ttfb=ttfb,
