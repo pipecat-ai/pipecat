@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `DailyParams.audio_in_user_tracks` to allow receiving one track per
+  user (default) or a single track from the room (all participants mixed).
+
 - Added support for providing "direct" functions, which don't need an
   accompanying `FunctionSchema` or function definition dict. Instead, metadata
   (i.e. `name`, `description`, `properties`, and `required`) are automatically
@@ -53,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed a race condition that occurs in Python 3.10+ where the task could miss 
+- Fixed a race condition that occurs in Python 3.10+ where the task could miss
   the `CancelledError` and continue running indefinitely, freezing the pipeline.
 
 - Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.

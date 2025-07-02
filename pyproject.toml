@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "aiohttp~=3.11.12",
     "audioop-lts~=0.2.1; python_version>='3.13'",
+    "docstring_parser~=0.16",
     "loguru~=0.7.3",
     "Markdown~=3.7",
     "numpy~=1.26.4",
@@ -32,7 +33,6 @@ dependencies = [
     "resampy~=0.4.3",
     "soxr~=0.5.0",
     "openai~=1.70.0",
-    "docstring_parser~=0.16"
 ]
 
 [project.urls]
@@ -131,7 +131,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Skip docstring checks for non-source code
 "examples/**/*.py" = ["D"]
-"tests/**/*.py" = ["D"] 
+"tests/**/*.py" = ["D"]
 "scripts/**/*.py" = ["D"]
 "docs/**/*.py" = ["D"]
 # Skip D104 (missing docstring in public package) for __init__.py files
