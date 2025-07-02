@@ -18,14 +18,6 @@ class StatelessTextTransformer(FrameProcessor):
     This processor intercepts TextFrame objects and applies a user-provided
     transformation function to the text content. The function can be either
     synchronous or asynchronous (coroutine).
-
-    >>> async def print_frames(aggregator, frame):
-    ...     async for frame in aggregator.process_frame(frame):
-    ...         print(frame.text)
-
-    >>> aggregator = StatelessTextTransformer(lambda x: x.upper())
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello")))
-    HELLO
     """
 
     def __init__(

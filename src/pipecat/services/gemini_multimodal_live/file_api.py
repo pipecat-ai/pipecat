@@ -6,9 +6,9 @@
 
 """Gemini File API client for uploading and managing files.
 
-This module provides the GeminiFileAPI class for interacting with Google's Gemini File API,
-including uploading, fetching, listing, and deleting files that can be used with Gemini
-generative models.
+This module provides a client for Google's Gemini File API, enabling file
+uploads, metadata retrieval, listing, and deletion. Files uploaded through
+this API can be referenced in Gemini generative model calls.
 """
 
 import mimetypes
