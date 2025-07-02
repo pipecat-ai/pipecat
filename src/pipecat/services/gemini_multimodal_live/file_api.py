@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Gemini File API client for uploading and managing files.
+
+This module provides a client for Google's Gemini File API, enabling file
+uploads, metadata retrieval, listing, and deletion. Files uploaded through
+this API can be referenced in Gemini generative model calls.
+"""
+
 import mimetypes
 from typing import Any, Dict, Optional
 
