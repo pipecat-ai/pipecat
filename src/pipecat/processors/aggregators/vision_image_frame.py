@@ -20,17 +20,6 @@ class VisionImageFrameAggregator(FrameProcessor):
     This aggregator waits for a consecutive TextFrame and an InputImageRawFrame.
     After the InputImageRawFrame arrives it will output a VisionImageRawFrame
     combining both the text and image data for multimodal processing.
-
-    >>> from pipecat.frames.frames import ImageFrame
-
-    >>> async def print_frames(aggregator, frame):
-    ...     async for frame in aggregator.process_frame(frame):
-    ...         print(frame)
-
-    >>> aggregator = VisionImageFrameAggregator()
-    >>> asyncio.run(print_frames(aggregator, TextFrame("What do you see?")))
-    >>> asyncio.run(print_frames(aggregator, ImageFrame(image=bytes([]), size=(0, 0))))
-    VisionImageFrame, text: What do you see?, image size: 0x0, buffer size: 0 B
     """
 
     def __init__(self):
