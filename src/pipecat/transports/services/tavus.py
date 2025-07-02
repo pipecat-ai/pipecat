@@ -20,7 +20,6 @@ from daily.daily import AudioData
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -437,8 +436,6 @@ class TavusInputTransport(BaseInputTransport):
         super().__init__(params, **kwargs)
         self._client = client
         self._params = params
-        self._resampler = create_default_resampler()
-
         # Whether we have seen a StartFrame already.
         self._initialized = False
 
