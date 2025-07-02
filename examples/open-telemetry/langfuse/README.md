@@ -26,7 +26,7 @@ Create a `.env` file with your API keys to enable tracing:
 ```
 ENABLE_TRACING=true
 # OTLP endpoint for Langfuse
-OTEL_EXPORTER_OTLP_ENDPOINT=http://cloud.langfuse.com/api/public/otel
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic%20<base64_encoded_api_key>
 # Set to any value to enable console output for debugging
 # OTEL_CONSOLE_EXPORT=true
