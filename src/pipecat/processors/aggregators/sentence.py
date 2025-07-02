@@ -23,20 +23,10 @@ class SentenceAggregator(FrameProcessor):
     Useful for ensuring downstream processors receive coherent, complete sentences
     rather than fragmented text.
 
-    Frame input/output:
+    Frame input/output::
+
         TextFrame("Hello,") -> None
         TextFrame(" world.") -> TextFrame("Hello, world.")
-
-    Doctest: FIXME to work with asyncio
-    >>> import asyncio
-    >>> async def print_frames(aggregator, frame):
-    ...     async for frame in aggregator.process_frame(frame):
-    ...         print(frame.text)
-
-    >>> aggregator = SentenceAggregator()
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello,")))
-    >>> asyncio.run(print_frames(aggregator, TextFrame(" world.")))
-    Hello, world.
     """
 
     def __init__(self):
