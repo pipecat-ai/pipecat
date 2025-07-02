@@ -951,7 +951,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             else:
                 # Log unhandled events that might contain grounding metadata
                 logger.warning(f"Received unhandled server event type: {evt}")
-                pass
 
     async def _transcribe_audio_handler(self):
         while True:
@@ -1341,8 +1340,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not grounding_metadata:
             logger.warning("No grounding metadata provided to _process_grounding_metadata")
             return
-
-        # logger.debug(f"Processing grounding metadata: {grounding_metadata}") # Too verbose for PR
 
         # Extract rendered content for search suggestions
         rendered_content = None

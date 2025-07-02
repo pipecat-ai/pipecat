@@ -12,7 +12,6 @@ import json
 from enum import Enum
 from typing import List, Literal, Optional
 
-from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -482,7 +481,7 @@ class ServerEvent(BaseModel):
     usageMetadata: Optional[UsageMetadata] = None
 
 
-def parse_server_event(message_str):
+def parse_server_event(str):
     """Parse a server event from JSON string.
 
     Args:
@@ -491,26 +490,11 @@ def parse_server_event(message_str):
     Returns:
         ServerEvent instance if parsing succeeds, None otherwise.
     """
-    from loguru import logger  # Import logger locally to avoid scoping issues
-
     try:
-        evt_dict = json.loads(message_str)
-
-        # Only log grounding metadata detection if truly needed for debugging
-        # In production, this could be removed entirely or moved to TRACE level
-        if "serverContent" in evt_dict:
-            server_content = evt_dict["serverContent"]
-            if "groundingMetadata" in server_content:
-                # Consider removing this log entirely for production
-                pass
-
-        evt = ServerEvent.model_validate(evt_dict)
-        return evt
+        evt = json.loads(str)
+        return ServerEvent.model_validate(evt)
     except Exception as e:
-        logger.error(f"Error parsing server event: {e}")
-        # Truncate raw message to avoid logging potentially sensitive or overly long data
-        truncated_message = message_str[:200] + "..." if len(message_str) > 200 else message_str
-        logger.error(f"Raw message (truncated): {truncated_message}")
+        print(f"Error parsing server event: {e}")
         return None
 
 
