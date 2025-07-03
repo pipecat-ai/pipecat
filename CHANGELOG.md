@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `run_llm` field to `LLMMessagesAppendFrame` and `LLMMessagesUpdateFrame`
+  frames. If true, a context frame will be pushed triggering the LLM to respond.
+
+- Added a new `SOXRStreamAudioResampler` for processing audio in chunks or
+  streams. If you write your own processor and need to use an audio resampler,
+  use the new `create_stream_resampler()`.
+
+- Added new `DailyParams.audio_in_user_tracks` to allow receiving one track per
+  user (default) or a single track from the room (all participants mixed).
+
 - Added support for providing "direct" functions, which don't need an
   accompanying `FunctionSchema` or function definition dict. Instead, metadata
   (i.e. `name`, `description`, `properties`, and `required`) are automatically
@@ -51,9 +61,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
 
+### Changed
+
+- Updated all the services to use the new `SOXRStreamAudioResampler`, ensuring smooth
+  transitions and eliminating clicks.
+
+- Upgraded `daily-python` to 0.19.4.
+
+- Updated `google` optional dependency to use `google-genai` version `1.24.0`.
+
 ### Fixed
 
-- Fixed a race condition that occurs in Python 3.10+ where the task could miss 
+- Fixed a race condition that occurs in Python 3.10+ where the task could miss
   the `CancelledError` and continue running indefinitely, freezing the pipeline.
 
 - Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.

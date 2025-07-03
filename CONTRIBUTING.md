@@ -86,6 +86,13 @@ We follow Google-style docstrings with these specific conventions:
 - Use section headers like "Supported features:" or "Behavior:" before lists
 - For complex nested information, consider using paragraph format instead
 
+**Deprecations:**
+
+- Use `warnings.warn()` in code for runtime deprecation warnings
+- Add `.. deprecated::` directive in docstrings for documentation visibility
+- Include version information and describe current status
+- Describe parameters in present tense, use directive to indicate deprecation status
+
 #### Examples:
 
 ```python
@@ -103,14 +110,24 @@ class MyService(BaseService):
     - Feature three for advanced use cases
     """
 
-    def __init__(self, param1: str, param2: bool = True, **kwargs):
+    def __init__(self, param1: str, old_param: str = None, **kwargs):
         """Initialize the service.
 
         Args:
             param1: Description of param1.
-            param2: Description of param2. Defaults to True.
+            old_param: Controls legacy behavior.
+
+                .. deprecated:: 1.2.0
+                    This parameter no longer has any effect and will be removed in version 2.0.
+
             **kwargs: Additional arguments passed to parent.
         """
+        if old_param is not None:
+            import warnings
+            warnings.warn(
+                "Parameter 'old_param' is deprecated and will be removed in version 2.0.",
+                DeprecationWarning,
+            )
         super().__init__(**kwargs)
 
     @property
@@ -133,21 +150,6 @@ class MyService(BaseService):
         """
         pass
 
-# Dataclass
-@dataclass
-class ConfigParams:
-    """Configuration parameters for the service.
-
-    Parameters:
-        host: The host address.
-        port: The port number. Defaults to 8080.
-        timeout: Connection timeout in seconds.
-    """
-
-    host: str
-    port: int = 8080
-    timeout: float = 30.0
-
 # Dataclass with code examples
 @dataclass
 class MessageFrame:
@@ -155,20 +157,12 @@ class MessageFrame:
 
     Supports both simple and content list message formats.
 
-    Examples:
-        Simple format::
+    Example::
 
-            [
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi there!"}
-            ]
-
-        Content list format::
-
-            [
-                {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
-                {"role": "assistant", "content": [{"type": "text", "text": "Hi there!"}]}
-            ]
+        [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"}
+        ]
 
     Parameters:
         messages: List of messages in OpenAI format.

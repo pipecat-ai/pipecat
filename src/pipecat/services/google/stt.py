@@ -362,7 +362,7 @@ class GoogleSTTService(STTService):
     with streaming support. Handles audio transcription and optional voice activity detection.
     Implements automatic stream reconnection to handle Google's 4-minute streaming limit.
 
-    Attributes:
+    Parameters:
         InputParams: Configuration parameters for the STT service.
         STREAMING_LIMIT: Google Cloud's streaming limit in milliseconds (4 minutes).
 

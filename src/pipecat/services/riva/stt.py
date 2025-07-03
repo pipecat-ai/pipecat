@@ -660,8 +660,9 @@ class RivaSegmentedSTTService(SegmentedSTTService):
 class ParakeetSTTService(RivaSTTService):
     """Deprecated speech-to-text service using NVIDIA Parakeet models.
 
-    This class is deprecated. Use RivaSTTService instead for equivalent functionality
-    with Parakeet models by specifying the appropriate model_function_map.
+    .. deprecated:: 0.0.66
+        This class is deprecated. Use `RivaSTTService` instead for equivalent functionality
+        with Parakeet models by specifying the appropriate model_function_map.
     """
 
     def __init__(

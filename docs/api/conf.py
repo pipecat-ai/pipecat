@@ -38,9 +38,8 @@ napoleon_include_init_with_doc = True
 autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
-    "undoc-members": True,
+    "undoc-members": False,
     "exclude-members": "__weakref__,model_config",
-    "no-index": True,
     "show-inheritance": True,
 }
 

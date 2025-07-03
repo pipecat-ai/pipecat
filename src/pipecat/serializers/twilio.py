@@ -13,7 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler, pcm_to_ulaw, ulaw_to_pcm
+from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -81,7 +81,8 @@ class TwilioFrameSerializer(FrameSerializer):
         self._twilio_sample_rate = self._params.twilio_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
-        self._resampler = create_default_resampler()
+        self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
 
     @property
@@ -129,7 +130,7 @@ class TwilioFrameSerializer(FrameSerializer):
 
             # Output: Convert PCM at frame's rate to 8kHz μ-law for Twilio
             serialized_data = await pcm_to_ulaw(
-                data, frame.sample_rate, self._twilio_sample_rate, self._resampler
+                data, frame.sample_rate, self._twilio_sample_rate, self._output_resampler
             )
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
@@ -214,7 +215,7 @@ class TwilioFrameSerializer(FrameSerializer):
 
             # Input: Convert Twilio's 8kHz μ-law to PCM at pipeline input rate
             deserialized_data = await ulaw_to_pcm(
-                payload, self._twilio_sample_rate, self._sample_rate, self._resampler
+                payload, self._twilio_sample_rate, self._sample_rate, self._input_resampler
             )
             audio_frame = InputAudioRawFrame(
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate

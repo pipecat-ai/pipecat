@@ -273,6 +273,10 @@ class LLMService(AIService):
                 parameter.
             start_callback: Legacy callback function (deprecated). Put initialization
                 code at the top of your handler instead.
+
+                .. deprecated:: 0.0.59
+                    The `start_callback` parameter is deprecated and will be removed in a future version.
+
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
         """
@@ -354,6 +358,17 @@ class LLMService(AIService):
         if None in self._functions.keys():
             return True
         return function_name in self._functions.keys()
+
+    def needs_mcp_alternate_schema(self) -> bool:
+        """Check if this LLM service requires alternate MCP schema.
+
+        Some LLM services have stricter JSON schema validation and require
+        certain properties to be removed or modified for compatibility.
+
+        Returns:
+            True if MCP schemas should be cleaned for this service, False otherwise.
+        """
+        return False
 
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         """Execute a sequence of function calls from the LLM.

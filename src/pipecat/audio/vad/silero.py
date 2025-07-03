@@ -46,10 +46,6 @@ class SileroOnnxModel:
             path: Path to the ONNX model file.
             force_onnx_cpu: Whether to force CPU execution provider.
         """
-        import numpy as np
-
-        global np
-
         opts = onnxruntime.SessionOptions()
         opts.inter_op_num_threads = 1
         opts.intra_op_num_threads = 1
