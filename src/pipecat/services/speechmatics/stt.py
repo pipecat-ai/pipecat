@@ -29,12 +29,13 @@ try:
         AsyncClient,
         AudioEncoding,
         AudioFormat,
+        ConversationConfig,
         OperatingPoint,
         ServerMessageType,
+        SpeakerDiarizationConfig,
         TranscriptionConfig,
         __version__,
     )
-    from speechmatics.rt._models import ConversationConfig, SpeakerDiarizationConfig
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
