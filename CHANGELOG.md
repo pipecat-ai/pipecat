@@ -5,16 +5,18 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.74] - 2025-07-03
 
 ### Added
 
-- Added a new STT service, `SpeechmaticsSTTService`. This service provides 
+- Added a new STT service, `SpeechmaticsSTTService`. This service provides
   real-time speech-to-text transcription using the Speechmatics API. It supports
-  partial and final transcriptions, multiple languages, various audio formats, 
+  partial and final transcriptions, multiple languages, various audio formats,
   and speaker diarization.
 
 - Added `normalize` and `model_id` to `FishAudioTTSService`.
+
+- Added `http_options` argument to `GoogleLLMService`.
 
 - Added `run_llm` field to `LLMMessagesAppendFrame` and `LLMMessagesUpdateFrame`
   frames. If true, a context frame will be pushed triggering the LLM to respond.
@@ -57,9 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tools = ToolsSchema(standard_tools=[do_something])
   ```
 
-  - `user_id` is now populated in the `TranscriptionFrame` and
-    `InterimTranscriptionFrame` when using a transport that provides a
-    `user_id`, like `DailyTransport` or `LiveKitTransport`.
+- `user_id` is now populated in the `TranscriptionFrame` and
+  `InterimTranscriptionFrame` when using a transport that provides a `user_id`,
+  like `DailyTransport` or `LiveKitTransport`.
 
 - Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
   if you have a coroutine that is waiting for a result and that takes a long
