@@ -42,6 +42,7 @@ class ChatbotClient {
     this.debugLog = document.getElementById('debug-log');
     this.botVideoContainer = document.getElementById('bot-video-container');
     this.deviceSelector = document.getElementById('device-selector');
+    this.micToggleBtn = document.getElementById('mic-toggle-btn');
 
     // Create an audio element for bot's voice output
     this.botAudio = document.createElement('audio');
@@ -79,13 +80,19 @@ class ChatbotClient {
     // Handle mic mute/unmute toggle
     const micToggleBtn = document.getElementById('mic-toggle-btn');
 
-    micToggleBtn.addEventListener('click', () => {
-      let micEnabled = this.pcClient.isMicEnabled;
-      micToggleBtn.textContent = micEnabled ? 'Unmute Mic' : 'Mute Mic';
-      this.pcClient.enableMic(!micEnabled);
+    micToggleBtn.addEventListener('click', async () => {
+      if (this.pcClient.state === 'disconnected') {
+        await this.pcClient.initDevices();
+      } else {
+        this.pcClient.enableMic(!this.pcClient.isMicEnabled);
+      }
     });
   }
 
+  updateMicToggleButton(micEnabled) {
+    console.log('Mic enabled:', micEnabled, this.pcClient?.isMicEnabled);
+    this.micToggleBtn.textContent = micEnabled ? 'Mute Mic' : 'Unmute Mic';
+  }
   /**
    * Set up the Pipecat client and Daily transport
    */
@@ -94,7 +101,7 @@ class ChatbotClient {
     // Initialize the Pipecat client with a DailyTransport and our configuration
     this.pcClient = new PipecatClient({
       transport: new DailyTransport(),
-      enableMic: true, // Enable microphone for user input
+      enableMic: true,
       enableCam: false,
       callbacks: {
         // Handle connection state changes
@@ -109,6 +116,7 @@ class ChatbotClient {
           this.connectBtn.disabled = false;
           this.disconnectBtn.disabled = true;
           this.log('Client disconnected');
+          this.updateMicToggleButton(false);
         },
         // Handle transport state changes
         onTransportStateChanged: (state) => {
@@ -156,8 +164,6 @@ class ChatbotClient {
 
     // Set up listeners for media track events
     this.setupTrackListeners();
-
-    await this.pcClient.initDevices();
     this.setupEventListeners();
   }
 
@@ -216,13 +222,16 @@ class ChatbotClient {
 
     // Listen for new tracks starting
     this.pcClient.on(RTVIEvent.TrackStarted, (track, participant) => {
-      // Only handle non-local (bot) tracks
       if (!participant?.local) {
         if (track.kind === 'audio') {
           this.setupAudioTrack(track);
         } else if (track.kind === 'video') {
           this.setupVideoTrack(track);
         }
+      } else if (track.kind === 'audio') {
+        console.log(`Local audio track started: `, this.pcClient.tracks());
+        // If local audio track starts, update mic
+        this.updateMicToggleButton(true);
       }
     });
 
@@ -230,9 +239,13 @@ class ChatbotClient {
     this.pcClient.on(RTVIEvent.TrackStopped, (track, participant) => {
       this.log(
         `Track stopped event: ${track.kind} from ${
-          participant?.name || 'unknown'
+          participant ? (participant.local ? 'local' : 'bot') : 'unknown'
         }`
       );
+      if (participant?.local && track.kind === 'audio') {
+        // If local audio track stops, update mic toggle button
+        this.updateMicToggleButton(false);
+      }
     });
   }
 
