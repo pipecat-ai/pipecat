@@ -317,6 +317,9 @@ class SpeechmaticsSTTService(STTService):
         speaker_active_format: str = "<{speaker_id}>{text}</{speaker_id}>",
         speaker_passive_format: str = "<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         transcription_config: Optional[TranscriptionConfig] = None,
+        enable_speaker_diarization: Optional[bool] = None,  # deprecated, use diarization_config
+        text_format: Optional[str] = None,  # deprecated, use diarization_config
+        max_speakers: Optional[int] = None,  # deprecated, use diarization_config
         **kwargs,
     ):
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -342,6 +345,17 @@ class SpeechmaticsSTTService(STTService):
         self._diarization_config: Optional[DiarizationConfig] = diarization_config
 
         # Deprecation warnings
+        if enable_speaker_diarization is not None:
+            logger.warning(
+                "enable_speaker_diarization is deprecated, use diarization_config instead"
+            )
+            self._diarization_config.enable = enable_speaker_diarization
+        if max_speakers is not None:
+            logger.warning("max_speakers is deprecated, use diarization_config instead")
+            self._diarization_config.max_speakers = max_speakers
+        if text_format is not None:
+            logger.warning("text_format is deprecated, use speaker_active_format instead")
+            self._diarization_config.speaker_active_format = text_format
 
         # Check we have required attributes
         if not self._api_key:
