@@ -49,7 +49,7 @@ python run-release-evals.py -p 07 -a -v
 You can also run evals for a single example (not part of the release set):
 
 ```sh
-python run-eval.py YOUR_EXAMPLE_SCRIPT -a -v
+python run-eval.py -p "A simple math addition" -a -v YOUR_EXAMPLE_SCRIPT
 ```
 
 Your script needs to follow any of the foundation examples pattern.
