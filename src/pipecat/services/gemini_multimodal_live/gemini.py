@@ -253,7 +253,7 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
         self.messages.append(message)
         logger.info(f"Added file reference to context: {file_uri}")
 
-   def get_messages_for_initializing_history(self):
+    def get_messages_for_initializing_history(self):
         """Get messages formatted for Gemini history initialization.
 
         Returns:
