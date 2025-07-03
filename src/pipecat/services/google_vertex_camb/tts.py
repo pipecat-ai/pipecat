@@ -175,20 +175,10 @@ class GoogleVertexCambTTSService(TTSService):
 
             if self._settings["reference_text"] is not None:
                 instances["ref_text"] = self._settings["reference_text"]
-            data = {"instances": [instances]}
             yield TTSStartedFrame()
             
-            # Run the synchronous endpoint call in a thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, 
-                lambda: self._client.endpoint.raw_predict(
-                    body=json.dumps(data).encode("utf-8"),
-                    headers={"Content-Type": "application/json"}
-                )
-            )
-            response_data = json.loads(response.content)
-            predictions = response_data.get("predictions", [])
+            response = await self._client.endpoint.predict_async(instances=[instances])
+            predictions = response.predictions
 
             if not predictions or len(predictions) == 0:
                 raise RuntimeError("No audio predictions returned from the model")
