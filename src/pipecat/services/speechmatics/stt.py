@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Speechmatics STT service integration."""
+
 import asyncio
 import datetime
 import re
@@ -51,12 +53,14 @@ class AudioBuffer:
     buffer will accumulate the data from the pipeline and provide it to the
     STT client in the correct lengths, waiting for the number of frames to
     be available.
-
-    Args:
-        maxsize: Maximum size of the buffer.
     """
 
     def __init__(self, maxsize: int = 0):
+        """Initialize the audio buffer.
+
+        Args:
+            maxsize: Maximum size of the buffer.
+        """
         self._queue = asyncio.Queue(maxsize=maxsize)
         self._current_chunk = b""
         self._position = 0
@@ -126,7 +130,7 @@ class AudioBuffer:
 class SpeechFragment:
     """Fragment of an utterance.
 
-    Attributes:
+    Parameters:
         start_time: Start time of the fragment in seconds (from session start).
         end_time: End time of the fragment in seconds (from session start).
         language: Language of the fragment. Defaults to `Language.EN`.
@@ -155,7 +159,7 @@ class SpeechFragment:
 class SpeakerFragments:
     """SpeechFragment items grouped by speaker_id.
 
-    Attributes:
+    Parameters:
         speaker_id: The ID of the speaker.
         timestamp: The timestamp of the frame.
         language: The language of the frame.
@@ -219,27 +223,6 @@ class SpeechmaticsSTTService(STTService):
     This service provides real-time speech-to-text transcription using the Speechmatics API.
     It supports partial and final transcriptions, multiple languages, various audio formats,
     and speaker diarization.
-
-    Args:
-        api_key: Speechmatics API key for authentication.
-        language: Language code for transcription. Defaults to `None`.
-        language_code: Language code string for transcription. Defaults to `None`.
-        base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
-        domain: Domain for Speechmatics API. Defaults to `None`.
-        output_locale: Output locale for transcription, e.g. `Language.EN_GB`. Defaults to `None`.
-        output_locale_code: Output locale code for transcription. Defaults to `None`.
-        enable_partials: Enable partial transcription results. Defaults to `True`.
-        max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
-        sample_rate: Audio sample rate in Hz. Defaults to `16000`.
-        chunk_size: Audio chunk size for streaming. Defaults to `256`.
-        audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
-        end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
-        operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
-        enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
-        text_format: Wrapper for speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
-        max_speakers: Maximum number of speakers to detect. Defaults to `None` (auto-detect).
-        transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
-        **kwargs: Additional arguments passed to STTService.
     """
 
     def __init__(
@@ -265,6 +248,29 @@ class SpeechmaticsSTTService(STTService):
         transcription_config: Optional[TranscriptionConfig] = None,
         **kwargs,
     ):
+        """Initialize the Speechmatics STT service.
+
+        Args:
+            api_key: Speechmatics API key for authentication.
+            language: Language code for transcription. Defaults to `None`.
+            language_code: Language code string for transcription. Defaults to `None`.
+            base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
+            domain: Domain for Speechmatics API. Defaults to `None`.
+            output_locale: Output locale for transcription, e.g. `Language.EN_GB`. Defaults to `None`.
+            output_locale_code: Output locale code for transcription. Defaults to `None`.
+            enable_partials: Enable partial transcription results. Defaults to `True`.
+            max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
+            sample_rate: Audio sample rate in Hz. Defaults to `16000`.
+            chunk_size: Audio chunk size for streaming. Defaults to `256`.
+            audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
+            end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
+            operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
+            enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
+            text_format: Wrapper for speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
+            max_speakers: Maximum number of speakers to detect. Defaults to `None` (auto-detect).
+            transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
+            **kwargs: Additional arguments passed to STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Client configuration
