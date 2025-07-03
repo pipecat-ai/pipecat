@@ -214,7 +214,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
 
         # All the InputDTMFFrames plus one TranscriptionFrame
-        expected_down_frames = [InputDTMFFrame] * 12 + [TranscriptionFrame]
+        expected_down_frames = [InputDTMFFrame] * len(frames_to_send) + [TranscriptionFrame]
 
         received_down_frames, _ = await run_test(
             aggregator,

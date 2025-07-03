@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "aiohttp~=3.11.12",
     "audioop-lts~=0.2.1; python_version>='3.13'",
+    "docstring_parser~=0.16",
     "loguru~=0.7.3",
     "Markdown~=3.7",
     "numpy~=1.26.4",
@@ -31,7 +32,7 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.70.0"
+    "openai~=1.70.0",
 ]
 
 [project.urls]
@@ -47,14 +48,14 @@ azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "websockets~=13.1" ]
 cerebras = []
 deepseek = []
-daily = [ "daily-python~=0.19.3" ]
+daily = [ "daily-python~=0.19.4" ]
 deepgram = [ "deepgram-sdk~=4.1.0" ]
 elevenlabs = [ "websockets~=13.1" ]
 fal = [ "fal-client~=0.5.9" ]
 fireworks = []
 fish = [ "ormsgpack~=1.7.0", "websockets~=13.1" ]
 gladia = [ "websockets~=13.1" ]
-google = [ "google-cloud-speech~=2.32.0", "google-cloud-texttospeech~=2.26.0", "google-genai~=1.14.0", "websockets~=13.1" ]
+google = [ "google-cloud-speech~=2.32.0", "google-cloud-texttospeech~=2.26.0", "google-genai~=1.24.0", "websockets~=13.1" ]
 grok = []
 groq = [ "groq~=0.23.0" ]
 gstreamer = [ "pygobject~=3.50.0" ]
@@ -86,6 +87,7 @@ remote-smart-turn = []
 silero = [ "onnxruntime~=1.20.1" ]
 simli = [ "simli-ai~=0.1.10"]
 soundfile = [ "soundfile~=0.13.0" ]
+speechmatics = [ "speechmatics-rt>=0.3.1" ]
 tavus=[]
 together = []
 tracing = [ "opentelemetry-sdk>=1.33.0", "opentelemetry-api>=1.33.0", "opentelemetry-instrumentation>=0.54b0" ]
@@ -123,9 +125,21 @@ select = [
     "D", # Docstring rules
     "I", # Import rules
 ]
+ignore = [
+    "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)
+]
 
 [tool.ruff.lint.per-file-ignores]
+# Skip docstring checks for non-source code
+"examples/**/*.py" = ["D"]
+"tests/**/*.py" = ["D"]
+"scripts/**/*.py" = ["D"]
+"docs/**/*.py" = ["D"]
+# Skip D104 (missing docstring in public package) for __init__.py files
 "**/__init__.py" = ["D104"]
+# Skip specific rules for generated protobuf files
+"**/*_pb2.py" = ["D"]
+"src/pipecat/services/__init__.py" = ["D"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

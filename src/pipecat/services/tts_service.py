@@ -94,6 +94,10 @@ class TTSService(AIService):
             text_aggregator: Custom text aggregator for processing incoming text.
             text_filters: Sequence of text filters to apply after aggregation.
             text_filter: Single text filter (deprecated, use text_filters).
+
+                .. deprecated:: 0.0.59
+                    Use `text_filters` instead, which allows multiple filters.
+
             transport_destination: Destination for generated audio frames.
             **kwargs: Additional arguments passed to the parent AIService.
         """
@@ -549,12 +553,11 @@ class WebsocketTTSService(TTSService, WebsocketService):
     Event handlers:
         on_connection_error: Called when a websocket connection error occurs.
 
-    Example:
-        ```python
+    Example::
+
         @tts.event_handler("on_connection_error")
         async def on_connection_error(tts: TTSService, error: str):
             logger.error(f"TTS connection error: {error}")
-        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -622,12 +625,11 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
     Event handlers:
         on_connection_error: Called when a websocket connection error occurs.
 
-    Example:
-        ```python
+    Example::
+
         @tts.event_handler("on_connection_error")
         async def on_connection_error(tts: TTSService, error: str):
             logger.error(f"TTS connection error: {error}")
-        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
@@ -807,6 +809,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     async def _stop_audio_context_task(self):
         if self._audio_context_task:
+            self._contexts_queue.cancel()
             await self.cancel_task(self._audio_context_task)
             self._audio_context_task = None
 

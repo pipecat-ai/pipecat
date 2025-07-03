@@ -15,7 +15,7 @@ from typing import Any, AsyncGenerator, Dict, Optional
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -121,7 +121,7 @@ class XTTSService(TTSService):
         self._studio_speakers: Optional[Dict[str, Any]] = None
         self._aiohttp_session = aiohttp_session
 
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

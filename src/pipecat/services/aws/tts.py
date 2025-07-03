@@ -17,7 +17,7 @@ from typing import AsyncGenerator, List, Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -195,7 +195,7 @@ class AWSPollyTTSService(TTSService):
             "lexicon_names": params.lexicon_names,
         }
 
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
 
         self.set_voice(voice_id)
 
@@ -343,7 +343,12 @@ class AWSPollyTTSService(TTSService):
 
 
 class PollyTTSService(AWSPollyTTSService):
-    """Deprecated alias for AWSPollyTTSService."""
+    """Deprecated alias for AWSPollyTTSService.
+
+    .. deprecated:: 0.0.67
+        `PollyTTSService` is deprecated, use `AWSPollyTTSService` instead.
+
+    """
 
     def __init__(self, **kwargs):
         """Initialize the deprecated PollyTTSService.

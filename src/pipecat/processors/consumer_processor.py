@@ -77,6 +77,7 @@ class ConsumerProcessor(FrameProcessor):
     async def _cancel(self, _: CancelFrame):
         """Cancel the consumer task."""
         if self._consumer_task:
+            self._queue.cancel()
             await self.cancel_task(self._consumer_task)
 
     async def _consumer_task_handler(self):

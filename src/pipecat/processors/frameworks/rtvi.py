@@ -1005,6 +1005,10 @@ class RTVIProcessor(FrameProcessor):
     ):
         """Handle the start of a function call from the LLM.
 
+        .. deprecated:: 0.0.66
+            This method is deprecated and will be removed in a future version.
+            Use `RTVIProcessor.handle_function_call()` instead.
+
         Args:
             function_name: Name of the function being called.
             llm: The LLM processor making the call.
@@ -1086,10 +1090,12 @@ class RTVIProcessor(FrameProcessor):
     async def _cancel_tasks(self):
         """Cancel all running tasks."""
         if self._action_task:
+            self._action_queue.cancel()
             await self.cancel_task(self._action_task)
             self._action_task = None
 
         if self._message_task:
+            self._message_queue.cancel()
             await self.cancel_task(self._message_task)
             self._message_task = None
 

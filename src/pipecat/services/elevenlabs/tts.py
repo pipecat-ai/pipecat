@@ -764,21 +764,23 @@ class ElevenLabsHttpTTSService(WordTTSService):
     def calculate_word_times(self, alignment_info: Mapping[str, Any]) -> List[Tuple[str, float]]:
         """Calculate word timing from character alignment data.
 
-        Example input data:
-        {
-            "characters": [" ", "H", "e", "l", "l", "o", " ", "w", "o", "r", "l", "d"],
-            "character_start_times_seconds": [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-            "character_end_times_seconds": [0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-        }
-
-        Would produce word times (with cumulative_time=0):
-        [("Hello", 0.1), ("world", 0.5)]
-
         Args:
             alignment_info: Character timing data from ElevenLabs.
 
         Returns:
             List of (word, timestamp) pairs.
+
+        Example input data::
+
+            {
+                "characters": [" ", "H", "e", "l", "l", "o", " ", "w", "o", "r", "l", "d"],
+                "character_start_times_seconds": [0.0, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+                "character_end_times_seconds": [0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+            }
+
+        Would produce word times (with cumulative_time=0)::
+
+            [("Hello", 0.1), ("world", 0.5)]
         """
         chars = alignment_info.get("characters", [])
         char_start_times = alignment_info.get("character_start_times_seconds", [])

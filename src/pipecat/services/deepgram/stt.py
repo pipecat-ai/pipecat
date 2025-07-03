@@ -65,7 +65,11 @@ class DeepgramSTTService(STTService):
 
         Args:
             api_key: Deepgram API key for authentication.
-            url: Deprecated. Use base_url instead.
+            url: Custom Deepgram API base URL.
+
+                .. deprecated:: 0.0.64
+                    Parameter `url` is deprecated, use `base_url` instead.
+
             base_url: Custom Deepgram API base URL.
             sample_rate: Audio sample rate. If None, uses default or live_options value.
             live_options: Deepgram LiveOptions for detailed configuration.
@@ -278,7 +282,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,
@@ -291,7 +295,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,

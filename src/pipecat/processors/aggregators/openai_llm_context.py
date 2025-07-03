@@ -210,9 +210,10 @@ class OpenAILLMContext:
     def from_standard_message(self, message):
         """Convert from OpenAI message format to OpenAI message format (passthrough).
 
-        OpenAI's format allows both simple string content and structured content:
-        - Simple: {"role": "user", "content": "Hello"}
-        - Structured: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
+        OpenAI's format allows both simple string content and structured content::
+
+            Simple: {"role": "user", "content": "Hello"}
+            Structured: {"role": "user", "content": [{"type": "text", "text": "Hello"}]}
 
         Since OpenAI is our standard format, this is a passthrough function.
 
