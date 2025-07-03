@@ -76,6 +76,10 @@ class PipelineParams(BaseModel):
         heartbeats_period_secs: Period between heartbeats in seconds.
         interruption_strategies: Strategies for bot interruption behavior.
         observers: [deprecated] Use `observers` arg in `PipelineTask` class.
+
+            .. deprecated:: 0.0.58
+                Use the `observers` argument in the `PipelineTask` class instead.
+
         report_only_initial_ttfb: Whether to report only initial time to first byte.
         send_initial_empty_metrics: Whether to send initial empty metrics.
         start_metadata: Additional metadata for pipeline start.
