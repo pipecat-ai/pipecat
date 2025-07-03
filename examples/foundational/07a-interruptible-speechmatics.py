@@ -21,7 +21,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.speechmatics.stt import OperatingPoint, SpeechmaticsSTTService
+from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -113,7 +113,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
+            stt,  # STT
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
