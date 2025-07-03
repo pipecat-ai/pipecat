@@ -249,6 +249,55 @@ class Config(BaseModel):
 
 
 #
+# Grounding metadata models
+#
+
+
+class SearchEntryPoint(BaseModel):
+    """Represents the search entry point with rendered content for search suggestions."""
+
+    renderedContent: Optional[str] = None
+
+
+class WebSource(BaseModel):
+    """Represents a web source from grounding chunks."""
+
+    uri: Optional[str] = None
+    title: Optional[str] = None
+
+
+class GroundingChunk(BaseModel):
+    """Represents a grounding chunk containing web source information."""
+
+    web: Optional[WebSource] = None
+
+
+class GroundingSegment(BaseModel):
+    """Represents a segment of text that is grounded."""
+
+    startIndex: Optional[int] = None
+    endIndex: Optional[int] = None
+    text: Optional[str] = None
+
+
+class GroundingSupport(BaseModel):
+    """Represents support information for grounded text segments."""
+
+    segment: Optional[GroundingSegment] = None
+    groundingChunkIndices: Optional[List[int]] = None
+    confidenceScores: Optional[List[float]] = None
+
+
+class GroundingMetadata(BaseModel):
+    """Represents grounding metadata from Google Search."""
+
+    searchEntryPoint: Optional[SearchEntryPoint] = None
+    groundingChunks: Optional[List[GroundingChunk]] = None
+    groundingSupports: Optional[List[GroundingSupport]] = None
+    webSearchQueries: Optional[List[str]] = None
+
+
+#
 # Server events
 #
 
@@ -339,6 +388,7 @@ class ServerContent(BaseModel):
     turnComplete: Optional[bool] = None
     inputTranscription: Optional[BidiGenerateContentTranscription] = None
     outputTranscription: Optional[BidiGenerateContentTranscription] = None
+    groundingMetadata: Optional[GroundingMetadata] = None
 
 
 class FunctionCall(BaseModel):
