@@ -72,6 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where audio would get stuck in the queue when an interrupt occurs 
+  during Azure TTS synthesis.
+
 - Fixed a race condition that occurs in Python 3.10+ where the task could miss
   the `CancelledError` and continue running indefinitely, freezing the pipeline.
 
