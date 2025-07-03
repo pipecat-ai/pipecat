@@ -17,13 +17,6 @@ class AzureLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Azure's OpenAI endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing Azure OpenAI.
-        endpoint: The Azure endpoint URL.
-        model: The model identifier to use.
-        api_version: Azure API version. Defaults to "2024-09-01-preview".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -35,6 +28,15 @@ class AzureLLMService(OpenAILLMService):
         api_version: str = "2024-09-01-preview",
         **kwargs,
     ):
+        """Initialize the Azure LLM service.
+
+        Args:
+            api_key: The API key for accessing Azure OpenAI.
+            endpoint: The Azure endpoint URL.
+            model: The model identifier to use.
+            api_version: Azure API version. Defaults to "2024-09-01-preview".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         # Initialize variables before calling parent __init__() because that
         # will call create_client() and we need those values there.
         self._endpoint = endpoint

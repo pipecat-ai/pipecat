@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Groq speech-to-text service implementation using Whisper models."""
+
 from typing import Optional
 
 from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcription
@@ -15,15 +17,6 @@ class GroqSTTService(BaseWhisperSTTService):
 
     Uses Groq's Whisper API to convert audio to text. Requires a Groq API key
     set via the api_key parameter or GROQ_API_KEY environment variable.
-
-    Args:
-        model: Whisper model to use. Defaults to "whisper-large-v3-turbo".
-        api_key: Groq API key. Defaults to None.
-        base_url: API base URL. Defaults to "https://api.groq.com/openai/v1".
-        language: Language of the audio input. Defaults to English.
-        prompt: Optional text to guide the model's style or continue a previous segment.
-        temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
-        **kwargs: Additional arguments passed to BaseWhisperSTTService.
     """
 
     def __init__(
@@ -37,6 +30,17 @@ class GroqSTTService(BaseWhisperSTTService):
         temperature: Optional[float] = None,
         **kwargs,
     ):
+        """Initialize Groq STT service.
+
+        Args:
+            model: Whisper model to use. Defaults to "whisper-large-v3-turbo".
+            api_key: Groq API key. Defaults to None.
+            base_url: API base URL. Defaults to "https://api.groq.com/openai/v1".
+            language: Language of the audio input. Defaults to English.
+            prompt: Optional text to guide the model's style or continue a previous segment.
+            temperature: Optional sampling temperature between 0 and 1. Defaults to 0.0.
+            **kwargs: Additional arguments passed to BaseWhisperSTTService.
+        """
         super().__init__(
             model=model,
             api_key=api_key,

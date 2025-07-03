@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Sarvam AI text-to-speech service implementation."""
+
 import base64
 from typing import AsyncGenerator, Optional
 
@@ -25,7 +27,14 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 def language_to_sarvam_language(language: Language) -> Optional[str]:
-    """Convert Pipecat Language enum to Sarvam AI language codes."""
+    """Convert Pipecat Language enum to Sarvam AI language codes.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding Sarvam AI language code, or None if not supported.
+    """
     LANGUAGE_MAP = {
         Language.BN: "bn-IN",  # Bengali
         Language.EN: "en-IN",  # English (India)
@@ -50,17 +59,8 @@ class SarvamTTSService(TTSService):
     Indian languages. Provides control over voice characteristics like pitch, pace,
     and loudness.
 
-    Args:
-        api_key: Sarvam AI API subscription key.
-        voice_id: Speaker voice ID (e.g., "anushka", "meera").
-        model: TTS model to use ("bulbul:v1" or "bulbul:v2").
-        aiohttp_session: Shared aiohttp session for making requests.
-        base_url: Sarvam AI API base URL.
-        sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000).
-        params: Additional voice and preprocessing parameters.
+    Example::
 
-    Example:
-        ```python
         tts = SarvamTTSService(
             api_key="your-api-key",
             voice_id="anushka",
@@ -72,10 +72,19 @@ class SarvamTTSService(TTSService):
                 pace=1.2
             )
         )
-        ```
     """
 
     class InputParams(BaseModel):
+        """Input parameters for Sarvam TTS configuration.
+
+        Parameters:
+            language: Language for synthesis. Defaults to English (India).
+            pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
+            pace: Speech pace multiplier (0.3 to 3.0). Defaults to 1.0.
+            loudness: Volume multiplier (0.1 to 3.0). Defaults to 1.0.
+            enable_preprocessing: Whether to enable text preprocessing. Defaults to False.
+        """
+
         language: Optional[Language] = Language.EN
         pitch: Optional[float] = Field(default=0.0, ge=-0.75, le=0.75)
         pace: Optional[float] = Field(default=1.0, ge=0.3, le=3.0)
@@ -94,6 +103,18 @@ class SarvamTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Sarvam TTS service.
+
+        Args:
+            api_key: Sarvam AI API subscription key.
+            voice_id: Speaker voice ID (e.g., "anushka", "meera"). Defaults to "anushka".
+            model: TTS model to use ("bulbul:v1" or "bulbul:v2"). Defaults to "bulbul:v2".
+            aiohttp_session: Shared aiohttp session for making requests.
+            base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
+            sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000). If None, uses default.
+            params: Additional voice and preprocessing parameters. If None, uses defaults.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or SarvamTTSService.InputParams()
@@ -116,17 +137,43 @@ class SarvamTTSService(TTSService):
         self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Sarvam service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Sarvam AI language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Sarvam AI-specific language code, or None if not supported.
+        """
         return language_to_sarvam_language(language)
 
     async def start(self, frame: StartFrame):
+        """Start the Sarvam TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._settings["sample_rate"] = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Sarvam AI's API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:

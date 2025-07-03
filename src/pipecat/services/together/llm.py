@@ -16,12 +16,6 @@ class TogetherLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Together.ai's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key: The API key for accessing Together.ai's API.
-        base_url: The base URL for Together.ai API. Defaults to "https://api.together.xyz/v1".
-        model: The model identifier to use. Defaults to "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -32,6 +26,14 @@ class TogetherLLMService(OpenAILLMService):
         model: str = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
         **kwargs,
     ):
+        """Initialize Together.ai LLM service.
+
+        Args:
+            api_key: The API key for accessing Together.ai's API.
+            base_url: The base URL for Together.ai API. Defaults to "https://api.together.xyz/v1".
+            model: The model identifier to use. Defaults to "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):

@@ -4,7 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Functions for adding attributes to OpenTelemetry spans."""
+"""Functions for adding attributes to OpenTelemetry spans.
+
+This module provides specialized functions for adding service-specific
+attributes to OpenTelemetry spans, following standard semantic conventions
+where applicable and Pipecat-specific conventions for additional context.
+"""
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -26,6 +31,12 @@ def _get_gen_ai_system_from_service_name(service_name: str) -> str:
 
     Uses standard OTel names where possible, with special case mappings for
     service names that don't follow the pattern.
+
+    Args:
+        service_name: The service class name to extract system name from.
+
+    Returns:
+        The standardized gen_ai.system value.
     """
     SPECIAL_CASE_MAPPINGS = {
         # AWS
@@ -66,16 +77,16 @@ def add_tts_span_attributes(
     """Add TTS-specific attributes to a span.
 
     Args:
-        span: The span to add attributes to
-        service_name: Name of the TTS service (e.g., "cartesia")
-        model: Model name/identifier
-        voice_id: Voice identifier
-        text: The text being synthesized
-        settings: Service configuration settings
-        character_count: Number of characters in the text
-        operation_name: Name of the operation (default: "tts")
-        ttfb: Time to first byte in seconds
-        **kwargs: Additional attributes to add
+        span: The span to add attributes to.
+        service_name: Name of the TTS service (e.g., "cartesia").
+        model: Model name/identifier.
+        voice_id: Voice identifier.
+        text: The text being synthesized.
+        settings: Service configuration settings.
+        character_count: Number of characters in the text.
+        operation_name: Name of the operation (default: "tts").
+        ttfb: Time to first byte in seconds.
+        **kwargs: Additional attributes to add.
     """
     # Add standard attributes
     span.set_attribute("gen_ai.system", service_name.replace("TTSService", "").lower())
@@ -114,6 +125,7 @@ def add_stt_span_attributes(
     transcript: Optional[str] = None,
     is_final: Optional[bool] = None,
     language: Optional[str] = None,
+    user_id: Optional[str] = None,
     settings: Optional[Dict[str, Any]] = None,
     vad_enabled: bool = False,
     ttfb: Optional[float] = None,
@@ -122,17 +134,18 @@ def add_stt_span_attributes(
     """Add STT-specific attributes to a span.
 
     Args:
-        span: The span to add attributes to
-        service_name: Name of the STT service (e.g., "deepgram")
-        model: Model name/identifier
-        operation_name: Name of the operation (default: "stt")
-        transcript: The transcribed text
-        is_final: Whether this is a final transcript
-        language: Detected or configured language
-        settings: Service configuration settings
-        vad_enabled: Whether voice activity detection is enabled
-        ttfb: Time to first byte in seconds
-        **kwargs: Additional attributes to add
+        span: The span to add attributes to.
+        service_name: Name of the STT service (e.g., "deepgram").
+        model: Model name/identifier.
+        operation_name: Name of the operation (default: "stt").
+        transcript: The transcribed text.
+        is_final: Whether this is a final transcript.
+        language: Detected or configured language.
+        user_id: User ID associated with the audio being transcribed.
+        settings: Service configuration settings.
+        vad_enabled: Whether voice activity detection is enabled.
+        ttfb: Time to first byte in seconds.
+        **kwargs: Additional attributes to add.
     """
     # Add standard attributes
     span.set_attribute("gen_ai.system", service_name.replace("STTService", "").lower())
@@ -149,6 +162,9 @@ def add_stt_span_attributes(
 
     if language:
         span.set_attribute("language", language)
+
+    if user_id:
+        span.set_attribute("user_id", user_id)
 
     if ttfb is not None:
         span.set_attribute("metrics.ttfb", ttfb)
@@ -184,20 +200,20 @@ def add_llm_span_attributes(
     """Add LLM-specific attributes to a span.
 
     Args:
-        span: The span to add attributes to
-        service_name: Name of the LLM service (e.g., "openai")
-        model: Model name/identifier
-        stream: Whether streaming is enabled
-        messages: JSON-serialized messages
-        output: Aggregated output text from the LLM
-        tools: JSON-serialized tools configuration
-        tool_count: Number of tools available
-        tool_choice: Tool selection configuration
-        system: System message
-        parameters: Service parameters
-        extra_parameters: Additional parameters
-        ttfb: Time to first byte in seconds
-        **kwargs: Additional attributes to add
+        span: The span to add attributes to.
+        service_name: Name of the LLM service (e.g., "openai").
+        model: Model name/identifier.
+        stream: Whether streaming is enabled.
+        messages: JSON-serialized messages.
+        output: Aggregated output text from the LLM.
+        tools: JSON-serialized tools configuration.
+        tool_count: Number of tools available.
+        tool_choice: Tool selection configuration.
+        system: System message.
+        parameters: Service parameters.
+        extra_parameters: Additional parameters.
+        ttfb: Time to first byte in seconds.
+        **kwargs: Additional attributes to add.
     """
     # Add standard attributes
     span.set_attribute("gen_ai.system", _get_gen_ai_system_from_service_name(service_name))
@@ -278,21 +294,21 @@ def add_gemini_live_span_attributes(
     """Add Gemini Live specific attributes to a span.
 
     Args:
-        span: The span to add attributes to
-        service_name: Name of the service
-        model: Model name/identifier
-        operation_name: Name of the operation (setup, model_turn, tool_call, etc.)
-        voice_id: Voice identifier used for output
-        language: Language code for the session
-        modalities: Supported modalities (e.g., "AUDIO", "TEXT")
-        settings: Service configuration settings
-        tools: Available tools/functions list
-        tools_serialized: JSON-serialized tools for detailed inspection
-        transcript: Transcription text
-        is_input: Whether transcript is input (True) or output (False)
-        text_output: Text output from model
-        audio_data_size: Size of audio data in bytes
-        **kwargs: Additional attributes to add
+        span: The span to add attributes to.
+        service_name: Name of the service.
+        model: Model name/identifier.
+        operation_name: Name of the operation (setup, model_turn, tool_call, etc.).
+        voice_id: Voice identifier used for output.
+        language: Language code for the session.
+        modalities: Supported modalities (e.g., "AUDIO", "TEXT").
+        settings: Service configuration settings.
+        tools: Available tools/functions list.
+        tools_serialized: JSON-serialized tools for detailed inspection.
+        transcript: Transcription text.
+        is_input: Whether transcript is input (True) or output (False).
+        text_output: Text output from model.
+        audio_data_size: Size of audio data in bytes.
+        **kwargs: Additional attributes to add.
     """
     # Add standard attributes
     span.set_attribute("gen_ai.system", "gcp.gemini")
@@ -381,19 +397,19 @@ def add_openai_realtime_span_attributes(
     """Add OpenAI Realtime specific attributes to a span.
 
     Args:
-        span: The span to add attributes to
-        service_name: Name of the service
-        model: Model name/identifier
-        operation_name: Name of the operation (setup, transcription, response, etc.)
-        session_properties: Session configuration properties
-        transcript: Transcription text
-        is_input: Whether transcript is input (True) or output (False)
-        context_messages: JSON-serialized context messages
-        function_calls: Function calls being made
-        tools: Available tools/functions list
-        tools_serialized: JSON-serialized tools for detailed inspection
-        audio_data_size: Size of audio data in bytes
-        **kwargs: Additional attributes to add
+        span: The span to add attributes to.
+        service_name: Name of the service.
+        model: Model name/identifier.
+        operation_name: Name of the operation (setup, transcription, response, etc.).
+        session_properties: Session configuration properties.
+        transcript: Transcription text.
+        is_input: Whether transcript is input (True) or output (False).
+        context_messages: JSON-serialized context messages.
+        function_calls: Function calls being made.
+        tools: Available tools/functions list.
+        tools_serialized: JSON-serialized tools for detailed inspection.
+        audio_data_size: Size of audio data in bytes.
+        **kwargs: Additional attributes to add.
     """
     # Add standard attributes
     span.set_attribute("gen_ai.system", "openai")

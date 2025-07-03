@@ -96,7 +96,13 @@ class AWSNovaSonicUnhandledFunctionException(Exception):
 
 
 class ContentType(Enum):
-    """Content types supported by AWS Nova Sonic."""
+    """Content types supported by AWS Nova Sonic.
+
+    Parameters:
+        AUDIO: Audio content type.
+        TEXT: Text content type.
+        TOOL: Tool content type.
+    """
 
     AUDIO = "AUDIO"
     TEXT = "TEXT"
@@ -104,7 +110,12 @@ class ContentType(Enum):
 
 
 class TextStage(Enum):
-    """Text generation stages in AWS Nova Sonic responses."""
+    """Text generation stages in AWS Nova Sonic responses.
+
+    Parameters:
+        FINAL: Final text that has been fully generated.
+        SPECULATIVE: Speculative text that is still being generated.
+    """
 
     FINAL = "FINAL"  # what has been said
     SPECULATIVE = "SPECULATIVE"  # what's planned to be said
@@ -127,6 +138,7 @@ class CurrentContent:
     text_content: str  # starts as None, then fills in if text
 
     def __str__(self):
+        """String representation of the current content."""
         return (
             f"CurrentContent(\n"
             f"  type={self.type.name},\n"
@@ -139,7 +151,7 @@ class CurrentContent:
 class Params(BaseModel):
     """Configuration parameters for AWS Nova Sonic.
 
-    Attributes:
+    Parameters:
         input_sample_rate: Audio input sample rate in Hz.
         input_sample_size: Audio input sample size in bits.
         input_channel_count: Number of input audio channels.
@@ -172,18 +184,6 @@ class AWSNovaSonicLLMService(LLMService):
 
     Provides bidirectional audio streaming, real-time transcription, text generation,
     and function calling capabilities using AWS Nova Sonic model.
-
-    Args:
-        secret_access_key: AWS secret access key for authentication.
-        access_key_id: AWS access key ID for authentication.
-        region: AWS region where the service is hosted.
-        model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
-        voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
-        params: Model parameters for audio configuration and inference.
-        system_instruction: System-level instruction for the model.
-        tools: Available tools/functions for the model to use.
-        send_transcription_frames: Whether to emit transcription frames.
-        **kwargs: Additional arguments passed to the parent LLMService.
     """
 
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
@@ -194,6 +194,7 @@ class AWSNovaSonicLLMService(LLMService):
         *,
         secret_access_key: str,
         access_key_id: str,
+        session_token: Optional[str] = None,
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
@@ -203,9 +204,25 @@ class AWSNovaSonicLLMService(LLMService):
         send_transcription_frames: bool = True,
         **kwargs,
     ):
+        """Initializes the AWS Nova Sonic LLM service.
+
+        Args:
+            secret_access_key: AWS secret access key for authentication.
+            access_key_id: AWS access key ID for authentication.
+            session_token: AWS session token for authentication.
+            region: AWS region where the service is hosted.
+            model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
+            voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
+            params: Model parameters for audio configuration and inference.
+            system_instruction: System-level instruction for the model.
+            tools: Available tools/functions for the model to use.
+            send_transcription_frames: Whether to emit transcription frames.
+            **kwargs: Additional arguments passed to the parent LLMService.
+        """
         super().__init__(**kwargs)
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
+        self._session_token = session_token
         self._region = region
         self._model = model
         self._client: Optional[BedrockRuntimeClient] = None
@@ -509,7 +526,9 @@ class AWSNovaSonicLLMService(LLMService):
             region=self._region,
             aws_credentials_identity_resolver=StaticCredentialsResolver(
                 credentials=AWSCredentialsIdentity(
-                    access_key_id=self._access_key_id, secret_access_key=self._secret_access_key
+                    access_key_id=self._access_key_id,
+                    secret_access_key=self._secret_access_key,
+                    session_token=self._session_token,
                 )
             ),
             http_auth_scheme_resolver=HTTPAuthSchemeResolver(),

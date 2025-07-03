@@ -50,21 +50,6 @@ class TTSService(AIService):
     Provides common functionality for TTS services including text aggregation,
     filtering, audio generation, and frame management. Supports configurable
     sentence aggregation, silence insertion, and frame processing control.
-
-    Args:
-        aggregate_sentences: Whether to aggregate text into sentences before synthesis.
-        push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
-        push_stop_frames: Whether to automatically push TTSStoppedFrames.
-        stop_frame_timeout_s: Idle time before pushing TTSStoppedFrame when push_stop_frames is True.
-        push_silence_after_stop: Whether to push silence audio after TTSStoppedFrame.
-        silence_time_s: Duration of silence to push when push_silence_after_stop is True.
-        pause_frame_processing: Whether to pause frame processing during audio generation.
-        sample_rate: Output sample rate for generated audio.
-        text_aggregator: Custom text aggregator for processing incoming text.
-        text_filters: Sequence of text filters to apply after aggregation.
-        text_filter: Single text filter (deprecated, use text_filters).
-        transport_destination: Destination for generated audio frames.
-        **kwargs: Additional arguments passed to the parent AIService.
     """
 
     def __init__(
@@ -95,6 +80,27 @@ class TTSService(AIService):
         transport_destination: Optional[str] = None,
         **kwargs,
     ):
+        """Initialize the TTS service.
+
+        Args:
+            aggregate_sentences: Whether to aggregate text into sentences before synthesis.
+            push_text_frames: Whether to push TextFrames and LLMFullResponseEndFrames.
+            push_stop_frames: Whether to automatically push TTSStoppedFrames.
+            stop_frame_timeout_s: Idle time before pushing TTSStoppedFrame when push_stop_frames is True.
+            push_silence_after_stop: Whether to push silence audio after TTSStoppedFrame.
+            silence_time_s: Duration of silence to push when push_silence_after_stop is True.
+            pause_frame_processing: Whether to pause frame processing during audio generation.
+            sample_rate: Output sample rate for generated audio.
+            text_aggregator: Custom text aggregator for processing incoming text.
+            text_filters: Sequence of text filters to apply after aggregation.
+            text_filter: Single text filter (deprecated, use text_filters).
+
+                .. deprecated:: 0.0.59
+                    Use `text_filters` instead, which allows multiple filters.
+
+            transport_destination: Destination for generated audio frames.
+            **kwargs: Additional arguments passed to the parent AIService.
+        """
         super().__init__(**kwargs)
         self._aggregate_sentences: bool = aggregate_sentences
         self._push_text_frames: bool = push_text_frames
@@ -428,12 +434,14 @@ class WordTTSService(TTSService):
 
     Word timestamps are useful to synchronize audio with text of the spoken
     words. This way only the spoken words are added to the conversation context.
-
-    Args:
-        **kwargs: Additional arguments passed to the parent TTSService.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent TTSService.
+        """
         super().__init__(**kwargs)
         self._initial_word_timestamp = -1
         self._words_task = None
@@ -542,22 +550,23 @@ class WebsocketTTSService(TTSService, WebsocketService):
     Combines TTS functionality with websocket connectivity, providing automatic
     error handling and reconnection capabilities.
 
-    Args:
-        reconnect_on_error: Whether to automatically reconnect on websocket errors.
-        **kwargs: Additional arguments passed to parent classes.
-
     Event handlers:
         on_connection_error: Called when a websocket connection error occurs.
 
-    Example:
-        ```python
+    Example::
+
         @tts.event_handler("on_connection_error")
         async def on_connection_error(tts: TTSService, error: str):
             logger.error(f"TTS connection error: {error}")
-        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+        """Initialize the Websocket TTS service.
+
+        Args:
+            reconnect_on_error: Whether to automatically reconnect on websocket errors.
+            **kwargs: Additional arguments passed to parent classes.
+        """
         TTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
         self._register_event_handler("on_connection_error")
@@ -572,12 +581,14 @@ class InterruptibleTTSService(WebsocketTTSService):
 
     Designed for TTS services that don't support word timestamps. Handles interruptions
     by reconnecting the websocket when the bot is speaking and gets interrupted.
-
-    Args:
-        **kwargs: Additional arguments passed to the parent WebsocketTTSService.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the Interruptible TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent WebsocketTTSService.
+        """
         super().__init__(**kwargs)
 
         # Indicates if the bot is speaking. If the bot is not speaking we don't
@@ -611,22 +622,23 @@ class WebsocketWordTTSService(WordTTSService, WebsocketService):
 
     Combines word timestamp functionality with websocket connectivity.
 
-    Args:
-        reconnect_on_error: Whether to automatically reconnect on websocket errors.
-        **kwargs: Additional arguments passed to parent classes.
-
     Event handlers:
         on_connection_error: Called when a websocket connection error occurs.
 
-    Example:
-        ```python
+    Example::
+
         @tts.event_handler("on_connection_error")
         async def on_connection_error(tts: TTSService, error: str):
             logger.error(f"TTS connection error: {error}")
-        ```
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+        """Initialize the Websocket Word TTS service.
+
+        Args:
+            reconnect_on_error: Whether to automatically reconnect on websocket errors.
+            **kwargs: Additional arguments passed to parent classes.
+        """
         WordTTSService.__init__(self, **kwargs)
         WebsocketService.__init__(self, reconnect_on_error=reconnect_on_error, **kwargs)
         self._register_event_handler("on_connection_error")
@@ -641,12 +653,14 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
 
     For TTS services that support word timestamps but can't correlate generated
     audio with requested text. Handles interruptions by reconnecting when needed.
-
-    Args:
-        **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the Interruptible Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
+        """
         super().__init__(**kwargs)
 
         # Indicates if the bot is speaking. If the bot is not speaking we don't
@@ -689,12 +703,14 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
     The audio received from the TTS will be played in context order. That is, if
     we requested audio for a context "A" and then audio for context "B", the
     audio from context ID "A" will be played first.
-
-    Args:
-        **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the Audio Context Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
+        """
         super().__init__(**kwargs)
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
@@ -793,6 +809,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     async def _stop_audio_context_task(self):
         if self._audio_context_task:
+            self._contexts_queue.cancel()
             await self.cancel_task(self._audio_context_task)
             self._audio_context_task = None
 

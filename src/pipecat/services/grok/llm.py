@@ -67,12 +67,6 @@ class GrokLLMService(OpenAILLMService):
     maintaining full compatibility with OpenAI's interface and functionality.
     Includes specialized token usage tracking that accumulates metrics during
     processing and reports final totals.
-
-    Args:
-        api_key: The API key for accessing Grok's API.
-        base_url: The base URL for Grok API. Defaults to "https://api.x.ai/v1".
-        model: The model identifier to use. Defaults to "grok-3-beta".
-        **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
     def __init__(
@@ -83,6 +77,14 @@ class GrokLLMService(OpenAILLMService):
         model: str = "grok-3-beta",
         **kwargs,
     ):
+        """Initialize the GrokLLMService with API key and model.
+
+        Args:
+            api_key: The API key for accessing Grok's API.
+            base_url: The base URL for Grok API. Defaults to "https://api.x.ai/v1".
+            model: The model identifier to use. Defaults to "grok-3-beta".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
         # Initialize counters for token usage metrics
         self._prompt_tokens = 0
