@@ -569,6 +569,7 @@ class PipelineTask(BasePipelineTask):
     async def _maybe_cancel_idle_task(self):
         """Cancel idle monitoring task if it is running."""
         if self._idle_timeout_secs and self._idle_monitor_task:
+            self._idle_queue.cancel()
             await self._task_manager.cancel_task(self._idle_monitor_task)
             self._idle_monitor_task = None
 
