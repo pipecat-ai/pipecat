@@ -61,8 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
 
-- Added Gemini Multimodal Live File API for uploading, fetching, listing, and 
-deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
+- Added Gemini Multimodal Live File API for uploading, fetching, listing, and
+  deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
 
 ### Changed
 
@@ -75,13 +75,19 @@ deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
 
 ### Fixed
 
-- Fixed an issue where audio would get stuck in the queue when an interrupt occurs 
+- Fixed an issue where audio would get stuck in the queue when an interrupt occurs
   during Azure TTS synthesis.
 
 - Fixed a race condition that occurs in Python 3.10+ where the task could miss
   the `CancelledError` and continue running indefinitely, freezing the pipeline.
 
 - Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.
+
+### Deprecated
+
+- In `FishTTSService`, deprecated `model` and replaced with `reference_id`.
+  This change is to better align with Fish Audio's variable naming and to
+  reduce confusion about what functionality the variable controls.
 
 ## [0.0.73] - 2025-06-26
 
