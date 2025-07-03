@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from speechmatics.rt import (
@@ -484,6 +485,13 @@ class SpeechmaticsSTTService(STTService):
         # Send frames
         asyncio.run_coroutine_threadsafe(self._send_frames(), self.get_event_loop())
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def _send_frames(self, finalized: bool = False) -> None:
         """Send frames to the pipeline.
 
@@ -524,6 +532,11 @@ class SpeechmaticsSTTService(STTService):
 
         # Send the frames back to pipecat
         for frame in frames:
+            await self._handle_transcription(
+                transcript=frame.text,
+                is_final=finalized,
+                language=frame.language,
+            )
             await self.push_frame(frame)
 
     def _add_speech_fragments(self, message: dict[str, Any], is_final: bool = False) -> bool:
