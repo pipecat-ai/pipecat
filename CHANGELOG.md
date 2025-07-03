@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `normalize` and `model_id` to `FishAudioTTSService`.
+
 - Added `run_llm` field to `LLMMessagesAppendFrame` and `LLMMessagesUpdateFrame`
   frames. If true, a context frame will be pushed triggering the LLM to respond.
 
@@ -85,9 +87,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- In `FishTTSService`, deprecated `model` and replaced with `reference_id`.
-  This change is to better align with Fish Audio's variable naming and to
-  reduce confusion about what functionality the variable controls.
+- In `FishAudioTTSService`, deprecated `model` and replaced with
+  `reference_id`. This change is to better align with Fish Audio's variable
+  naming and to reduce confusion about what functionality the variable
+  controls.
 
 ## [0.0.73] - 2025-06-26
 
