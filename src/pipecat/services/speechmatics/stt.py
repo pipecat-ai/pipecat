@@ -237,11 +237,11 @@ class SpeechmaticsSTTService(STTService):
         output_locale: Optional[Language] = None,
         output_locale_code: Optional[str] = None,
         enable_partials: bool = True,
-        max_delay: float = 2.0,
+        max_delay: float = 1.5,
         sample_rate: Optional[int] = 16000,
         chunk_size: int = 256,
         audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
-        end_of_utterance_silence_trigger: Optional[float] = None,
+        end_of_utterance_silence_trigger: float = 0.5,
         operating_point: OperatingPoint = OperatingPoint.ENHANCED,
         enable_speaker_diarization: bool = False,
         text_format: str = "<{speaker_id}>{text}</{speaker_id}>",
@@ -260,11 +260,11 @@ class SpeechmaticsSTTService(STTService):
             output_locale: Output locale for transcription, e.g. `Language.EN_GB`. Defaults to `None`.
             output_locale_code: Output locale code for transcription. Defaults to `None`.
             enable_partials: Enable partial transcription results. Defaults to `True`.
-            max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
+            max_delay: Maximum delay for transcription in seconds. Defaults to `1.5`.
             sample_rate: Audio sample rate in Hz. Defaults to `16000`.
             chunk_size: Audio chunk size for streaming. Defaults to `256`.
             audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
-            end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
+            end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `0.5`.
             operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
             enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
             text_format: Wrapper for speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
