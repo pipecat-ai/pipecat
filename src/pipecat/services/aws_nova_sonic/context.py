@@ -41,7 +41,14 @@ from pipecat.services.openai.llm import (
 
 
 class Role(Enum):
-    """Roles supported in AWS Nova Sonic conversations."""
+    """Roles supported in AWS Nova Sonic conversations.
+
+    Parameters:
+        SYSTEM: System-level messages (not used in conversation history).
+        USER: Messages sent by the user.
+        ASSISTANT: Messages sent by the assistant.
+        TOOL: Messages sent by tools (not used in conversation history).
+    """
 
     SYSTEM = "SYSTEM"
     USER = "USER"
@@ -80,14 +87,16 @@ class AWSNovaSonicLLMContext(OpenAILLMContext):
 
     Extends OpenAI context with Nova Sonic-specific message handling,
     conversation history management, and text buffering capabilities.
-
-    Args:
-        messages: Initial messages for the context.
-        tools: Available tools for the context.
-        **kwargs: Additional arguments passed to parent class.
     """
 
     def __init__(self, messages=None, tools=None, **kwargs):
+        """Initialize AWS Nova Sonic LLM context.
+
+        Args:
+            messages: Initial messages for the context.
+            tools: Available tools for the context.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(messages=messages, tools=tools, **kwargs)
         self.__setup_local()
 

@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Twilio Media Streams WebSocket protocol serializer for Pipecat."""
+
 import base64
 import json
 from typing import Optional
@@ -11,7 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler, pcm_to_ulaw, ulaw_to_pcm
+from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -38,22 +40,12 @@ class TwilioFrameSerializer(FrameSerializer):
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Twilio call when an EndFrame or CancelFrame is processed, but requires Twilio
     credentials to be provided.
-
-    Attributes:
-        _stream_sid: The Twilio Media Stream SID.
-        _call_sid: The associated Twilio Call SID.
-        _account_sid: Twilio account SID for API access.
-        _auth_token: Twilio authentication token for API access.
-        _params: Configuration parameters.
-        _twilio_sample_rate: Sample rate used by Twilio (typically 8kHz).
-        _sample_rate: Input sample rate for the pipeline.
-        _resampler: Audio resampler for format conversion.
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for TwilioFrameSerializer.
 
-        Attributes:
+        Parameters:
             twilio_sample_rate: Sample rate used by Twilio, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
@@ -89,7 +81,8 @@ class TwilioFrameSerializer(FrameSerializer):
         self._twilio_sample_rate = self._params.twilio_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
-        self._resampler = create_default_resampler()
+        self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
 
     @property
@@ -137,7 +130,7 @@ class TwilioFrameSerializer(FrameSerializer):
 
             # Output: Convert PCM at frame's rate to 8kHz μ-law for Twilio
             serialized_data = await pcm_to_ulaw(
-                data, frame.sample_rate, self._twilio_sample_rate, self._resampler
+                data, frame.sample_rate, self._twilio_sample_rate, self._output_resampler
             )
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
@@ -222,7 +215,7 @@ class TwilioFrameSerializer(FrameSerializer):
 
             # Input: Convert Twilio's 8kHz μ-law to PCM at pipeline input rate
             deserialized_data = await ulaw_to_pcm(
-                payload, self._twilio_sample_rate, self._sample_rate, self._resampler
+                payload, self._twilio_sample_rate, self._sample_rate, self._input_resampler
             )
             audio_frame = InputAudioRawFrame(
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate

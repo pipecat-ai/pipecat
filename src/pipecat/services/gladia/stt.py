@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Gladia Speech-to-Text (STT) service implementation.
+
+This module provides a Speech-to-Text service using Gladia's real-time WebSocket API,
+supporting multiple languages, custom vocabulary, and various audio processing options.
+"""
+
 import asyncio
 import base64
 import json
@@ -41,10 +47,10 @@ def language_to_gladia_language(language: Language) -> Optional[str]:
     """Convert a Language enum to Gladia's language code format.
 
     Args:
-        language: The Language enum value to convert
+        language: The Language enum value to convert.
 
     Returns:
-        The Gladia language code string or None if not supported
+        The Gladia language code string or None if not supported.
     """
     BASE_LANGUAGES = {
         Language.AF: "af",
@@ -180,8 +186,12 @@ class GladiaSTTService(STTService):
 
     This service connects to Gladia's WebSocket API for real-time transcription
     with support for multiple languages, custom vocabulary, and various processing options.
+    Provides automatic reconnection, audio buffering, and comprehensive error handling.
 
     For complete API documentation, see: https://docs.gladia.io/api-reference/v2/live/init
+
+    .. deprecated:: 0.0.62
+        Use :class:`~pipecat.services.gladia.config.GladiaInputParams` directly instead.
     """
 
     # Maintain backward compatibility
@@ -204,16 +214,16 @@ class GladiaSTTService(STTService):
         """Initialize the Gladia STT service.
 
         Args:
-            api_key: Gladia API key
-            url: Gladia API URL
-            confidence: Minimum confidence threshold for transcriptions
-            sample_rate: Audio sample rate in Hz
-            model: Model to use ("solaria-1")
-            params: Additional configuration parameters
-            max_reconnection_attempts: Maximum number of reconnection attempts
-            reconnection_delay: Initial delay between reconnection attempts (exponential backoff)
-            max_buffer_size: Maximum size of audio buffer in bytes
-            **kwargs: Additional arguments passed to the STTService
+            api_key: Gladia API key for authentication.
+            url: Gladia API URL. Defaults to "https://api.gladia.io/v2/live".
+            confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            model: Model to use for transcription. Defaults to "solaria-1".
+            params: Additional configuration parameters for Gladia service.
+            max_reconnection_attempts: Maximum number of reconnection attempts. Defaults to 5.
+            reconnection_delay: Initial delay between reconnection attempts in seconds.
+            max_buffer_size: Maximum size of audio buffer in bytes. Defaults to 20MB.
+            **kwargs: Additional arguments passed to the STTService parent class.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
@@ -256,10 +266,22 @@ class GladiaSTTService(STTService):
         self._should_reconnect = True
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate performance metrics.
+
+        Returns:
+            True, indicating this service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert pipecat Language enum to Gladia's language code."""
+        """Convert pipecat Language enum to Gladia's language code.
+
+        Args:
+            language: The Language enum value to convert.
+
+        Returns:
+            The Gladia language code string or None if not supported.
+        """
         return language_to_gladia_language(language)
 
     def _prepare_settings(self) -> Dict[str, Any]:
@@ -314,7 +336,11 @@ class GladiaSTTService(STTService):
         return settings
 
     async def start(self, frame: StartFrame):
-        """Start the Gladia STT websocket connection."""
+        """Start the Gladia STT websocket connection.
+
+        Args:
+            frame: The start frame triggering service startup.
+        """
         await super().start(frame)
         if self._connection_task:
             return
@@ -323,7 +349,11 @@ class GladiaSTTService(STTService):
         self._connection_task = self.create_task(self._connection_handler())
 
     async def stop(self, frame: EndFrame):
-        """Stop the Gladia STT websocket connection."""
+        """Stop the Gladia STT websocket connection.
+
+        Args:
+            frame: The end frame triggering service shutdown.
+        """
         await super().stop(frame)
         self._should_reconnect = False
         await self._send_stop_recording()
@@ -335,7 +365,11 @@ class GladiaSTTService(STTService):
         await self._cleanup_connection()
 
     async def cancel(self, frame: CancelFrame):
-        """Cancel the Gladia STT websocket connection."""
+        """Cancel the Gladia STT websocket connection.
+
+        Args:
+            frame: The cancel frame triggering service cancellation.
+        """
         await super().cancel(frame)
         self._should_reconnect = False
 
@@ -346,7 +380,14 @@ class GladiaSTTService(STTService):
         await self._cleanup_connection()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Run speech-to-text on audio data."""
+        """Run speech-to-text on audio data.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            None (processing is handled asynchronously via WebSocket).
+        """
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
@@ -529,7 +570,7 @@ class GladiaSTTService(STTService):
                             await self.push_frame(
                                 TranscriptionFrame(
                                     transcript,
-                                    "",
+                                    self._user_id,
                                     time_now_iso8601(),
                                     language,
                                     result=content,
@@ -544,7 +585,7 @@ class GladiaSTTService(STTService):
                             await self.push_frame(
                                 InterimTranscriptionFrame(
                                     transcript,
-                                    "",
+                                    self._user_id,
                                     time_now_iso8601(),
                                     language,
                                     result=content,

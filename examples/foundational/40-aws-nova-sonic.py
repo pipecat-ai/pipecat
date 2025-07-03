@@ -102,6 +102,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         region=os.getenv("AWS_REGION"),  # as of 2025-05-06, us-east-1 is the only supported region
+        session_token=os.getenv("AWS_SESSION_TOKEN"),
         voice_id="tiffany",  # matthew, tiffany, amy
         # you could choose to pass instruction here rather than via context
         # system_instruction=system_instruction

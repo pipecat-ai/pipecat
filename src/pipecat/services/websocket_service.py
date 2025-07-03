@@ -24,13 +24,15 @@ class WebsocketService(ABC):
     Provides websocket connection management, automatic reconnection with
     exponential backoff, connection verification, and error handling.
     Subclasses implement service-specific connection and message handling logic.
-
-    Args:
-        reconnect_on_error: Whether to automatically reconnect on connection errors.
-        **kwargs: Additional arguments (unused, for compatibility).
     """
 
     def __init__(self, *, reconnect_on_error: bool = True, **kwargs):
+        """Initialize the websocket service.
+
+        Args:
+            reconnect_on_error: Whether to automatically reconnect on connection errors.
+            **kwargs: Additional arguments (unused, for compatibility).
+        """
         self._websocket: Optional[websockets.WebSocketClientProtocol] = None
         self._reconnect_on_error = reconnect_on_error
 

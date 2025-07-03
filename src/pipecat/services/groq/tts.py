@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Groq text-to-speech service implementation."""
+
 import io
 import wave
 from typing import AsyncGenerator, Optional
@@ -25,7 +27,21 @@ except ModuleNotFoundError as e:
 
 
 class GroqTTSService(TTSService):
+    """Groq text-to-speech service implementation.
+
+    Provides text-to-speech synthesis using Groq's TTS API. The service
+    operates at a fixed 48kHz sample rate and supports various voices
+    and output formats.
+    """
+
     class InputParams(BaseModel):
+        """Input parameters for Groq TTS configuration.
+
+        Parameters:
+            language: Language for speech synthesis. Defaults to English.
+            speed: Speech speed multiplier. Defaults to 1.0.
+        """
+
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
 
@@ -42,6 +58,17 @@ class GroqTTSService(TTSService):
         sample_rate: Optional[int] = GROQ_SAMPLE_RATE,
         **kwargs,
     ):
+        """Initialize Groq TTS service.
+
+        Args:
+            api_key: Groq API key for authentication.
+            output_format: Audio output format. Defaults to "wav".
+            params: Additional input parameters for voice customization.
+            model_name: TTS model to use. Defaults to "playai-tts".
+            voice_id: Voice identifier to use. Defaults to "Celeste-PlayAI".
+            sample_rate: Audio sample rate. Must be 48000 Hz for Groq TTS.
+            **kwargs: Additional arguments passed to parent TTSService class.
+        """
         if sample_rate != self.GROQ_SAMPLE_RATE:
             logger.warning(f"Groq TTS only supports {self.GROQ_SAMPLE_RATE}Hz sample rate. ")
 
@@ -71,10 +98,23 @@ class GroqTTSService(TTSService):
         self._client = AsyncGroq(api_key=self._api_key)
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Groq TTS service supports metrics generation.
+        """
         return True
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Groq's TTS API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech data.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
         measuring_ttfb = True
         await self.start_ttfb_metrics()

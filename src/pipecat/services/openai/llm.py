@@ -61,11 +61,6 @@ class OpenAILLMService(BaseOpenAILLMService):
     Provides a complete OpenAI LLM service with context aggregation support.
     Uses the BaseOpenAILLMService for core functionality and adds OpenAI-specific
     context aggregator creation.
-
-    Args:
-        model: The OpenAI model name to use. Defaults to "gpt-4.1".
-        params: Input parameters for model configuration.
-        **kwargs: Additional arguments passed to the parent BaseOpenAILLMService.
     """
 
     def __init__(
@@ -75,6 +70,13 @@ class OpenAILLMService(BaseOpenAILLMService):
         params: Optional[BaseOpenAILLMService.InputParams] = None,
         **kwargs,
     ):
+        """Initialize OpenAI LLM service.
+
+        Args:
+            model: The OpenAI model name to use. Defaults to "gpt-4.1".
+            params: Input parameters for model configuration.
+            **kwargs: Additional arguments passed to the parent BaseOpenAILLMService.
+        """
         super().__init__(model=model, params=params, **kwargs)
 
     def create_context_aggregator(

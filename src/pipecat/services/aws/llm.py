@@ -104,12 +104,6 @@ class AWSBedrockLLMContext(OpenAILLMContext):
     Extends OpenAI LLM context to handle AWS Bedrock's specific message format
     and system message handling. Manages conversion between OpenAI and Bedrock
     message formats.
-
-    Args:
-        messages: List of conversation messages in OpenAI format.
-        tools: List of available function calling tools.
-        tool_choice: Tool selection strategy or specific tool choice.
-        system: System message content for AWS Bedrock.
     """
 
     def __init__(
@@ -120,6 +114,14 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         *,
         system: Optional[str] = None,
     ):
+        """Initialize AWS Bedrock LLM context.
+
+        Args:
+            messages: List of conversation messages in OpenAI format.
+            tools: List of available function calling tools.
+            tool_choice: Tool selection strategy or specific tool choice.
+            system: System message content for AWS Bedrock.
+        """
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.system = system
 
@@ -205,20 +207,37 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         Handles text content and function calls for both user and assistant messages.
 
         Args:
-            obj: Message in AWS Bedrock format:
-                {
-                    "role": "user/assistant",
-                    "content": [{"text": str} | {"toolUse": {...}} | {"toolResult": {...}}]
-                }
+            obj: Message in AWS Bedrock format.
 
         Returns:
-            List of messages in standard format:
-            [
+            List of messages in standard format.
+
+        Examples:
+            AWS Bedrock format input::
+
                 {
-                    "role": "user/assistant/tool",
-                    "content": [{"type": "text", "text": str}]
+                    "role": "assistant",
+                    "content": [
+                        {"text": "Hello"},
+                        {"toolUse": {"toolUseId": "123", "name": "search", "input": {"q": "test"}}}
+                    ]
                 }
-            ]
+
+            Standard format output::
+
+                [
+                    {"role": "assistant", "content": [{"type": "text", "text": "Hello"}]},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "id": "123",
+                                "function": {"name": "search", "arguments": '{"q": "test"}'}
+                            }
+                        ]
+                    }
+                ]
         """
         role = obj.get("role")
         content = obj.get("content")
@@ -292,23 +311,38 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         Empty text content is converted to "(empty)".
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/tool",
-                    "content": str | [{"type": "text", ...}],
-                    "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}]
-                }
+            message: Message in standard format.
 
         Returns:
-            Message in AWS Bedrock format:
-            {
-                "role": "user/assistant",
-                "content": [
-                    {"text": str} |
-                    {"toolUse": {"toolUseId": str, "name": str, "input": dict}} |
-                    {"toolResult": {"toolUseId": str, "content": [...], "status": str}}
-                ]
-            }
+            Message in AWS Bedrock format.
+
+        Examples:
+            Standard format input::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "123",
+                            "function": {"name": "search", "arguments": '{"q": "test"}'}
+                        }
+                    ]
+                }
+
+            AWS Bedrock format output::
+
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "toolUse": {
+                                "toolUseId": "123",
+                                "name": "search",
+                                "input": {"q": "test"}
+                            }
+                        }
+                    ]
+                }
         """
         if message["role"] == "tool":
             # Try to parse the content as JSON if it looks like JSON
@@ -656,16 +690,6 @@ class AWSBedrockLLMService(LLMService):
     Provides inference capabilities for AWS Bedrock models including Amazon Nova
     and Anthropic Claude. Supports streaming responses, function calling, and
     vision capabilities.
-
-    Args:
-        model: The AWS Bedrock model identifier to use.
-        aws_access_key: AWS access key ID. If None, uses default credentials.
-        aws_secret_key: AWS secret access key. If None, uses default credentials.
-        aws_session_token: AWS session token for temporary credentials.
-        aws_region: AWS region for the Bedrock service.
-        params: Model parameters and configuration.
-        client_config: Custom boto3 client configuration.
-        **kwargs: Additional arguments passed to parent LLMService.
     """
 
     # Overriding the default adapter to use the Anthropic one.
@@ -702,6 +726,18 @@ class AWSBedrockLLMService(LLMService):
         client_config: Optional[Config] = None,
         **kwargs,
     ):
+        """Initialize the AWS Bedrock LLM service.
+
+        Args:
+            model: The AWS Bedrock model identifier to use.
+            aws_access_key: AWS access key ID. If None, uses default credentials.
+            aws_secret_key: AWS secret access key. If None, uses default credentials.
+            aws_session_token: AWS session token for temporary credentials.
+            aws_region: AWS region for the Bedrock service.
+            params: Model parameters and configuration.
+            client_config: Custom boto3 client configuration.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         super().__init__(**kwargs)
 
         params = params or AWSBedrockLLMService.InputParams()

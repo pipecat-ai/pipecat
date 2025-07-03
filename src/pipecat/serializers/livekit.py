@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""LiveKit frame serializer for Pipecat."""
+
 import ctypes
 import pickle
 
@@ -21,11 +23,33 @@ except ModuleNotFoundError as e:
 
 
 class LivekitFrameSerializer(FrameSerializer):
+    """Serializer for converting between Pipecat frames and LiveKit audio frames.
+
+    This serializer handles the conversion of Pipecat's OutputAudioRawFrame objects
+    to LiveKit AudioFrame objects for transmission, and the reverse conversion
+    for received audio data.
+    """
+
     @property
     def type(self) -> FrameSerializerType:
+        """Get the serializer type.
+
+        Returns:
+            The serializer type indicating binary serialization.
+        """
         return FrameSerializerType.BINARY
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
+        """Serialize a Pipecat frame to LiveKit AudioFrame format.
+
+        Args:
+            frame: The Pipecat frame to serialize. Only OutputAudioRawFrame
+                  instances are supported.
+
+        Returns:
+            Pickled LiveKit AudioFrame bytes if frame is OutputAudioRawFrame,
+            None otherwise.
+        """
         if not isinstance(frame, OutputAudioRawFrame):
             return None
         audio_frame = AudioFrame(
@@ -37,6 +61,15 @@ class LivekitFrameSerializer(FrameSerializer):
         return pickle.dumps(audio_frame)
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
+        """Deserialize LiveKit AudioFrame data to a Pipecat frame.
+
+        Args:
+            data: Pickled data containing a LiveKit AudioFrame.
+
+        Returns:
+            InputAudioRawFrame containing the deserialized audio data,
+            or None if deserialization fails.
+        """
         audio_frame: AudioFrame = pickle.loads(data)["frame"]
         return InputAudioRawFrame(
             audio=bytes(audio_frame.data),

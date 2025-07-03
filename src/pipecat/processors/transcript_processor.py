@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Transcript processing utilities for conversation recording and analysis.
+
+This module provides processors that convert speech and text frames into structured
+transcript messages with timestamps, enabling conversation history tracking and analysis.
+"""
+
 from typing import List, Optional
 
 from loguru import logger
@@ -30,7 +36,11 @@ class BaseTranscriptProcessor(FrameProcessor):
     """
 
     def __init__(self, **kwargs):
-        """Initialize processor with empty message store."""
+        """Initialize processor with empty message store.
+
+        Args:
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(**kwargs)
         self._processed_messages: List[TranscriptionMessage] = []
         self._register_event_handler("on_transcript_update")
@@ -39,7 +49,7 @@ class BaseTranscriptProcessor(FrameProcessor):
         """Emit transcript updates for new messages.
 
         Args:
-            messages: New messages to emit in update
+            messages: New messages to emit in update.
         """
         if messages:
             self._processed_messages.extend(messages)
@@ -55,8 +65,8 @@ class UserTranscriptProcessor(BaseTranscriptProcessor):
         """Process TranscriptionFrames into user conversation messages.
 
         Args:
-            frame: Input frame to process
-            direction: Frame processing direction
+            frame: Input frame to process.
+            direction: Frame processing direction.
         """
         await super().process_frame(frame, direction)
 
@@ -74,17 +84,18 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
 
     This processor aggregates TTS text frames into complete utterances and emits them as
     transcript messages. Utterances are completed when:
+
     - The bot stops speaking (BotStoppedSpeakingFrame)
     - The bot is interrupted (StartInterruptionFrame)
     - The pipeline ends (EndFrame)
-
-    Attributes:
-        _current_text_parts: List of text fragments being aggregated for current utterance
-        _aggregation_start_time: Timestamp when the current utterance began
     """
 
     def __init__(self, **kwargs):
-        """Initialize processor with aggregation state."""
+        """Initialize processor with aggregation state.
+
+        Args:
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(**kwargs)
         self._current_text_parts: List[str] = []
         self._aggregation_start_time: Optional[str] = None
@@ -98,34 +109,34 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         TTS services with different formatting patterns.
 
         Examples:
-            Fragments with embedded spacing (concatenated):
-                ```
+            Fragments with embedded spacing (concatenated)::
+
                 TTSTextFrame: ["Hello"]
                 TTSTextFrame: [" there"]  # Leading space
                 TTSTextFrame: ["!"]
                 TTSTextFrame: [" How"]    # Leading space
                 TTSTextFrame: ["'s"]
                 TTSTextFrame: [" it"]     # Leading space
-                ```
+
                 Result: "Hello there! How's it"
 
-            Fragments with trailing spaces (concatenated):
-                ```
+            Fragments with trailing spaces (concatenated)::
+
                 TTSTextFrame: ["Hel"]
                 TTSTextFrame: ["lo "]     # Trailing space
                 TTSTextFrame: ["to "]     # Trailing space
                 TTSTextFrame: ["you"]
-                ```
+
                 Result: "Hello to you"
 
-            Word-by-word fragments without spacing (joined with spaces):
-                ```
+            Word-by-word fragments without spacing (joined with spaces)::
+
                 TTSTextFrame: ["Hello"]
                 TTSTextFrame: ["there"]
                 TTSTextFrame: ["how"]
                 TTSTextFrame: ["are"]
                 TTSTextFrame: ["you"]
-                ```
+
                 Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
@@ -169,6 +180,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """Process frames into assistant conversation messages.
 
         Handles different frame types:
+
         - TTSTextFrame: Aggregates text for current utterance
         - BotStoppedSpeakingFrame: Completes current utterance
         - StartInterruptionFrame: Completes current utterance due to interruption
@@ -176,8 +188,8 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         - CancelFrame: Completes current utterance due to cancellation
 
         Args:
-            frame: Input frame to process
-            direction: Frame processing direction
+            frame: Input frame to process.
+            direction: Frame processing direction.
         """
         await super().process_frame(frame, direction)
 
@@ -211,8 +223,8 @@ class TranscriptProcessor:
     Provides unified access to user and assistant transcript processors
     with shared event handling.
 
-    Example:
-        ```python
+    Example::
+
         transcript = TranscriptProcessor()
 
         pipeline = Pipeline(
@@ -232,7 +244,6 @@ class TranscriptProcessor:
         @transcript.event_handler("on_transcript_update")
         async def handle_update(processor, frame):
             print(f"New messages: {frame.messages}")
-        ```
     """
 
     def __init__(self):
@@ -245,7 +256,10 @@ class TranscriptProcessor:
         """Get the user transcript processor.
 
         Args:
-            **kwargs: Arguments specific to UserTranscriptProcessor
+            **kwargs: Arguments specific to UserTranscriptProcessor.
+
+        Returns:
+            The user transcript processor instance.
         """
         if self._user_processor is None:
             self._user_processor = UserTranscriptProcessor(**kwargs)
@@ -262,7 +276,10 @@ class TranscriptProcessor:
         """Get the assistant transcript processor.
 
         Args:
-            **kwargs: Arguments specific to AssistantTranscriptProcessor
+            **kwargs: Arguments specific to AssistantTranscriptProcessor.
+
+        Returns:
+            The assistant transcript processor instance.
         """
         if self._assistant_processor is None:
             self._assistant_processor = AssistantTranscriptProcessor(**kwargs)
@@ -279,10 +296,10 @@ class TranscriptProcessor:
         """Register event handler for both processors.
 
         Args:
-            event_name: Name of event to handle
+            event_name: Name of event to handle.
 
         Returns:
-            Decorator function that registers handler with both processors
+            Decorator function that registers handler with both processors.
         """
 
         def decorator(handler):

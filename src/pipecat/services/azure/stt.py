@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Azure Speech-to-Text service implementation for Pipecat.
+
+This module provides speech-to-text functionality using Azure Cognitive Services
+Speech SDK for real-time audio transcription.
+"""
+
 import asyncio
 from typing import AsyncGenerator, Optional
 
@@ -40,6 +46,13 @@ except ModuleNotFoundError as e:
 
 
 class AzureSTTService(STTService):
+    """Azure Speech-to-Text service for real-time audio transcription.
+
+    This service uses Azure Cognitive Services Speech SDK to convert speech
+    audio into text transcriptions. It supports continuous recognition and
+    provides real-time transcription results with timing information.
+    """
+
     def __init__(
         self,
         *,
@@ -49,6 +62,15 @@ class AzureSTTService(STTService):
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
+        """Initialize the Azure STT service.
+
+        Args:
+            api_key: Azure Cognitive Services subscription key.
+            region: Azure region for the Speech service (e.g., 'eastus').
+            language: Language for speech recognition. Defaults to English (US).
+            sample_rate: Audio sample rate in Hz. If None, uses service default.
+            **kwargs: Additional arguments passed to parent STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._speech_config = SpeechConfig(
@@ -66,9 +88,25 @@ class AzureSTTService(STTService):
         }
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate performance metrics.
+
+        Returns:
+            True as this service supports metrics generation.
+        """
         return True
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Process audio data for speech-to-text conversion.
+
+        Feeds audio data to the Azure speech recognizer for processing.
+        Recognition results are handled asynchronously through callbacks.
+
+        Args:
+            audio: Raw audio bytes to process.
+
+        Yields:
+            None - actual transcription frames are pushed via callbacks.
+        """
         await self.start_processing_metrics()
         await self.start_ttfb_metrics()
         if self._audio_stream:
@@ -76,6 +114,14 @@ class AzureSTTService(STTService):
         yield None
 
     async def start(self, frame: StartFrame):
+        """Start the speech recognition service.
+
+        Initializes the Azure speech recognizer with audio stream configuration
+        and begins continuous speech recognition.
+
+        Args:
+            frame: Frame indicating the start of processing.
+        """
         await super().start(frame)
 
         if self._audio_stream:
@@ -93,6 +139,13 @@ class AzureSTTService(STTService):
         self._speech_recognizer.start_continuous_recognition_async()
 
     async def stop(self, frame: EndFrame):
+        """Stop the speech recognition service.
+
+        Cleanly shuts down the Azure speech recognizer and closes audio streams.
+
+        Args:
+            frame: Frame indicating the end of processing.
+        """
         await super().stop(frame)
 
         if self._speech_recognizer:
@@ -102,6 +155,13 @@ class AzureSTTService(STTService):
             self._audio_stream.close()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the speech recognition service.
+
+        Immediately stops recognition and closes resources.
+
+        Args:
+            frame: Frame indicating cancellation.
+        """
         await super().cancel(frame)
 
         if self._speech_recognizer:
@@ -123,7 +183,7 @@ class AzureSTTService(STTService):
             language = getattr(event.result, "language", None) or self._settings.get("language")
             frame = TranscriptionFrame(
                 event.result.text,
-                "",
+                self._user_id,
                 time_now_iso8601(),
                 language,
                 result=event,
