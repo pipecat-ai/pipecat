@@ -69,7 +69,12 @@ class AudioBufferProcessor(FrameProcessor):
             sample_rate: Desired output sample rate. If None, uses source rate.
             num_channels: Number of channels (1 for mono, 2 for stereo). Defaults to 1.
             buffer_size: Size of buffer before triggering events. 0 for no buffering.
-            user_continuous_stream: Deprecated parameter for backwards compatibility.
+            user_continuous_stream: Controls whether user audio is treated as a continuous
+                stream for buffering purposes.
+
+                .. deprecated:: 0.0.72
+                    This parameter no longer has any effect and will be removed in a future version.
+
             enable_turn_audio: Whether turn audio event handlers should be triggered.
             **kwargs: Additional arguments passed to parent class.
         """
