@@ -312,6 +312,7 @@ class SpeechmaticsSTTService(STTService):
 
         # STT client
         self._client: Optional[AsyncClient] = None
+        self._client_task: Optional[asyncio.Task] = None
         self._audio_buffer: AudioBuffer = AudioBuffer(maxsize=10)
         self._start_time: Optional[datetime.datetime] = None
 
@@ -358,6 +359,9 @@ class SpeechmaticsSTTService(STTService):
             url=_get_endpoint_url(self._base_url),
         )
 
+        # Log the event
+        logger.debug("Connected to Speechmatics STT service")
+
         # Recognition started event
         @self._client.on(ServerMessageType.RECOGNITION_STARTED)
         def _evt_on_recognition_started(message: dict[str, Any]):
@@ -378,10 +382,12 @@ class SpeechmaticsSTTService(STTService):
         @self._client.on(ServerMessageType.END_OF_UTTERANCE)
         def _evt_on_end_of_utterance(message: dict[str, Any]):
             logger.debug("End of utterance received from STT")
-            asyncio.create_task(self._send_frames(finalized=True))
+            asyncio.run_coroutine_threadsafe(
+                self._send_frames(finalized=True), self.get_event_loop()
+            )
 
         # Start the client in a thread
-        asyncio.create_task(self._run_client())
+        self._client_task = self.create_task(self._run_client())
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service."""
@@ -391,6 +397,14 @@ class SpeechmaticsSTTService(STTService):
         # Disconnect the client
         if self._client:
             await self._client.close()
+
+        # Cancel the client task
+        if self._client_task:
+            await self.cancel_task(self._client_task)
+            self._client_task = None
+
+        # Log the event
+        logger.debug("Disconnected from Speechmatics STT service")
 
     def _process_config(self, transcription_config: Optional[TranscriptionConfig] = None) -> None:
         """Create a formatted STT transcription config.
@@ -462,7 +476,7 @@ class SpeechmaticsSTTService(STTService):
             return
 
         # Send frames
-        asyncio.create_task(self._send_frames())
+        asyncio.run_coroutine_threadsafe(self._send_frames(), self.get_event_loop())
 
     async def _send_frames(self, finalized: bool = False) -> None:
         """Send frames to the pipeline.
