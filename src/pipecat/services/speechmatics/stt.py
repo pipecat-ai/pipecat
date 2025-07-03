@@ -273,7 +273,7 @@ class SpeechmaticsSTTService(STTService):
         self._base_url: str = base_url
         self._domain: Optional[str] = domain
         self._output_locale: Optional[Language] = output_locale
-        self._output_locale_code: Optional[str] = None
+        self._output_locale_code: Optional[str] = output_locale_code
         self._enable_partials: bool = enable_partials
         self._max_delay: float = max_delay
         self._sample_rate: int = sample_rate
