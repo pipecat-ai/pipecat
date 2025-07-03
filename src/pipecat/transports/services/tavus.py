@@ -126,10 +126,10 @@ class TavusApi:
             response = await r.json()
             logger.debug(f"Fetched Tavus persona: {response}")
             return response["persona_name"]
-    
+
     async def _validate_persona(self, persona_id: str):
         """Validate that the persona's microphone is enabled.
-        
+
         Args:
             persona_id: ID of the persona to validate.
         """
@@ -143,9 +143,13 @@ class TavusApi:
             logger.debug(f"Fetched Tavus persona: {response}")
             try:
                 transport_settings = response.get("layers", {}).get("transport", {})
-                microphone_enabled = transport_settings.get("input_settings", {}).get("microphone", "")
+                microphone_enabled = transport_settings.get("input_settings", {}).get(
+                    "microphone", ""
+                )
                 if microphone_enabled != "enabled":
-                    raise Exception("Microphone is not enabled for this persona. Please update the persona or use the persona pipecat-stream.")
+                    raise Exception(
+                        "Microphone is not enabled for this persona. Please update the persona or use the persona pipecat-stream."
+                    )
             except Exception as e:
                 logger.error(f"Error validating persona {persona_id}: {e}")
                 raise e
