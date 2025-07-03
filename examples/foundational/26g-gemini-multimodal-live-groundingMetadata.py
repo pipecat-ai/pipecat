@@ -53,33 +53,24 @@ class GroundingMetadataProcessor(FrameProcessor):
         # Always call super().process_frame first
         await super().process_frame(frame, direction)
 
-        # Only log important frame types, not every audio frame
-        if hasattr(frame, '__class__'):
-            frame_type = frame.__class__.__name__
-            if frame_type in ['LLMTextFrame', 'TTSTextFrame', 'LLMFullResponseStartFrame', 'LLMFullResponseEndFrame']:
-                logger.debug(f"GroundingProcessor received: {frame_type}")
-
         if isinstance(frame, LLMSearchResponseFrame):
             self._grounding_count += 1
-            logger.info(f"\n🔍 GROUNDING METADATA RECEIVED #{self._grounding_count}")
-            logger.info(f"📝 Search Result Text: {frame.search_result[:200]}...")
-            
-            if frame.rendered_content:
-                logger.info(f"🔗 Rendered Content: {frame.rendered_content}")
+            logger.info(f"🔍 GROUNDING METADATA RECEIVED #{self._grounding_count}")
+            logger.info(f"📝 Search Result: {frame.search_result[:200]}...")
             
             if frame.origins:
-                logger.info(f"📍 Number of Origins: {len(frame.origins)}")
+                logger.info(f"📍 Origins: {len(frame.origins)} sources")
                 for i, origin in enumerate(frame.origins):
-                    logger.info(f"  Origin {i+1}: {origin.site_title} - {origin.site_uri}")
-                    if origin.results:
-                        logger.info(f"    Results: {len(origin.results)} items")
+                    logger.info(f"  {i+1}. {origin.site_title} - {origin.site_uri}")
+                    
+            if frame.rendered_content:
+                logger.info(f"🔗 Rendered Content Available: {len(frame.rendered_content)} chars")
 
         # Always push the frame downstream
         await self.push_frame(frame, direction)
 
 
 async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting Gemini Live Grounding Test Bot")
 
     # Initialize the SmallWebRTCTransport with the connection
     transport = SmallWebRTCTransport(

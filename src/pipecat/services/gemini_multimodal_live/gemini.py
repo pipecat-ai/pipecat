@@ -1096,7 +1096,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Check for grounding metadata in server content
         if evt.serverContent and evt.serverContent.groundingMetadata:
             self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
-            logger.debug("Grounding metadata detected in model turn.")
 
         inline_data = part.inlineData
         if not inline_data:
@@ -1166,10 +1165,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         # Process grounding metadata if we have accumulated any
         if self._accumulated_grounding_metadata:
-            logger.debug("Processing grounding metadata...")
             await self._process_grounding_metadata(self._accumulated_grounding_metadata, self._search_result_buffer)
-        else:
-            logger.debug("No grounding metadata to process")
 
         # Reset grounding tracking for next response
         self._search_result_buffer = ""
@@ -1262,23 +1258,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _handle_evt_grounding_metadata(self, evt):
         """Handle dedicated grounding metadata events."""
-        logger.debug("Received dedicated grounding metadata event.")
-        
         if evt.serverContent and evt.serverContent.groundingMetadata:
             grounding_metadata = evt.serverContent.groundingMetadata
-            logger.debug(f"Grounding data: {len(grounding_metadata.groundingChunks or [])} chunks, {len(grounding_metadata.groundingSupports or [])} supports")
-            
             # Process the grounding metadata immediately
             await self._process_grounding_metadata(grounding_metadata, self._search_result_buffer)
 
     async def _process_grounding_metadata(self, grounding_metadata: events.GroundingMetadata, search_result: str = ""):
         """Process grounding metadata and emit LLMSearchResponseFrame."""
-        logger.debug(f"Processing grounding metadata. Search result text length: {len(search_result)}")
         if not grounding_metadata:
-            logger.warning("No grounding metadata provided to _process_grounding_metadata")
             return
-
-        # logger.debug(f"Processing grounding metadata: {grounding_metadata}") # Too verbose for PR
 
         # Extract rendered content for search suggestions
         rendered_content = None
@@ -1324,7 +1312,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
             rendered_content=rendered_content
         )
         
-        logger.debug(f"Emitting LLMSearchResponseFrame with {len(origins)} origins, rendered_content available: {rendered_content is not None}")
         await self.push_frame(search_frame)
     async def _handle_evt_usage_metadata(self, evt):
         if not evt.usageMetadata:
