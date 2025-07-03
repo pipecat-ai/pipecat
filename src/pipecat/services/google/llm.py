@@ -68,6 +68,7 @@ try:
         FunctionCall,
         FunctionResponse,
         GenerateContentConfig,
+        HttpOptions,
         Part,
     )
 except ModuleNotFoundError as e:
@@ -678,6 +679,7 @@ class GoogleLLMService(LLMService):
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
+        http_options: Optional[HttpOptions] = None,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -689,6 +691,7 @@ class GoogleLLMService(LLMService):
             system_instruction: System instruction/prompt for the model.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
+            http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -698,7 +701,8 @@ class GoogleLLMService(LLMService):
         self.set_model_name(model)
         self._api_key = api_key
         self._system_instruction = system_instruction
-        self._create_client(api_key)
+        self._http_options = http_options
+        self._create_client(api_key, http_options)
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -717,6 +721,9 @@ class GoogleLLMService(LLMService):
         """
         return True
 
+    def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
+        self._client = genai.Client(api_key=api_key, http_options=http_options)
+
     def needs_mcp_alternate_schema(self) -> bool:
         """Check if this LLM service requires alternate MCP schema.
 
@@ -727,9 +734,6 @@ class GoogleLLMService(LLMService):
             True for Google/Gemini services.
         """
         return True
-
-    def _create_client(self, api_key: str):
-        self._client = genai.Client(api_key=api_key)
 
     def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
         try:
