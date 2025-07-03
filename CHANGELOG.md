@@ -61,6 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
 
+- Added Gemini Multimodal Live File API for uploading, fetching, listing, and 
+deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
+
 ### Changed
 
 - Updated all the services to use the new `SOXRStreamAudioResampler`, ensuring smooth
