@@ -131,11 +131,11 @@ class DiarizationKnownSpeakers:
 
     Attributes:
         speaker_id: The ID of the speaker.
-        centroids: One or more centroids for the speaker.
+        data: One or more data strings for the speaker.
     """
 
     speaker_id: str
-    centroids: list[str]
+    data: list[str]
 
 
 @dataclass
@@ -340,6 +340,8 @@ class SpeechmaticsSTTService(STTService):
         self._speaker_passive_format: str = speaker_passive_format
         self._diarization_config: Optional[DiarizationConfig] = diarization_config
 
+        # Deprecation warnings
+
         # Check we have required attributes
         if not self._api_key:
             raise ValueError("Missing Speechmatics API key")
@@ -504,11 +506,14 @@ class SpeechmaticsSTTService(STTService):
 
         # Diarization
         if self._diarization_config.enable:
-            transcription_config.speaker_diarization_config = SpeakerDiarizationConfig(
-                max_speakers=self._diarization_config.max_speakers,
-                speaker_sensitivity=self._diarization_config.speaker_sensitivity,
-                prefer_current_speaker=self._diarization_config.prefer_current_speaker,
-            )
+            dz_cfg = SpeakerDiarizationConfig()
+            if self._diarization_config.max_speakers is not None:
+                dz_cfg.max_speakers = self._diarization_config.max_speakers
+            if self._diarization_config.speaker_sensitivity is not None:
+                dz_cfg.speaker_sensitivity = self._diarization_config.speaker_sensitivity
+            if self._diarization_config.prefer_current_speaker is not None:
+                dz_cfg.prefer_current_speaker = self._diarization_config.prefer_current_speaker
+            transcription_config.speaker_diarization_config = dz_cfg
 
         # End of Utterance
         if self._end_of_utterance_silence_trigger:
