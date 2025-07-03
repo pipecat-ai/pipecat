@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new STT service, `SpeechmaticsSTTService`. This service provides 
+  real-time speech-to-text transcription using the Speechmatics API. It supports
+  partial and final transcriptions, multiple languages, various audio formats, 
+  and speaker diarization.
+
 - Added `normalize` and `model_id` to `FishAudioTTSService`.
 
 - Added `run_llm` field to `LLMMessagesAppendFrame` and `LLMMessagesUpdateFrame`
