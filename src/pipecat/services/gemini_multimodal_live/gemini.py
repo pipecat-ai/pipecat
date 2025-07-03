@@ -60,7 +60,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 
 
 from pipecat.services.openai.llm import (
@@ -74,13 +74,10 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
-from .file_api import GeminiFileAPI
 
 from .audio_transcriber import AudioTranscriber
 from .file_api import GeminiFileAPI
 
-
-from .file_api import GeminiFileAPI
 
 try:
     import websockets
