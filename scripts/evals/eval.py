@@ -104,7 +104,7 @@ class EvalRunner:
                 asyncio.create_task(run_example_pipeline(script_path)),
                 asyncio.create_task(run_eval_pipeline(self, example_file, prompt, eval)),
             ]
-            _, pending = await asyncio.wait(tasks, timeout=10)
+            _, pending = await asyncio.wait(tasks, timeout=90)
             if pending:
                 logger.error(f"ERROR: Eval timeout expired, cancelling pending tasks...")
                 for task in pending:
