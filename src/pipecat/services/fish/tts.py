@@ -58,12 +58,14 @@ class FishAudioTTSService(InterruptibleTTSService):
         Parameters:
             language: Language for synthesis. Defaults to English.
             latency: Latency mode ("normal" or "balanced"). Defaults to "normal".
+            normalize: Whether to normalize audio output. Defaults to True.
             prosody_speed: Speech speed multiplier (0.5-2.0). Defaults to 1.0.
             prosody_volume: Volume adjustment in dB. Defaults to 0.
         """
 
         language: Optional[Language] = Language.EN
         latency: Optional[str] = "normal"  # "normal" or "balanced"
+        normalize: Optional[bool] = True
         prosody_speed: Optional[float] = 1.0  # Speech speed (0.5-2.0)
         prosody_volume: Optional[int] = 0  # Volume adjustment in dB
 
@@ -71,7 +73,9 @@ class FishAudioTTSService(InterruptibleTTSService):
         self,
         *,
         api_key: str,
-        model: str,  # This is the reference_id
+        reference_id: Optional[str] = None,  # This is the voice ID
+        model: Optional[str] = None,  # Deprecated
+        model_id: str = "speech-1.5",
         output_format: FishAudioOutputFormat = "pcm",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -81,7 +85,14 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         Args:
             api_key: Fish Audio API key for authentication.
-            model: Reference ID of the voice model to use for synthesis.
+            reference_id: Reference ID of the voice model to use for synthesis.
+            model: Deprecated. Reference ID of the voice model to use for synthesis.
+
+              .. deprecated:: 0.0.74
+                The `model` parameter is deprecated and will be removed in version 0.1.0.
+                Use `reference_id` instead to specify the voice model.
+
+            model_id: Specify which Fish Audio TTS model to use (e.g. "speech-1.5")
             output_format: Audio output format. Defaults to "pcm".
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
@@ -96,6 +107,26 @@ class FishAudioTTSService(InterruptibleTTSService):
 
         params = params or FishAudioTTSService.InputParams()
 
+        # Validation for model and reference_id parameters
+        if model and reference_id:
+            raise ValueError(
+                "Cannot specify both 'model' and 'reference_id'. Use 'reference_id' only."
+            )
+
+        if model is None and reference_id is None:
+            raise ValueError("Must specify 'reference_id' (or deprecated 'model') parameter.")
+
+        if model:
+            import warnings
+
+            warnings.warn(
+                "Parameter 'model' is deprecated and will be removed in a future version. "
+                "Use 'reference_id' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            reference_id = model
+
         self._api_key = api_key
         self._base_url = "wss://api.fish.audio/v1/tts/live"
         self._websocket = None
@@ -107,14 +138,15 @@ class FishAudioTTSService(InterruptibleTTSService):
             "sample_rate": 0,
             "latency": params.latency,
             "format": output_format,
+            "normalize": params.normalize,
             "prosody": {
                 "speed": params.prosody_speed,
                 "volume": params.prosody_volume,
             },
-            "reference_id": model,
+            "reference_id": reference_id,
         }
 
-        self.set_model_name(model)
+        self.set_model_name(model_id)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -125,14 +157,15 @@ class FishAudioTTSService(InterruptibleTTSService):
         return True
 
     async def set_model(self, model: str):
-        """Set the TTS model (reference ID).
+        """Set the TTS model and reconnect.
 
         Args:
-            model: The reference ID of the voice model to use.
+            model: The model name to use for synthesis.
         """
-        self._settings["reference_id"] = model
         await super().set_model(model)
         logger.info(f"Switching TTS model to: [{model}]")
+        await self._disconnect()
+        await self._connect()
 
     async def start(self, frame: StartFrame):
         """Start the Fish Audio TTS service.
@@ -182,6 +215,7 @@ class FishAudioTTSService(InterruptibleTTSService):
 
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
+            headers["model"] = self.model_name
             self._websocket = await websockets.connect(self._base_url, extra_headers=headers)
 
             # Send initial start message with ormsgpack
