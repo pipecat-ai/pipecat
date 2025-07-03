@@ -24,12 +24,14 @@ class ImageGenService(AIService):
     Processes TextFrames by using their content as prompts for image generation.
     Subclasses must implement the run_image_gen method to provide actual image
     generation functionality using their specific AI service.
-
-    Args:
-            **kwargs: Additional arguments passed to the parent AIService.
     """
 
     def __init__(self, **kwargs):
+        """Initialize the image generation service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent AIService.
+        """
         super().__init__(**kwargs)
 
     # Renders the image. Returns an Image object.

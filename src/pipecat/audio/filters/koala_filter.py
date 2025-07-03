@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Koala noise suppression audio filter for Pipecat.
+
+This module provides an audio filter implementation using PicoVoice's Koala
+Noise Suppression engine to reduce background noise in audio streams.
+"""
+
 from typing import Sequence
 
 import numpy as np
@@ -21,12 +27,19 @@ except ModuleNotFoundError as e:
 
 
 class KoalaFilter(BaseAudioFilter):
-    """This is an audio filter that uses Koala Noise Suppression (from
-    PicoVoice).
+    """Audio filter using Koala Noise Suppression from PicoVoice.
 
+    Provides real-time noise suppression for audio streams using PicoVoice's
+    Koala engine. The filter buffers audio data to match Koala's required
+    frame length and processes it in chunks.
     """
 
     def __init__(self, *, access_key: str) -> None:
+        """Initialize the Koala noise suppression filter.
+
+        Args:
+            access_key: PicoVoice access key for Koala engine authentication.
+        """
         self._access_key = access_key
 
         self._filtering = True
@@ -36,6 +49,11 @@ class KoalaFilter(BaseAudioFilter):
         self._audio_buffer = bytearray()
 
     async def start(self, sample_rate: int):
+        """Initialize the filter with the transport's sample rate.
+
+        Args:
+            sample_rate: The sample rate of the input transport in Hz.
+        """
         self._sample_rate = sample_rate
         if self._sample_rate != self._koala.sample_rate:
             logger.warning(
@@ -44,13 +62,30 @@ class KoalaFilter(BaseAudioFilter):
             self._koala_ready = False
 
     async def stop(self):
+        """Clean up the Koala engine when stopping."""
         self._koala.reset()
 
     async def process_frame(self, frame: FilterControlFrame):
+        """Process control frames to enable/disable filtering.
+
+        Args:
+            frame: The control frame containing filter commands.
+        """
         if isinstance(frame, FilterEnableFrame):
             self._filtering = frame.enable
 
     async def filter(self, audio: bytes) -> bytes:
+        """Apply Koala noise suppression to audio data.
+
+        Buffers incoming audio and processes it in chunks that match Koala's
+        required frame length. Returns filtered audio data.
+
+        Args:
+            audio: Raw audio data as bytes to be filtered.
+
+        Returns:
+            Noise-suppressed audio data as bytes.
+        """
         if not self._koala_ready or not self._filtering:
             return audio
 

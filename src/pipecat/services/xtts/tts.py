@@ -4,12 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""XTTS text-to-speech service implementation.
+
+This module provides integration with Coqui XTTS streaming server for
+text-to-speech synthesis using local Docker deployment.
+"""
+
 from typing import Any, AsyncGenerator, Dict, Optional
 
 import aiohttp
 from loguru import logger
 
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -31,6 +37,14 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 def language_to_xtts_language(language: Language) -> Optional[str]:
+    """Convert a Language enum to XTTS language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding XTTS language code, or None if not supported.
+    """
     BASE_LANGUAGES = {
         Language.CS: "cs",
         Language.DE: "de",
@@ -70,6 +84,13 @@ def language_to_xtts_language(language: Language) -> Optional[str]:
 
 
 class XTTSService(TTSService):
+    """Coqui XTTS text-to-speech service.
+
+    Provides text-to-speech synthesis using a locally running Coqui XTTS
+    streaming server. Supports multiple languages and voice cloning through
+    studio speakers configuration.
+    """
+
     def __init__(
         self,
         *,
@@ -80,6 +101,16 @@ class XTTSService(TTSService):
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
+        """Initialize the XTTS service.
+
+        Args:
+            voice_id: ID of the voice/speaker to use for synthesis.
+            base_url: Base URL of the XTTS streaming server.
+            aiohttp_session: HTTP session for making requests to the server.
+            language: Language for synthesis. Defaults to English.
+            sample_rate: Audio sample rate. If None, uses default.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._settings = {
@@ -90,15 +121,33 @@ class XTTSService(TTSService):
         self._studio_speakers: Optional[Dict[str, Any]] = None
         self._aiohttp_session = aiohttp_session
 
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as XTTS service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to XTTS service language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The XTTS-specific language code, or None if not supported.
+        """
         return language_to_xtts_language(language)
 
     async def start(self, frame: StartFrame):
+        """Start the XTTS service and load studio speakers.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
 
         if self._studio_speakers:
@@ -120,6 +169,14 @@ class XTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using XTTS streaming server.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         if not self._studio_speakers:

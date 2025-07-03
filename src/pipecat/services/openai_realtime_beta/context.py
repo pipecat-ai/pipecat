@@ -37,14 +37,16 @@ class OpenAIRealtimeLLMContext(OpenAILLMContext):
     Extends the standard OpenAI LLM context to support real-time session properties,
     instruction management, and conversion between standard message formats and
     realtime conversation items.
-
-    Args:
-        messages: Initial conversation messages. Defaults to None.
-        tools: Available function tools. Defaults to None.
-        **kwargs: Additional arguments passed to parent OpenAILLMContext.
     """
 
     def __init__(self, messages=None, tools=None, **kwargs):
+        """Initialize the OpenAIRealtimeLLMContext.
+
+        Args:
+            messages: Initial conversation messages. Defaults to None.
+            tools: Available function tools. Defaults to None.
+            **kwargs: Additional arguments passed to parent OpenAILLMContext.
+        """
         super().__init__(messages=messages, tools=tools, **kwargs)
         self.__setup_local()
 

@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""DTMF aggregation processor for converting keypad input to transcription.
+
+This module provides a frame processor that aggregates DTMF (Dual-Tone Multi-Frequency)
+keypad inputs into meaningful sequences and converts them to transcription frames
+for downstream processing by LLM context aggregators.
+"""
+
 import asyncio
 from typing import Optional
 
@@ -26,16 +33,12 @@ class DTMFAggregator(FrameProcessor):
 
     The aggregator accumulates digits from InputDTMFFrame instances and flushes
     when:
+
     - Timeout occurs (configurable idle period)
     - Termination digit is received (default: '#')
     - EndFrame or CancelFrame is received
 
     Emits TranscriptionFrame for compatibility with existing LLM context aggregators.
-
-    Args:
-        timeout: Idle timeout in seconds before flushing
-        termination_digit: Digit that triggers immediate flush
-        prefix: Prefix added to DTMF sequence in transcription
     """
 
     def __init__(
@@ -45,6 +48,14 @@ class DTMFAggregator(FrameProcessor):
         prefix: str = "DTMF: ",
         **kwargs,
     ):
+        """Initialize the DTMF aggregator.
+
+        Args:
+            timeout: Idle timeout in seconds before flushing
+            termination_digit: Digit that triggers immediate flush
+            prefix: Prefix added to DTMF sequence in transcription
+            **kwargs: Additional arguments passed to FrameProcessor
+        """
         super().__init__(**kwargs)
         self._aggregation = ""
         self._idle_timeout = timeout
@@ -55,6 +66,12 @@ class DTMFAggregator(FrameProcessor):
         self._aggregation_task: Optional[asyncio.Task] = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        """Process incoming frames and handle DTMF aggregation.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):

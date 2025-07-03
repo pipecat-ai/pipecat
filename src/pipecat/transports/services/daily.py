@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Daily transport implementation for Pipecat.
+
+This module provides comprehensive Daily video conferencing integration including
+audio/video streaming, transcription, recording, dial-in/out functionality, and
+real-time communication features.
+"""
+
 import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -20,6 +27,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InputAudioRawFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -52,6 +60,7 @@ try:
         EventHandler,
         VideoFrame,
         VirtualCameraDevice,
+        VirtualSpeakerDevice,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -67,7 +76,7 @@ VAD_RESET_PERIOD_MS = 2000
 class DailyTransportMessageFrame(TransportMessageFrame):
     """Frame for transport messages in Daily calls.
 
-    Attributes:
+    Parameters:
         participant_id: Optional ID of the participant this message is for/from.
     """
 
@@ -78,7 +87,7 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
     """Frame for urgent transport messages in Daily calls.
 
-    Attributes:
+    Parameters:
         participant_id: Optional ID of the participant this message is for/from.
     """
 
@@ -89,13 +98,15 @@ class WebRTCVADAnalyzer(VADAnalyzer):
     """Voice Activity Detection analyzer using WebRTC.
 
     Implements voice activity detection using Daily's native WebRTC VAD.
-
-    Args:
-        sample_rate: Audio sample rate in Hz.
-        params: VAD configuration parameters (VADParams).
     """
 
     def __init__(self, *, sample_rate: Optional[int] = None, params: Optional[VADParams] = None):
+        """Initialize the WebRTC VAD analyzer.
+
+        Args:
+            sample_rate: Audio sample rate in Hz.
+            params: VAD configuration parameters.
+        """
         super().__init__(sample_rate=sample_rate, params=params)
 
         self._webrtc_vad = Daily.create_native_vad(
@@ -104,9 +115,22 @@ class WebRTCVADAnalyzer(VADAnalyzer):
         logger.debug("Loaded native WebRTC VAD")
 
     def num_frames_required(self) -> int:
+        """Get the number of audio frames required for VAD analysis.
+
+        Returns:
+            The number of frames needed (equivalent to 10ms of audio).
+        """
         return int(self.sample_rate / 100.0)
 
     def voice_confidence(self, buffer) -> float:
+        """Analyze audio buffer and return voice confidence score.
+
+        Args:
+            buffer: Audio buffer to analyze.
+
+        Returns:
+            Voice confidence score between 0.0 and 1.0.
+        """
         confidence = 0
         if len(buffer) > 0:
             confidence = self._webrtc_vad.analyze_frames(buffer)
@@ -116,7 +140,7 @@ class WebRTCVADAnalyzer(VADAnalyzer):
 class DailyDialinSettings(BaseModel):
     """Settings for Daily's dial-in functionality.
 
-    Attributes:
+    Parameters:
         call_id: CallId is represented by UUID and represents the sessionId in the SIP Network.
         call_domain: Call Domain is represented by UUID and represents your Daily Domain on the SIP Network.
     """
@@ -128,7 +152,7 @@ class DailyDialinSettings(BaseModel):
 class DailyTranscriptionSettings(BaseModel):
     """Configuration settings for Daily's transcription service.
 
-    Attributes:
+    Parameters:
         language: ISO language code for transcription (e.g. "en").
         model: Transcription model to use (e.g. "nova-2-general").
         profanity_filter: Whether to filter profanity from transcripts.
@@ -152,18 +176,20 @@ class DailyTranscriptionSettings(BaseModel):
 class DailyParams(TransportParams):
     """Configuration parameters for Daily transport.
 
-    Args:
-        api_url: Daily API base URL
-        api_key: Daily API authentication key
-        dialin_settings: Optional settings for dial-in functionality
-        camera_out_enabled: Whether to enable the main camera output track. If enabled, it still needs `video_out_enabled=True`
-        microphone_out_enabled: Whether to enable the main microphone track. If enabled, it still needs `audio_out_enabled=True`
-        transcription_enabled: Whether to enable speech transcription
-        transcription_settings: Configuration for transcription service
+    Parameters:
+        api_url: Daily API base URL.
+        api_key: Daily API authentication key.
+        audio_in_user_tracks: Receive users' audio in separate tracks
+        dialin_settings: Optional settings for dial-in functionality.
+        camera_out_enabled: Whether to enable the main camera output track.
+        microphone_out_enabled: Whether to enable the main microphone track.
+        transcription_enabled: Whether to enable speech transcription.
+        transcription_settings: Configuration for transcription service.
     """
 
     api_url: str = "https://api.daily.co/v1"
     api_key: str = ""
+    audio_in_user_tracks: bool = True
     dialin_settings: Optional[DailyDialinSettings] = None
     camera_out_enabled: bool = True
     microphone_out_enabled: bool = True
@@ -174,7 +200,7 @@ class DailyParams(TransportParams):
 class DailyCallbacks(BaseModel):
     """Callback handlers for Daily events.
 
-    Attributes:
+    Parameters:
         on_active_speaker_changed: Called when the active speaker of the call has changed.
         on_joined: Called when bot successfully joined a room.
         on_left: Called when bot left a room.
@@ -230,6 +256,15 @@ class DailyCallbacks(BaseModel):
 
 
 def completion_callback(future):
+    """Create a completion callback for Daily API calls.
+
+    Args:
+        future: The asyncio Future to set the result on.
+
+    Returns:
+        A callback function that sets the future result.
+    """
+
     def _callback(*args):
         def set_result(future, *args):
             try:
@@ -247,6 +282,13 @@ def completion_callback(future):
 
 @dataclass
 class DailyAudioTrack:
+    """Container for Daily audio track components.
+
+    Parameters:
+        source: The custom audio source for the track.
+        track: The custom audio track instance.
+    """
+
     source: CustomAudioSource
     track: CustomAudioTrack
 
@@ -254,21 +296,14 @@ class DailyAudioTrack:
 class DailyTransportClient(EventHandler):
     """Core client for interacting with Daily's API.
 
-    Manages the connection to Daily rooms and handles all low-level API interactions.
-
-    Args:
-        room_url: URL of the Daily room to connect to.
-        token: Optional authentication token for the room.
-        bot_name: Display name for the bot in the call.
-        params: Configuration parameters (DailyParams).
-        callbacks: Event callback handlers (DailyCallbacks).
-        transport_name: Name identifier for the transport.
+    Manages the connection to Daily rooms and handles all low-level API interactions
+    including room management, media streaming, transcription, and event handling.
     """
 
     _daily_initialized: bool = False
 
-    # This is necessary to override EventHandler's __new__ method.
     def __new__(cls, *args, **kwargs):
+        """Override EventHandler's __new__ method to ensure Daily is initialized only once."""
         return super().__new__(cls)
 
     def __init__(
@@ -280,6 +315,16 @@ class DailyTransportClient(EventHandler):
         callbacks: DailyCallbacks,
         transport_name: str,
     ):
+        """Initialize the Daily transport client.
+
+        Args:
+            room_url: URL of the Daily room to connect to.
+            token: Optional authentication token for the room.
+            bot_name: Display name for the bot in the call.
+            params: Configuration parameters for the transport.
+            callbacks: Event callback handlers.
+            transport_name: Name identifier for the transport.
+        """
         super().__init__()
 
         if not DailyTransportClient._daily_initialized:
@@ -331,29 +376,60 @@ class DailyTransportClient(EventHandler):
         self._out_sample_rate = 0
 
         self._camera: Optional[VirtualCameraDevice] = None
+        self._speaker: Optional[VirtualSpeakerDevice] = None
         self._microphone_track: Optional[DailyAudioTrack] = None
         self._custom_audio_tracks: Dict[str, DailyAudioTrack] = {}
 
     def _camera_name(self):
+        """Generate a unique virtual camera name for this client instance."""
         return f"camera-{self}"
+
+    def _speaker_name(self):
+        """Generate a unique virtual speaker name for this client instance."""
+        return f"speaker-{self}"
 
     @property
     def room_url(self) -> str:
+        """Get the Daily room URL.
+
+        Returns:
+            The room URL this client is connected to.
+        """
         return self._room_url
 
     @property
     def participant_id(self) -> str:
+        """Get the participant ID for this client.
+
+        Returns:
+            The participant ID assigned by Daily.
+        """
         return self._participant_id
 
     @property
     def in_sample_rate(self) -> int:
+        """Get the input audio sample rate.
+
+        Returns:
+            The input sample rate in Hz.
+        """
         return self._in_sample_rate
 
     @property
     def out_sample_rate(self) -> int:
+        """Get the output audio sample rate.
+
+        Returns:
+            The output sample rate in Hz.
+        """
         return self._out_sample_rate
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+        """Send an application message to participants.
+
+        Args:
+            frame: The message frame to send.
+        """
         if not self._joined:
             return
 
@@ -367,11 +443,45 @@ class DailyTransportClient(EventHandler):
         )
         await future
 
+    async def read_next_audio_frame(self) -> Optional[InputAudioRawFrame]:
+        """Reads the next 20ms audio frame from the virtual speaker."""
+        if not self._speaker:
+            return None
+
+        sample_rate = self._in_sample_rate
+        num_channels = self._params.audio_in_channels
+        num_frames = int(sample_rate / 100) * 2  # 20ms of audio
+
+        future = self._get_event_loop().create_future()
+        self._speaker.read_frames(num_frames, completion=completion_callback(future))
+        audio = await future
+
+        if len(audio) > 0:
+            return InputAudioRawFrame(
+                audio=audio, sample_rate=sample_rate, num_channels=num_channels
+            )
+        else:
+            # If we don't read any audio it could be there's no participant
+            # connected. daily-python will return immediately if that's the
+            # case, so let's sleep for a little bit (i.e. busy wait).
+            await asyncio.sleep(0.01)
+            return None
+
     async def register_audio_destination(self, destination: str):
+        """Register a custom audio destination for multi-track output.
+
+        Args:
+            destination: The destination identifier to register.
+        """
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        """Write an audio frame to the appropriate audio track.
+
+        Args:
+            frame: The audio frame to write.
+        """
         future = self._get_event_loop().create_future()
 
         destination = frame.transport_destination
@@ -391,10 +501,20 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def write_video_frame(self, frame: OutputImageRawFrame):
+        """Write a video frame to the camera device.
+
+        Args:
+            frame: The image frame to write.
+        """
         if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
 
     async def setup(self, setup: FrameProcessorSetup):
+        """Setup the client with task manager and event queues.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
         if self._task_manager:
             return
 
@@ -408,6 +528,7 @@ class DailyTransportClient(EventHandler):
         )
 
     async def cleanup(self):
+        """Cleanup client resources and cancel tasks."""
         if self._event_task and self._task_manager:
             await self._task_manager.cancel_task(self._event_task)
             self._event_task = None
@@ -422,15 +543,29 @@ class DailyTransportClient(EventHandler):
         await self._get_event_loop().run_in_executor(self._executor, self._cleanup)
 
     async def start(self, frame: StartFrame):
+        """Start the client and initialize audio/video components.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         self._in_sample_rate = self._params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
-        if self._params.audio_in_enabled and not self._audio_task and self._task_manager:
-            self._audio_queue = WatchdogQueue(self._task_manager)
-            self._audio_task = self._task_manager.create_task(
-                self._callback_task_handler(self._audio_queue),
-                f"{self}::audio_callback_task",
-            )
+        if self._params.audio_in_enabled:
+            if self._params.audio_in_user_tracks and not self._audio_task:
+                self._audio_queue = WatchdogQueue(self._task_manager)
+                self._audio_task = self._task_manager.create_task(
+                    self._callback_task_handler(self._audio_queue),
+                    f"{self}::audio_callback_task",
+                )
+            elif not self._speaker:
+                self._speaker = Daily.create_speaker_device(
+                    self._speaker_name(),
+                    sample_rate=self._in_sample_rate,
+                    channels=self._params.audio_in_channels,
+                    non_blocking=True,
+                )
+                Daily.select_speaker_device(self._speaker_name())
 
         if self._params.video_in_enabled and not self._video_task and self._task_manager:
             self._video_queue = WatchdogQueue(self._task_manager)
@@ -452,6 +587,7 @@ class DailyTransportClient(EventHandler):
             self._microphone_track = DailyAudioTrack(source=audio_source, track=audio_track)
 
     async def join(self):
+        """Join the Daily room with configured settings."""
         # Transport already joined or joining, ignore.
         if self._joined or self._joining:
             # Increment leave counter if we already joined.
@@ -497,6 +633,7 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
 
     async def _join(self):
+        """Execute the actual room join operation."""
         future = self._get_event_loop().create_future()
 
         camera_enabled = self._params.video_out_enabled and self._params.camera_out_enabled
@@ -552,6 +689,7 @@ class DailyTransportClient(EventHandler):
         return await asyncio.wait_for(future, timeout=10)
 
     async def leave(self):
+        """Leave the Daily room and cleanup resources."""
         # Decrement leave counter when leaving.
         self._leave_counter -= 1
 
@@ -586,22 +724,39 @@ class DailyTransportClient(EventHandler):
             await self._callbacks.on_error(error_msg)
 
     async def _leave(self):
+        """Execute the actual room leave operation."""
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
         return await asyncio.wait_for(future, timeout=10)
 
     def _cleanup(self):
+        """Cleanup the Daily client instance."""
         if self._client:
             self._client.release()
             self._client = None
 
     def participants(self):
+        """Get current participants in the room.
+
+        Returns:
+            Dictionary of participants keyed by participant ID.
+        """
         return self._client.participants()
 
     def participant_counts(self):
+        """Get participant count information.
+
+        Returns:
+            Dictionary with participant count details.
+        """
         return self._client.participant_counts()
 
     async def start_dialout(self, settings):
+        """Start a dial-out call to a phone number.
+
+        Args:
+            settings: Dial-out configuration settings.
+        """
         logger.debug(f"Starting dialout: settings={settings}")
 
         future = self._get_event_loop().create_future()
@@ -611,6 +766,11 @@ class DailyTransportClient(EventHandler):
             logger.error(f"Unable to start dialout: {error}")
 
     async def stop_dialout(self, participant_id):
+        """Stop a dial-out call for a specific participant.
+
+        Args:
+            participant_id: ID of the participant to stop dial-out for.
+        """
         logger.debug(f"Stopping dialout: participant_id={participant_id}")
 
         future = self._get_event_loop().create_future()
@@ -620,21 +780,43 @@ class DailyTransportClient(EventHandler):
             logger.error(f"Unable to stop dialout: {error}")
 
     async def send_dtmf(self, settings):
+        """Send DTMF tones during a call.
+
+        Args:
+            settings: DTMF settings including tones and target session.
+        """
         future = self._get_event_loop().create_future()
         self._client.send_dtmf(settings, completion=completion_callback(future))
         await future
 
     async def sip_call_transfer(self, settings):
+        """Transfer a SIP call to another destination.
+
+        Args:
+            settings: SIP call transfer settings.
+        """
         future = self._get_event_loop().create_future()
         self._client.sip_call_transfer(settings, completion=completion_callback(future))
         await future
 
     async def sip_refer(self, settings):
+        """Send a SIP REFER request.
+
+        Args:
+            settings: SIP REFER settings.
+        """
         future = self._get_event_loop().create_future()
         self._client.sip_refer(settings, completion=completion_callback(future))
         await future
 
     async def start_recording(self, streaming_settings, stream_id, force_new):
+        """Start recording the call.
+
+        Args:
+            streaming_settings: Recording configuration settings.
+            stream_id: Unique identifier for the recording stream.
+            force_new: Whether to force a new recording session.
+        """
         logger.debug(
             f"Starting recording: stream_id={stream_id} force_new={force_new} settings={streaming_settings}"
         )
@@ -648,6 +830,11 @@ class DailyTransportClient(EventHandler):
             logger.error(f"Unable to start recording: {error}")
 
     async def stop_recording(self, stream_id):
+        """Stop recording the call.
+
+        Args:
+            stream_id: Unique identifier for the recording stream to stop.
+        """
         logger.debug(f"Stopping recording: stream_id={stream_id}")
 
         future = self._get_event_loop().create_future()
@@ -657,6 +844,11 @@ class DailyTransportClient(EventHandler):
             logger.error(f"Unable to stop recording: {error}")
 
     async def start_transcription(self, settings):
+        """Start transcription for the call.
+
+        Args:
+            settings: Transcription configuration settings.
+        """
         if not self._token:
             logger.warning("Transcription can't be started without a room token")
             return
@@ -673,6 +865,7 @@ class DailyTransportClient(EventHandler):
             logger.error(f"Unable to start transcription: {error}")
 
     async def stop_transcription(self):
+        """Stop transcription for the call."""
         if not self._token:
             return
 
@@ -685,6 +878,12 @@ class DailyTransportClient(EventHandler):
             logger.error(f"Unable to stop transcription: {error}")
 
     async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
+        """Send a chat message to Daily's Prebuilt main room.
+
+        Args:
+            message: The chat message to send.
+            user_name: Optional user name that will appear as sender of the message.
+        """
         if not self._joined:
             return
 
@@ -695,6 +894,11 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def capture_participant_transcription(self, participant_id: str):
+        """Enable transcription capture for a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture transcription for.
+        """
         if not self._params.transcription_enabled:
             return
 
@@ -710,6 +914,15 @@ class DailyTransportClient(EventHandler):
         sample_rate: int = 16000,
         callback_interval_ms: int = 20,
     ):
+        """Capture audio from a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture audio from.
+            callback: Callback function to handle audio data.
+            audio_source: Audio source to capture (microphone, screenAudio, or custom).
+            sample_rate: Desired sample rate for audio capture.
+            callback_interval_ms: Interval between audio callbacks in milliseconds.
+        """
         # Only enable the desired audio source subscription on this participant.
         if audio_source in ("microphone", "screenAudio"):
             media = {"media": {audio_source: "subscribed"}}
@@ -740,6 +953,15 @@ class DailyTransportClient(EventHandler):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
+        """Capture video from a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture video from.
+            callback: Callback function to handle video frames.
+            framerate: Desired framerate for video capture.
+            video_source: Video source to capture (camera, screenVideo, or custom).
+            color_format: Color format for video frames.
+        """
         # Only enable the desired audio source subscription on this participant.
         if video_source in ("camera", "screenVideo"):
             media = {"media": {video_source: "subscribed"}}
@@ -762,6 +984,14 @@ class DailyTransportClient(EventHandler):
         )
 
     async def add_custom_audio_track(self, track_name: str) -> DailyAudioTrack:
+        """Add a custom audio track for multi-stream output.
+
+        Args:
+            track_name: Name for the custom audio track.
+
+        Returns:
+            The created DailyAudioTrack instance.
+        """
         future = self._get_event_loop().create_future()
 
         audio_source = CustomAudioSource(self._out_sample_rate, 1)
@@ -782,6 +1012,11 @@ class DailyTransportClient(EventHandler):
         return track
 
     async def remove_custom_audio_track(self, track_name: str):
+        """Remove a custom audio track.
+
+        Args:
+            track_name: Name of the custom audio track to remove.
+        """
         future = self._get_event_loop().create_future()
         self._client.remove_custom_audio_track(
             track_name=track_name,
@@ -790,6 +1025,12 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def update_transcription(self, participants=None, instance_id=None):
+        """Update transcription settings for specific participants.
+
+        Args:
+            participants: List of participant IDs to enable transcription for.
+            instance_id: Optional transcription instance ID.
+        """
         future = self._get_event_loop().create_future()
         self._client.update_transcription(
             participants, instance_id, completion=completion_callback(future)
@@ -797,6 +1038,12 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        """Update media subscription settings.
+
+        Args:
+            participant_settings: Per-participant subscription settings.
+            profile_settings: Global subscription profile settings.
+        """
         future = self._get_event_loop().create_future()
         self._client.update_subscriptions(
             participant_settings=participant_settings,
@@ -806,6 +1053,11 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def update_publishing(self, publishing_settings: Mapping[str, Any]):
+        """Update media publishing settings.
+
+        Args:
+            publishing_settings: Publishing configuration settings.
+        """
         future = self._get_event_loop().create_future()
         self._client.update_publishing(
             publishing_settings=publishing_settings,
@@ -814,6 +1066,11 @@ class DailyTransportClient(EventHandler):
         await future
 
     async def update_remote_participants(self, remote_participants: Mapping[str, Any]):
+        """Update settings for remote participants.
+
+        Args:
+            remote_participants: Remote participant configuration settings.
+        """
         future = self._get_event_loop().create_future()
         self._client.update_remote_participants(
             remote_participants=remote_participants, completion=completion_callback(future)
@@ -826,76 +1083,195 @@ class DailyTransportClient(EventHandler):
     #
 
     def on_active_speaker_changed(self, participant):
+        """Handle active speaker change events.
+
+        Args:
+            participant: The new active speaker participant info.
+        """
         self._call_event_callback(self._callbacks.on_active_speaker_changed, participant)
 
     def on_app_message(self, message: Any, sender: str):
+        """Handle application message events.
+
+        Args:
+            message: The received message data.
+            sender: ID of the message sender.
+        """
         self._call_event_callback(self._callbacks.on_app_message, message, sender)
 
     def on_call_state_updated(self, state: str):
+        """Handle call state update events.
+
+        Args:
+            state: The new call state.
+        """
         self._call_event_callback(self._callbacks.on_call_state_updated, state)
 
     def on_dialin_connected(self, data: Any):
+        """Handle dial-in connected events.
+
+        Args:
+            data: Dial-in connection data.
+        """
         self._call_event_callback(self._callbacks.on_dialin_connected, data)
 
     def on_dialin_ready(self, sip_endpoint: str):
+        """Handle dial-in ready events.
+
+        Args:
+            sip_endpoint: The SIP endpoint for dial-in.
+        """
         self._call_event_callback(self._callbacks.on_dialin_ready, sip_endpoint)
 
     def on_dialin_stopped(self, data: Any):
+        """Handle dial-in stopped events.
+
+        Args:
+            data: Dial-in stop data.
+        """
         self._call_event_callback(self._callbacks.on_dialin_stopped, data)
 
     def on_dialin_error(self, data: Any):
+        """Handle dial-in error events.
+
+        Args:
+            data: Dial-in error data.
+        """
         self._call_event_callback(self._callbacks.on_dialin_error, data)
 
     def on_dialin_warning(self, data: Any):
+        """Handle dial-in warning events.
+
+        Args:
+            data: Dial-in warning data.
+        """
         self._call_event_callback(self._callbacks.on_dialin_warning, data)
 
     def on_dialout_answered(self, data: Any):
+        """Handle dial-out answered events.
+
+        Args:
+            data: Dial-out answered data.
+        """
         self._call_event_callback(self._callbacks.on_dialout_answered, data)
 
     def on_dialout_connected(self, data: Any):
+        """Handle dial-out connected events.
+
+        Args:
+            data: Dial-out connection data.
+        """
         self._call_event_callback(self._callbacks.on_dialout_connected, data)
 
     def on_dialout_stopped(self, data: Any):
+        """Handle dial-out stopped events.
+
+        Args:
+            data: Dial-out stop data.
+        """
         self._call_event_callback(self._callbacks.on_dialout_stopped, data)
 
     def on_dialout_error(self, data: Any):
+        """Handle dial-out error events.
+
+        Args:
+            data: Dial-out error data.
+        """
         self._call_event_callback(self._callbacks.on_dialout_error, data)
 
     def on_dialout_warning(self, data: Any):
+        """Handle dial-out warning events.
+
+        Args:
+            data: Dial-out warning data.
+        """
         self._call_event_callback(self._callbacks.on_dialout_warning, data)
 
     def on_participant_joined(self, participant):
+        """Handle participant joined events.
+
+        Args:
+            participant: The participant that joined.
+        """
         self._call_event_callback(self._callbacks.on_participant_joined, participant)
 
     def on_participant_left(self, participant, reason):
+        """Handle participant left events.
+
+        Args:
+            participant: The participant that left.
+            reason: Reason for leaving.
+        """
         self._call_event_callback(self._callbacks.on_participant_left, participant, reason)
 
     def on_participant_updated(self, participant):
+        """Handle participant updated events.
+
+        Args:
+            participant: The updated participant info.
+        """
         self._call_event_callback(self._callbacks.on_participant_updated, participant)
 
     def on_transcription_started(self, status):
+        """Handle transcription started events.
+
+        Args:
+            status: Transcription start status.
+        """
         logger.debug(f"Transcription started: {status}")
         self._transcription_status = status
         self._call_event_callback(self.update_transcription, self._transcription_ids)
 
     def on_transcription_stopped(self, stopped_by, stopped_by_error):
+        """Handle transcription stopped events.
+
+        Args:
+            stopped_by: Who stopped the transcription.
+            stopped_by_error: Whether stopped due to error.
+        """
         logger.debug("Transcription stopped")
 
     def on_transcription_error(self, message):
+        """Handle transcription error events.
+
+        Args:
+            message: Error message.
+        """
         logger.error(f"Transcription error: {message}")
 
     def on_transcription_message(self, message):
+        """Handle transcription message events.
+
+        Args:
+            message: The transcription message data.
+        """
         self._call_event_callback(self._callbacks.on_transcription_message, message)
 
     def on_recording_started(self, status):
+        """Handle recording started events.
+
+        Args:
+            status: Recording start status.
+        """
         logger.debug(f"Recording started: {status}")
         self._call_event_callback(self._callbacks.on_recording_started, status)
 
     def on_recording_stopped(self, stream_id):
+        """Handle recording stopped events.
+
+        Args:
+            stream_id: ID of the stopped recording stream.
+        """
         logger.debug(f"Recording stopped: {stream_id}")
         self._call_event_callback(self._callbacks.on_recording_stopped, stream_id)
 
     def on_recording_error(self, stream_id, message):
+        """Handle recording error events.
+
+        Args:
+            stream_id: ID of the recording stream with error.
+            message: Error message.
+        """
         logger.error(f"Recording error for {stream_id}: {message}")
         self._call_event_callback(self._callbacks.on_recording_error, stream_id, message)
 
@@ -904,12 +1280,14 @@ class DailyTransportClient(EventHandler):
     #
 
     def _audio_data_received(self, participant_id: str, audio_data: AudioData, audio_source: str):
+        """Handle received audio data from participants."""
         callback = self._audio_renderers[participant_id][audio_source]
         self._call_audio_callback(callback, participant_id, audio_data, audio_source)
 
     def _video_frame_received(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
     ):
+        """Handle received video frames from participants."""
         callback = self._video_renderers[participant_id][video_source]
         self._call_video_callback(callback, participant_id, video_frame, video_source)
 
@@ -918,21 +1296,26 @@ class DailyTransportClient(EventHandler):
     #
 
     def _call_audio_callback(self, callback, *args):
+        """Queue an audio callback for async execution."""
         self._call_async_callback(self._audio_queue, callback, *args)
 
     def _call_video_callback(self, callback, *args):
+        """Queue a video callback for async execution."""
         self._call_async_callback(self._video_queue, callback, *args)
 
     def _call_event_callback(self, callback, *args):
+        """Queue an event callback for async execution."""
         self._call_async_callback(self._event_queue, callback, *args)
 
     def _call_async_callback(self, queue: asyncio.Queue, callback, *args):
+        """Queue a callback for async execution on the event loop."""
         future = asyncio.run_coroutine_threadsafe(
             queue.put((callback, *args)), self._get_event_loop()
         )
         future.result()
 
     async def _callback_task_handler(self, queue: asyncio.Queue):
+        """Handle queued callbacks from the specified queue."""
         while True:
             # Wait to process any callback until we are joined.
             await self._joined_event.wait()
@@ -941,22 +1324,21 @@ class DailyTransportClient(EventHandler):
             queue.task_done()
 
     def _get_event_loop(self) -> asyncio.AbstractEventLoop:
+        """Get the event loop from the task manager."""
         if not self._task_manager:
             raise Exception(f"{self}: missing task manager (pipeline not started?)")
         return self._task_manager.get_event_loop()
 
     def __str__(self):
+        """String representation of the DailyTransportClient."""
         return f"{self._transport_name}::DailyTransportClient"
 
 
 class DailyInputTransport(BaseInputTransport):
     """Handles incoming media streams and events from Daily calls.
 
-    Processes incoming audio, video, transcriptions and other events from Daily.
-
-    Args:
-        client: DailyTransportClient instance.
-        params: Configuration parameters.
+    Processes incoming audio, video, transcriptions and other events from Daily
+    room participants, including participant media capture and event forwarding.
     """
 
     def __init__(
@@ -966,6 +1348,14 @@ class DailyInputTransport(BaseInputTransport):
         params: DailyParams,
         **kwargs,
     ):
+        """Initialize the Daily input transport.
+
+        Args:
+            transport: The parent transport instance.
+            client: DailyTransportClient instance.
+            params: Configuration parameters.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(params, **kwargs)
 
         self._transport = transport
@@ -984,34 +1374,62 @@ class DailyInputTransport(BaseInputTransport):
         # case we don't start streaming right away.
         self._capture_participant_audio = []
 
+        # Audio task when using a virtual speaker (i.e. no user tracks).
+        self._audio_in_task: Optional[asyncio.Task] = None
+
         self._vad_analyzer: Optional[VADAnalyzer] = params.vad_analyzer
 
     @property
     def vad_analyzer(self) -> Optional[VADAnalyzer]:
+        """Get the Voice Activity Detection analyzer.
+
+        Returns:
+            The VAD analyzer instance if configured.
+        """
         return self._vad_analyzer
 
     async def start_audio_in_streaming(self):
+        """Start receiving audio from participants."""
         if not self._params.audio_in_enabled:
             return
 
         logger.debug(f"Start receiving audio")
-        for participant_id, audio_source, sample_rate in self._capture_participant_audio:
-            await self._client.capture_participant_audio(
-                participant_id, self._on_participant_audio_data, audio_source, sample_rate
-            )
+
+        if self._params.audio_in_enabled:
+            if self._params.audio_in_user_tracks:
+                # Capture invididual participant tracks.
+                for participant_id, audio_source, sample_rate in self._capture_participant_audio:
+                    await self._client.capture_participant_audio(
+                        participant_id, self._on_participant_audio_data, audio_source, sample_rate
+                    )
+            elif not self._audio_in_task:
+                # Create audio task. It reads audio frames from a single room
+                # track and pushes them internally for VAD processing.
+                self._audio_in_task = self.create_task(self._audio_in_task_handler())
 
         self._streaming_started = True
 
     async def setup(self, setup: FrameProcessorSetup):
+        """Setup the input transport with shared client setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
         await super().setup(setup)
         await self._client.setup(setup)
 
     async def cleanup(self):
+        """Cleanup input transport and shared resources."""
         await super().cleanup()
         await self._client.cleanup()
         await self._transport.cleanup()
 
     async def start(self, frame: StartFrame):
+        """Start the input transport and join the Daily room.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         # Parent start.
         await super().start(frame)
 
@@ -1033,22 +1451,46 @@ class DailyInputTransport(BaseInputTransport):
             await self.start_audio_in_streaming()
 
     async def stop(self, frame: EndFrame):
+        """Stop the input transport and leave the Daily room.
+
+        Args:
+            frame: The end frame signaling transport shutdown.
+        """
         # Parent stop.
         await super().stop(frame)
         # Leave the room.
         await self._client.leave()
+        # Stop audio thread.
+        if self._audio_in_task:
+            await self.cancel_task(self._audio_in_task)
+            self._audio_in_task = None
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the input transport and leave the Daily room.
+
+        Args:
+            frame: The cancel frame signaling immediate cancellation.
+        """
         # Parent stop.
         await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
+        # Stop audio thread.
+        if self._audio_in_task:
+            await self.cancel_task(self._audio_in_task)
+            self._audio_in_task = None
 
     #
     # FrameProcessor
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames, including user image requests.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserImageRequestFrame):
@@ -1059,9 +1501,20 @@ class DailyInputTransport(BaseInputTransport):
     #
 
     async def push_transcription_frame(self, frame: TranscriptionFrame | InterimTranscriptionFrame):
+        """Push a transcription frame downstream.
+
+        Args:
+            frame: The transcription frame to push.
+        """
         await self.push_frame(frame)
 
     async def push_app_message(self, message: Any, sender: str):
+        """Push an application message as an urgent transport frame.
+
+        Args:
+            message: The message data to send.
+            sender: ID of the message sender.
+        """
         frame = DailyTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
@@ -1075,6 +1528,13 @@ class DailyInputTransport(BaseInputTransport):
         audio_source: str = "microphone",
         sample_rate: int = 16000,
     ):
+        """Capture audio from a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture audio from.
+            audio_source: Audio source to capture from.
+            sample_rate: Desired sample rate for audio capture.
+        """
         if self._streaming_started:
             await self._client.capture_participant_audio(
                 participant_id, self._on_participant_audio_data, audio_source, sample_rate
@@ -1085,6 +1545,7 @@ class DailyInputTransport(BaseInputTransport):
     async def _on_participant_audio_data(
         self, participant_id: str, audio: AudioData, audio_source: str
     ):
+        """Handle received participant audio data."""
         frame = UserAudioRawFrame(
             user_id=participant_id,
             audio=audio.audio_frames,
@@ -1093,6 +1554,12 @@ class DailyInputTransport(BaseInputTransport):
         )
         frame.transport_source = audio_source
         await self.push_audio_frame(frame)
+
+    async def _audio_in_task_handler(self):
+        while True:
+            frame = await self._client.read_next_audio_frame()
+            if frame:
+                await self.push_audio_frame(frame)
 
     #
     # Camera in
@@ -1105,6 +1572,14 @@ class DailyInputTransport(BaseInputTransport):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
+        """Capture video from a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture video from.
+            framerate: Desired framerate for video capture.
+            video_source: Video source to capture from.
+            color_format: Color format for video frames.
+        """
         if participant_id not in self._video_renderers:
             self._video_renderers[participant_id] = {}
 
@@ -1119,6 +1594,11 @@ class DailyInputTransport(BaseInputTransport):
         )
 
     async def request_participant_image(self, frame: UserImageRequestFrame):
+        """Request a video frame from a specific participant.
+
+        Args:
+            frame: The user image request frame.
+        """
         if frame.user_id in self._video_renderers:
             video_source = frame.video_source if frame.video_source else "camera"
             self._video_renderers[frame.user_id][video_source]["render_next_frame"].append(frame)
@@ -1126,6 +1606,7 @@ class DailyInputTransport(BaseInputTransport):
     async def _on_participant_video_frame(
         self, participant_id: str, video_frame: VideoFrame, video_source: str
     ):
+        """Handle received participant video frames."""
         render_frame = False
 
         curr_time = time.time()
@@ -1161,16 +1642,21 @@ class DailyInputTransport(BaseInputTransport):
 class DailyOutputTransport(BaseOutputTransport):
     """Handles outgoing media streams and events to Daily calls.
 
-    Manages sending audio, video and other data to Daily calls.
-
-    Args:
-        client: DailyTransportClient instance.
-        params: Configuration parameters.
+    Manages sending audio, video, DTMF tones, and other data to Daily calls,
+    including audio destination registration and message transmission.
     """
 
     def __init__(
         self, transport: BaseTransport, client: DailyTransportClient, params: DailyParams, **kwargs
     ):
+        """Initialize the Daily output transport.
+
+        Args:
+            transport: The parent transport instance.
+            client: DailyTransportClient instance.
+            params: Configuration parameters.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(params, **kwargs)
 
         self._transport = transport
@@ -1180,15 +1666,26 @@ class DailyOutputTransport(BaseOutputTransport):
         self._initialized = False
 
     async def setup(self, setup: FrameProcessorSetup):
+        """Setup the output transport with shared client setup.
+
+        Args:
+            setup: The frame processor setup configuration.
+        """
         await super().setup(setup)
         await self._client.setup(setup)
 
     async def cleanup(self):
+        """Cleanup output transport and shared resources."""
         await super().cleanup()
         await self._client.cleanup()
         await self._transport.cleanup()
 
     async def start(self, frame: StartFrame):
+        """Start the output transport and join the Daily room.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         # Parent start.
         await super().start(frame)
 
@@ -1207,27 +1704,57 @@ class DailyOutputTransport(BaseOutputTransport):
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
+        """Stop the output transport and leave the Daily room.
+
+        Args:
+            frame: The end frame signaling transport shutdown.
+        """
         # Parent stop.
         await super().stop(frame)
         # Leave the room.
         await self._client.leave()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the output transport and leave the Daily room.
+
+        Args:
+            frame: The cancel frame signaling immediate cancellation.
+        """
         # Parent stop.
         await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+        """Send a transport message to participants.
+
+        Args:
+            frame: The transport message frame to send.
+        """
         await self._client.send_message(frame)
 
     async def register_video_destination(self, destination: str):
+        """Register a video output destination.
+
+        Args:
+            destination: The destination identifier to register.
+        """
         logger.warning(f"{self} registering video destinations is not supported yet")
 
     async def register_audio_destination(self, destination: str):
+        """Register an audio output destination.
+
+        Args:
+            destination: The destination identifier to register.
+        """
         await self._client.register_audio_destination(destination)
 
     async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        """Write DTMF tones to the call.
+
+        Args:
+            frame: The DTMF frame containing tone information.
+        """
         await self._client.send_dtmf(
             {
                 "sessionId": frame.transport_destination,
@@ -1236,25 +1763,28 @@ class DailyOutputTransport(BaseOutputTransport):
         )
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        """Write an audio frame to the Daily call.
+
+        Args:
+            frame: The audio frame to write.
+        """
         await self._client.write_audio_frame(frame)
 
     async def write_video_frame(self, frame: OutputImageRawFrame):
+        """Write a video frame to the Daily call.
+
+        Args:
+            frame: The video frame to write.
+        """
         await self._client.write_video_frame(frame)
 
 
 class DailyTransport(BaseTransport):
     """Transport implementation for Daily audio and video calls.
 
-    Handles audio/video streaming, transcription, recordings, dial-in,
-        dial-out, and call management through Daily's API.
-
-    Args:
-        room_url: URL of the Daily room to connect to.
-        token: Optional authentication token for the room.
-        bot_name: Display name for the bot in the call.
-        params: Configuration parameters (DailyParams) for the transport.
-        input_name: Optional name for the input transport.
-        output_name: Optional name for the output transport.
+    Provides comprehensive Daily integration including audio/video streaming,
+    transcription, recording, dial-in/out functionality, and real-time communication
+    features for conversational AI applications.
     """
 
     def __init__(
@@ -1266,6 +1796,16 @@ class DailyTransport(BaseTransport):
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ):
+        """Initialize the Daily transport.
+
+        Args:
+            room_url: URL of the Daily room to connect to.
+            token: Optional authentication token for the room.
+            bot_name: Display name for the bot in the call.
+            params: Configuration parameters for the transport.
+            input_name: Optional name for the input transport.
+            output_name: Optional name for the output transport.
+        """
         super().__init__(input_name=input_name, output_name=output_name)
 
         callbacks = DailyCallbacks(
@@ -1339,6 +1879,11 @@ class DailyTransport(BaseTransport):
     #
 
     def input(self) -> DailyInputTransport:
+        """Get the input transport for receiving media and events.
+
+        Returns:
+            The Daily input transport instance.
+        """
         if not self._input:
             self._input = DailyInputTransport(
                 self, self._client, self._params, name=self._input_name
@@ -1346,6 +1891,11 @@ class DailyTransport(BaseTransport):
         return self._input
 
     def output(self) -> DailyOutputTransport:
+        """Get the output transport for sending media and events.
+
+        Returns:
+            The Daily output transport instance.
+        """
         if not self._output:
             self._output = DailyOutputTransport(
                 self, self._client, self._params, name=self._output_name
@@ -1358,33 +1908,81 @@ class DailyTransport(BaseTransport):
 
     @property
     def room_url(self) -> str:
+        """Get the Daily room URL.
+
+        Returns:
+            The room URL this transport is connected to.
+        """
         return self._client.room_url
 
     @property
     def participant_id(self) -> str:
+        """Get the participant ID for this transport.
+
+        Returns:
+            The participant ID assigned by Daily.
+        """
         return self._client.participant_id
 
     async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
+        """Send an image frame to the Daily call.
+
+        Args:
+            frame: The image frame to send.
+        """
         if self._output:
             await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
+        """Send an audio frame to the Daily call.
+
+        Args:
+            frame: The audio frame to send.
+        """
         if self._output:
             await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
     def participants(self):
+        """Get current participants in the room.
+
+        Returns:
+            Dictionary of participants keyed by participant ID.
+        """
         return self._client.participants()
 
     def participant_counts(self):
+        """Get participant count information.
+
+        Returns:
+            Dictionary with participant count details.
+        """
         return self._client.participant_counts()
 
     async def start_dialout(self, settings=None):
+        """Start a dial-out call to a phone number.
+
+        Args:
+            settings: Dial-out configuration settings.
+        """
         await self._client.start_dialout(settings)
 
     async def stop_dialout(self, participant_id):
+        """Stop a dial-out call for a specific participant.
+
+        Args:
+            participant_id: ID of the participant to stop dial-out for.
+        """
         await self._client.stop_dialout(participant_id)
 
     async def send_dtmf(self, settings):
+        """Send DTMF tones during a call (deprecated).
+
+        .. deprecated:: 0.0.69
+            Push an `OutputDTMFFrame` or an `OutputDTMFUrgentFrame` instead.
+
+        Args:
+            settings: DTMF settings including tones and target session.
+        """
         import warnings
 
         with warnings.catch_warnings():
@@ -1396,33 +1994,66 @@ class DailyTransport(BaseTransport):
         await self._client.send_dtmf(settings)
 
     async def sip_call_transfer(self, settings):
+        """Transfer a SIP call to another destination.
+
+        Args:
+            settings: SIP call transfer settings.
+        """
         await self._client.sip_call_transfer(settings)
 
     async def sip_refer(self, settings):
+        """Send a SIP REFER request.
+
+        Args:
+            settings: SIP REFER settings.
+        """
         await self._client.sip_refer(settings)
 
     async def start_recording(self, streaming_settings=None, stream_id=None, force_new=None):
+        """Start recording the call.
+
+        Args:
+            streaming_settings: Recording configuration settings.
+            stream_id: Unique identifier for the recording stream.
+            force_new: Whether to force a new recording session.
+        """
         await self._client.start_recording(streaming_settings, stream_id, force_new)
 
     async def stop_recording(self, stream_id=None):
+        """Stop recording the call.
+
+        Args:
+            stream_id: Unique identifier for the recording stream to stop.
+        """
         await self._client.stop_recording(stream_id)
 
     async def start_transcription(self, settings=None):
+        """Start transcription for the call.
+
+        Args:
+            settings: Transcription configuration settings.
+        """
         await self._client.start_transcription(settings)
 
     async def stop_transcription(self):
+        """Stop transcription for the call."""
         await self._client.stop_transcription()
 
     async def send_prebuilt_chat_message(self, message: str, user_name: Optional[str] = None):
-        """Sends a chat message to Daily's Prebuilt main room.
+        """Send a chat message to Daily's Prebuilt main room.
 
         Args:
-        message: The chat message to send
-        user_name: Optional user name that will appear as sender of the message
+            message: The chat message to send.
+            user_name: Optional user name that will appear as sender of the message.
         """
         await self._client.send_prebuilt_chat_message(message, user_name)
 
     async def capture_participant_transcription(self, participant_id: str):
+        """Enable transcription capture for a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture transcription for.
+        """
         await self._client.capture_participant_transcription(participant_id)
 
     async def capture_participant_audio(
@@ -1431,6 +2062,13 @@ class DailyTransport(BaseTransport):
         audio_source: str = "microphone",
         sample_rate: int = 16000,
     ):
+        """Capture audio from a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture audio from.
+            audio_source: Audio source to capture from.
+            sample_rate: Desired sample rate for audio capture.
+        """
         if self._input:
             await self._input.capture_participant_audio(participant_id, audio_source, sample_rate)
 
@@ -1441,32 +2079,60 @@ class DailyTransport(BaseTransport):
         video_source: str = "camera",
         color_format: str = "RGB",
     ):
+        """Capture video from a specific participant.
+
+        Args:
+            participant_id: ID of the participant to capture video from.
+            framerate: Desired framerate for video capture.
+            video_source: Video source to capture from.
+            color_format: Color format for video frames.
+        """
         if self._input:
             await self._input.capture_participant_video(
                 participant_id, framerate, video_source, color_format
             )
 
     async def update_publishing(self, publishing_settings: Mapping[str, Any]):
+        """Update media publishing settings.
+
+        Args:
+            publishing_settings: Publishing configuration settings.
+        """
         await self._client.update_publishing(publishing_settings=publishing_settings)
 
     async def update_subscriptions(self, participant_settings=None, profile_settings=None):
+        """Update media subscription settings.
+
+        Args:
+            participant_settings: Per-participant subscription settings.
+            profile_settings: Global subscription profile settings.
+        """
         await self._client.update_subscriptions(
             participant_settings=participant_settings, profile_settings=profile_settings
         )
 
     async def update_remote_participants(self, remote_participants: Mapping[str, Any]):
+        """Update settings for remote participants.
+
+        Args:
+            remote_participants: Remote participant configuration settings.
+        """
         await self._client.update_remote_participants(remote_participants=remote_participants)
 
     async def _on_active_speaker_changed(self, participant: Any):
+        """Handle active speaker change events."""
         await self._call_event_handler("on_active_speaker_changed", participant)
 
     async def _on_joined(self, data):
+        """Handle room joined events."""
         await self._call_event_handler("on_joined", data)
 
     async def _on_left(self):
+        """Handle room left events."""
         await self._call_event_handler("on_left")
 
     async def _on_error(self, error):
+        """Handle error events and push error frames."""
         await self._call_event_handler("on_error", error)
         # Push error frame to notify the pipeline
         error_frame = ErrorFrame(error)
@@ -1480,20 +2146,25 @@ class DailyTransport(BaseTransport):
             raise Exception("No valid input or output channel to push error")
 
     async def _on_app_message(self, message: Any, sender: str):
+        """Handle application message events."""
         if self._input:
             await self._input.push_app_message(message, sender)
         await self._call_event_handler("on_app_message", message, sender)
 
     async def _on_call_state_updated(self, state: str):
+        """Handle call state update events."""
         await self._call_event_handler("on_call_state_updated", state)
 
     async def _on_client_connected(self, participant: Any):
+        """Handle client connected events."""
         await self._call_event_handler("on_client_connected", participant)
 
     async def _on_client_disconnected(self, participant: Any):
+        """Handle client disconnected events."""
         await self._call_event_handler("on_client_disconnected", participant)
 
     async def _handle_dialin_ready(self, sip_endpoint: str):
+        """Handle dial-in ready events by updating SIP configuration."""
         if not self._params.dialin_settings:
             return
 
@@ -1528,42 +2199,53 @@ class DailyTransport(BaseTransport):
                 logger.exception(f"Error handling dialin-ready event ({url}): {e}")
 
     async def _on_dialin_connected(self, data):
+        """Handle dial-in connected events."""
         await self._call_event_handler("on_dialin_connected", data)
 
     async def _on_dialin_ready(self, sip_endpoint):
+        """Handle dial-in ready events."""
         if self._params.dialin_settings:
             await self._handle_dialin_ready(sip_endpoint)
         await self._call_event_handler("on_dialin_ready", sip_endpoint)
 
     async def _on_dialin_stopped(self, data):
+        """Handle dial-in stopped events."""
         await self._call_event_handler("on_dialin_stopped", data)
 
     async def _on_dialin_error(self, data):
+        """Handle dial-in error events."""
         await self._call_event_handler("on_dialin_error", data)
 
     async def _on_dialin_warning(self, data):
+        """Handle dial-in warning events."""
         await self._call_event_handler("on_dialin_warning", data)
 
     async def _on_dialout_answered(self, data):
+        """Handle dial-out answered events."""
         await self._call_event_handler("on_dialout_answered", data)
 
     async def _on_dialout_connected(self, data):
+        """Handle dial-out connected events."""
         await self._call_event_handler("on_dialout_connected", data)
 
     async def _on_dialout_stopped(self, data):
+        """Handle dial-out stopped events."""
         await self._call_event_handler("on_dialout_stopped", data)
 
     async def _on_dialout_error(self, data):
+        """Handle dial-out error events."""
         await self._call_event_handler("on_dialout_error", data)
 
     async def _on_dialout_warning(self, data):
+        """Handle dial-out warning events."""
         await self._call_event_handler("on_dialout_warning", data)
 
     async def _on_participant_joined(self, participant):
+        """Handle participant joined events."""
         id = participant["id"]
         logger.info(f"Participant joined {id}")
 
-        if self._input and self._params.audio_in_enabled:
+        if self._input and self._params.audio_in_enabled and self._params.audio_in_user_tracks:
             await self._input.capture_participant_audio(
                 id, "microphone", self._client.in_sample_rate
             )
@@ -1577,6 +2259,7 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_client_connected", participant)
 
     async def _on_participant_left(self, participant, reason):
+        """Handle participant left events."""
         id = participant["id"]
         logger.info(f"Participant left {id}")
         await self._call_event_handler("on_participant_left", participant, reason)
@@ -1584,9 +2267,11 @@ class DailyTransport(BaseTransport):
         await self._call_event_handler("on_client_disconnected", participant)
 
     async def _on_participant_updated(self, participant):
+        """Handle participant updated events."""
         await self._call_event_handler("on_participant_updated", participant)
 
     async def _on_transcription_message(self, message):
+        """Handle transcription message events."""
         await self._call_event_handler("on_transcription_message", message)
 
         participant_id = ""
@@ -1619,10 +2304,13 @@ class DailyTransport(BaseTransport):
             await self._input.push_transcription_frame(frame)
 
     async def _on_recording_started(self, status):
+        """Handle recording started events."""
         await self._call_event_handler("on_recording_started", status)
 
     async def _on_recording_stopped(self, stream_id):
+        """Handle recording stopped events."""
         await self._call_event_handler("on_recording_stopped", stream_id)
 
     async def _on_recording_error(self, stream_id, message):
+        """Handle recording error events."""
         await self._call_event_handler("on_recording_error", stream_id, message)
