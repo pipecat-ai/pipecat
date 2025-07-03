@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Base class for Whisper-based speech-to-text services.
+
+This module provides common functionality for services implementing the Whisper API
+interface, including language mapping, metrics generation, and error handling.
+"""
+
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
@@ -18,9 +24,16 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 
 def language_to_whisper_language(language: Language) -> Optional[str]:
-    """Language support for Whisper API.
+    """Maps pipecat Language enum to Whisper API language codes.
 
+    Language support for Whisper API.
     Docs: https://platform.openai.com/docs/guides/speech-to-text#supported-languages
+
+    Args:
+        language: A Language enum value representing the input language.
+
+    Returns:
+        str or None: The corresponding Whisper language code, or None if not supported.
     """
     BASE_LANGUAGES = {
         Language.AF: "af",
@@ -98,15 +111,6 @@ class BaseWhisperSTTService(SegmentedSTTService):
 
     Provides common functionality for services implementing the Whisper API interface,
     including metrics generation and error handling.
-
-    Args:
-        model: Name of the Whisper model to use.
-        api_key: Service API key. Defaults to None.
-        base_url: Service API base URL. Defaults to None.
-        language: Language of the audio input. Defaults to English.
-        prompt: Optional text to guide the model's style or continue a previous segment.
-        temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
     """
 
     def __init__(
@@ -120,6 +124,17 @@ class BaseWhisperSTTService(SegmentedSTTService):
         temperature: Optional[float] = None,
         **kwargs,
     ):
+        """Initialize the Whisper STT service.
+
+        Args:
+            model: Name of the Whisper model to use.
+            api_key: Service API key. Defaults to None.
+            base_url: Service API base URL. Defaults to None.
+            language: Language of the audio input. Defaults to English.
+            prompt: Optional text to guide the model's style or continue a previous segment.
+            temperature: Sampling temperature between 0 and 1. Defaults to 0.0.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
         super().__init__(**kwargs)
         self.set_model_name(model)
         self._client = self._create_client(api_key, base_url)
@@ -138,12 +153,30 @@ class BaseWhisperSTTService(SegmentedSTTService):
         return AsyncOpenAI(api_key=api_key, base_url=base_url)
 
     async def set_model(self, model: str):
+        """Set the model name for transcription.
+
+        Args:
+            model: The name of the model to use.
+        """
         self.set_model_name(model)
 
     def can_generate_metrics(self) -> bool:
+        """Indicates whether this service can generate metrics.
+
+        Returns:
+            bool: True, as this service supports metric generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert from pipecat Language to service language code.
+
+        Args:
+            language: The Language enum value to convert.
+
+        Returns:
+            str or None: The corresponding service language code, or None if not supported.
+        """
         return language_to_whisper_language(language)
 
     async def set_language(self, language: Language):
@@ -163,6 +196,15 @@ class BaseWhisperSTTService(SegmentedSTTService):
         pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Transcribe audio data to text.
+
+        Args:
+            audio: Raw audio data to transcribe.
+
+        Yields:
+            Frame: Either a TranscriptionFrame containing the transcribed text
+                  or an ErrorFrame if transcription fails.
+        """
         try:
             await self.start_processing_metrics()
             await self.start_ttfb_metrics()
@@ -177,7 +219,11 @@ class BaseWhisperSTTService(SegmentedSTTService):
             if text:
                 await self._handle_transcription(text, True, self._language)
                 logger.debug(f"Transcription: [{text}]")
-                yield TranscriptionFrame(text, "", time_now_iso8601())
+                yield TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                )
             else:
                 logger.warning("Received empty transcription from API")
 

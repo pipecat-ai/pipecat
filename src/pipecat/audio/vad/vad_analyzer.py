@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Voice Activity Detection (VAD) analyzer base classes and utilities.
+
+This module provides the abstract base class for VAD analyzers and associated
+data structures for voice activity detection in audio streams. Includes state
+management, parameter configuration, and audio analysis framework.
+"""
+
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional
@@ -20,6 +27,15 @@ VAD_MIN_VOLUME = 0.6
 
 
 class VADState(Enum):
+    """Voice Activity Detection states.
+
+    Parameters:
+        QUIET: No voice activity detected.
+        STARTING: Voice activity beginning, transitioning from quiet.
+        SPEAKING: Active voice detected and confirmed.
+        STOPPING: Voice activity ending, transitioning to quiet.
+    """
+
     QUIET = 1
     STARTING = 2
     SPEAKING = 3
@@ -27,6 +43,15 @@ class VADState(Enum):
 
 
 class VADParams(BaseModel):
+    """Configuration parameters for Voice Activity Detection.
+
+    Parameters:
+        confidence: Minimum confidence threshold for voice detection.
+        start_secs: Duration to wait before confirming voice start.
+        stop_secs: Duration to wait before confirming voice stop.
+        min_volume: Minimum audio volume threshold for voice detection.
+    """
+
     confidence: float = VAD_CONFIDENCE
     start_secs: float = VAD_START_SECS
     stop_secs: float = VAD_STOP_SECS
@@ -34,7 +59,20 @@ class VADParams(BaseModel):
 
 
 class VADAnalyzer(ABC):
+    """Abstract base class for Voice Activity Detection analyzers.
+
+    Provides the framework for implementing VAD analysis with configurable
+    parameters, state management, and audio processing capabilities.
+    Subclasses must implement the core voice confidence calculation.
+    """
+
     def __init__(self, *, sample_rate: Optional[int] = None, params: Optional[VADParams] = None):
+        """Initialize the VAD analyzer.
+
+        Args:
+            sample_rate: Audio sample rate in Hz. If None, will be set later.
+            params: VAD parameters for detection configuration.
+        """
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._params = params or VADParams()
@@ -48,29 +86,67 @@ class VADAnalyzer(ABC):
 
     @property
     def sample_rate(self) -> int:
+        """Get the current sample rate.
+
+        Returns:
+            Current audio sample rate in Hz.
+        """
         return self._sample_rate
 
     @property
     def num_channels(self) -> int:
+        """Get the number of audio channels.
+
+        Returns:
+            Number of audio channels (always 1 for mono).
+        """
         return self._num_channels
 
     @property
     def params(self) -> VADParams:
+        """Get the current VAD parameters.
+
+        Returns:
+            Current VAD configuration parameters.
+        """
         return self._params
 
     @abstractmethod
     def num_frames_required(self) -> int:
+        """Get the number of audio frames required for analysis.
+
+        Returns:
+            Number of frames needed for VAD processing.
+        """
         pass
 
     @abstractmethod
     def voice_confidence(self, buffer) -> float:
+        """Calculate voice activity confidence for the given audio buffer.
+
+        Args:
+            buffer: Audio buffer to analyze.
+
+        Returns:
+            Voice confidence score between 0.0 and 1.0.
+        """
         pass
 
     def set_sample_rate(self, sample_rate: int):
+        """Set the sample rate for audio processing.
+
+        Args:
+            sample_rate: Audio sample rate in Hz.
+        """
         self._sample_rate = self._init_sample_rate or sample_rate
         self.set_params(self._params)
 
     def set_params(self, params: VADParams):
+        """Set VAD parameters and recalculate internal values.
+
+        Args:
+            params: VAD parameters for detection configuration.
+        """
         logger.debug(f"Setting VAD params to: {params}")
         self._params = params
         self._vad_frames = self.num_frames_required()
@@ -85,10 +161,22 @@ class VADAnalyzer(ABC):
         self._vad_state: VADState = VADState.QUIET
 
     def _get_smoothed_volume(self, audio: bytes) -> float:
+        """Calculate smoothed audio volume using exponential smoothing."""
         volume = calculate_audio_volume(audio, self.sample_rate)
         return exp_smoothing(volume, self._prev_volume, self._smoothing_factor)
 
     def analyze_audio(self, buffer) -> VADState:
+        """Analyze audio buffer and return current VAD state.
+
+        Processes incoming audio data, maintains internal state, and determines
+        voice activity status based on confidence and volume thresholds.
+
+        Args:
+            buffer: Audio buffer to analyze.
+
+        Returns:
+            Current VAD state after processing the buffer.
+        """
         self._vad_buffer += buffer
 
         num_required_bytes = self._vad_frames_num_bytes

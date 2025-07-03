@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Smart turn analyzer base class using ML models for end-of-turn detection.
+
+This module provides the base implementation for smart turn analyzers that use
+machine learning models to determine when a user has finished speaking, going
+beyond simple silence-based detection.
+"""
+
 import time
 from abc import abstractmethod
 from typing import Any, Dict, Optional, Tuple
@@ -23,6 +30,14 @@ USE_ONLY_LAST_VAD_SEGMENT = True
 
 
 class SmartTurnParams(BaseModel):
+    """Configuration parameters for smart turn analysis.
+
+    Parameters:
+        stop_secs: Maximum silence duration in seconds before ending turn.
+        pre_speech_ms: Milliseconds of audio to include before speech starts.
+        max_duration_secs: Maximum duration in seconds for audio segments.
+    """
+
     stop_secs: float = STOP_SECS
     pre_speech_ms: float = PRE_SPEECH_MS
     max_duration_secs: float = MAX_DURATION_SECONDS
@@ -31,13 +46,28 @@ class SmartTurnParams(BaseModel):
 
 
 class SmartTurnTimeoutException(Exception):
+    """Exception raised when smart turn analysis times out."""
+
     pass
 
 
 class BaseSmartTurn(BaseTurnAnalyzer):
+    """Base class for smart turn analyzers using ML models.
+
+    Provides common functionality for smart turn detection including audio
+    buffering, speech tracking, and ML model integration. Subclasses must
+    implement the specific model prediction logic.
+    """
+
     def __init__(
         self, *, sample_rate: Optional[int] = None, params: Optional[SmartTurnParams] = None
     ):
+        """Initialize the smart turn analyzer.
+
+        Args:
+            sample_rate: Optional sample rate for audio processing.
+            params: Configuration parameters for turn analysis behavior.
+        """
         super().__init__(sample_rate=sample_rate)
         self._params = params or SmartTurnParams()
         # Configuration
@@ -50,9 +80,23 @@ class BaseSmartTurn(BaseTurnAnalyzer):
 
     @property
     def speech_triggered(self) -> bool:
+        """Check if speech has been detected and triggered analysis.
+
+        Returns:
+            True if speech has been detected and turn analysis is active.
+        """
         return self._speech_triggered
 
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
+        """Append audio data for turn analysis.
+
+        Args:
+            buffer: Raw audio data bytes to append for analysis.
+            is_speech: Whether the audio buffer contains detected speech.
+
+        Returns:
+            Current end-of-turn state after processing the audio.
+        """
         # Convert raw audio to float32 format and append to the buffer
         audio_int16 = np.frombuffer(buffer, dtype=np.int16)
         audio_float32 = np.frombuffer(audio_int16, dtype=np.int16).astype(np.float32) / 32768.0
@@ -92,6 +136,12 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         return state
 
     async def analyze_end_of_turn(self) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+        """Analyze the current audio state to determine if turn has ended.
+
+        Returns:
+            Tuple containing the end-of-turn state and optional metrics data
+            from the ML model analysis.
+        """
         state, result = await self._process_speech_segment(self._audio_buffer)
         if state == EndOfTurnState.COMPLETE or USE_ONLY_LAST_VAD_SEGMENT:
             self._clear(state)
@@ -99,9 +149,11 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         return state, result
 
     def clear(self):
+        """Reset the turn analyzer to its initial state."""
         self._clear(EndOfTurnState.COMPLETE)
 
     def _clear(self, turn_state: EndOfTurnState):
+        """Clear internal state based on turn completion status."""
         # If the state is still incomplete, keep the _speech_triggered as True
         self._speech_triggered = turn_state == EndOfTurnState.INCOMPLETE
         self._audio_buffer = []
@@ -111,6 +163,7 @@ class BaseSmartTurn(BaseTurnAnalyzer):
     async def _process_speech_segment(
         self, audio_buffer
     ) -> Tuple[EndOfTurnState, Optional[MetricsData]]:
+        """Process accumulated audio segment using ML model."""
         state = EndOfTurnState.INCOMPLETE
 
         if not audio_buffer:
@@ -188,14 +241,5 @@ class BaseSmartTurn(BaseTurnAnalyzer):
 
     @abstractmethod
     async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
-        """Abstract method to predict if a turn has ended based on audio.
-
-        Args:
-            audio_array: Float32 numpy array of audio samples at 16kHz.
-
-        Returns:
-            Dictionary with:
-              - prediction: 1 if turn is complete, else 0
-              - probability: Confidence of the prediction
-        """
+        """Predict end-of-turn using ML model from audio data."""
         pass

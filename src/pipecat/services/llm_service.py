@@ -9,11 +9,23 @@
 import asyncio
 import inspect
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Mapping, Optional, Protocol, Sequence, Type
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    Type,
+)
 
 from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
+from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
+from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
@@ -94,7 +106,7 @@ class FunctionCallRegistryItem:
     """
 
     function_name: Optional[str]
-    handler: FunctionCallHandler
+    handler: FunctionCallHandler | "DirectFunctionWrapper"
     cancel_on_interruption: bool
 
 
@@ -128,18 +140,14 @@ class LLMService(AIService):
     parallel and sequential execution modes. Provides event handlers for
     completion timeouts and function call lifecycle events.
 
-    Args:
-        run_in_parallel: Whether to run function calls in parallel or sequentially.
-            Defaults to True.
-        **kwargs: Additional arguments passed to the parent AIService.
+    The service supports the following event handlers:
 
-    Event handlers:
-        on_completion_timeout: Called when an LLM completion timeout occurs.
-        on_function_calls_started: Called when function calls are received and
-            execution is about to start.
+    - on_completion_timeout: Called when an LLM completion timeout occurs
+    - on_function_calls_started: Called when function calls are received and
+      execution is about to start
 
-    Example:
-        ```python
+    Example::
+
         @task.event_handler("on_completion_timeout")
         async def on_completion_timeout(service):
             logger.warning("LLM completion timed out")
@@ -147,7 +155,6 @@ class LLMService(AIService):
         @task.event_handler("on_function_calls_started")
         async def on_function_calls_started(service, function_calls):
             logger.info(f"Starting {len(function_calls)} function calls")
-        ```
     """
 
     # OpenAILLMAdapter is used as the default adapter since it aligns with most LLM implementations.
@@ -155,6 +162,13 @@ class LLMService(AIService):
     adapter_class: Type[BaseLLMAdapter] = OpenAILLMAdapter
 
     def __init__(self, run_in_parallel: bool = True, **kwargs):
+        """Initialize the LLM service.
+
+        Args:
+            run_in_parallel: Whether to run function calls in parallel or sequentially.
+                Defaults to True.
+            **kwargs: Additional arguments passed to the parent AIService.
+        """
         super().__init__(**kwargs)
         self._run_in_parallel = run_in_parallel
         self._start_callbacks = {}
@@ -259,6 +273,10 @@ class LLMService(AIService):
                 parameter.
             start_callback: Legacy callback function (deprecated). Put initialization
                 code at the top of your handler instead.
+
+                .. deprecated:: 0.0.59
+                    The `start_callback` parameter is deprecated and will be removed in a future version.
+
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
         """
@@ -283,6 +301,30 @@ class LLMService(AIService):
 
             self._start_callbacks[function_name] = start_callback
 
+    def register_direct_function(
+        self,
+        handler: DirectFunction,
+        *,
+        cancel_on_interruption: bool = True,
+    ):
+        """Register a direct function handler for LLM function calls.
+
+        Direct functions have their metadata automatically extracted from their
+        signature and docstring, eliminating the need for accompanying
+        configurations (as FunctionSchemas or in provider-specific formats).
+
+        Args:
+            handler: The direct function to register. Must follow DirectFunction protocol.
+            cancel_on_interruption: Whether to cancel this function call when an
+                interruption occurs. Defaults to True.
+        """
+        wrapper = DirectFunctionWrapper(handler)
+        self._functions[wrapper.name] = FunctionCallRegistryItem(
+            function_name=wrapper.name,
+            handler=wrapper,
+            cancel_on_interruption=cancel_on_interruption,
+        )
+
     def unregister_function(self, function_name: Optional[str]):
         """Remove a registered function handler.
 
@@ -292,6 +334,16 @@ class LLMService(AIService):
         del self._functions[function_name]
         if self._start_callbacks[function_name]:
             del self._start_callbacks[function_name]
+
+    def unregister_direct_function(self, handler: Any):
+        """Remove a registered direct function handler.
+
+        Args:
+            handler: The direct function handler to remove.
+        """
+        wrapper = DirectFunctionWrapper(handler)
+        del self._functions[wrapper.name]
+        # Note: no need to remove start callback here, as direct functions don't support start callbacks.
 
     def has_function(self, function_name: str):
         """Check if a function handler is registered.
@@ -306,6 +358,17 @@ class LLMService(AIService):
         if None in self._functions.keys():
             return True
         return function_name in self._functions.keys()
+
+    def needs_mcp_alternate_schema(self) -> bool:
+        """Check if this LLM service requires alternate MCP schema.
+
+        Some LLM services have stricter JSON schema validation and require
+        certain properties to be removed or modified for compatibility.
+
+        Returns:
+            True if MCP schemas should be cleaned for this service, False otherwise.
+        """
+        return False
 
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
         """Execute a sequence of function calls from the LLM.
@@ -472,35 +535,50 @@ class LLMService(AIService):
             await self.push_frame(result_frame_downstream, FrameDirection.DOWNSTREAM)
             await self.push_frame(result_frame_upstream, FrameDirection.UPSTREAM)
 
-        signature = inspect.signature(item.handler)
-        if len(signature.parameters) > 1:
-            import warnings
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                warnings.warn(
-                    "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
-                    DeprecationWarning,
-                )
-
-            await item.handler(
-                runner_item.function_name,
-                runner_item.tool_call_id,
-                runner_item.arguments,
-                self,
-                runner_item.context,
-                function_call_result_callback,
+        if isinstance(item.handler, DirectFunctionWrapper):
+            # Handler is a DirectFunctionWrapper
+            await item.handler.invoke(
+                args=runner_item.arguments,
+                params=FunctionCallParams(
+                    function_name=runner_item.function_name,
+                    tool_call_id=runner_item.tool_call_id,
+                    arguments=runner_item.arguments,
+                    llm=self,
+                    context=runner_item.context,
+                    result_callback=function_call_result_callback,
+                ),
             )
         else:
-            params = FunctionCallParams(
-                function_name=runner_item.function_name,
-                tool_call_id=runner_item.tool_call_id,
-                arguments=runner_item.arguments,
-                llm=self,
-                context=runner_item.context,
-                result_callback=function_call_result_callback,
-            )
-            await item.handler(params)
+            # Handler is a FunctionCallHandler
+            signature = inspect.signature(item.handler)
+            if len(signature.parameters) > 1:
+                import warnings
+
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
+                        DeprecationWarning,
+                    )
+
+                await item.handler(
+                    runner_item.function_name,
+                    runner_item.tool_call_id,
+                    runner_item.arguments,
+                    self,
+                    runner_item.context,
+                    function_call_result_callback,
+                )
+            else:
+                params = FunctionCallParams(
+                    function_name=runner_item.function_name,
+                    tool_call_id=runner_item.tool_call_id,
+                    arguments=runner_item.arguments,
+                    llm=self,
+                    context=runner_item.context,
+                    result_callback=function_call_result_callback,
+                )
+                await item.handler(params)
 
     async def _cancel_function_call(self, function_name: Optional[str]):
         cancelled_tasks = set()

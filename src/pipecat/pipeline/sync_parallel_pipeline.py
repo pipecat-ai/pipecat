@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Synchronous parallel pipeline implementation for concurrent frame processing.
+
+This module provides a pipeline that processes frames through multiple parallel
+pipelines simultaneously, synchronizing their output to maintain frame ordering
+and prevent duplicate processing.
+"""
+
 import asyncio
 from dataclasses import dataclass
 from itertools import chain
@@ -20,17 +27,38 @@ from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 @dataclass
 class SyncFrame(ControlFrame):
-    """This frame is used to know when the internal pipelines have finished."""
+    """Control frame used to synchronize parallel pipeline processing.
+
+    This frame is sent through parallel pipelines to determine when the
+    internal pipelines have finished processing a batch of frames.
+    """
 
     pass
 
 
 class SyncParallelPipelineSource(FrameProcessor):
+    """Source processor for synchronous parallel pipeline processing.
+
+    Routes frames to parallel pipelines and collects upstream responses
+    for synchronization purposes.
+    """
+
     def __init__(self, upstream_queue: asyncio.Queue):
+        """Initialize the sync parallel pipeline source.
+
+        Args:
+            upstream_queue: Queue for collecting upstream frames from the pipeline.
+        """
         super().__init__()
         self._up_queue = upstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and route them based on direction.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
         await super().process_frame(frame, direction)
 
         match direction:
@@ -41,11 +69,28 @@ class SyncParallelPipelineSource(FrameProcessor):
 
 
 class SyncParallelPipelineSink(FrameProcessor):
+    """Sink processor for synchronous parallel pipeline processing.
+
+    Collects downstream frames from parallel pipelines and routes
+    upstream frames back through the pipeline.
+    """
+
     def __init__(self, downstream_queue: asyncio.Queue):
+        """Initialize the sync parallel pipeline sink.
+
+        Args:
+            downstream_queue: Queue for collecting downstream frames from the pipeline.
+        """
         super().__init__()
         self._down_queue = downstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and route them based on direction.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
         await super().process_frame(frame, direction)
 
         match direction:
@@ -56,7 +101,28 @@ class SyncParallelPipelineSink(FrameProcessor):
 
 
 class SyncParallelPipeline(BasePipeline):
+    """Pipeline that processes frames through multiple parallel pipelines synchronously.
+
+    Creates multiple parallel processing paths that all receive the same input frames
+    and produces synchronized output. Each parallel path is a separate pipeline that
+    processes frames independently, with synchronization points to ensure consistent
+    ordering and prevent duplicate frame processing.
+
+    The pipeline uses SyncFrame control frames to coordinate between parallel paths
+    and ensure all paths have completed processing before moving to the next frame.
+    """
+
     def __init__(self, *args):
+        """Initialize the synchronous parallel pipeline.
+
+        Args:
+            *args: Variable number of processor lists, each representing a parallel pipeline path.
+                   Each argument should be a list of FrameProcessor instances.
+
+        Raises:
+            Exception: If no arguments are provided.
+            TypeError: If any argument is not a list of processors.
+        """
         super().__init__()
 
         if len(args) == 0:
@@ -72,6 +138,11 @@ class SyncParallelPipeline(BasePipeline):
     #
 
     def processors_with_metrics(self) -> List[FrameProcessor]:
+        """Collect processors that can generate metrics from all parallel pipelines.
+
+        Returns:
+            List of frame processors that support metrics collection from all parallel paths.
+        """
         return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
 
     #
@@ -79,6 +150,11 @@ class SyncParallelPipeline(BasePipeline):
     #
 
     async def setup(self, setup: FrameProcessorSetup):
+        """Set up the parallel pipeline and all contained processors.
+
+        Args:
+            setup: Configuration for frame processor setup.
+        """
         await super().setup(setup)
 
         self._up_queue = WatchdogQueue(setup.task_manager)
@@ -113,12 +189,23 @@ class SyncParallelPipeline(BasePipeline):
         await asyncio.gather(*[s["processor"].setup(setup) for s in self._sinks])
 
     async def cleanup(self):
+        """Clean up the parallel pipeline and all contained processors."""
         await super().cleanup()
         await asyncio.gather(*[s["processor"].cleanup() for s in self._sources])
         await asyncio.gather(*[p.cleanup() for p in self._pipelines])
         await asyncio.gather(*[s["processor"].cleanup() for s in self._sinks])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames through all parallel pipelines with synchronization.
+
+        Distributes frames to all parallel pipelines and synchronizes their output
+        to maintain proper ordering and prevent duplicate processing. Uses SyncFrame
+        control frames to coordinate between parallel paths.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
         await super().process_frame(frame, direction)
 
         # The last processor of each pipeline needs to be synchronous otherwise
