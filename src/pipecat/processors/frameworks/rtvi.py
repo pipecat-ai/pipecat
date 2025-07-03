@@ -1005,6 +1005,10 @@ class RTVIProcessor(FrameProcessor):
     ):
         """Handle the start of a function call from the LLM.
 
+        .. deprecated:: 0.0.66
+            This method is deprecated and will be removed in a future version.
+            Use `RTVIProcessor.handle_function_call()` instead.
+
         Args:
             function_name: Name of the function being called.
             llm: The LLM processor making the call.
