@@ -488,15 +488,6 @@ def parse_server_event(str):
     """
     try:
         evt_dict = json.loads(message_str)
-        
-        # Only log grounding metadata detection if truly needed for debugging
-        # In production, this could be removed entirely or moved to TRACE level
-        if 'serverContent' in evt_dict:
-            server_content = evt_dict['serverContent']
-            if 'groundingMetadata' in server_content:
-                # Consider removing this log entirely for production
-                pass
-
         evt = ServerEvent.model_validate(evt_dict)
         return evt
     except Exception as e:
