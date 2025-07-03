@@ -402,8 +402,15 @@ class SpeechmaticsSTTService(STTService):
         self._audio_buffer.stop()
 
         # Disconnect the client
-        if self._client:
-            await self._client.close()
+        try:
+            if self._client:
+                await asyncio.wait_for(self._client.close(), timeout=1.0)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout while closing Speechmatics client connection")
+        except Exception as e:
+            logger.error(f"Error closing Speechmatics client: {e}")
+        finally:
+            self._client = None
 
         # Cancel the client task
         if self._client_task:
