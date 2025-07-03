@@ -67,6 +67,7 @@ try:
         Content,
         FunctionCall,
         FunctionResponse,
+        HttpOptions,
         GenerateContentConfig,
         Part,
     )
@@ -678,7 +679,7 @@ class GoogleLLMService(LLMService):
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
-        http_options: Optional[Any] = None,
+        http_options: Optional[HttpOptions] = None,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -720,7 +721,7 @@ class GoogleLLMService(LLMService):
         """
         return True
 
-    def _create_client(self, api_key: str, http_options: Optional[Any] = None):
+    def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
         self._client = genai.Client(api_key=api_key, http_options=http_options)
 
     def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
