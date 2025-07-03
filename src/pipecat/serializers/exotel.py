@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Exotel Media Streams serializer for Pipecat."""
+
 import base64
 import json
 from typing import Optional
@@ -11,7 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
@@ -33,13 +35,14 @@ class ExotelFrameSerializer(FrameSerializer):
     media streams protocol. It supports audio conversion, DTMF events, and automatic
     call termination.
 
-    Ref Doc for events - https://support.exotel.com/support/solutions/articles/3000108630-working-with-the-stream-and-voicebot-applet
+    Note: Ref docs for events:
+        https://support.exotel.com/support/solutions/articles/3000108630-working-with-the-stream-and-voicebot-applet
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for ExotelFrameSerializer.
 
-        Attributes:
+        Parameters:
             exotel_sample_rate: Sample rate used by Exotel, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
         """
@@ -64,7 +67,8 @@ class ExotelFrameSerializer(FrameSerializer):
         self._exotel_sample_rate = self._params.exotel_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
-        self._resampler = create_default_resampler()
+        self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
 
     @property
     def type(self) -> FrameSerializerType:
@@ -101,7 +105,7 @@ class ExotelFrameSerializer(FrameSerializer):
             data = frame.audio
 
             # Output: Exotel outputs PCM audio, but we need to resample to match requested sample_rate
-            serialized_data = await self._resampler.resample(
+            serialized_data = await self._output_resampler.resample(
                 data, frame.sample_rate, self._exotel_sample_rate
             )
             payload = base64.b64encode(serialized_data).decode("ascii")
@@ -135,7 +139,7 @@ class ExotelFrameSerializer(FrameSerializer):
             payload_base64 = message["media"]["payload"]
             payload = base64.b64decode(payload_base64)
 
-            deserialized_data = await self._resampler.resample(
+            deserialized_data = await self._input_resampler.resample(
                 payload,
                 self._exotel_sample_rate,
                 self._sample_rate,

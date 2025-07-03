@@ -153,7 +153,12 @@ class GladiaInputParams(BaseModel):
         custom_metadata: Additional metadata to include with requests
         endpointing: Silence duration in seconds to mark end of speech
         maximum_duration_without_endpointing: Maximum utterance duration without silence
-        language: DEPRECATED - Use language_config instead
+        language: Language code for transcription
+
+            .. deprecated:: 0.0.62
+                The 'language' parameter is deprecated and will be removed in a future version.
+                Use 'language_config' instead.
+
         language_config: Detailed language configuration
         pre_processing: Audio pre-processing options
         realtime_processing: Real-time processing features

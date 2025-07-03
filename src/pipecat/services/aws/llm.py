@@ -207,20 +207,37 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         Handles text content and function calls for both user and assistant messages.
 
         Args:
-            obj: Message in AWS Bedrock format:
-                {
-                    "role": "user/assistant",
-                    "content": [{"text": str} | {"toolUse": {...}} | {"toolResult": {...}}]
-                }
+            obj: Message in AWS Bedrock format.
 
         Returns:
-            List of messages in standard format:
-            [
+            List of messages in standard format.
+
+        Examples:
+            AWS Bedrock format input::
+
                 {
-                    "role": "user/assistant/tool",
-                    "content": [{"type": "text", "text": str}]
+                    "role": "assistant",
+                    "content": [
+                        {"text": "Hello"},
+                        {"toolUse": {"toolUseId": "123", "name": "search", "input": {"q": "test"}}}
+                    ]
                 }
-            ]
+
+            Standard format output::
+
+                [
+                    {"role": "assistant", "content": [{"type": "text", "text": "Hello"}]},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "id": "123",
+                                "function": {"name": "search", "arguments": '{"q": "test"}'}
+                            }
+                        ]
+                    }
+                ]
         """
         role = obj.get("role")
         content = obj.get("content")
@@ -294,23 +311,38 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         Empty text content is converted to "(empty)".
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/tool",
-                    "content": str | [{"type": "text", ...}],
-                    "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}]
-                }
+            message: Message in standard format.
 
         Returns:
-            Message in AWS Bedrock format:
-            {
-                "role": "user/assistant",
-                "content": [
-                    {"text": str} |
-                    {"toolUse": {"toolUseId": str, "name": str, "input": dict}} |
-                    {"toolResult": {"toolUseId": str, "content": [...], "status": str}}
-                ]
-            }
+            Message in AWS Bedrock format.
+
+        Examples:
+            Standard format input::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "123",
+                            "function": {"name": "search", "arguments": '{"q": "test"}'}
+                        }
+                    ]
+                }
+
+            AWS Bedrock format output::
+
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "toolUse": {
+                                "toolUseId": "123",
+                                "name": "search",
+                                "input": {"q": "test"}
+                            }
+                        }
+                    ]
+                }
         """
         if message["role"] == "tool":
             # Try to parse the content as JSON if it looks like JSON

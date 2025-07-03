@@ -68,6 +68,7 @@ try:
         FunctionCall,
         FunctionResponse,
         GenerateContentConfig,
+        HttpOptions,
         Part,
     )
 except ModuleNotFoundError as e:
@@ -380,18 +381,48 @@ class GoogleLLMContext(OpenAILLMContext):
         System messages are stored separately and return None.
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/system/tool",
-                    "content": str | [{"type": "text/image_url", ...}] | None,
-                    "tool_calls": [{"function": {"name": str, "arguments": str}}]
-                }
+            message: Message in standard format.
 
         Returns:
-            Content object with:
-                - role: "user" or "model" (converted from "assistant")
-                - parts: List[Part] containing text, inline_data, or function calls
-            Returns None for system messages.
+            Content object with role and parts, or None for system messages.
+
+        Examples:
+            Standard text message::
+
+                {
+                    "role": "user",
+                    "content": "Hello there"
+                }
+
+            Converts to Google Content with::
+
+                Content(
+                    role="user",
+                    parts=[Part(text="Hello there")]
+                )
+
+            Standard function call message::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "function": {
+                                "name": "search",
+                                "arguments": '{"query": "test"}'
+                            }
+                        }
+                    ]
+                }
+
+            Converts to Google Content with::
+
+                Content(
+                    role="model",
+                    parts=[Part(function_call=FunctionCall(name="search", args={"query": "test"}))]
+                )
+
+            System message returns None and stores content in self.system_message.
         """
         role = message["role"]
         content = message.get("content", [])
@@ -447,21 +478,73 @@ class GoogleLLMContext(OpenAILLMContext):
         Handles text, images, and function calls from Google's Content/Part objects.
 
         Args:
-            obj: Google Content object with:
-                - role: "model" (converted to "assistant") or "user"
-                - parts: List[Part] containing text, inline_data, or function calls
+            obj: Google Content object with role and parts.
 
         Returns:
-            List of messages in standard format:
-            [
-                {
-                    "role": "user/assistant/tool",
-                    "content": [
-                        {"type": "text", "text": str} |
-                        {"type": "image_url", "image_url": {"url": str}}
-                    ]
-                }
-            ]
+            List containing a single message in standard format.
+
+        Examples:
+            Google Content with text::
+
+                Content(
+                    role="user",
+                    parts=[Part(text="Hello")]
+                )
+
+            Converts to::
+
+                [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "Hello"}]
+                    }
+                ]
+
+            Google Content with function call::
+
+                Content(
+                    role="model",
+                    parts=[Part(function_call=FunctionCall(name="search", args={"q": "test"}))]
+                )
+
+            Converts to::
+
+                [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "search",
+                                "type": "function",
+                                "function": {
+                                    "name": "search",
+                                    "arguments": '{"q": "test"}'
+                                }
+                            }
+                        ]
+                    }
+                ]
+
+            Google Content with image::
+
+                Content(
+                    role="user",
+                    parts=[Part(inline_data=Blob(mime_type="image/jpeg", data=bytes_data))]
+                )
+
+            Converts to::
+
+                [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/jpeg;base64,<encoded_data>"}
+                            }
+                        ]
+                    }
+                ]
         """
         msg = {"role": obj.role, "content": []}
         if msg["role"] == "model":
@@ -596,6 +679,7 @@ class GoogleLLMService(LLMService):
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_config: Optional[Dict[str, Any]] = None,
+        http_options: Optional[HttpOptions] = None,
         **kwargs,
     ):
         """Initialize the Google LLM service.
@@ -607,6 +691,7 @@ class GoogleLLMService(LLMService):
             system_instruction: System instruction/prompt for the model.
             tools: List of available tools/functions.
             tool_config: Configuration for tool usage.
+            http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -616,7 +701,8 @@ class GoogleLLMService(LLMService):
         self.set_model_name(model)
         self._api_key = api_key
         self._system_instruction = system_instruction
-        self._create_client(api_key)
+        self._http_options = http_options
+        self._create_client(api_key, http_options)
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -635,8 +721,19 @@ class GoogleLLMService(LLMService):
         """
         return True
 
-    def _create_client(self, api_key: str):
-        self._client = genai.Client(api_key=api_key)
+    def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
+        self._client = genai.Client(api_key=api_key, http_options=http_options)
+
+    def needs_mcp_alternate_schema(self) -> bool:
+        """Check if this LLM service requires alternate MCP schema.
+
+        Google/Gemini has stricter JSON schema validation and requires
+        certain properties to be removed or modified for compatibility.
+
+        Returns:
+            True for Google/Gemini services.
+        """
+        return True
 
     def _maybe_unset_thinking_budget(self, generation_params: Dict[str, Any]):
         try:

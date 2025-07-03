@@ -7,16 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+
+- Remove unncessary push task in each `FrameProcessor`.
+
+## [0.0.74] - 2025-07-03
+
 ### Added
+
+- Added a new STT service, `SpeechmaticsSTTService`. This service provides
+  real-time speech-to-text transcription using the Speechmatics API. It supports
+  partial and final transcriptions, multiple languages, various audio formats,
+  and speaker diarization.
+
+- Added `normalize` and `model_id` to `FishAudioTTSService`.
+
+- Added `http_options` argument to `GoogleLLMService`.
+
+- Added `run_llm` field to `LLMMessagesAppendFrame` and `LLMMessagesUpdateFrame`
+  frames. If true, a context frame will be pushed triggering the LLM to respond.
+
+- Added a new `SOXRStreamAudioResampler` for processing audio in chunks or
+  streams. If you write your own processor and need to use an audio resampler,
+  use the new `create_stream_resampler()`.
+
+- Added new `DailyParams.audio_in_user_tracks` to allow receiving one track per
+  user (default) or a single track from the room (all participants mixed).
+
+- Added support for providing "direct" functions, which don't need an
+  accompanying `FunctionSchema` or function definition dict. Instead, metadata
+  (i.e. `name`, `description`, `properties`, and `required`) are automatically
+  extracted from a combination of the function signature and docstring.
+
+  Usage:
+
+  ```python
+  # "Direct" function
+  # `params` must be the first parameter
+  async def do_something(params: FunctionCallParams, foo: int, bar: str = ""):
+    """
+    Do something interesting.
+
+    Args:
+      foo (int): The foo to do something interesting with.
+      bar (string): The bar to do something interesting with.
+    """
+
+    result = await process(foo, bar)
+    await params.result_callback({"result": result})
+
+  # ...
+
+  llm.register_direct_function(do_something)
+
+  # ...
+
+  tools = ToolsSchema(standard_tools=[do_something])
+  ```
+
+- `user_id` is now populated in the `TranscriptionFrame` and
+  `InterimTranscriptionFrame` when using a transport that provides a `user_id`,
+  like `DailyTransport` or `LiveKitTransport`.
 
 - Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
   if you have a coroutine that is waiting for a result and that takes a long
   time, you will need to wrap it with `watchdog_coroutine()` so the watchdog
   timers are reset regularly.
 
+- Added `session_token` parameter to `AWSNovaSonicLLMService`.
+
+- Added Gemini Multimodal Live File API for uploading, fetching, listing, and
+  deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
+
+### Changed
+
+- Updated all the services to use the new `SOXRStreamAudioResampler`, ensuring smooth
+  transitions and eliminating clicks.
+
+- Upgraded `daily-python` to 0.19.4.
+
+- Updated `google` optional dependency to use `google-genai` version `1.24.0`.
+
 ### Fixed
 
+- Fixed an issue where audio would get stuck in the queue when an interrupt occurs
+  during Azure TTS synthesis.
+
+- Fixed a race condition that occurs in Python 3.10+ where the task could miss
+  the `CancelledError` and continue running indefinitely, freezing the pipeline.
+
 - Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.
+
+### Deprecated
+
+- In `FishAudioTTSService`, deprecated `model` and replaced with
+  `reference_id`. This change is to better align with Fish Audio's variable
+  naming and to reduce confusion about what functionality the variable
+  controls.
 
 ## [0.0.73] - 2025-06-26
 

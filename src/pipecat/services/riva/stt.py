@@ -314,7 +314,7 @@ class RivaSTTService(STTService):
                     await self.push_frame(
                         TranscriptionFrame(
                             transcript,
-                            "",
+                            self._user_id,
                             time_now_iso8601(),
                             self._language_code,
                             result=result,
@@ -329,7 +329,7 @@ class RivaSTTService(STTService):
                     await self.push_frame(
                         InterimTranscriptionFrame(
                             transcript,
-                            "",
+                            self._user_id,
                             time_now_iso8601(),
                             self._language_code,
                             result=result,
@@ -636,7 +636,10 @@ class RivaSegmentedSTTService(SegmentedSTTService):
                         if text:
                             logger.debug(f"Transcription: [{text}]")
                             yield TranscriptionFrame(
-                                text, "", time_now_iso8601(), self._language_enum
+                                text,
+                                self._user_id,
+                                time_now_iso8601(),
+                                self._language_enum,
                             )
                             transcription_found = True
 
@@ -657,8 +660,9 @@ class RivaSegmentedSTTService(SegmentedSTTService):
 class ParakeetSTTService(RivaSTTService):
     """Deprecated speech-to-text service using NVIDIA Parakeet models.
 
-    This class is deprecated. Use RivaSTTService instead for equivalent functionality
-    with Parakeet models by specifying the appropriate model_function_map.
+    .. deprecated:: 0.0.66
+        This class is deprecated. Use `RivaSTTService` instead for equivalent functionality
+        with Parakeet models by specifying the appropriate model_function_map.
     """
 
     def __init__(

@@ -15,10 +15,12 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 
 
 class UserIdleProcessor(FrameProcessor):
@@ -28,8 +30,8 @@ class UserIdleProcessor(FrameProcessor):
     users become idle. It starts monitoring only after the first conversation
     activity and supports both basic and retry-based callback patterns.
 
-    Example:
-        ```
+    Example::
+
         # Retry callback:
         async def handle_idle(processor: "UserIdleProcessor", retry_count: int) -> bool:
             if retry_count < 3:
@@ -45,7 +47,6 @@ class UserIdleProcessor(FrameProcessor):
             callback=handle_idle,
             timeout=5.0
         )
-        ```
     """
 
     def __init__(
@@ -61,11 +62,10 @@ class UserIdleProcessor(FrameProcessor):
         """Initialize the user idle processor.
 
         Args:
-            callback: Function to call when user is idle. Can be either:
-                - Basic callback(processor) -> None
-                - Retry callback(processor, retry_count) -> bool
-                  Return True to continue monitoring for idle events,
-                  Return False to stop the idle monitoring task
+            callback: Function to call when user is idle. Can be either a basic
+                callback taking only the processor, or a retry callback taking
+                the processor and retry count. Retry callbacks should return
+                True to continue monitoring or False to stop.
             timeout: Seconds to wait before considering user idle.
             **kwargs: Additional arguments passed to FrameProcessor.
         """
@@ -76,7 +76,7 @@ class UserIdleProcessor(FrameProcessor):
         self._interrupted = False
         self._conversation_started = False
         self._idle_task = None
-        self._idle_event = asyncio.Event()
+        self._idle_event = None
 
     def _wrap_callback(
         self,
@@ -135,6 +135,9 @@ class UserIdleProcessor(FrameProcessor):
             direction: Direction of the frame flow.
         """
         await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            self._idle_event = WatchdogEvent(self.task_manager)
 
         # Check for end frames before processing
         if isinstance(frame, (EndFrame, CancelFrame)):

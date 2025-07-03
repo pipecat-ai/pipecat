@@ -282,6 +282,13 @@ class AzureTTSService(AzureBaseTTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
+        # Clear the audio queue in case there's still audio in it, causing the next audio response
+        # to be cut off by the 'None' element returned at the end of the previous audio synthesis.
+        # Empty the audio queue before processing the new text
+        while not self._audio_queue.empty():
+            self._audio_queue.get_nowait()
+            self._audio_queue.task_done()
+
         try:
             if self._speech_synthesizer is None:
                 error_msg = "Speech synthesizer not initialized."

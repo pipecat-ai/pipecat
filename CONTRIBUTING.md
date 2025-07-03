@@ -71,6 +71,28 @@ We follow Google-style docstrings with these specific conventions:
 - Use `Parameters:` section to document each enum value and its meaning
 - No `__init__` docstring (Enums don't have custom constructors)
 
+**Code Examples in Docstrings:**
+
+- Use `Examples:` as a section header for multiple examples
+- Use descriptive text followed by double colons (`::`) for each example
+- **Always include a blank line after the `::"`**
+- Indent all code consistently within each block
+- Separate multiple examples with blank lines for readability
+
+**Lists and Bullets in Docstrings:**
+
+- Use dashes (`-`) for bullet points, not asterisks (`*`)
+- **Add a blank line before bullet lists** when they follow a colon
+- Use section headers like "Supported features:" or "Behavior:" before lists
+- For complex nested information, consider using paragraph format instead
+
+**Deprecations:**
+
+- Use `warnings.warn()` in code for runtime deprecation warnings
+- Add `.. deprecated::` directive in docstrings for documentation visibility
+- Include version information and describe current status
+- Describe parameters in present tense, use directive to indicate deprecation status
+
 #### Examples:
 
 ```python
@@ -80,16 +102,32 @@ class MyService(BaseService):
 
     Provides detailed explanation of the service's functionality,
     key features, and usage patterns.
+
+    Supported features:
+
+    - Feature one with detailed explanation
+    - Feature two with additional context
+    - Feature three for advanced use cases
     """
 
-    def __init__(self, param1: str, param2: bool = True, **kwargs):
+    def __init__(self, param1: str, old_param: str = None, **kwargs):
         """Initialize the service.
 
         Args:
             param1: Description of param1.
-            param2: Description of param2. Defaults to True.
+            old_param: Controls legacy behavior.
+
+                .. deprecated:: 1.2.0
+                    This parameter no longer has any effect and will be removed in version 2.0.
+
             **kwargs: Additional arguments passed to parent.
         """
+        if old_param is not None:
+            import warnings
+            warnings.warn(
+                "Parameter 'old_param' is deprecated and will be removed in version 2.0.",
+                DeprecationWarning,
+            )
         super().__init__(**kwargs)
 
     @property
@@ -112,20 +150,25 @@ class MyService(BaseService):
         """
         pass
 
-# Dataclass
+# Dataclass with code examples
 @dataclass
-class ConfigParams:
-    """Configuration parameters for the service.
+class MessageFrame:
+    """Frame containing messages in OpenAI format.
+
+    Supports both simple and content list message formats.
+
+    Example::
+
+        [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"}
+        ]
 
     Parameters:
-        host: The host address.
-        port: The port number. Defaults to 8080.
-        timeout: Connection timeout in seconds.
+        messages: List of messages in OpenAI format.
     """
 
-    host: str
-    port: int = 8080
-    timeout: float = 30.0
+    messages: List[dict]
 
 # Enum class
 class Status(Enum):

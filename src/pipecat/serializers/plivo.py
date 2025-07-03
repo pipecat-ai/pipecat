@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Plivo WebSocket frame serializer for audio streaming."""
+
 import base64
 import json
 from typing import Optional
@@ -11,7 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.utils import create_default_resampler, pcm_to_ulaw, ulaw_to_pcm
+from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -38,22 +40,12 @@ class PlivoFrameSerializer(FrameSerializer):
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Plivo call when an EndFrame or CancelFrame is processed, but requires Plivo
     credentials to be provided.
-
-    Attributes:
-        _stream_id: The Plivo Stream ID.
-        _call_id: The associated Plivo Call ID.
-        _auth_id: Plivo auth ID for API access.
-        _auth_token: Plivo authentication token for API access.
-        _params: Configuration parameters.
-        _plivo_sample_rate: Sample rate used by Plivo (typically 8kHz).
-        _sample_rate: Input sample rate for the pipeline.
-        _resampler: Audio resampler for format conversion.
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for PlivoFrameSerializer.
 
-        Attributes:
+        Parameters:
             plivo_sample_rate: Sample rate used by Plivo, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             auto_hang_up: Whether to automatically terminate call on EndFrame.
@@ -89,7 +81,8 @@ class PlivoFrameSerializer(FrameSerializer):
         self._plivo_sample_rate = self._params.plivo_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
-        self._resampler = create_default_resampler()
+        self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
 
     @property
@@ -137,7 +130,7 @@ class PlivoFrameSerializer(FrameSerializer):
 
             # Output: Convert PCM at frame's rate to 8kHz μ-law for Plivo
             serialized_data = await pcm_to_ulaw(
-                data, frame.sample_rate, self._plivo_sample_rate, self._resampler
+                data, frame.sample_rate, self._plivo_sample_rate, self._output_resampler
             )
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
@@ -232,7 +225,7 @@ class PlivoFrameSerializer(FrameSerializer):
 
             # Input: Convert Plivo's 8kHz μ-law to PCM at pipeline input rate
             deserialized_data = await ulaw_to_pcm(
-                payload, self._plivo_sample_rate, self._sample_rate, self._resampler
+                payload, self._plivo_sample_rate, self._sample_rate, self._input_resampler
             )
             audio_frame = InputAudioRawFrame(
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate

@@ -189,6 +189,9 @@ class GladiaSTTService(STTService):
     Provides automatic reconnection, audio buffering, and comprehensive error handling.
 
     For complete API documentation, see: https://docs.gladia.io/api-reference/v2/live/init
+
+    .. deprecated:: 0.0.62
+        Use :class:`~pipecat.services.gladia.config.GladiaInputParams` directly instead.
     """
 
     # Maintain backward compatibility
@@ -567,7 +570,7 @@ class GladiaSTTService(STTService):
                             await self.push_frame(
                                 TranscriptionFrame(
                                     transcript,
-                                    "",
+                                    self._user_id,
                                     time_now_iso8601(),
                                     language,
                                     result=content,
@@ -582,7 +585,7 @@ class GladiaSTTService(STTService):
                             await self.push_frame(
                                 InterimTranscriptionFrame(
                                     transcript,
-                                    "",
+                                    self._user_id,
                                     time_now_iso8601(),
                                     language,
                                     result=content,

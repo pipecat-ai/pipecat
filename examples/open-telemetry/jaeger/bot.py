@@ -24,6 +24,7 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 from pipecat.utils.tracing.setup import setup_tracing
 
@@ -61,7 +62,7 @@ transport_params = {
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
     ),
-    "twilio": lambda: TransportParams(
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),

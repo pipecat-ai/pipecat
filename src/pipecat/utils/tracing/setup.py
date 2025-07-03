@@ -4,7 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Core OpenTelemetry tracing utilities and setup for Pipecat."""
+"""Core OpenTelemetry tracing utilities and setup for Pipecat.
+
+This module provides functions to check availability and configure OpenTelemetry
+tracing for Pipecat applications. It handles the optional nature of OpenTelemetry
+dependencies and provides a safe setup process.
+"""
 
 import os
 
@@ -21,10 +26,10 @@ except ImportError:
 
 
 def is_tracing_available() -> bool:
-    """Returns True if OpenTelemetry tracing is available and configured.
+    """Check if OpenTelemetry tracing is available and configured.
 
     Returns:
-        bool: True if tracing is available, False otherwise.
+        True if tracing is available, False otherwise.
     """
     return OPENTELEMETRY_AVAILABLE
 
@@ -37,15 +42,16 @@ def setup_tracing(
     """Set up OpenTelemetry tracing with a user-provided exporter.
 
     Args:
-        service_name: The name of the service for traces
+        service_name: The name of the service for traces.
         exporter: A pre-configured OpenTelemetry span exporter instance.
                   If None, only console export will be available if enabled.
-        console_export: Whether to also export traces to console (useful for debugging)
+        console_export: Whether to also export traces to console (useful for debugging).
 
     Returns:
-        bool: True if setup was successful, False otherwise
+        True if setup was successful, False otherwise.
 
-    Example:
+    Example::
+
         # With OTLP exporter
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 

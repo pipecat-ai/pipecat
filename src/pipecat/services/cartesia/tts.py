@@ -98,7 +98,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
         Parameters:
             language: Language to use for synthesis.
             speed: Voice speed control (string or float).
-            emotion: List of emotion controls (deprecated).
+            emotion: List of emotion controls.
+
+                .. deprecated:: 0.0.68
+                        The `emotion` parameter is deprecated and will be removed in a future version.
         """
 
         language: Optional[Language] = Language.EN
@@ -414,7 +417,10 @@ class CartesiaHttpTTSService(TTSService):
         Parameters:
             language: Language to use for synthesis.
             speed: Voice speed control (string or float).
-            emotion: List of emotion controls (deprecated).
+            emotion: List of emotion controls.
+
+                .. deprecated:: 0.0.68
+                        The `emotion` parameter is deprecated and will be removed in a future version.
         """
 
         language: Optional[Language] = Language.EN

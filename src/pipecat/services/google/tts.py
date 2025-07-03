@@ -471,8 +471,8 @@ class GoogleTTSService(TTSService):
         default application credentials (GOOGLE_APPLICATION_CREDENTIALS env var).
         Only Chirp 3 HD and Journey voices are supported. Use GoogleHttpTTSService for other voices.
 
-    Example:
-        ```python
+    Example::
+
         tts = GoogleTTSService(
             credentials_path="/path/to/service-account.json",
             voice_id="en-US-Chirp3-HD-Charon",
@@ -480,7 +480,6 @@ class GoogleTTSService(TTSService):
                 language=Language.EN_US,
             )
         )
-        ```
     """
 
     class InputParams(BaseModel):
