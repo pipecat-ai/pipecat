@@ -28,7 +28,6 @@ class ChatbotClient {
     // Initialize client state
     this.rtviClient = null;
     this.setupDOMElements();
-    this.setupEventListeners();
     this.initializeClientAndTransport();
   }
 
@@ -42,6 +41,7 @@ class ChatbotClient {
     this.statusSpan = document.getElementById('connection-status');
     this.debugLog = document.getElementById('debug-log');
     this.botVideoContainer = document.getElementById('bot-video-container');
+    this.deviceSelector = document.getElementById('device-selector');
 
     // Create an audio element for bot's voice output
     this.botAudio = document.createElement('audio');
@@ -56,12 +56,37 @@ class ChatbotClient {
   setupEventListeners() {
     this.connectBtn.addEventListener('click', () => this.connect());
     this.disconnectBtn.addEventListener('click', () => this.disconnect());
+
+    // Populate device selector
+    this.rtviClient.getAllMics().then((mics) => {
+      console.log('Available mics:', mics);
+      mics.forEach((device) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `Microphone ${device.deviceId}`;
+        this.deviceSelector.appendChild(option);
+      });
+    });
+    this.deviceSelector.addEventListener('change', (event) => {
+      const selectedDeviceId = event.target.value;
+      console.log('Selected device ID:', selectedDeviceId);
+      this.rtviClient.updateMic(selectedDeviceId);
+    });
+
+    // Handle mic mute/unmute toggle
+    const micToggleBtn = document.getElementById('mic-toggle-btn');
+
+    micToggleBtn.addEventListener('click', () => {
+      let micEnabled = this.rtviClient.isMicEnabled;
+      micToggleBtn.textContent = micEnabled ? 'Unmute Mic' : 'Mute Mic';
+      this.rtviClient.enableMic(!micEnabled);
+    });
   }
 
   /**
    * Set up the RTVI client and Daily transport
    */
-  initializeClientAndTransport() {
+  async initializeClientAndTransport() {
     // Initialize the RTVI client with a DailyTransport and our configuration
     this.rtviClient = new RTVIClient({
       transport: new DailyTransport(),
@@ -121,14 +146,22 @@ class ChatbotClient {
         onMessageError: (error) => {
           console.log('Message error:', error);
         },
+        onMicUpdated: (data) => {
+          console.log('Mic updated:', data);
+          this.deviceSelector.value = data.deviceId;
+        },
         onError: (error) => {
           console.log('Error:', JSON.stringify(error));
         },
       },
     });
+    window.client = this; // Expose client globally for debugging
 
     // Set up listeners for media track events
     this.setupTrackListeners();
+
+    await this.rtviClient.initDevices();
+    this.setupEventListeners();
   }
 
   /**
