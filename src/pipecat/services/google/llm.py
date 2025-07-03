@@ -67,8 +67,8 @@ try:
         Content,
         FunctionCall,
         FunctionResponse,
-        HttpOptions,
         GenerateContentConfig,
+        HttpOptions,
         Part,
     )
 except ModuleNotFoundError as e:
@@ -723,7 +723,7 @@ class GoogleLLMService(LLMService):
 
     def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
         self._client = genai.Client(api_key=api_key, http_options=http_options)
-    
+
     def needs_mcp_alternate_schema(self) -> bool:
         """Check if this LLM service requires alternate MCP schema.
 
