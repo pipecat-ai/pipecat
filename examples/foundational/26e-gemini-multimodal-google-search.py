@@ -55,7 +55,7 @@ transport_params = {
         # endpointing, for now.
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.5)),
     ),
-    "twilio": lambda: TransportParams(
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         # set stop_secs to something roughly similar to the internal setting
