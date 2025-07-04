@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the case where the user has hung up before the `TwilioFrameSerializer` hangs
   up the call.
 
+### Changed
+
+- The `UserIdleProcessor` now handles the scenario where function calls take
+  longer than the idle timeout duration. This allows you to use the
+  `UserIdleProcessor` in conjunction with function calls that take a while to
+  return a result.
+
 ### Performance
 
 - Remove unncessary push task in each `FrameProcessor`.

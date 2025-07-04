@@ -15,6 +15,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -167,6 +169,13 @@ class UserIdleProcessor(FrameProcessor):
                 self._interrupted = False
                 self._idle_event.set()
             elif isinstance(frame, BotSpeakingFrame):
+                self._idle_event.set()
+            elif isinstance(frame, FunctionCallInProgressFrame):
+                # Function calls can take longer than the timeout, so we want to prevent idle callbacks
+                self._interrupted = True
+                self._idle_event.set()
+            elif isinstance(frame, FunctionCallResultFrame):
+                self._interrupted = False
                 self._idle_event.set()
 
     async def cleanup(self) -> None:
