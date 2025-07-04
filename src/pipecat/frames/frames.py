@@ -1177,7 +1177,7 @@ class StopFrame(ControlFrame):
 
 
 @dataclass
-class HeartbeatFrame(ControlFrame):
+class HeartbeatFrame(SystemFrame):
     """Frame used by pipeline task to monitor pipeline health.
 
     This frame is used by the pipeline task as a mechanism to know if the

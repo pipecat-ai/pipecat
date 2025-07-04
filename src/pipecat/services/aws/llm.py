@@ -55,7 +55,7 @@ from pipecat.services.llm_service import LLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
-    import boto3
+    import aioboto3
     import httpx
     from botocore.config import Config
 except ModuleNotFoundError as e:
@@ -749,13 +749,17 @@ class AWSBedrockLLMService(LLMService):
                 read_timeout=300,  # 5 minutes
                 retries={"max_attempts": 3},
             )
-        session = boto3.Session(
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
-            aws_session_token=aws_session_token,
-            region_name=aws_region,
-        )
-        self._client = session.client(service_name="bedrock-runtime", config=client_config)
+
+        self._aws_session = aioboto3.Session()
+
+        # Store AWS session parameters for creating client in async context
+        self._aws_params = {
+            "aws_access_key_id": aws_access_key,
+            "aws_secret_access_key": aws_secret_key,
+            "aws_session_token": aws_session_token,
+            "region_name": aws_region,
+            "config": client_config,
+        }
 
         self.set_model_name(model)
         self._settings = {
@@ -903,70 +907,74 @@ class AWSBedrockLLMService(LLMService):
 
             logger.debug(f"Calling AWS Bedrock model with: {request_params}")
 
-            # Call AWS Bedrock with streaming
-            response = self._client.converse_stream(**request_params)
+            async with self._aws_session.client(
+                service_name="bedrock-runtime", **self._aws_params
+            ) as client:
+                # Call AWS Bedrock with streaming
+                response = await client.converse_stream(**request_params)
 
-            await self.stop_ttfb_metrics()
+                await self.stop_ttfb_metrics()
 
-            # Process the streaming response
-            tool_use_block = None
-            json_accumulator = ""
+                # Process the streaming response
+                tool_use_block = None
+                json_accumulator = ""
 
-            function_calls = []
-            for event in response["stream"]:
-                self.reset_watchdog()
+                function_calls = []
 
-                # Handle text content
-                if "contentBlockDelta" in event:
-                    delta = event["contentBlockDelta"]["delta"]
-                    if "text" in delta:
-                        await self.push_frame(LLMTextFrame(delta["text"]))
-                        completion_tokens_estimate += self._estimate_tokens(delta["text"])
-                    elif "toolUse" in delta and "input" in delta["toolUse"]:
-                        # Handle partial JSON for tool use
-                        json_accumulator += delta["toolUse"]["input"]
-                        completion_tokens_estimate += self._estimate_tokens(
-                            delta["toolUse"]["input"]
-                        )
+                async for event in response["stream"]:
+                    self.reset_watchdog()
 
-                # Handle tool use start
-                elif "contentBlockStart" in event:
-                    content_block_start = event["contentBlockStart"]["start"]
-                    if "toolUse" in content_block_start:
-                        tool_use_block = {
-                            "id": content_block_start["toolUse"].get("toolUseId", ""),
-                            "name": content_block_start["toolUse"].get("name", ""),
-                        }
-                        json_accumulator = ""
+                    # Handle text content
+                    if "contentBlockDelta" in event:
+                        delta = event["contentBlockDelta"]["delta"]
+                        if "text" in delta:
+                            await self.push_frame(LLMTextFrame(delta["text"]))
+                            completion_tokens_estimate += self._estimate_tokens(delta["text"])
+                        elif "toolUse" in delta and "input" in delta["toolUse"]:
+                            # Handle partial JSON for tool use
+                            json_accumulator += delta["toolUse"]["input"]
+                            completion_tokens_estimate += self._estimate_tokens(
+                                delta["toolUse"]["input"]
+                            )
 
-                # Handle message completion with tool use
-                elif "messageStop" in event and "stopReason" in event["messageStop"]:
-                    if event["messageStop"]["stopReason"] == "tool_use" and tool_use_block:
-                        try:
-                            arguments = json.loads(json_accumulator) if json_accumulator else {}
+                    # Handle tool use start
+                    elif "contentBlockStart" in event:
+                        content_block_start = event["contentBlockStart"]["start"]
+                        if "toolUse" in content_block_start:
+                            tool_use_block = {
+                                "id": content_block_start["toolUse"].get("toolUseId", ""),
+                                "name": content_block_start["toolUse"].get("name", ""),
+                            }
+                            json_accumulator = ""
 
-                            # Only call function if it's not the no_operation tool
-                            if not using_noop_tool:
-                                function_calls.append(
-                                    FunctionCallFromLLM(
-                                        context=context,
-                                        tool_call_id=tool_use_block["id"],
-                                        function_name=tool_use_block["name"],
-                                        arguments=arguments,
+                    # Handle message completion with tool use
+                    elif "messageStop" in event and "stopReason" in event["messageStop"]:
+                        if event["messageStop"]["stopReason"] == "tool_use" and tool_use_block:
+                            try:
+                                arguments = json.loads(json_accumulator) if json_accumulator else {}
+
+                                # Only call function if it's not the no_operation tool
+                                if not using_noop_tool:
+                                    function_calls.append(
+                                        FunctionCallFromLLM(
+                                            context=context,
+                                            tool_call_id=tool_use_block["id"],
+                                            function_name=tool_use_block["name"],
+                                            arguments=arguments,
+                                        )
                                     )
-                                )
-                            else:
-                                logger.debug("Ignoring no_operation tool call")
-                        except json.JSONDecodeError:
-                            logger.error(f"Failed to parse tool arguments: {json_accumulator}")
+                                else:
+                                    logger.debug("Ignoring no_operation tool call")
+                            except json.JSONDecodeError:
+                                logger.error(f"Failed to parse tool arguments: {json_accumulator}")
 
-                # Handle usage metrics if available
-                if "metadata" in event and "usage" in event["metadata"]:
-                    usage = event["metadata"]["usage"]
-                    prompt_tokens += usage.get("inputTokens", 0)
-                    completion_tokens += usage.get("outputTokens", 0)
-                    cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
-                    cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
+                    # Handle usage metrics if available
+                    if "metadata" in event and "usage" in event["metadata"]:
+                        usage = event["metadata"]["usage"]
+                        prompt_tokens += usage.get("inputTokens", 0)
+                        completion_tokens += usage.get("outputTokens", 0)
+                        cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
+                        cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
 
             await self.run_function_calls(function_calls)
         except asyncio.CancelledError:

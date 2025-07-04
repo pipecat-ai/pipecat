@@ -13,6 +13,10 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import (
+    HeartbeatFrame,
+)
+from pipecat.observers.loggers.debug_log_observer import DebugLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -136,7 +140,15 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
+            enable_heartbeats=True,
         ),
+        observers=[
+            DebugLogObserver(
+                frame_types={
+                    HeartbeatFrame: None,
+                }
+            ),
+        ],
     )
 
     @transport.event_handler("on_client_connected")
