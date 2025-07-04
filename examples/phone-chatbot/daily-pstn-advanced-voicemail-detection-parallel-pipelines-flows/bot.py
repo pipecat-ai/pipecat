@@ -13,7 +13,15 @@ import time
 
 from dotenv import load_dotenv
 from loguru import logger
-from pipecat_flows import FlowArgs, FlowManager, FlowResult, FlowsFunctionSchema, NodeConfig
+from pipecat_flows import (
+    ContextStrategy,
+    ContextStrategyConfig,
+    FlowArgs,
+    FlowManager,
+    FlowResult,
+    FlowsFunctionSchema,
+    NodeConfig,
+)
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
@@ -86,44 +94,45 @@ class EndConversationResult(FlowResult):
     status: str
 
 
-# Flow function handlers
-async def handle_greeting(args: FlowArgs, flow_manager: FlowManager) -> tuple[GreetingResult, str]:
+# Flow function handlers - updated to return (result, next_node) tuple
+async def handle_greeting(
+    args: FlowArgs, flow_manager: FlowManager
+) -> tuple[GreetingResult, NodeConfig]:
     """Handle initial greeting to human."""
     logger.debug("handle_greeting executing")
 
     result = GreetingResult(greeting_complete=True)
 
-    # Set up the conversation node dynamically
-    await flow_manager.set_node("conversation", create_conversation_node())
-
-    return result, "conversation"
+    # Return the next node config directly instead of using set_node
+    next_node = create_conversation_node()
+    return result, next_node
 
 
 async def handle_conversation(
     args: FlowArgs, flow_manager: FlowManager
-) -> tuple[ConversationResult, str]:
+) -> tuple[ConversationResult, NodeConfig]:
     """Handle ongoing conversation with human."""
     message = args.get("message", "")
     logger.debug(f"handle_conversation executing with message: {message}")
 
     result = ConversationResult(message=message)
 
-    # Continue with the same conversation node for ongoing chat
-    return result, "conversation"
+    # Return the same conversation node to continue the chat
+    next_node = create_conversation_node()
+    return result, next_node
 
 
 async def handle_end_conversation(
     args: FlowArgs, flow_manager: FlowManager
-) -> tuple[EndConversationResult, str]:
+) -> tuple[EndConversationResult, NodeConfig]:
     """Handle ending the conversation."""
     logger.debug("handle_end_conversation executing")
 
     result = EndConversationResult(status="completed")
 
-    # Set up the end node dynamically
-    await flow_manager.set_node("end", create_end_node())
-
-    return result, "end"
+    # Return the end node config directly
+    next_node = create_end_node()
+    return result, next_node
 
 
 # Node configurations for human conversation flow
@@ -134,22 +143,15 @@ def create_greeting_node() -> NodeConfig:
         "role_messages": [
             {
                 "role": "system",
-                "content": (
-                    """You are a friendly chatbot. Your responses will be
+                "content": """You are a friendly chatbot. Your responses will be
                     converted to audio, so avoid special characters.
-                    Be conversational and helpful."""
-                ),
+                    Be conversational and helpful. Please only say 'This is virtual agent John - Am I speaking to Tim?' once at the start of the conversation.""",
             }
         ],
         "task_messages": [
             {
                 "role": "system",
-                "content": (
-                    "The user has been detected as a human (not a voicemail system). "
-                    "Respond naturally to what they say. Listen to their input and respond appropriately. "
-                    "If they seem to be greeting you or asking if someone is there, greet them warmly. "
-                    "After responding to their input, call handle_greeting to proceed to the main conversation."
-                ),
+                "content": """Please say 'This is virtual agent John - Am I speaking to Tim?""",
             }
         ],
         "functions": [
@@ -251,6 +253,31 @@ class VoicemailDetectionObserver(BaseObserver):
                 self._voicemail_speaking = diff_time < self._timeout
             if self._voicemail_speaking:
                 await asyncio.sleep(0.5)
+
+
+class BlockAudioFrames(FrameProcessor):
+    """Blocks audio frames from being processed further, conditionally based on mode."""
+
+    def __init__(self, mode_checker):
+        super().__init__()
+        self._mode_checker = mode_checker
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # Block audio frames based on current mode
+        if isinstance(frame, InputAudioRawFrame):
+            current_mode = self._mode_checker()
+            if current_mode == MUTE_MODE:
+                return  # Do not push audio frames in MUTE_MODE
+            if current_mode == VOICEMAIL_MODE:
+                return  # Do not push audio frames in VOICEMAIL_MODE
+            if current_mode == HUMAN_MODE:
+                await self.push_frame(frame, direction)
+                return
+
+        # Pass all other frames through
+        await self.push_frame(frame, direction)
 
 
 class OutputGate(FrameProcessor):
@@ -415,7 +442,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             is_voicemail = False
 
             await human_notifier.notify()
-            await flow_manager.initialize()
+            await flow_manager.initialize(create_greeting_node())
 
         await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
 
@@ -538,23 +565,9 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     human_llm = GoogleLLMService(
         model="models/gemini-2.0-flash-001",
         api_key=os.getenv("GOOGLE_API_KEY"),
-        # system_instruction="""You are Chatbot talking to a human. Be friendly and helpful.
-        # Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
-        # Keep your responses brief and to the point. Listen to what the person says.
-        # If the user asks you to check the context, call the function `context_check`.
-        # When the person indicates they're done with the conversation by saying something like:
-        # - "Goodbye"
-        # - "That's all"
-        # - "I'm done"
-        # - "Thank you, that's all I needed"
-        # THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function.""",
-        # tools=human_tools,
     )
 
     # ------------ CONTEXTS & FUNCTIONS ------------
-
-    # context = GoogleLLMContext()
-    # context_aggregator = detection_llm.create_context_aggregator(context)
 
     detection_context = GoogleLLMContext()
     detection_context_aggregator = detection_llm.create_context_aggregator(detection_context)
@@ -569,8 +582,13 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
 
     # ------------ PROCESSORS ------------
 
+    def get_current_mode():
+        """Get the current conversation mode."""
+        return current_mode
+
     audio_collector = UserAudioCollector(detection_context, detection_context_aggregator.user())
     human_gate = OutputGate(human_notifier, start_open=False)
+    block_audio_frames = BlockAudioFrames(get_current_mode)
 
     # Filter functions
     async def voicemail_filter(frame) -> bool:
@@ -590,15 +608,17 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                     audio_collector,
                     detection_context_aggregator.user(),
                     detection_llm,
-                    voicemail_tts,
                     FunctionFilter(voicemail_filter),
                 ],
-                # Human conversation branch
+                [voicemail_tts],
                 [
+                    # Human conversation branch
+                    # input_audio_gate,
+                    block_audio_frames,
                     stt,
                     human_context_aggregator.user(),
                     human_llm,
-                    human_gate,
+                    # human_gate,
                     human_tts,
                     FunctionFilter(human_filter),
                     human_context_aggregator.assistant(),
