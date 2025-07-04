@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added call hang-up error handling in `TwilioFrameSerializer`, which handles
+  the case where the user has hung up before the `TwilioFrameSerializer` hangs
+  up the call.
+
 ### Performance
 
 - Remove unncessary push task in each `FrameProcessor`.
