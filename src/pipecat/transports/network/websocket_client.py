@@ -333,7 +333,7 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
 
         self._initialized = True
 
-        self._send_interval = self._params.audio_out_10ms_chunks * 10 / 1000 # ms
+        self._send_interval = self._params.audio_out_10ms_chunks * 10 / 1000 # seconds
         if self._params.serializer:
             await self._params.serializer.setup(frame)
         await self._session.connect()

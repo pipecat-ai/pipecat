@@ -297,7 +297,7 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         if self._params.serializer:
             await self._params.serializer.setup(frame)
-        self._send_interval = self._params.audio_out_10ms_chunks * 10 / 1000 # ms
+        self._send_interval = self._params.audio_out_10ms_chunks * 10 / 1000 # seconds
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
