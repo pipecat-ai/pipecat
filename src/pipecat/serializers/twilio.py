@@ -185,8 +185,26 @@ class TwilioFrameSerializer(FrameSerializer):
                 async with session.post(endpoint, auth=auth, data=params) as response:
                     if response.status == 200:
                         logger.info(f"Successfully terminated Twilio call {call_sid}")
+                    elif response.status == 404:
+                        # Handle the case where the call has already ended
+                        # Error code 20404: "The requested resource was not found"
+                        # Source: https://www.twilio.com/docs/errors/20404
+                        try:
+                            error_data = await response.json()
+                            if error_data.get("code") == 20404:
+                                logger.debug(f"Twilio call {call_sid} was already terminated")
+                                return
+                        except:
+                            pass  # Fall through to log the raw error
+
+                        # Log other 404 errors
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to terminate Twilio call {call_sid}: "
+                            f"Status {response.status}, Response: {error_text}"
+                        )
                     else:
-                        # Get the error details for better debugging
+                        # Log other errors
                         error_text = await response.text()
                         logger.error(
                             f"Failed to terminate Twilio call {call_sid}: "
