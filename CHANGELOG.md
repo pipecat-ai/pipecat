@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `kwargs` to the `OLLamaLLMService` to allow for configuration args to
+  be passed to Ollama.
+
 - Added call hang-up error handling in `TwilioFrameSerializer`, which handles
   the case where the user has hung up before the `TwilioFrameSerializer` hangs
   up the call.
