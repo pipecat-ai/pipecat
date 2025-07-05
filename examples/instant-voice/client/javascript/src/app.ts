@@ -5,7 +5,7 @@
  */
 
 /**
- * RTVI Client Implementation
+ * Pipecat Client Implementation
  *
  * This client connects to an RTVI-compatible bot server using WebRTC (via Daily).
  * It handles audio/video streaming and manages the connection lifecycle.
@@ -18,20 +18,22 @@
 
 import {
   Participant,
-  RTVIClient,
-  RTVIClientOptions,
+  PipecatClient,
+  PipecatClientOptions,
   RTVIEvent,
 } from '@pipecat-ai/client-js';
-import { DailyTransport } from '@pipecat-ai/daily-transport';
+import {
+  DailyEventCallbacks,
+  DailyTransport,
+} from '@pipecat-ai/daily-transport';
 import SoundUtils from './util/soundUtils';
-import { InstantVoiceHelper } from './util/instantVoiceHelper';
 
 /**
  * InstantVoiceClient handles the connection and media management for a real-time
  * voice and video interaction with an AI bot.
  */
 class InstantVoiceClient {
-  private declare rtviClient: RTVIClient;
+  private declare pcClient: PipecatClient;
   private connectBtn: HTMLButtonElement | null = null;
   private disconnectBtn: HTMLButtonElement | null = null;
   private statusSpan: HTMLElement | null = null;
@@ -46,7 +48,7 @@ class InstantVoiceClient {
     document.body.appendChild(this.botAudio);
     this.setupDOMElements();
     this.setupEventListeners();
-    this.initializeRTVIClient();
+    this.initializePipecatClient();
   }
 
   /**
@@ -72,16 +74,11 @@ class InstantVoiceClient {
     this.disconnectBtn?.addEventListener('click', () => this.disconnect());
   }
 
-  private initializeRTVIClient(): void {
-    const RTVIConfig: RTVIClientOptions = {
+  private initializePipecatClient(): void {
+    const PipecatConfig: PipecatClientOptions = {
       transport: new DailyTransport({
         bufferLocalAudioUntilBotReady: true,
       }),
-      params: {
-        // The baseURL and endpoint of your bot server that the client will connect to
-        baseUrl: 'http://localhost:7860',
-        endpoints: { connect: '/connect' },
-      },
       enableMic: true,
       enableCam: false,
       callbacks: {
@@ -113,30 +110,23 @@ class InstantVoiceClient {
         onBotTranscript: (data) => this.log(`Bot: ${data.text}`),
         onMessageError: (error) => console.error('Message error:', error),
         onError: (error) => console.error('Error:', error),
-      },
+        onAudioBufferingStarted: () => {
+          SoundUtils.beep();
+          this.updateBufferingStatus('Yes');
+          this.log(
+            `onMicCaptureStarted, timeTaken: ${Date.now() - this.startTime}`
+          );
+        },
+        onAudioBufferingStopped: () => {
+          this.updateBufferingStatus('No');
+          this.log(
+            `onMicCaptureStopped, timeTaken: ${Date.now() - this.startTime}`
+          );
+        },
+      } as DailyEventCallbacks,
     };
 
-    this.rtviClient = new RTVIClient(RTVIConfig);
-    this.rtviClient.registerHelper(
-      'transport',
-      new InstantVoiceHelper({
-        callbacks: {
-          onAudioBufferingStarted: () => {
-            SoundUtils.beep();
-            this.updateBufferingStatus('Yes');
-            this.log(
-              `onMicCaptureStarted, timeTaken: ${Date.now() - this.startTime}`
-            );
-          },
-          onAudioBufferingStopped: () => {
-            this.updateBufferingStatus('No');
-            this.log(
-              `onMicCaptureStopped, timeTaken: ${Date.now() - this.startTime}`
-            );
-          },
-        },
-      })
-    );
+    this.pcClient = new PipecatClient(PipecatConfig);
     this.setupTrackListeners();
   }
 
@@ -182,8 +172,8 @@ class InstantVoiceClient {
    * This is called when the bot is ready or when the transport state changes to ready
    */
   setupMediaTracks() {
-    if (!this.rtviClient) return;
-    const tracks = this.rtviClient.tracks();
+    if (!this.pcClient) return;
+    const tracks = this.pcClient.tracks();
     if (tracks.bot?.audio) {
       this.setupAudioTrack(tracks.bot.audio);
     }
@@ -194,10 +184,10 @@ class InstantVoiceClient {
    * This handles new tracks being added during the session
    */
   setupTrackListeners() {
-    if (!this.rtviClient) return;
+    if (!this.pcClient) return;
 
     // Listen for new tracks starting
-    this.rtviClient.on(RTVIEvent.TrackStarted, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStarted, (track, participant) => {
       // Only handle non-local (bot) tracks
       if (!participant?.local && track.kind === 'audio') {
         this.setupAudioTrack(track);
@@ -205,7 +195,7 @@ class InstantVoiceClient {
     });
 
     // Listen for tracks stopping
-    this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
+    this.pcClient.on(RTVIEvent.TrackStopped, (track, participant) => {
       this.log(
         `Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`
       );
@@ -230,22 +220,25 @@ class InstantVoiceClient {
 
   /**
    * Initialize and connect to the bot
-   * This sets up the RTVI client, initializes devices, and establishes the connection
+   * This sets up the Pipecat client, initializes devices, and establishes the connection
    */
   public async connect(): Promise<void> {
     try {
       this.startTime = Date.now();
       this.log('Connecting to bot...');
-      await this.rtviClient.connect();
+      await this.pcClient.connect({
+        // The baseURL and endpoint of your bot server that the client will connect to
+        endpoint: 'http://localhost:7860/connect',
+      });
     } catch (error) {
       this.log(`Error connecting: ${(error as Error).message}`);
       this.updateStatus('Error');
       this.updateBufferingStatus('No');
 
       // Clean up if there's an error
-      if (this.rtviClient) {
+      if (this.pcClient) {
         try {
-          await this.rtviClient.disconnect();
+          await this.pcClient.disconnect();
         } catch (disconnectError) {
           this.log(`Error during disconnect: ${disconnectError}`);
         }
@@ -258,7 +251,7 @@ class InstantVoiceClient {
    */
   public async disconnect(): Promise<void> {
     try {
-      await this.rtviClient.disconnect();
+      await this.pcClient.disconnect();
       if (
         this.botAudio.srcObject &&
         'getAudioTracks' in this.botAudio.srcObject
