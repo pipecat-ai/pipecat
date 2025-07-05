@@ -113,7 +113,11 @@ class BaseOutputTransport(FrameProcessor):
         # We will write 10ms*CHUNKS of audio at a time (where CHUNKS is the
         # `audio_out_10ms_chunks` parameter). If we receive long audio frames we
         # will chunk them. This will help with interruption handling.
-        audio_bytes_10ms = int(self._sample_rate / 100) * self._params.audio_out_channels * 2
+        audio_bytes_10ms = (
+            int(self._sample_rate / 100)
+            * self._params.audio_out_channels
+            * self._params.audio_out_bytes_per_sample
+        )
         self._audio_chunk_size = audio_bytes_10ms * self._params.audio_out_10ms_chunks
 
     async def stop(self, frame: EndFrame):

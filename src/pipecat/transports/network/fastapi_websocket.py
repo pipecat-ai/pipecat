@@ -357,7 +357,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         await self._client.setup(frame)
         if self._params.serializer:
             await self._params.serializer.setup(frame)
-        self._send_interval = (self.audio_chunk_size / self.sample_rate) / 2
+        self._send_interval = self._params.audio_out_10ms_chunks * 10 / 1000 # seconds
         await self.set_transport_ready(frame)
 
     async def stop(self, frame: EndFrame):
