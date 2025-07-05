@@ -192,6 +192,14 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
 
 if __name__ == "__main__":
+    if not os.getenv("NASA_API_KEY"):
+        logger.error(
+            f"Please set NASA_API_KEY environment variable for this example. See https://api.nasa.gov"
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)
