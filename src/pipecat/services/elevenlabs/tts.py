@@ -238,6 +238,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
+        aggregate_sentences: Optional[bool] = True,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -249,6 +250,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
+            aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
         """
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -266,7 +268,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         # speaking for a while, so we want the parent class to send TTSStopFrame
         # after a short period not receiving any audio.
         super().__init__(
-            aggregate_sentences=True,
+            aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
