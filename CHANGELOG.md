@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an `aggregate_sentences` arg in `CartesiaTTSService`,
+  `ElevenLabsTTSService`, `NeuphonicTTSService` and `RimeTTSService`, where the
+  default value is True. When `aggregate_sentences` is True, the `TTSService`
+  aggregates the LLM streamed tokens into sentences by default. Note: setting
+  the value to False requires a custom processor before the `TTSService` to
+  aggregate LLM tokens.
+
 - Added call hang-up error handling in `TwilioFrameSerializer`, which handles
   the case where the user has hung up before the `TwilioFrameSerializer` hangs
   up the call.

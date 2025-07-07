@@ -110,6 +110,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
         params: Optional[InputParams] = None,
+        aggregate_sentences: Optional[bool] = True,
         **kwargs,
     ):
         """Initialize the Neuphonic TTS service.
@@ -121,10 +122,11 @@ class NeuphonicTTSService(InterruptibleTTSService):
             sample_rate: Audio sample rate in Hz. Defaults to 22050.
             encoding: Audio encoding format. Defaults to "pcm_linear".
             params: Additional input parameters for TTS configuration.
+            aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
         super().__init__(
-            aggregate_sentences=True,
+            aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
             stop_frame_timeout_s=2.0,
