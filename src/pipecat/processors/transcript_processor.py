@@ -10,6 +10,7 @@ This module provides processors that convert speech and text frames into structu
 transcript messages with timestamps, enabling conversation history tracking and analysis.
 """
 
+import json
 from typing import List, Optional
 
 from loguru import logger
@@ -19,6 +20,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallResultFrame,
     StartInterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
@@ -217,6 +219,30 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
             await self.push_frame(frame, direction)
 
 
+class ToolResultProcessor(BaseTranscriptProcessor):
+    """Processes tool result frames into timestamped conversation messages."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        """Process FunctionCallResultFrames into tool result conversation messages."""
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, FunctionCallResultFrame):
+            content = json.dumps(
+                dict(
+                    function_name=frame.function_name,
+                    tool_call_id=frame.tool_call_id,
+                    arguments=frame.arguments,
+                    result=frame.result,
+                )
+            )
+            message = TranscriptionMessage(
+                role="tool", content=content, timestamp=time_now_iso8601()
+            )
+            await self._emit_update([message])
+
+        await self.push_frame(frame, direction)
+
+
 class TranscriptProcessor:
     """Factory for creating and managing transcript processors.
 
@@ -234,6 +260,7 @@ class TranscriptProcessor:
                 transcript.user(),              # User transcripts
                 context_aggregator.user(),
                 llm,
+                transcript.tool(),              # Tool result transcripts
                 tts,
                 transport.output(),
                 transcript.assistant_tts(),     # Assistant transcripts
@@ -250,6 +277,7 @@ class TranscriptProcessor:
         """Initialize factory."""
         self._user_processor = None
         self._assistant_processor = None
+        self._tool_result_processor = None
         self._event_handlers = {}
 
     def user(self, **kwargs) -> UserTranscriptProcessor:
@@ -292,6 +320,26 @@ class TranscriptProcessor:
 
         return self._assistant_processor
 
+    def tool(self, **kwargs) -> ToolResultProcessor:
+        """Get the tool result transcript processor.
+
+        Args:
+            **kwargs: Arguments specific to ToolResultProcessor
+
+        Returns:
+            The tool result transcript processor instance.
+        """
+        if self._tool_result_processor is None:
+            self._tool_result_processor = ToolResultProcessor(**kwargs)
+            # Apply any registered event handlers
+            for event_name, handler in self._event_handlers.items():
+
+                @self._tool_result_processor.event_handler(event_name)
+                async def tool_handler(processor, frame):
+                    return await handler(processor, frame)
+
+        return self._tool_result_processor
+
     def event_handler(self, event_name: str):
         """Register event handler for both processors.
 
@@ -316,6 +364,12 @@ class TranscriptProcessor:
 
                 @self._assistant_processor.event_handler(event_name)
                 async def assistant_handler(processor, frame):
+                    return await handler(processor, frame)
+
+            if self._tool_result_processor:
+
+                @self._tool_result_processor.event_handler(event_name)
+                async def tool_handler(processor, frame):
                     return await handler(processor, frame)
 
             return handler

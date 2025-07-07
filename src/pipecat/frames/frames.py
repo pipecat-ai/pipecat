@@ -392,16 +392,16 @@ class TranscriptionMessage:
     """A message in a conversation transcript.
 
     A message in a conversation transcript containing the role and content.
-    Messages are in standard format with roles normalized to user/assistant.
+    Messages are in standard format with roles normalized to user/assistant/tool.
 
     Parameters:
-        role: The role of the message sender (user or assistant).
+        role: The role of the message sender (user, assistant or tool).
         content: The message content/text.
         user_id: Optional identifier for the user.
         timestamp: Optional timestamp when the message was created.
     """
 
-    role: Literal["user", "assistant"]
+    role: Literal["user", "assistant", "tool"]
     content: str
     user_id: Optional[str] = None
     timestamp: Optional[str] = None

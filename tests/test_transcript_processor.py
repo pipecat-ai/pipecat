@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
+    FunctionCallResultFrame,
     StartInterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
@@ -22,6 +23,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.transcript_processor import (
     AssistantTranscriptProcessor,
+    ToolResultProcessor,
     UserTranscriptProcessor,
 )
 from pipecat.tests.utils import SleepFrame, run_test
@@ -181,6 +183,66 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         # All frames should be passed through in order, with update at end
         downstream_update = cast(TranscriptionUpdateFrame, received_frames[-1])
         self.assertEqual(downstream_update.messages[0].content, "Hello world! How are you?")
+
+    async def test_no_tool_call(self):
+        """Test that no update frames are emitted when no tool call is made"""
+        processor = ToolResultProcessor()
+
+        received_updates: List[TranscriptionUpdateFrame] = []
+
+        @processor.event_handler("on_transcript_update")
+        async def handle_update(proc, frame: TranscriptionUpdateFrame):
+            received_updates.append(frame)
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        # Create frames to send
+        frames_to_send = [
+            TranscriptionFrame(text="Hello, world!", user_id="test_user", timestamp=timestamp)
+        ]
+
+        # TranscriptionFrame is passed through, no update frame is emitted
+        expected_down_frames = [
+            TranscriptionFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
+
+        self.assertEqual(len(received_updates), 0, "No updates should be emitted for empty content")
+
+    async def test_tool_call_result(self):
+        """Test that tool call results are emitted"""
+        processor = ToolResultProcessor()
+
+        received_updates: List[TranscriptionUpdateFrame] = []
+
+        @processor.event_handler("on_transcript_update")
+        async def handle_update(proc, frame: TranscriptionUpdateFrame):
+            received_updates.append(frame)
+
+        frames_to_send = [
+            FunctionCallResultFrame(
+                result="Hello, world!",
+                tool_call_id="123",
+                function_name="test_function",
+                arguments={"name": "John"},
+            ),
+        ]
+
+        expected_down_frames = [
+            FunctionCallResultFrame,
+            TranscriptionUpdateFrame,
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+        )
 
     async def test_empty_text_handling(self):
         """Test that empty messages are not emitted"""
@@ -385,6 +447,10 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         asst_proc2 = factory.assistant()
         self.assertIs(asst_proc1, asst_proc2, "Assistant processor should be reused")
 
+        tool_proc1 = factory.tool()
+        tool_proc2 = factory.tool()
+        self.assertIs(tool_proc1, tool_proc2, "Tool processor should be reused")
+
         # Test user processor
         timestamp = datetime.now(timezone.utc).isoformat()
         frames_to_send = [
@@ -419,12 +485,37 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+        # Test tool result processor
+        timestamp = datetime.now(timezone.utc).isoformat()
+        frames_to_send = [
+            FunctionCallResultFrame(
+                result="Hello, world!",
+                tool_call_id="123",
+                function_name="test_function",
+                arguments={"name": "John"},
+            ),
+        ]
+
+        await run_test(
+            tool_proc1,
+            frames_to_send=frames_to_send,
+            expected_down_frames=[FunctionCallResultFrame, TranscriptionUpdateFrame],
+        )
+
         # Verify both processors triggered the same handler
-        self.assertEqual(len(received_updates), 2)
+        self.assertEqual(len(received_updates), 3)
         self.assertEqual(received_updates[0].role, "user")
         self.assertEqual(received_updates[0].content, "User message")
         self.assertEqual(received_updates[1].role, "assistant")
         self.assertEqual(received_updates[1].content, "Assistant message")
+        self.assertEqual(received_updates[2].role, "tool")
+        self.assertEqual(
+            received_updates[2].content,
+            (
+                '{"function_name": "test_function", "tool_call_id": "123", "arguments": {"name": "John"}, "result": '
+                '"Hello, world!"}'
+            ),
+        )
 
     async def test_text_fragments_with_spaces(self):
         """Test aggregating text fragments with various spacing patterns"""
