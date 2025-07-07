@@ -15,7 +15,7 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^0.3.5",
-    "@pipecat-ai/daily-transport": "^0.3.10"
+    "@pipecat-ai/client-js": "^1.0.0",
+    "@pipecat-ai/daily-transport": "^1.0.0"
   }
 }
