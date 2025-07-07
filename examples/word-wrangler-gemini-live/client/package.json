@@ -9,11 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^0.3.5",
-    "@pipecat-ai/client-react": "^0.3.5",
-    "@pipecat-ai/daily-transport": "^0.3.10",
+    "@pipecat-ai/client-js": "^1.0.0",
+    "@pipecat-ai/client-react": "^1.0.0",
+    "@pipecat-ai/daily-transport": "^1.0.0",
     "@tabler/icons-react": "^3.31.0",
     "@tailwindcss/postcss": "^4.1.3",
+    "jotai": "^2.12.5",
     "js-confetti": "^0.12.0",
     "next": "15.2.4",
     "react": "^19.0.0",
