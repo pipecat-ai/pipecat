@@ -25,6 +25,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `RTVIObserver` and `RTVIProcessor` to match the new RTVI 1.0.0 protocol.
+  This includes:
+  - depreprecating support for all messages related to service configuaration and
+    actions.
+  - adding support for obtaining and logging data about client, including its
+    RTVI version and optionally included system information (OS/browser/etc.)
+  - Added support for handling the new `client-message` RTVI message through
+    either a `on_client_message` event handler or listening for a new
+    `RTVIClientMessageFrame`
+  - Added support for responding to a `client-message` with a `server-response`
+    via either a direct call on the `RTVIProcessor` or via pushing a new
+    `RTVIServerResponseFrame`
+  - Added built-in support for handling the new `append-to-context` RTVI message
+    which allows a client to add to the user or assistant llm context. No extra
+    code is required for supporting this behavior.
+  - Updated all JavaScript and React client RTVI examples to use versions 1.0.0
+    of the clients.
+
 - Refactored `AWSBedrockLLMService` and `AWSPollyTTSService` to work
   asynchronously using `aioboto3` instead of the `boto3` library.
 
