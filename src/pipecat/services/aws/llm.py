@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""AWS Bedrock integration for Large Language Model services.
+
+This module provides AWS Bedrock LLM service implementation with support for
+Amazon Nova and Anthropic Claude models, including vision capabilities and
+function calling.
+"""
+
 import asyncio
 import base64
 import copy
@@ -61,17 +68,44 @@ except ModuleNotFoundError as e:
 
 @dataclass
 class AWSBedrockContextAggregatorPair:
+    """Container for AWS Bedrock context aggregators.
+
+    Provides convenient access to both user and assistant context aggregators
+    for AWS Bedrock LLM operations.
+
+    Parameters:
+        _user: The user context aggregator instance.
+        _assistant: The assistant context aggregator instance.
+    """
+
     _user: "AWSBedrockUserContextAggregator"
     _assistant: "AWSBedrockAssistantContextAggregator"
 
     def user(self) -> "AWSBedrockUserContextAggregator":
+        """Get the user context aggregator.
+
+        Returns:
+            The user context aggregator instance.
+        """
         return self._user
 
     def assistant(self) -> "AWSBedrockAssistantContextAggregator":
+        """Get the assistant context aggregator.
+
+        Returns:
+            The assistant context aggregator instance.
+        """
         return self._assistant
 
 
 class AWSBedrockLLMContext(OpenAILLMContext):
+    """AWS Bedrock-specific LLM context implementation.
+
+    Extends OpenAI LLM context to handle AWS Bedrock's specific message format
+    and system message handling. Manages conversion between OpenAI and Bedrock
+    message formats.
+    """
+
     def __init__(
         self,
         messages: Optional[List[dict]] = None,
@@ -80,11 +114,27 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         *,
         system: Optional[str] = None,
     ):
+        """Initialize AWS Bedrock LLM context.
+
+        Args:
+            messages: List of conversation messages in OpenAI format.
+            tools: List of available function calling tools.
+            tool_choice: Tool selection strategy or specific tool choice.
+            system: System message content for AWS Bedrock.
+        """
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
         self.system = system
 
     @staticmethod
     def upgrade_to_bedrock(obj: OpenAILLMContext) -> "AWSBedrockLLMContext":
+        """Upgrade an OpenAI LLM context to AWS Bedrock format.
+
+        Args:
+            obj: The OpenAI LLM context to upgrade.
+
+        Returns:
+            The upgraded AWS Bedrock LLM context.
+        """
         logger.debug(f"Upgrading to AWS Bedrock: {obj}")
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AWSBedrockLLMContext):
             obj.__class__ = AWSBedrockLLMContext
@@ -95,6 +145,14 @@ class AWSBedrockLLMContext(OpenAILLMContext):
 
     @classmethod
     def from_openai_context(cls, openai_context: OpenAILLMContext):
+        """Create AWS Bedrock context from OpenAI context.
+
+        Args:
+            openai_context: The OpenAI LLM context to convert.
+
+        Returns:
+            New AWS Bedrock LLM context instance.
+        """
         self = cls(
             messages=openai_context.messages,
             tools=openai_context.tools,
@@ -106,12 +164,28 @@ class AWSBedrockLLMContext(OpenAILLMContext):
 
     @classmethod
     def from_messages(cls, messages: List[dict]) -> "AWSBedrockLLMContext":
+        """Create AWS Bedrock context from message list.
+
+        Args:
+            messages: List of messages in OpenAI format.
+
+        Returns:
+            New AWS Bedrock LLM context instance.
+        """
         self = cls(messages=messages)
         self._restructure_from_openai_messages()
         return self
 
     @classmethod
     def from_image_frame(cls, frame: VisionImageRawFrame) -> "AWSBedrockLLMContext":
+        """Create AWS Bedrock context from vision image frame.
+
+        Args:
+            frame: The vision image frame to convert.
+
+        Returns:
+            New AWS Bedrock LLM context instance.
+        """
         context = cls()
         context.add_image_frame_message(
             format=frame.format, size=frame.size, image=frame.image, text=frame.text
@@ -119,30 +193,51 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         return context
 
     def set_messages(self, messages: List):
+        """Set the messages list and restructure for Bedrock format.
+
+        Args:
+            messages: List of messages to set.
+        """
         self._messages[:] = messages
         self._restructure_from_openai_messages()
 
-    # convert a message in AWS Bedrock format into one or more messages in OpenAI format
     def to_standard_messages(self, obj):
         """Convert AWS Bedrock message format to standard structured format.
 
         Handles text content and function calls for both user and assistant messages.
 
         Args:
-            obj: Message in AWS Bedrock format:
-                {
-                    "role": "user/assistant",
-                    "content": [{"text": str} | {"toolUse": {...}} | {"toolResult": {...}}]
-                }
+            obj: Message in AWS Bedrock format.
 
         Returns:
-            List of messages in standard format:
-            [
+            List of messages in standard format.
+
+        Examples:
+            AWS Bedrock format input::
+
                 {
-                    "role": "user/assistant/tool",
-                    "content": [{"type": "text", "text": str}]
+                    "role": "assistant",
+                    "content": [
+                        {"text": "Hello"},
+                        {"toolUse": {"toolUseId": "123", "name": "search", "input": {"q": "test"}}}
+                    ]
                 }
-            ]
+
+            Standard format output::
+
+                [
+                    {"role": "assistant", "content": [{"type": "text", "text": "Hello"}]},
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "id": "123",
+                                "function": {"name": "search", "arguments": '{"q": "test"}'}
+                            }
+                        ]
+                    }
+                ]
         """
         role = obj.get("role")
         content = obj.get("content")
@@ -216,23 +311,38 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         Empty text content is converted to "(empty)".
 
         Args:
-            message: Message in standard format:
-                {
-                    "role": "user/assistant/tool",
-                    "content": str | [{"type": "text", ...}],
-                    "tool_calls": [{"id": str, "function": {"name": str, "arguments": str}}]
-                }
+            message: Message in standard format.
 
         Returns:
-            Message in AWS Bedrock format:
-            {
-                "role": "user/assistant",
-                "content": [
-                    {"text": str} |
-                    {"toolUse": {"toolUseId": str, "name": str, "input": dict}} |
-                    {"toolResult": {"toolUseId": str, "content": [...], "status": str}}
-                ]
-            }
+            Message in AWS Bedrock format.
+
+        Examples:
+            Standard format input::
+
+                {
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "123",
+                            "function": {"name": "search", "arguments": '{"q": "test"}'}
+                        }
+                    ]
+                }
+
+            AWS Bedrock format output::
+
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "toolUse": {
+                                "toolUseId": "123",
+                                "name": "search",
+                                "input": {"q": "test"}
+                            }
+                        }
+                    ]
+                }
         """
         if message["role"] == "tool":
             # Try to parse the content as JSON if it looks like JSON
@@ -295,6 +405,14 @@ class AWSBedrockLLMContext(OpenAILLMContext):
     def add_image_frame_message(
         self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
     ):
+        """Add an image message to the context.
+
+        Args:
+            format: The image format (e.g., 'RGB', 'RGBA').
+            size: The image dimensions as (width, height).
+            image: The raw image data as bytes.
+            text: Optional text to accompany the image.
+        """
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
@@ -306,6 +424,14 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         self.add_message({"role": "user", "content": content})
 
     def add_message(self, message):
+        """Add a message to the context, merging with previous message if same role.
+
+        AWS Bedrock requires alternating roles, so consecutive messages from the
+        same role are merged together.
+
+        Args:
+            message: The message to add to the context.
+        """
         try:
             if self.messages:
                 # AWS Bedrock requires that roles alternate. If this message's
@@ -330,10 +456,10 @@ class AWSBedrockLLMContext(OpenAILLMContext):
             logger.error(f"Error adding message: {e}")
 
     def _restructure_from_bedrock_messages(self):
-        """Restructure messages in AWS Bedrock format by handling system
-        messages, merging consecutive messages with the same role, and ensuring
-        proper content formatting.
+        """Restructure messages in AWS Bedrock format.
 
+        Handles system messages, merging consecutive messages with the same role,
+        and ensuring proper content formatting.
         """
         # Handle system message if present at the beginning
         if self.messages and self.messages[0]["role"] == "system":
@@ -416,12 +542,22 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                 message["content"] = [{"type": "text", "text": "(empty)"}]
 
     def get_messages_for_persistent_storage(self):
+        """Get messages formatted for persistent storage.
+
+        Returns:
+            List of messages including system message if present.
+        """
         messages = super().get_messages_for_persistent_storage()
         if self.system:
             messages.insert(0, {"role": "system", "content": self.system})
         return messages
 
     def get_messages_for_logging(self) -> str:
+        """Get messages formatted for logging with sensitive data redacted.
+
+        Returns:
+            JSON string representation of messages with image data redacted.
+        """
         msgs = []
         for message in self.messages:
             msg = copy.deepcopy(message)
@@ -435,11 +571,36 @@ class AWSBedrockLLMContext(OpenAILLMContext):
 
 
 class AWSBedrockUserContextAggregator(LLMUserContextAggregator):
+    """User context aggregator for AWS Bedrock LLM service.
+
+    Handles aggregation of user messages and frames for AWS Bedrock format.
+    Inherits all functionality from the base LLM user context aggregator.
+
+    Args:
+        context: The LLM context to aggregate messages into.
+        params: Configuration parameters for the aggregator.
+    """
+
     pass
 
 
 class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
+    """Assistant context aggregator for AWS Bedrock LLM service.
+
+    Handles aggregation of assistant responses and function calls for AWS Bedrock
+    format, including tool use and tool result handling.
+
+    Args:
+        context: The LLM context to aggregate messages into.
+        params: Configuration parameters for the aggregator.
+    """
+
     async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        """Handle function call in progress frame.
+
+        Args:
+            frame: The function call in progress frame to handle.
+        """
         # Format tool use according to AWS Bedrock API
         self._context.add_message(
             {
@@ -470,6 +631,11 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
         )
 
     async def handle_function_call_result(self, frame: FunctionCallResultFrame):
+        """Handle function call result frame.
+
+        Args:
+            frame: The function call result frame to handle.
+        """
         if frame.result:
             result = json.dumps(frame.result)
             await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
@@ -479,6 +645,11 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
             )
 
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        """Handle function call cancel frame.
+
+        Args:
+            frame: The function call cancel frame to handle.
+        """
         await self._update_function_call_result(
             frame.function_name, frame.tool_call_id, "CANCELLED"
         )
@@ -497,6 +668,11 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
                         content["toolResult"]["content"] = [{"text": result}]
 
     async def handle_user_image_frame(self, frame: UserImageRawFrame):
+        """Handle user image frame.
+
+        Args:
+            frame: The user image frame to handle.
+        """
         await self._update_function_call_result(
             frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
         )
@@ -509,18 +685,28 @@ class AWSBedrockAssistantContextAggregator(LLMAssistantContextAggregator):
 
 
 class AWSBedrockLLMService(LLMService):
-    """This class implements inference with AWS Bedrock models including Amazon
-    Nova and Anthropic Claude.
+    """AWS Bedrock Large Language Model service implementation.
 
-    Requires AWS credentials to be configured in the environment or through
-    boto3 configuration.
-
+    Provides inference capabilities for AWS Bedrock models including Amazon Nova
+    and Anthropic Claude. Supports streaming responses, function calling, and
+    vision capabilities.
     """
 
     # Overriding the default adapter to use the Anthropic one.
     adapter_class = AWSBedrockLLMAdapter
 
     class InputParams(BaseModel):
+        """Input parameters for AWS Bedrock LLM service.
+
+        Parameters:
+            max_tokens: Maximum number of tokens to generate.
+            temperature: Sampling temperature between 0.0 and 1.0.
+            top_p: Nucleus sampling parameter between 0.0 and 1.0.
+            stop_sequences: List of strings that stop generation.
+            latency: Performance mode - "standard" or "optimized".
+            additional_model_request_fields: Additional model-specific parameters.
+        """
+
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
         temperature: Optional[float] = Field(default_factory=lambda: 0.7, ge=0.0, le=1.0)
         top_p: Optional[float] = Field(default_factory=lambda: 0.999, ge=0.0, le=1.0)
@@ -540,6 +726,18 @@ class AWSBedrockLLMService(LLMService):
         client_config: Optional[Config] = None,
         **kwargs,
     ):
+        """Initialize the AWS Bedrock LLM service.
+
+        Args:
+            model: The AWS Bedrock model identifier to use.
+            aws_access_key: AWS access key ID. If None, uses default credentials.
+            aws_secret_key: AWS secret access key. If None, uses default credentials.
+            aws_session_token: AWS session token for temporary credentials.
+            aws_region: AWS region for the Bedrock service.
+            params: Model parameters and configuration.
+            client_config: Custom boto3 client configuration.
+            **kwargs: Additional arguments passed to parent LLMService.
+        """
         super().__init__(**kwargs)
 
         params = params or AWSBedrockLLMService.InputParams()
@@ -573,6 +771,11 @@ class AWSBedrockLLMService(LLMService):
         logger.info(f"Using AWS Bedrock model: {model}")
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate usage metrics.
+
+        Returns:
+            True if metrics generation is supported.
+        """
         return True
 
     def create_context_aggregator(
@@ -582,21 +785,21 @@ class AWSBedrockLLMService(LLMService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> AWSBedrockContextAggregatorPair:
-        """Create an instance of AWSBedrockContextAggregatorPair from an
-        OpenAILLMContext. Constructor keyword arguments for both the user and
-        assistant aggregators can be provided.
+        """Create AWS Bedrock-specific context aggregators.
+
+        Creates a pair of context aggregators optimized for AWS Bedrocks's message
+        format, including support for function calls, tool usage, and image handling.
 
         Args:
-            context (OpenAILLMContext): The LLM context.
-            user_params (LLMUserAggregatorParams, optional): User aggregator
-                parameters.
-            assistant_params (LLMAssistantAggregatorParams, optional): User
-                aggregator parameters.
+            context: The LLM context to create aggregators for.
+            user_params: Parameters for user message aggregation.
+            assistant_params: Parameters for assistant message aggregation.
 
         Returns:
-            AWSBedrockContextAggregatorPair: A pair of context aggregators, one
-            for the user and one for the assistant, encapsulated in an
+            AWSBedrockContextAggregatorPair: A pair of context aggregators, one for
+            the user and one for the assistant, encapsulated in an
             AWSBedrockContextAggregatorPair.
+
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
@@ -711,6 +914,8 @@ class AWSBedrockLLMService(LLMService):
 
             function_calls = []
             for event in response["stream"]:
+                self.reset_watchdog()
+
                 # Handle text content
                 if "contentBlockDelta" in event:
                     delta = event["contentBlockDelta"]["delta"]
@@ -762,6 +967,7 @@ class AWSBedrockLLMService(LLMService):
                     completion_tokens += usage.get("outputTokens", 0)
                     cache_read_input_tokens += usage.get("cacheReadInputTokens", 0)
                     cache_creation_input_tokens += usage.get("cacheWriteInputTokens", 0)
+
             await self.run_function_calls(function_calls)
         except asyncio.CancelledError:
             # If we're interrupted, we won't get a complete usage report. So set our flag to use the
@@ -789,6 +995,12 @@ class AWSBedrockLLMService(LLMService):
             )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle LLM-specific frame types.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         context = None

@@ -8,8 +8,16 @@ import asyncio
 import time
 import unittest
 
-from pipecat.frames.frames import EndFrame, HeartbeatFrame, StartFrame, StopFrame, TextFrame
+from pipecat.frames.frames import (
+    EndFrame,
+    HeartbeatFrame,
+    InputAudioRawFrame,
+    StartFrame,
+    StopFrame,
+    TextFrame,
+)
 from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.pipeline.base_task import PipelineTaskParams
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -89,11 +97,10 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
     async def test_task_single(self):
         pipeline = Pipeline([IdentityFilter()])
         task = PipelineTask(pipeline)
-        task.set_event_loop(asyncio.get_event_loop())
 
         await task.queue_frame(TextFrame(text="Hello!"))
         await task.queue_frames([TextFrame(text="Bye!"), EndFrame()])
-        await task.run()
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         assert task.has_finished()
 
     async def test_task_observers(self):
@@ -109,10 +116,9 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, observers=[CustomObserver()])
-        task.set_event_loop(asyncio.get_event_loop())
 
         await task.queue_frames([TextFrame(text="Hello Downstream!"), EndFrame()])
-        await task.run()
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         assert frame_received
 
     async def test_task_add_observer(self):
@@ -149,8 +155,6 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         observer1 = CustomAddObserver1()
         task.add_observer(observer1)
 
-        task.set_event_loop(asyncio.get_event_loop())
-
         async def delayed_add_observer():
             observer2 = CustomAddObserver2()
             # Wait after the pipeline is started and add another observer.
@@ -169,7 +173,9 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             # Finally end the pipeline.
             await task.queue_frame(EndFrame())
 
-        await asyncio.gather(task.run(), delayed_add_observer())
+        await asyncio.gather(
+            task.run(PipelineTaskParams(loop=asyncio.get_event_loop())), delayed_add_observer()
+        )
 
         assert frame_received
         assert frame_count_1 == 1
@@ -182,7 +188,6 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline)
-        task.set_event_loop(asyncio.get_event_loop())
 
         @task.event_handler("on_pipeline_started")
         async def on_pipeline_started(task, frame: StartFrame):
@@ -195,7 +200,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             end_received = True
 
         await task.queue_frame(EndFrame())
-        await task.run()
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
 
         assert start_received
         assert end_received
@@ -206,7 +211,6 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline)
-        task.set_event_loop(asyncio.get_event_loop())
 
         @task.event_handler("on_pipeline_stopped")
         async def on_pipeline_ended(task, frame: StopFrame):
@@ -214,7 +218,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             stop_received = True
 
         await task.queue_frame(StopFrame())
-        await task.run()
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
 
         assert stop_received
 
@@ -225,7 +229,6 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, cancel_on_idle_timeout=False)
-        task.set_event_loop(asyncio.get_event_loop())
         task.set_reached_upstream_filter((TextFrame,))
         task.set_reached_downstream_filter((TextFrame,))
 
@@ -247,7 +250,10 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await task.queue_frame(TextFrame(text="Hello Downstream!"))
 
         try:
-            await asyncio.wait_for(asyncio.shield(task.run()), timeout=1.0)
+            await asyncio.wait_for(
+                asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+                timeout=1.0,
+            )
         except asyncio.TimeoutError:
             pass
 
@@ -275,13 +281,15 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             observers=[heartbeats_observer],
             cancel_on_idle_timeout=False,
         )
-        task.set_event_loop(asyncio.get_event_loop())
 
         expected_heartbeats = 1.0 / 0.2
 
         await task.queue_frame(TextFrame(text="Hello!"))
         try:
-            await asyncio.wait_for(asyncio.shield(task.run()), timeout=1.0)
+            await asyncio.wait_for(
+                asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+                timeout=1.0,
+            )
         except asyncio.TimeoutError:
             pass
         assert heartbeats_counter == expected_heartbeats
@@ -290,17 +298,18 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, idle_timeout_secs=0.2)
-        task.set_event_loop(asyncio.get_event_loop())
-        await task.run()
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         assert True
 
     async def test_no_idle_task(self):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
-        task.set_event_loop(asyncio.get_event_loop())
         try:
-            await asyncio.wait_for(asyncio.shield(task.run()), timeout=0.3)
+            await asyncio.wait_for(
+                asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+                timeout=0.3,
+            )
         except asyncio.TimeoutError:
             assert True
         else:
@@ -317,15 +326,13 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             ),
             idle_timeout_secs=0.3,
         )
-        task.set_event_loop(asyncio.get_event_loop())
-        await task.run()
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         assert True
 
-    async def test_idle_task_event_handler(self):
+    async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
-        task.set_event_loop(asyncio.get_event_loop())
 
         idle_timeout = False
 
@@ -335,8 +342,40 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             idle_timeout = True
             await task.cancel()
 
-        await task.run()
-        assert True
+        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        assert idle_timeout
+
+    async def test_idle_task_event_handler_quiet_user(self):
+        identity = IdentityFilter()
+        pipeline = Pipeline([identity])
+        task = PipelineTask(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
+
+        idle_timeout = 0
+
+        @task.event_handler("on_idle_timeout")
+        async def on_idle_timeout(task: PipelineTask):
+            nonlocal idle_timeout
+            idle_timeout += 1
+            # Stay a bit longer here while user audio frames are still being
+            # pushed. We do this to make sure this function is only called once.
+            await asyncio.sleep(0.1)
+            await task.queue_frame(EndFrame())
+
+        async def send_audio():
+            # We send audio during and after the 0.2 seconds of idle
+            # timeout. Inside `on_idle_timeout` we are waiting a little bit
+            # simulating the pipeline finishing (e.g. goodbye message from bot
+            # flushing).
+            for i in range(30):
+                await task.queue_frame(
+                    InputAudioRawFrame(audio=b"\x00", sample_rate=16000, num_channels=1)
+                )
+                await asyncio.sleep(0.01)
+
+        await asyncio.gather(
+            send_audio(), task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        )
+        assert idle_timeout == 1
 
     async def test_idle_task_frames(self):
         idle_timeout_secs = 0.2
@@ -349,7 +388,6 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             idle_timeout_secs=idle_timeout_secs,
             idle_timeout_frames=(TextFrame,),
         )
-        task.set_event_loop(asyncio.get_event_loop())
 
         async def delayed_frames():
             await asyncio.sleep(sleep_time_secs)
@@ -361,7 +399,10 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         start_time = time.time()
 
-        tasks = {asyncio.create_task(task.run()), asyncio.create_task(delayed_frames())}
+        tasks = [
+            asyncio.create_task(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
+            asyncio.create_task(delayed_frames()),
+        ]
 
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 

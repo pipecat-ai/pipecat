@@ -39,6 +39,7 @@ TESTS_07 = [
     # 07 series
     ("07-interruptible.py", PROMPT_SIMPLE_MATH, None),
     ("07-interruptible-cartesia-http.py", PROMPT_SIMPLE_MATH, None),
+    ("07a-interruptible-speechmatics.py", PROMPT_SIMPLE_MATH, None),
     ("07b-interruptible-langchain.py", PROMPT_SIMPLE_MATH, None),
     ("07c-interruptible-deepgram.py", PROMPT_SIMPLE_MATH, None),
     ("07d-interruptible-elevenlabs.py", PROMPT_SIMPLE_MATH, None),
@@ -111,11 +112,16 @@ TESTS_26 = [
     # ("26d-gemini-multimodal-live-text.py", PROMPT_SIMPLE_MATH, None),
 ]
 
+TESTS_40 = [
+    ("40-aws-nova-sonic.py", PROMPT_SIMPLE_MATH, None),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_14,
     *TESTS_19,
     *TESTS_26,
+    *TESTS_40,
 ]
 
 

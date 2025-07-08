@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Gated frame aggregator for conditional frame accumulation.
+
+This module provides a gated aggregator that accumulates frames based on
+custom gate open/close functions, allowing for conditional frame buffering
+and release in frame processing pipelines.
+"""
+
 from typing import List, Tuple
 
 from loguru import logger
@@ -14,31 +21,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 class GatedAggregator(FrameProcessor):
     """Accumulate frames, with custom functions to start and stop accumulation.
+
     Yields gate-opening frame before any accumulated frames, then ensuing frames
-    until and not including the gate-closed frame.
-
-    Doctest: FIXME to work with asyncio
-    >>> from pipecat.frames.frames import ImageRawFrame
-
-    >>> async def print_frames(aggregator, frame):
-    ...     async for frame in aggregator.process_frame(frame):
-    ...         if isinstance(frame, TextFrame):
-    ...             print(frame.text)
-    ...         else:
-    ...             print(frame.__class__.__name__)
-
-    >>> aggregator = GatedAggregator(
-    ...     gate_close_fn=lambda x: isinstance(x, LLMResponseStartFrame),
-    ...     gate_open_fn=lambda x: isinstance(x, ImageRawFrame),
-    ...     start_open=False)
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello")))
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Hello again.")))
-    >>> asyncio.run(print_frames(aggregator, ImageRawFrame(image=bytes([]), size=(0, 0))))
-    ImageRawFrame
-    Hello
-    Hello again.
-    >>> asyncio.run(print_frames(aggregator, TextFrame("Goodbye.")))
-    Goodbye.
+    until and not including the gate-closed frame. The aggregator maintains an
+    internal gate state that controls whether frames are passed through immediately
+    or accumulated for later release.
     """
 
     def __init__(
@@ -48,6 +35,14 @@ class GatedAggregator(FrameProcessor):
         start_open,
         direction: FrameDirection = FrameDirection.DOWNSTREAM,
     ):
+        """Initialize the gated aggregator.
+
+        Args:
+            gate_open_fn: Function that returns True when a frame should open the gate.
+            gate_close_fn: Function that returns True when a frame should close the gate.
+            start_open: Whether the gate should start in the open state.
+            direction: The frame direction this aggregator operates on.
+        """
         super().__init__()
         self._gate_open_fn = gate_open_fn
         self._gate_close_fn = gate_close_fn
@@ -56,6 +51,12 @@ class GatedAggregator(FrameProcessor):
         self._accumulator: List[Tuple[Frame, FrameDirection]] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames with gated accumulation logic.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of the frame flow.
+        """
         await super().process_frame(frame, direction)
 
         # We must not block system frames.

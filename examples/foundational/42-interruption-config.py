@@ -10,8 +10,8 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.interruptions.min_words_interruption_strategy import MinWordsInterruptionStrategy
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import MinWordsInterruptionStrategy
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -88,10 +88,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            report_only_initial_ttfb=True,
             interruption_strategies=[MinWordsInterruptionStrategy(min_words=3)],
         ),
     )

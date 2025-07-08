@@ -27,7 +27,6 @@ from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
-aiohttp_session = aiohttp.ClientSession()
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -38,7 +37,7 @@ transport_params = {
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         turn_analyzer=FalSmartTurnAnalyzer(
-            api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=aiohttp_session
+            api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=aiohttp.ClientSession()
         ),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
@@ -46,7 +45,7 @@ transport_params = {
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         turn_analyzer=FalSmartTurnAnalyzer(
-            api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=aiohttp_session
+            api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=aiohttp.ClientSession()
         ),
     ),
     "webrtc": lambda: TransportParams(
@@ -54,7 +53,7 @@ transport_params = {
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
         turn_analyzer=FalSmartTurnAnalyzer(
-            api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=aiohttp_session
+            api_key=os.getenv("FAL_SMART_TURN_API_KEY"), aiohttp_session=aiohttp.ClientSession()
         ),
     ),
 }
@@ -97,10 +96,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
-            report_only_initial_ttfb=True,
         ),
     )
 
@@ -119,8 +116,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     runner = PipelineRunner(handle_sigint=handle_sigint)
 
     await runner.run(task)
-
-    await aiohttp_session.close()
 
 
 if __name__ == "__main__":

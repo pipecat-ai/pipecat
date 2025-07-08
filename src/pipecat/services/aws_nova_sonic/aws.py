@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""AWS Nova Sonic LLM service implementation for Pipecat AI framework.
+
+This module provides a speech-to-speech LLM service using AWS Nova Sonic, which supports
+bidirectional audio streaming, text generation, and function calling capabilities.
+"""
+
 import asyncio
 import base64
 import json
@@ -25,6 +31,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    FunctionCallFromLLM,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
@@ -55,6 +62,7 @@ from pipecat.services.aws_nova_sonic.context import (
 )
 from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
+from pipecat.utils.asyncio.watchdog_coroutine import watchdog_coroutine
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -82,28 +90,55 @@ except ModuleNotFoundError as e:
 
 
 class AWSNovaSonicUnhandledFunctionException(Exception):
+    """Exception raised when the LLM attempts to call an unregistered function."""
+
     pass
 
 
 class ContentType(Enum):
+    """Content types supported by AWS Nova Sonic.
+
+    Parameters:
+        AUDIO: Audio content type.
+        TEXT: Text content type.
+        TOOL: Tool content type.
+    """
+
     AUDIO = "AUDIO"
     TEXT = "TEXT"
     TOOL = "TOOL"
 
 
 class TextStage(Enum):
+    """Text generation stages in AWS Nova Sonic responses.
+
+    Parameters:
+        FINAL: Final text that has been fully generated.
+        SPECULATIVE: Speculative text that is still being generated.
+    """
+
     FINAL = "FINAL"  # what has been said
     SPECULATIVE = "SPECULATIVE"  # what's planned to be said
 
 
 @dataclass
 class CurrentContent:
+    """Represents content currently being received from AWS Nova Sonic.
+
+    Parameters:
+        type: The type of content (audio, text, or tool).
+        role: The role generating the content (user, assistant, etc.).
+        text_stage: The stage of text generation (final or speculative).
+        text_content: The actual text content if applicable.
+    """
+
     type: ContentType
     role: Role
     text_stage: TextStage  # None if not text
     text_content: str  # starts as None, then fills in if text
 
     def __str__(self):
+        """String representation of the current content."""
         return (
             f"CurrentContent(\n"
             f"  type={self.type.name},\n"
@@ -114,6 +149,20 @@ class CurrentContent:
 
 
 class Params(BaseModel):
+    """Configuration parameters for AWS Nova Sonic.
+
+    Parameters:
+        input_sample_rate: Audio input sample rate in Hz.
+        input_sample_size: Audio input sample size in bits.
+        input_channel_count: Number of input audio channels.
+        output_sample_rate: Audio output sample rate in Hz.
+        output_sample_size: Audio output sample size in bits.
+        output_channel_count: Number of output audio channels.
+        max_tokens: Maximum number of tokens to generate.
+        top_p: Nucleus sampling parameter.
+        temperature: Sampling temperature for text generation.
+    """
+
     # Audio input
     input_sample_rate: Optional[int] = Field(default=16000)
     input_sample_size: Optional[int] = Field(default=16)
@@ -131,6 +180,12 @@ class Params(BaseModel):
 
 
 class AWSNovaSonicLLMService(LLMService):
+    """AWS Nova Sonic speech-to-speech LLM service.
+
+    Provides bidirectional audio streaming, real-time transcription, text generation,
+    and function calling capabilities using AWS Nova Sonic model.
+    """
+
     # Override the default adapter to use the AWSNovaSonicLLMAdapter one
     adapter_class = AWSNovaSonicLLMAdapter
 
@@ -139,6 +194,7 @@ class AWSNovaSonicLLMService(LLMService):
         *,
         secret_access_key: str,
         access_key_id: str,
+        session_token: Optional[str] = None,
         region: str,
         model: str = "amazon.nova-sonic-v1:0",
         voice_id: str = "matthew",  # matthew, tiffany, amy
@@ -148,9 +204,25 @@ class AWSNovaSonicLLMService(LLMService):
         send_transcription_frames: bool = True,
         **kwargs,
     ):
+        """Initializes the AWS Nova Sonic LLM service.
+
+        Args:
+            secret_access_key: AWS secret access key for authentication.
+            access_key_id: AWS access key ID for authentication.
+            session_token: AWS session token for authentication.
+            region: AWS region where the service is hosted.
+            model: Model identifier. Defaults to "amazon.nova-sonic-v1:0".
+            voice_id: Voice ID for speech synthesis. Options: matthew, tiffany, amy.
+            params: Model parameters for audio configuration and inference.
+            system_instruction: System-level instruction for the model.
+            tools: Available tools/functions for the model to use.
+            send_transcription_frames: Whether to emit transcription frames.
+            **kwargs: Additional arguments passed to the parent LLMService.
+        """
         super().__init__(**kwargs)
         self._secret_access_key = secret_access_key
         self._access_key_id = access_key_id
+        self._session_token = session_token
         self._region = region
         self._model = model
         self._client: Optional[BedrockRuntimeClient] = None
@@ -187,16 +259,31 @@ class AWSNovaSonicLLMService(LLMService):
     #
 
     async def start(self, frame: StartFrame):
+        """Start the service and initiate connection to AWS Nova Sonic.
+
+        Args:
+            frame: The start frame triggering service initialization.
+        """
         await super().start(frame)
         self._wants_connection = True
         await self._start_connecting()
 
     async def stop(self, frame: EndFrame):
+        """Stop the service and close connections.
+
+        Args:
+            frame: The end frame triggering service shutdown.
+        """
         await super().stop(frame)
         self._wants_connection = False
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the service and close connections.
+
+        Args:
+            frame: The cancel frame triggering service cancellation.
+        """
         await super().cancel(frame)
         self._wants_connection = False
         await self._disconnect()
@@ -206,6 +293,11 @@ class AWSNovaSonicLLMService(LLMService):
     #
 
     async def reset_conversation(self):
+        """Reset the conversation state while preserving context.
+
+        Handles bot stopped speaking event, disconnects from the service,
+        and reconnects with the preserved context.
+        """
         logger.debug("Resetting conversation")
         await self._handle_bot_stopped_speaking(delay_to_catch_trailing_assistant_text=False)
 
@@ -221,6 +313,12 @@ class AWSNovaSonicLLMService(LLMService):
     #
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process incoming frames and handle service-specific logic.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction the frame is traveling.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, OpenAILLMContextFrame):
@@ -428,7 +526,9 @@ class AWSNovaSonicLLMService(LLMService):
             region=self._region,
             aws_credentials_identity_resolver=StaticCredentialsResolver(
                 credentials=AWSCredentialsIdentity(
-                    access_key_id=self._access_key_id, secret_access_key=self._secret_access_key
+                    access_key_id=self._access_key_id,
+                    secret_access_key=self._secret_access_key,
+                    session_token=self._session_token,
                 )
             ),
             http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
@@ -696,7 +796,7 @@ class AWSNovaSonicLLMService(LLMService):
         try:
             while self._stream and not self._disconnecting:
                 output = await self._stream.await_output()
-                result = await output[1].receive()
+                result = await watchdog_coroutine(output[1].receive(), manager=self.task_manager)
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")
@@ -725,7 +825,6 @@ class AWSNovaSonicLLMService(LLMService):
                         elif "completionEnd" in event_json:
                             # Handle the LLM completion ending
                             await self._handle_completion_end_event(event_json)
-
         except Exception as e:
             logger.error(f"{self} error processing responses: {e}")
             if self._wants_connection:
@@ -804,12 +903,16 @@ class AWSNovaSonicLLMService(LLMService):
         # Call tool function
         if self.has_function(function_name):
             if function_name in self._functions.keys() or None in self._functions.keys():
-                await self.call_function(
-                    context=self._context,
-                    tool_call_id=tool_call_id,
-                    function_name=function_name,
-                    arguments=arguments,
-                )
+                function_calls_llm = [
+                    FunctionCallFromLLM(
+                        context=self._context,
+                        tool_call_id=tool_call_id,
+                        function_name=function_name,
+                        arguments=arguments,
+                    )
+                ]
+
+                await self.run_function_calls(function_calls_llm)
         else:
             raise AWSNovaSonicUnhandledFunctionException(
                 f"The LLM tried to call a function named '{function_name}', but there isn't a callback registered for that function."
@@ -952,6 +1055,16 @@ class AWSNovaSonicLLMService(LLMService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> AWSNovaSonicContextAggregatorPair:
+        """Create context aggregator pair for managing conversation context.
+
+        Args:
+            context: The OpenAI LLM context to upgrade.
+            user_params: Parameters for the user context aggregator.
+            assistant_params: Parameters for the assistant context aggregator.
+
+        Returns:
+            A pair of user and assistant context aggregators.
+        """
         context.set_llm_adapter(self.get_llm_adapter())
 
         user = AWSNovaSonicUserContextAggregator(context=context, params=user_params)
@@ -970,6 +1083,14 @@ class AWSNovaSonicLLMService(LLMService):
     )
 
     async def trigger_assistant_response(self):
+        """Trigger an assistant response by sending audio cue.
+
+        Sends a pre-recorded "ready" audio trigger to prompt the assistant
+        to start speaking. This is useful for controlling conversation flow.
+
+        Returns:
+            False if already triggering a response, True otherwise.
+        """
         if self._triggering_assistant_response:
             return False
 

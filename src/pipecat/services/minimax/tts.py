@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""MiniMax text-to-speech service implementation.
+
+This module provides integration with MiniMax's T2A (Text-to-Audio) API
+for streaming text-to-speech synthesis.
+"""
+
 import json
 from typing import AsyncGenerator, Optional
 
@@ -25,6 +31,14 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 
 def language_to_minimax_language(language: Language) -> Optional[str]:
+    """Convert a Language enum to MiniMax language format.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding MiniMax language name, or None if not supported.
+    """
     BASE_LANGUAGES = {
         Language.AR: "Arabic",
         Language.CS: "Czech",
@@ -71,24 +85,18 @@ def language_to_minimax_language(language: Language) -> Optional[str]:
 class MiniMaxHttpTTSService(TTSService):
     """Text-to-speech service using MiniMax's T2A (Text-to-Audio) API.
 
+    Provides streaming text-to-speech synthesis using MiniMax's HTTP API
+    with support for various voice settings, emotions, and audio configurations.
+    Supports real-time audio streaming with configurable voice parameters.
+
     Platform documentation:
     https://www.minimax.io/platform/document/T2A%20V2?key=66719005a427f0c8a5701643
-
-    Args:
-        api_key: MiniMax API key for authentication.
-        group_id: MiniMax Group ID to identify project.
-        model: TTS model name (default: "speech-02-turbo"). Options include
-            "speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo".
-        voice_id: Voice identifier (default: "Calm_Woman").
-        aiohttp_session: aiohttp.ClientSession for API communication.
-        sample_rate: Output audio sample rate in Hz (default: None, set from pipeline).
-        params: Additional configuration parameters.
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for MiniMax TTS.
 
-        Attributes:
+        Parameters:
             language: Language for TTS generation.
             speed: Speech speed (range: 0.5 to 2.0).
             volume: Speech volume (range: 0 to 10).
@@ -117,6 +125,19 @@ class MiniMaxHttpTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the MiniMax TTS service.
+
+        Args:
+            api_key: MiniMax API key for authentication.
+            group_id: MiniMax Group ID to identify project.
+            model: TTS model name. Defaults to "speech-02-turbo". Options include
+                "speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo".
+            voice_id: Voice identifier. Defaults to "Calm_Woman".
+            aiohttp_session: aiohttp.ClientSession for API communication.
+            sample_rate: Output audio sample rate in Hz. If None, uses pipeline default.
+            params: Additional configuration parameters.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or MiniMaxHttpTTSService.InputParams()
@@ -175,28 +196,62 @@ class MiniMaxHttpTTSService(TTSService):
             self._settings["english_normalization"] = params.english_normalization
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as MiniMax service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to MiniMax service language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The MiniMax-specific language name, or None if not supported.
+        """
         return language_to_minimax_language(language)
 
     def set_model_name(self, model: str):
-        """Set the TTS model to use"""
+        """Set the TTS model to use.
+
+        Args:
+            model: The model name to use for synthesis.
+        """
         self._model_name = model
 
     def set_voice(self, voice: str):
-        """Set the voice to use"""
+        """Set the voice to use.
+
+        Args:
+            voice: The voice identifier to use for synthesis.
+        """
         self._voice_id = voice
         if "voice_setting" in self._settings:
             self._settings["voice_setting"]["voice_id"] = voice
 
     async def start(self, frame: StartFrame):
+        """Start the MiniMax TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._settings["audio_setting"]["sample_rate"] = self.sample_rate
         logger.debug(f"MiniMax TTS initialized with sample rate: {self.sample_rate}")
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate TTS audio from text using MiniMax's streaming API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         headers = {

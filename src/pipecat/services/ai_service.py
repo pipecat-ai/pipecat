@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Base AI service implementation.
+
+Provides the foundation for all AI services in the Pipecat framework, including
+model management, settings handling, and frame processing lifecycle methods.
+"""
+
 from typing import Any, AsyncGenerator, Dict, Mapping
 
 from loguru import logger
@@ -20,7 +26,20 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
 class AIService(FrameProcessor):
+    """Base class for all AI services.
+
+    Provides common functionality for AI services including model management,
+    settings handling, session properties, and frame processing lifecycle.
+    Subclasses should implement specific AI functionality while leveraging
+    this base infrastructure.
+    """
+
     def __init__(self, **kwargs):
+        """Initialize the AI service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent FrameProcessor.
+        """
         super().__init__(**kwargs)
         self._model_name: str = ""
         self._settings: Dict[str, Any] = {}
@@ -28,19 +47,53 @@ class AIService(FrameProcessor):
 
     @property
     def model_name(self) -> str:
+        """Get the current model name.
+
+        Returns:
+            The name of the AI model being used.
+        """
         return self._model_name
 
     def set_model_name(self, model: str):
+        """Set the AI model name and update metrics.
+
+        Args:
+            model: The name of the AI model to use.
+        """
         self._model_name = model
         self.set_core_metrics_data(MetricsData(processor=self.name, model=self._model_name))
 
     async def start(self, frame: StartFrame):
+        """Start the AI service.
+
+        Called when the service should begin processing. Subclasses should
+        override this method to perform service-specific initialization.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         pass
 
     async def stop(self, frame: EndFrame):
+        """Stop the AI service.
+
+        Called when the service should stop processing. Subclasses should
+        override this method to perform cleanup operations.
+
+        Args:
+            frame: The end frame.
+        """
         pass
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the AI service.
+
+        Called when the service should cancel all operations. Subclasses should
+        override this method to handle cancellation logic.
+
+        Args:
+            frame: The cancel frame.
+        """
         pass
 
     async def _update_settings(self, settings: Mapping[str, Any]):
@@ -87,6 +140,15 @@ class AIService(FrameProcessor):
                 logger.warning(f"Unknown setting for {self.name} service: {key}")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and handle service lifecycle.
+
+        Automatically handles StartFrame, EndFrame, and CancelFrame by calling
+        the appropriate lifecycle methods.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
@@ -97,6 +159,14 @@ class AIService(FrameProcessor):
             await self.stop(frame)
 
     async def process_generator(self, generator: AsyncGenerator[Frame | None, None]):
+        """Process frames from an async generator.
+
+        Takes an async generator that yields frames and processes each one,
+        handling error frames specially by pushing them as errors.
+
+        Args:
+            generator: An async generator that yields Frame objects or None.
+        """
         async for f in generator:
             if f:
                 if isinstance(f, ErrorFrame):

@@ -326,7 +326,10 @@ async def run_bot(
     # Create pipeline task
     voicemail_detection_pipeline_task = PipelineTask(
         voicemail_detection_pipeline,
-        params=PipelineParams(allow_interruptions=True),
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
     )
 
     # ------------ RETRY LOGIC VARIABLES ------------
@@ -471,7 +474,10 @@ async def run_bot(
     # Create pipeline task
     human_conversation_pipeline_task = PipelineTask(
         human_conversation_pipeline,
-        params=PipelineParams(allow_interruptions=True),
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
     )
 
     # Update participant left handler for human conversation phase

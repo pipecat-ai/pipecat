@@ -4,6 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Local PyTorch smart turn analyzer for on-device ML inference.
+
+This module provides a smart turn analyzer that uses PyTorch models for
+local end-of-turn detection without requiring network connectivity.
+"""
 
 from typing import Any, Dict
 
@@ -24,7 +29,21 @@ except ModuleNotFoundError as e:
 
 
 class LocalSmartTurnAnalyzer(BaseSmartTurn):
+    """Local smart turn analyzer using PyTorch models.
+
+    Provides end-of-turn detection using locally-stored PyTorch models,
+    enabling offline operation without network dependencies. Uses
+    Wav2Vec2-BERT architecture for audio sequence classification.
+    """
+
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
+        """Initialize the local PyTorch smart turn analyzer.
+
+        Args:
+            smart_turn_model_path: Path to directory containing the PyTorch model
+                and feature extractor files. If empty, uses default HuggingFace model.
+            **kwargs: Additional arguments passed to BaseSmartTurn.
+        """
         super().__init__(**kwargs)
 
         if not smart_turn_model_path:
@@ -46,6 +65,7 @@ class LocalSmartTurnAnalyzer(BaseSmartTurn):
         logger.debug("Loaded Local Smart Turn")
 
     async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+        """Predict end-of-turn using local PyTorch model."""
         inputs = self._turn_processor(
             audio_array,
             sampling_rate=16000,

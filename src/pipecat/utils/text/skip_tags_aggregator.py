@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Skip tags aggregator for preventing sentence boundaries within tagged content.
+
+This module provides a text aggregator that prevents end-of-sentence matching
+between specified start/end tag pairs, ensuring that tagged content is processed
+as a unit regardless of internal punctuation.
+"""
+
 from typing import Optional, Sequence
 
 from pipecat.utils.string import StartEndTags, match_endofsentence, parse_start_end_tags
@@ -17,17 +24,18 @@ class SkipTagsAggregator(BaseTextAggregator):
     tag. If a start tag is found the aggregator will keep aggregating text
     unconditionally until the corresponding end tag is found. It's particularly
     useful for processing content with custom delimiters that should prevent
-    text from being considered for end of sentence matching..
+    text from being considered for end of sentence matching.
 
     The aggregator ensures that tags spanning multiple text chunks are correctly
-    identified.
-
+    identified and that content within tags is never split at sentence boundaries.
     """
 
     def __init__(self, tags: Sequence[StartEndTags]):
-        """Initialize the pattern pair aggregator.
+        """Initialize the skip tags aggregator.
 
-        Creates an empty aggregator with no patterns or handlers registered.
+        Args:
+            tags: Sequence of StartEndTags objects defining the tag pairs
+                  that should prevent sentence boundary detection.
         """
         self._text = ""
         self._tags = tags
@@ -39,24 +47,24 @@ class SkipTagsAggregator(BaseTextAggregator):
         """Get the currently buffered text.
 
         Returns:
-            The current text buffer content.
+            The current text buffer content that hasn't been processed yet.
         """
         return self._text
 
     async def aggregate(self, text: str) -> Optional[str]:
-        """Aggregate text and process pattern pairs.
+        """Aggregate text while respecting tag boundaries.
 
-        This method adds the new text to the buffer, processes any complete pattern
-        pairs, and returns processed text up to sentence boundaries if possible.
-        If there are incomplete patterns (start without matching end), it will
-        continue buffering text.
+        This method adds the new text to the buffer, processes any complete
+        pattern pairs, and returns processed text up to sentence boundaries if
+        possible. If there are incomplete patterns (start without matching
+        end), it will continue buffering text.
 
         Args:
             text: New text to add to the buffer.
 
         Returns:
-            Processed text up to a sentence boundary, or None if more
-            text is needed to form a complete sentence or pattern.
+            Processed text up to a sentence boundary (when not within tags),
+            or None if more text is needed to complete a sentence or close tags.
         """
         # Add new text to buffer
         self._text += text

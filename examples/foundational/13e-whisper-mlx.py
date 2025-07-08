@@ -84,7 +84,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         pipeline,
         params=PipelineParams(
             enable_metrics=True,
-            report_only_initial_ttfb=False,
+            enable_usage_metrics=True,
         ),
     )
 

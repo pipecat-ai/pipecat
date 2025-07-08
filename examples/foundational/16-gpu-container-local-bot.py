@@ -33,7 +33,7 @@ transport_params = {
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
     ),
-    "twilio": lambda: TransportParams(
+    "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
@@ -90,8 +90,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
+            enable_usage_metrics=True,
         ),
     )
 

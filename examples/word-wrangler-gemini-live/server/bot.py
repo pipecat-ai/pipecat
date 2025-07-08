@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+import argparse
 import asyncio
 import os
 import sys
@@ -135,7 +136,6 @@ Important guidelines:
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
@@ -199,16 +199,15 @@ async def bot(args: DailySessionArguments):
 
 
 # Local development
-async def local_daily():
+async def local_daily(args: DailySessionArguments):
     """Daily transport for local development."""
-    from runner import configure
+    # from runner import configure
 
     try:
         async with aiohttp.ClientSession() as session:
-            (room_url, token) = await configure(session)
             transport = DailyTransport(
-                room_url,
-                token,
+                room_url=args.room_url,
+                token=args.token,
                 bot_name="Bot",
                 params=DailyParams(
                     audio_in_enabled=True,
@@ -218,7 +217,7 @@ async def local_daily():
             )
 
             test_config = {
-                "personality": "witty",
+                "personality": args.personality,
             }
 
             await main(transport, test_config)
@@ -228,7 +227,24 @@ async def local_daily():
 
 # Local development entry point
 if LOCAL_RUN and __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Run the Word Wrangler bot in local development mode"
+    )
+    parser.add_argument(
+        "-u", "--room-url", type=str, default=os.getenv("DAILY_SAMPLE_ROOM_URL", "")
+    )
+    parser.add_argument(
+        "-t", "--token", type=str, default=os.getenv("DAILY_SAMPLE_ROOM_TOKEN", None)
+    )
+    parser.add_argument(
+        "-p",
+        "--personality",
+        default="witty",
+        choices=["friendly", "professional", "enthusiastic", "thoughtful", "witty"],
+        help="Personality preset for the bot (friendly, professional, enthusiastic, thoughtful, witty)",
+    )
+    args = parser.parse_args()
     try:
-        asyncio.run(local_daily())
+        asyncio.run(local_daily(args))
     except Exception as e:
         logger.exception(f"Failed to run in local mode: {e}")

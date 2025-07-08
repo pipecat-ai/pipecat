@@ -1,4 +1,5 @@
 ruff format src
 ruff format examples
 ruff format tests
-ruff check --select I --fix
+ruff format scripts
+ruff check --select I,D --fix

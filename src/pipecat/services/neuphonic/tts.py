@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Neuphonic text-to-speech service implementations.
+
+This module provides WebSocket and HTTP-based integrations with Neuphonic's
+text-to-speech API for real-time audio synthesis.
+"""
+
 import asyncio
 import base64
 import json
@@ -29,6 +35,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -41,6 +48,14 @@ except ModuleNotFoundError as e:
 
 
 def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
+    """Convert a Language enum to Neuphonic language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding Neuphonic language code, or None if not supported.
+    """
     BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
@@ -68,7 +83,21 @@ def language_to_neuphonic_lang_code(language: Language) -> Optional[str]:
 
 
 class NeuphonicTTSService(InterruptibleTTSService):
+    """Neuphonic real-time text-to-speech service using WebSocket streaming.
+
+    Provides real-time text-to-speech synthesis using Neuphonic's WebSocket API.
+    Supports interruption handling, keepalive connections, and configurable voice
+    parameters for high-quality speech generation.
+    """
+
     class InputParams(BaseModel):
+        """Input parameters for Neuphonic TTS configuration.
+
+        Parameters:
+            language: Language for synthesis. Defaults to English.
+            speed: Speech speed multiplier. Defaults to 1.0.
+        """
+
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
 
@@ -83,6 +112,17 @@ class NeuphonicTTSService(InterruptibleTTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Neuphonic TTS service.
+
+        Args:
+            api_key: Neuphonic API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            url: WebSocket URL for the Neuphonic API.
+            sample_rate: Audio sample rate in Hz. Defaults to 22050.
+            encoding: Audio encoding format. Defaults to "pcm_linear".
+            params: Additional input parameters for TTS configuration.
+            **kwargs: Additional arguments passed to parent InterruptibleTTSService.
+        """
         super().__init__(
             aggregate_sentences=True,
             push_text_frames=False,
@@ -113,12 +153,26 @@ class NeuphonicTTSService(InterruptibleTTSService):
         self._keepalive_task = None
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Neuphonic service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Neuphonic service language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Neuphonic-specific language code, or None if not supported.
+        """
         return language_to_neuphonic_lang_code(language)
 
     async def _update_settings(self, settings: Mapping[str, Any]):
+        """Update service settings and reconnect with new configuration."""
         if "voice_id" in settings:
             self.set_voice(settings["voice_id"])
 
@@ -128,28 +182,56 @@ class NeuphonicTTSService(InterruptibleTTSService):
         logger.info(f"Switching TTS to settings: [{self._settings}]")
 
     async def start(self, frame: StartFrame):
+        """Start the Neuphonic TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the Neuphonic TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the Neuphonic TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
     async def flush_audio(self):
+        """Flush any pending audio synthesis by sending stop command."""
         if self._websocket:
             msg = {"text": "<STOP>"}
             await self._websocket.send(json.dumps(msg))
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with special handling for stop conditions.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
         await super().push_frame(frame, direction)
         if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
             self._started = False
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with special handling for speech control.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         # If we received a TTSSpeakFrame and the LLM response included text (it
@@ -163,6 +245,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self.resume_processing_frames()
 
     async def _connect(self):
+        """Connect to Neuphonic WebSocket and start background tasks."""
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
@@ -172,6 +255,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
 
     async def _disconnect(self):
+        """Disconnect from Neuphonic WebSocket and clean up tasks."""
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -183,6 +267,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         await self._disconnect_websocket()
 
     async def _connect_websocket(self):
+        """Establish WebSocket connection to Neuphonic API."""
         try:
             if self._websocket and self._websocket.open:
                 return
@@ -208,6 +293,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
             await self._call_event_handler("on_connection_error", f"{e}")
 
     async def _disconnect_websocket(self):
+        """Close WebSocket connection and clean up state."""
         try:
             await self.stop_all_metrics()
 
@@ -221,7 +307,8 @@ class NeuphonicTTSService(InterruptibleTTSService):
             self._websocket = None
 
     async def _receive_messages(self):
-        async for message in self._websocket:
+        """Receive and process messages from Neuphonic WebSocket."""
+        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
             if isinstance(message, str):
                 msg = json.loads(message)
                 if msg.get("data", {}).get("audio") is not None:
@@ -232,11 +319,15 @@ class NeuphonicTTSService(InterruptibleTTSService):
                     await self.push_frame(frame)
 
     async def _keepalive_task_handler(self):
+        """Handle keepalive messages to maintain WebSocket connection."""
+        KEEPALIVE_SLEEP = 10 if self.task_manager.task_watchdog_enabled else 3
         while True:
-            await asyncio.sleep(10)
+            self.reset_watchdog()
+            await asyncio.sleep(KEEPALIVE_SLEEP)
             await self._send_text("")
 
     async def _send_text(self, text: str):
+        """Send text to Neuphonic WebSocket for synthesis."""
         if self._websocket:
             msg = {"text": text}
             logger.debug(f"Sending text to websocket: {msg}")
@@ -244,6 +335,14 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Neuphonic's streaming API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
@@ -271,19 +370,21 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
 
 class NeuphonicHttpTTSService(TTSService):
-    """Neuphonic Text-to-Speech service using HTTP streaming.
+    """Neuphonic text-to-speech service using HTTP streaming.
 
-    Args:
-        api_key: Neuphonic API key
-        voice_id: ID of the voice to use
-        url: Base URL for the Neuphonic API (default: "https://api.neuphonic.com")
-        sample_rate: Sample rate for audio output (default: 22050Hz)
-        encoding: Audio encoding format (default: "pcm_linear")
-        params: Additional parameters for TTS generation including language and speed
-        **kwargs: Additional keyword arguments passed to the parent class
+    Provides text-to-speech synthesis using Neuphonic's HTTP API with server-sent
+    events for streaming audio delivery. Suitable for applications that prefer
+    HTTP-based communication over WebSocket connections.
     """
 
     class InputParams(BaseModel):
+        """Input parameters for Neuphonic HTTP TTS configuration.
+
+        Parameters:
+            language: Language for synthesis. Defaults to English.
+            speed: Speech speed multiplier. Defaults to 1.0.
+        """
+
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
 
@@ -298,6 +399,17 @@ class NeuphonicHttpTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Neuphonic HTTP TTS service.
+
+        Args:
+            api_key: Neuphonic API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            url: Base URL for the Neuphonic HTTP API.
+            sample_rate: Audio sample rate in Hz. Defaults to 22050.
+            encoding: Audio encoding format. Defaults to "pcm_linear".
+            params: Additional input parameters for TTS configuration.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or NeuphonicHttpTTSService.InputParams()
@@ -313,12 +425,38 @@ class NeuphonicHttpTTSService(TTSService):
         self.set_voice(voice_id)
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Neuphonic HTTP service supports metrics generation.
+        """
         return True
 
+    def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Neuphonic service language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Neuphonic-specific language code, or None if not supported.
+        """
+        return language_to_neuphonic_lang_code(language)
+
     async def start(self, frame: StartFrame):
+        """Start the Neuphonic HTTP TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
 
     async def flush_audio(self):
+        """Flush any pending audio synthesis.
+
+        Note:
+            HTTP-based service doesn't require explicit flushing.
+        """
         pass
 
     @traced_tts
@@ -326,9 +464,10 @@ class NeuphonicHttpTTSService(TTSService):
         """Generate speech from text using Neuphonic streaming API.
 
         Args:
-            text: The text to convert to speech
+            text: The text to convert to speech.
+
         Yields:
-            Frames containing audio data and status information
+            Frame: Audio frames containing the synthesized speech and status information.
         """
         logger.debug(f"Generating TTS: [{text}]")
 

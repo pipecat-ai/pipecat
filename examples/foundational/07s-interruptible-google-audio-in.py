@@ -8,8 +8,8 @@ import argparse
 import os
 from dataclasses import dataclass
 
-import google.ai.generativelanguage as glm
 from dotenv import load_dotenv
+from google.genai.types import Content, Part
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -164,9 +164,7 @@ class TanscriptionContextFixup(FrameProcessor):
             and last_part.inline_data
             and last_part.inline_data.mime_type == "audio/wav"
         ):
-            self._context.messages[-2] = glm.Content(
-                role="user", parts=[glm.Part(text=self._transcript)]
-            )
+            self._context.messages[-2] = Content(role="user", parts=[Part(text=self._transcript)])
 
     def add_transcript_back_to_inference_output(self):
         if not self._transcript:
@@ -216,7 +214,12 @@ transport_params = {
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     logger.info(f"Starting bot")
 
-    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"), model="gemini-2.0-flash-001")
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        model="gemini-2.5-flash",
+        # turn on thinking if you want it
+        # params=GoogleLLMService.InputParams(extra={"thinking_config": {"thinking_budget": 4096}}),
+    )
 
     tts = GoogleTTSService(
         voice_id="en-US-Chirp3-HD-Charon",
@@ -258,7 +261,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

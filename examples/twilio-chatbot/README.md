@@ -110,31 +110,6 @@ To start a call, simply make a call to your configured Twilio phone number. The 
 
 ## Testing
 
-It is also possible to automatically test the server without making phone calls by using a software client.
-
-First, update `templates/streams.xml` to point to your server's websocket endpoint. For example:
-
-```
-<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <Stream url="ws://localhost:8765/ws"></Stream>
-  </Connect>
-  <Pause length="40"/>
-</Response>
-```
-
-Then, start the server with `-t` to indicate we are testing:
-
-```sh
-# Make sure you’re in the project directory and your virtual environment is activated
-python server.py -t
-```
-
-Finally, just point the client to the server's URL:
-
-```sh
-python client.py -u http://localhost:8765 -c 2
-```
-
-where `-c` allows you to create multiple concurrent clients.
+It is also possible to test the server without making phone calls by using one of these clients.
+- [python](client/python/README.md): This Python client enables automated testing of the server via WebSocket without the need to make actual phone calls. 
+- [typescript](client/typescript/README.md): This typescript client enables manual testing of the server via WebSocket without the need to make actual phone calls.

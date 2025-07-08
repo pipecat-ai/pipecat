@@ -4,13 +4,23 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Language code enumerations for Pipecat.
+
+This module provides comprehensive language code constants following ISO 639
+and BCP 47 standards, supporting both language-only and language-region
+combinations for various speech and text processing services.
+"""
+
 import sys
 from enum import Enum
 
 if sys.version_info < (3, 11):
 
     class StrEnum(str, Enum):
+        """String enumeration base class for Python < 3.11 compatibility."""
+
         def __new__(cls, value):
+            """Create a new instance of the StrEnum."""
             obj = str.__new__(cls, value)
             obj._value_ = value
             return obj
@@ -19,6 +29,14 @@ else:
 
 
 class Language(StrEnum):
+    """Language codes for speech and text processing services.
+
+    Provides comprehensive language code constants following ISO 639 and BCP 47
+    standards. Includes both language-only codes (e.g., 'en') and language-region
+    combinations (e.g., 'en-US') to support various speech synthesis, recognition,
+    and translation services.
+    """
+
     # Afrikaans
     AF = "af"
     AF_ZA = "af-ZA"
@@ -126,6 +144,9 @@ class Language(StrEnum):
     EN_TZ = "en-TZ"
     EN_US = "en-US"
     EN_ZA = "en-ZA"
+
+    # Esperanto
+    EO = "eo"
 
     # Spanish
     ES = "es"
@@ -455,6 +476,9 @@ class Language(StrEnum):
 
     # Tatar
     TT = "tt"
+
+    # Uyghur
+    UG = "ug"
 
     # Ukrainian
     UK = "uk"

@@ -47,7 +47,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     task = PipelineTask(
         Pipeline([imagegen, transport.output()]),
-        params=PipelineParams(enable_metrics=True),
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
     )
 
     # Register an event handler so we can play the audio when the client joins

@@ -49,7 +49,7 @@ async def main():
 
         # Initialize Sentry
         sentry_sdk.init(
-            dsn="your-project-dsn",
+            dsn=os.getenv("SENTRY_DSN"),
             traces_sample_rate=1.0,
         )
 
@@ -87,7 +87,10 @@ async def main():
 
         task = PipelineTask(
             pipeline,
-            params=PipelineParams(allow_interruptions=True, enable_metrics=True),
+            params=PipelineParams(
+                enable_metrics=True,
+                enable_usage_metrics=True,
+            ),
         )
 
         @transport.event_handler("on_first_participant_joined")

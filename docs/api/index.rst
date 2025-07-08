@@ -1,57 +1,17 @@
-Pipecat API Reference Docs
-==========================
+Pipecat API Reference
+=====================
 
-Welcome to Pipecat's API reference documentation!
+Welcome to the Pipecat API reference.
 
-Pipecat is an open source framework for building voice and multimodal assistants.
-It provides a flexible pipeline architecture for connecting various AI services,
-audio processing, and transport layers.
+Use the navigation on the left to browse modules, or search using the search box.
+
+**New to Pipecat?** Check out the `main documentation <https://docs.pipecat.ai>`_ for tutorials, guides, and client SDK information.
 
 Quick Links
 -----------
 
 * `GitHub Repository <https://github.com/pipecat-ai/pipecat>`_
-* `Website <https://pipecat.ai>`_
-
-API Reference
--------------
-
-Core Components
-~~~~~~~~~~~~~~~
-
-* :mod:`Frames <pipecat.frames>`
-* :mod:`Processors <pipecat.processors>`
-* :mod:`Pipeline <pipecat.pipeline>`
-
-Audio Processing
-~~~~~~~~~~~~~~~~
-
-* :mod:`Audio <pipecat.audio>`
-
-Services
-~~~~~~~~
-
-* :mod:`Services <pipecat.services>`
-
-Transport & Serialization
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-* :mod:`Transports <pipecat.transports>`
-   * :mod:`Local <pipecat.transports.local>`
-   * :mod:`Network <pipecat.transports.network>`
-   * :mod:`Services <pipecat.transports.services>`
-* :mod:`Serializers <pipecat.serializers>`
-
-Utilities
-~~~~~~~~~
-
-* :mod:`Adapters <pipecat.adapters>`
-* :mod:`Clocks <pipecat.clocks>`
-* :mod:`Metrics <pipecat.metrics>`
-* :mod:`Observers <pipecat.observers>`
-* :mod:`Sync <pipecat.sync>`
-* :mod:`Transcriptions <pipecat.transcriptions>`
-* :mod:`Utils <pipecat.utils>`
+* `Join our Community <https://discord.gg/pipecat>`_
 
 .. toctree::
    :maxdepth: 3
@@ -72,10 +32,3 @@ Utilities
    Transcriptions <api/pipecat.transcriptions>
    Transports <api/pipecat.transports>
    Utils <api/pipecat.utils>
-
-Indices and tables
-==================
-
-* :ref:`genindex`
-* :ref:`modindex`
-* :ref:`search`

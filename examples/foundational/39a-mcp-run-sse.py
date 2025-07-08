@@ -9,6 +9,7 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
+from mcp.client.session_group import SseServerParameters
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -63,7 +64,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     try:
         # https://docs.mcp.run/integrating/tutorials/mcp-run-sse-openai-agents/
-        mcp = MCPClient(server_params=os.getenv("MCP_RUN_SSE_URL"))
+        mcp = MCPClient(server_params=SseServerParameters(url=os.getenv("MCP_RUN_SSE_URL")))
     except Exception as e:
         logger.error(f"error setting up mcp")
         logger.exception("error trace:")
@@ -101,8 +102,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
+            enable_usage_metrics=True,
         ),
     )
 

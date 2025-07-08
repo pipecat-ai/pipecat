@@ -100,17 +100,18 @@ class EvalRunner:
         start_time = time.time()
 
         try:
-            await asyncio.wait(
-                [
-                    asyncio.create_task(run_example_pipeline(script_path)),
-                    asyncio.create_task(run_eval_pipeline(self, example_file, prompt, eval)),
-                ],
-                timeout=90,
-            )
-        except asyncio.CancelledError:
-            pass
+            tasks = [
+                asyncio.create_task(run_example_pipeline(script_path)),
+                asyncio.create_task(run_eval_pipeline(self, example_file, prompt, eval)),
+            ]
+            _, pending = await asyncio.wait(tasks, timeout=90)
+            if pending:
+                logger.error(f"ERROR: Eval timeout expired, cancelling pending tasks...")
+                for task in pending:
+                    task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
         except Exception as e:
-            print(f"ERROR: Unable to run {example_file}: {e}")
+            logger.error(f"ERROR: Unable to run {example_file}: {e}")
 
         try:
             result = await asyncio.wait_for(self._queue.get(), timeout=1.0)
@@ -134,6 +135,7 @@ class EvalRunner:
     async def save_audio(self, name: str, audio: bytes, sample_rate: int, num_channels: int):
         if len(audio) > 0:
             filename = self._recording_file_name(name)
+            logger.debug(f"Saving {name} audio to {filename}")
             with io.BytesIO() as buffer:
                 with wave.open(buffer, "wb") as wf:
                     wf.setsampwidth(2)
@@ -142,7 +144,6 @@ class EvalRunner:
                     wf.writeframes(audio)
                 async with aiofiles.open(filename, "wb") as file:
                     await file.write(buffer.getvalue())
-            logger.debug(f"Saving {name} audio to {filename}")
         else:
             logger.warning(f"There's no audio to save for {name}")
 
@@ -262,7 +263,6 @@ async def run_eval_pipeline(
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             audio_in_sample_rate=16000,
             audio_out_sample_rate=16000,
         ),

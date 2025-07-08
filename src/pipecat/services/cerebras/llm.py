@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Cerebras LLM service implementation using OpenAI-compatible interface."""
+
 from typing import List
 
 from loguru import logger
@@ -19,12 +21,6 @@ class CerebrasLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Cerebras's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key (str): The API key for accessing Cerebras's API
-        base_url (str, optional): The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1"
-        model (str, optional): The model identifier to use. Defaults to "llama-3.3-70b"
-        **kwargs: Additional keyword arguments passed to OpenAILLMService
     """
 
     def __init__(
@@ -35,10 +31,27 @@ class CerebrasLLMService(OpenAILLMService):
         model: str = "llama-3.3-70b",
         **kwargs,
     ):
+        """Initialize the Cerebras LLM service.
+
+        Args:
+            api_key: The API key for accessing Cerebras's API.
+            base_url: The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1".
+            model: The model identifier to use. Defaults to "llama-3.3-70b".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
-        """Create OpenAI-compatible client for Cerebras API endpoint."""
+        """Create OpenAI-compatible client for Cerebras API endpoint.
+
+        Args:
+            api_key: The API key for authentication. If None, uses instance key.
+            base_url: The base URL for the API. If None, uses instance URL.
+            **kwargs: Additional arguments passed to the client constructor.
+
+        Returns:
+            An OpenAI-compatible client configured for Cerebras API.
+        """
         logger.debug(f"Creating Cerebras client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
@@ -48,14 +61,14 @@ class CerebrasLLMService(OpenAILLMService):
         """Create a streaming chat completion using Cerebras's API.
 
         Args:
-        context (OpenAILLMContext): The context object containing tools configuration
-            and other settings for the chat completion.
-        messages (List[ChatCompletionMessageParam]): The list of messages comprising
-            the conversation history and current request.
+            context: The context object containing tools configuration
+                and other settings for the chat completion.
+            messages: The list of messages comprising
+                the conversation history and current request.
 
         Returns:
-        AsyncStream[ChatCompletionChunk]: A streaming response of chat completion
-            chunks that can be processed asynchronously.
+            A streaming response of chat completion
+                chunks that can be processed asynchronously.
         """
         params = {
             "model": self.model_name,

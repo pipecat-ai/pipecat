@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Grok LLM service implementation using OpenAI-compatible interface.
+
+This module provides a service for interacting with Grok's API through an
+OpenAI-compatible interface, including specialized token usage tracking
+and context aggregation functionality.
+"""
+
 from dataclasses import dataclass
 
 from loguru import logger
@@ -23,13 +30,33 @@ from pipecat.services.openai.llm import (
 
 @dataclass
 class GrokContextAggregatorPair:
+    """Pair of context aggregators for user and assistant interactions.
+
+    Provides a convenient container for managing both user and assistant
+    context aggregators together for Grok LLM interactions.
+
+    Parameters:
+        _user: The user context aggregator instance.
+        _assistant: The assistant context aggregator instance.
+    """
+
     _user: OpenAIUserContextAggregator
     _assistant: OpenAIAssistantContextAggregator
 
     def user(self) -> OpenAIUserContextAggregator:
+        """Get the user context aggregator.
+
+        Returns:
+            The user context aggregator instance.
+        """
         return self._user
 
     def assistant(self) -> OpenAIAssistantContextAggregator:
+        """Get the assistant context aggregator.
+
+        Returns:
+            The assistant context aggregator instance.
+        """
         return self._assistant
 
 
@@ -38,12 +65,8 @@ class GrokLLMService(OpenAILLMService):
 
     This service extends OpenAILLMService to connect to Grok's API endpoint while
     maintaining full compatibility with OpenAI's interface and functionality.
-
-    Args:
-        api_key (str): The API key for accessing Grok's API
-        base_url (str, optional): The base URL for Grok API. Defaults to "https://api.x.ai/v1"
-        model (str, optional): The model identifier to use. Defaults to "grok-3-beta"
-        **kwargs: Additional keyword arguments passed to OpenAILLMService
+    Includes specialized token usage tracking that accumulates metrics during
+    processing and reports final totals.
     """
 
     def __init__(
@@ -54,6 +77,14 @@ class GrokLLMService(OpenAILLMService):
         model: str = "grok-3-beta",
         **kwargs,
     ):
+        """Initialize the GrokLLMService with API key and model.
+
+        Args:
+            api_key: The API key for accessing Grok's API.
+            base_url: The base URL for Grok API. Defaults to "https://api.x.ai/v1".
+            model: The model identifier to use. Defaults to "grok-3-beta".
+            **kwargs: Additional keyword arguments passed to OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
         # Initialize counters for token usage metrics
         self._prompt_tokens = 0
@@ -63,7 +94,16 @@ class GrokLLMService(OpenAILLMService):
         self._is_processing = False
 
     def create_client(self, api_key=None, base_url=None, **kwargs):
-        """Create OpenAI-compatible client for Grok API endpoint."""
+        """Create OpenAI-compatible client for Grok API endpoint.
+
+        Args:
+            api_key: The API key to use. If None, uses instance default.
+            base_url: The base URL to use. If None, uses instance default.
+            **kwargs: Additional arguments passed to client creation.
+
+        Returns:
+            The configured client instance for Grok API.
+        """
         logger.debug(f"Creating Grok client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
@@ -75,8 +115,8 @@ class GrokLLMService(OpenAILLMService):
         them once at the end of processing.
 
         Args:
-            context (OpenAILLMContext): The context to process, containing messages
-                and other information needed for the LLM interaction.
+            context: The context to process, containing messages and other
+                information needed for the LLM interaction.
         """
         # Reset all counters and flags at the start of processing
         self._prompt_tokens = 0
@@ -107,8 +147,8 @@ class GrokLLMService(OpenAILLMService):
         The final accumulated totals are reported at the end of processing.
 
         Args:
-            tokens (LLMTokenUsage): The token usage metrics for the current chunk
-                of processing, containing prompt_tokens and completion_tokens counts.
+            tokens: The token usage metrics for the current chunk of processing,
+                containing prompt_tokens and completion_tokens counts.
         """
         # Only accumulate metrics during active processing
         if not self._is_processing:
@@ -130,22 +170,20 @@ class GrokLLMService(OpenAILLMService):
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
     ) -> GrokContextAggregatorPair:
-        """Create an instance of GrokContextAggregatorPair from an
-        OpenAILLMContext. Constructor keyword arguments for both the user and
-        assistant aggregators can be provided.
+        """Create an instance of GrokContextAggregatorPair from an OpenAILLMContext.
+
+        Constructor keyword arguments for both the user and assistant aggregators
+        can be provided.
 
         Args:
-            context (OpenAILLMContext): The LLM context.
-            user_params (LLMUserAggregatorParams, optional): User aggregator
-                parameters.
-            assistant_params (LLMAssistantAggregatorParams, optional): User
-                aggregator parameters.
+            context: The LLM context to create aggregators for.
+            user_params: Parameters for configuring the user aggregator.
+            assistant_params: Parameters for configuring the assistant aggregator.
 
         Returns:
             GrokContextAggregatorPair: A pair of context aggregators, one for
             the user and one for the assistant, encapsulated in an
             GrokContextAggregatorPair.
-
         """
         context.set_llm_adapter(self.get_llm_adapter())
 

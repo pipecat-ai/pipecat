@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Deepgram speech-to-text service implementation."""
+
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -41,6 +43,13 @@ except ModuleNotFoundError as e:
 
 
 class DeepgramSTTService(STTService):
+    """Deepgram speech-to-text service.
+
+    Provides real-time speech recognition using Deepgram's WebSocket API.
+    Supports configurable models, languages, VAD events, and various audio
+    processing options.
+    """
+
     def __init__(
         self,
         *,
@@ -52,6 +61,21 @@ class DeepgramSTTService(STTService):
         addons: Optional[Dict] = None,
         **kwargs,
     ):
+        """Initialize the Deepgram STT service.
+
+        Args:
+            api_key: Deepgram API key for authentication.
+            url: Custom Deepgram API base URL.
+
+                .. deprecated:: 0.0.64
+                    Parameter `url` is deprecated, use `base_url` instead.
+
+            base_url: Custom Deepgram API base URL.
+            sample_rate: Audio sample rate. If None, uses default or live_options value.
+            live_options: Deepgram LiveOptions for detailed configuration.
+            addons: Additional Deepgram features to enable.
+            **kwargs: Additional arguments passed to the parent STTService.
+        """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
 
@@ -108,12 +132,27 @@ class DeepgramSTTService(STTService):
 
     @property
     def vad_enabled(self):
+        """Check if Deepgram VAD events are enabled.
+
+        Returns:
+            True if VAD events are enabled in the current settings.
+        """
         return self._settings["vad_events"]
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Deepgram service supports metrics generation.
+        """
         return True
 
     async def set_model(self, model: str):
+        """Set the Deepgram model and reconnect.
+
+        Args:
+            model: The Deepgram model name to use.
+        """
         await super().set_model(model)
         logger.info(f"Switching STT model to: [{model}]")
         self._settings["model"] = model
@@ -121,25 +160,53 @@ class DeepgramSTTService(STTService):
         await self._connect()
 
     async def set_language(self, language: Language):
+        """Set the recognition language and reconnect.
+
+        Args:
+            language: The language to use for speech recognition.
+        """
         logger.info(f"Switching STT language to: [{language}]")
         self._settings["language"] = language
         await self._disconnect()
         await self._connect()
 
     async def start(self, frame: StartFrame):
+        """Start the Deepgram STT service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._settings["sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the Deepgram STT service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the Deepgram STT service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Send audio data to Deepgram for transcription.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (transcription results come via WebSocket callbacks).
+        """
         await self._connection.send(audio)
         yield None
 
@@ -172,6 +239,7 @@ class DeepgramSTTService(STTService):
             await self._connection.finish()
 
     async def start_metrics(self):
+        """Start TTFB and processing metrics collection."""
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
@@ -214,7 +282,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,
@@ -227,7 +295,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,
@@ -235,6 +303,12 @@ class DeepgramSTTService(STTService):
                 )
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with Deepgram-specific handling.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserStartedSpeakingFrame) and not self.vad_enabled:
