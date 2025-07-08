@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.75] - 2025-07-08
 
 ### Added
 
@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   up the call.
 
 ### Changed
+
+- Updated `RTVIObserver` and `RTVIProcessor` to match the new RTVI 1.0.0 protocol.
+  This includes:
+
+  - Deprecating support for all messages related to service configuaration and
+    actions.
+  - Adding support for obtaining and logging data about client, including its
+    RTVI version and optionally included system information (OS/browser/etc.)
+  - Adding support for handling the new `client-message` RTVI message through
+    either a `on_client_message` event handler or listening for a new
+    `RTVIClientMessageFrame`
+  - Adding support for responding to a `client-message` with a `server-response`
+    via either a direct call on the `RTVIProcessor` or via pushing a new
+    `RTVIServerResponseFrame`
+  - Adding built-in support for handling the new `append-to-context` RTVI message
+    which allows a client to add to the user or assistant llm context. No extra
+    code is required for supporting this behavior.
+  - Updating all JavaScript and React client RTVI examples to use versions 1.0.0
+    of the clients.
+
+  Get started migrating to RTVI protocol 1.0.0 by following the migration guide:
+  https://docs.pipecat.ai/client/migration-guide
 
 - Refactored `AWSBedrockLLMService` and `AWSPollyTTSService` to work
   asynchronously using `aioboto3` instead of the `boto3` library.
