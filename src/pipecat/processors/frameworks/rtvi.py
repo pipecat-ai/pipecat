@@ -93,10 +93,9 @@ class RTVIServiceOption(BaseModel):
     Defines a configurable option that can be set for an RTVI service,
     including its name, type, and handler function.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -112,10 +111,9 @@ class RTVIService(BaseModel):
     Represents a service that can be configured and used within the RTVI protocol,
     containing a name and list of configurable options.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     name: str
@@ -135,10 +133,9 @@ class RTVIActionArgumentData(BaseModel):
 
     Contains the name and value of an argument passed to an RTVI action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -150,10 +147,9 @@ class RTVIActionArgument(BaseModel):
 
     Specifies the name and expected type of an argument for an RTVI action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -166,10 +162,9 @@ class RTVIAction(BaseModel):
     Represents an action that can be executed within the RTVI protocol,
     including its service, name, arguments, and handler function.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Actions have been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     service: str
@@ -194,10 +189,9 @@ class RTVIServiceOptionConfig(BaseModel):
 
     Contains the name and value to set for a specific service option.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -209,10 +203,9 @@ class RTVIServiceConfig(BaseModel):
 
     Contains the service name and list of option configurations to apply.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     service: str
@@ -224,10 +217,9 @@ class RTVIConfig(BaseModel):
 
     Contains the full configuration for all RTVI services.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     config: List[RTVIServiceConfig]
@@ -244,10 +236,9 @@ class RTVIUpdateConfig(BaseModel):
 
     Contains new configuration settings and whether to interrupt the bot.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     config: List[RTVIServiceConfig]
@@ -259,10 +250,9 @@ class RTVIActionRunArgument(BaseModel):
 
     Contains the name and value of an argument to pass to an action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -274,10 +264,9 @@ class RTVIActionRun(BaseModel):
 
     Contains the service, action name, and optional arguments.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Actions have been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     service: str
@@ -293,10 +282,9 @@ class RTVIActionFrame(DataFrame):
         rtvi_action_run: The action to execute.
         message_id: Optional message ID for response correlation.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     rtvi_action_run: RTVIActionRun
@@ -431,10 +419,9 @@ class RTVIDescribeConfigData(BaseModel):
 
     Contains the list of available services and their options.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     config: List[RTVIService]
@@ -445,10 +432,9 @@ class RTVIDescribeConfig(BaseModel):
 
     Sent in response to a describe-config request.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -462,10 +448,9 @@ class RTVIDescribeActionsData(BaseModel):
 
     Contains the list of available actions that can be executed.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     actions: List[RTVIAction]
@@ -476,10 +461,9 @@ class RTVIDescribeActions(BaseModel):
 
     Sent in response to a describe-actions request.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -493,10 +477,9 @@ class RTVIConfigResponse(BaseModel):
 
     Sent in response to a get-config request.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -510,10 +493,9 @@ class RTVIActionResponseData(BaseModel):
 
     Contains the result of executing an action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     result: ActionResult
@@ -524,10 +506,9 @@ class RTVIActionResponse(BaseModel):
 
     Sent after successfully executing an action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -1278,9 +1259,6 @@ class RTVIProcessor(FrameProcessor):
             function_name: Name of the function being called.
             llm: The LLM processor making the call.
             context: The LLM context.
-
-        Note:
-            This method is deprecated. Use handle_function_call() instead.
         """
         import warnings
 
