@@ -279,7 +279,6 @@ class RivaSTTService(STTService):
             streaming_config=self._config,
         )
         for response in responses:
-            self.reset_watchdog()
             if not response.results:
                 continue
             asyncio.run_coroutine_threadsafe(
