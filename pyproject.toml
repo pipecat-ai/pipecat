@@ -32,7 +32,7 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.70.0",
+    "openai~=1.74.0",
 ]
 
 [project.urls]
@@ -79,7 +79,7 @@ perplexity = []
 playht = [ "pyht~=0.1.12", "websockets~=13.1" ]
 qwen = []
 rime = [ "websockets~=13.1" ]
-riva = [ "nvidia-riva-client~=2.19.1" ]
+riva = [ "nvidia-riva-client~=2.21.1" ]
 sambanova = []
 sentry = [ "sentry-sdk~=2.23.1" ]
 local-smart-turn = [ "coremltools>=8.0", "transformers", "torch==2.5.0", "torchaudio==2.5.0" ]
