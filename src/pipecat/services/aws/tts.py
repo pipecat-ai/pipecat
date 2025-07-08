@@ -30,7 +30,7 @@ from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
-    import boto3
+    import aioboto3
     from botocore.exceptions import BotoCoreError, ClientError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -177,13 +177,25 @@ class AWSPollyTTSService(TTSService):
 
         params = params or AWSPollyTTSService.InputParams()
 
-        self._polly_client = boto3.client(
-            "polly",
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=api_key,
-            aws_session_token=aws_session_token,
-            region_name=region,
-        )
+        # Get credentials from environment variables if not provided
+        self._aws_params = {
+            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
+            "region_name": region or os.getenv("AWS_REGION", "us-east-1"),
+        }
+
+        # Validate that we have the required credentials
+        if (
+            not self._aws_params["aws_access_key_id"]
+            or not self._aws_params["aws_secret_access_key"]
+        ):
+            raise ValueError(
+                "AWS credentials not found. Please provide them either through constructor parameters "
+                "or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
+            )
+
+        self._aws_session = aioboto3.Session()
         self._settings = {
             "engine": params.engine,
             "language": self.language_to_service_language(params.language)
@@ -198,24 +210,6 @@ class AWSPollyTTSService(TTSService):
         self._resampler = create_stream_resampler()
 
         self.set_voice(voice_id)
-
-        # Get credentials from environment variables if not provided
-        self._credentials = {
-            "aws_access_key_id": aws_access_key_id or os.getenv("AWS_ACCESS_KEY_ID"),
-            "aws_secret_access_key": api_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
-            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
-            "region": region or os.getenv("AWS_REGION", "us-east-1"),
-        }
-
-        # Validate that we have the required credentials
-        if (
-            not self._credentials["aws_access_key_id"]
-            or not self._credentials["aws_secret_access_key"]
-        ):
-            raise ValueError(
-                "AWS credentials not found. Please provide them either through constructor parameters "
-                "or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
-            )
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -279,14 +273,6 @@ class AWSPollyTTSService(TTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-
-        def read_audio_data(**args):
-            response = self._polly_client.synthesize_speech(**args)
-            if "AudioStream" in response:
-                audio_data = response["AudioStream"].read()
-                return audio_data
-            return None
-
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
@@ -309,30 +295,32 @@ class AWSPollyTTSService(TTSService):
             # Filter out None values
             filtered_params = {k: v for k, v in params.items() if v is not None}
 
-            audio_data = await asyncio.to_thread(read_audio_data, **filtered_params)
+            async with self._aws_session.client("polly", **self._aws_params) as polly:
+                response = await polly.synthesize_speech(**filtered_params)
+                if "AudioStream" in response:
+                    # Get the streaming body and read it
+                    stream = response["AudioStream"]
+                    audio_data = await stream.read()
+                else:
+                    logger.error(f"{self} No audio stream in response")
+                    audio_data = None
 
-            if not audio_data:
-                logger.error(f"{self} No audio data returned")
-                yield None
-                return
+                audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
 
-            audio_data = await self._resampler.resample(audio_data, 16000, self.sample_rate)
+                await self.start_tts_usage_metrics(text)
 
-            await self.start_tts_usage_metrics(text)
+                yield TTSStartedFrame()
 
-            yield TTSStartedFrame()
+                CHUNK_SIZE = self.chunk_size
 
-            CHUNK_SIZE = self.chunk_size
+                for i in range(0, len(audio_data), CHUNK_SIZE):
+                    chunk = audio_data[i : i + CHUNK_SIZE]
+                    if len(chunk) > 0:
+                        await self.stop_ttfb_metrics()
+                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
+                        yield frame
 
-            for i in range(0, len(audio_data), CHUNK_SIZE):
-                chunk = audio_data[i : i + CHUNK_SIZE]
-                if len(chunk) > 0:
-                    await self.stop_ttfb_metrics()
-                    frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
-                    yield frame
-
-            yield TTSStoppedFrame()
-
+                yield TTSStoppedFrame()
         except (BotoCoreError, ClientError) as error:
             logger.exception(f"{self} error generating TTS: {error}")
             error_message = f"AWS Polly TTS error: {str(error)}"
