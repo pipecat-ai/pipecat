@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refactored `AWSBedrockLLMService` and `AWSPollyTTSService` to work
+  asynchronously using `aioboto3` instead of the `boto3` library.
+
 - The `UserIdleProcessor` now handles the scenario where function calls take
   longer than the idle timeout duration. This allows you to use the
   `UserIdleProcessor` in conjunction with function calls that take a while to

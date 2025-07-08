@@ -42,7 +42,7 @@ Website = "https://pipecat.ai"
 [project.optional-dependencies]
 anthropic = [ "anthropic~=0.49.0" ]
 assemblyai = [ "websockets~=13.1" ]
-aws = [ "boto3~=1.37.16", "websockets~=13.1" ]
+aws = [ "aioboto3~=15.0.0", "websockets~=13.1" ]
 aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.0.2" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "websockets~=13.1" ]
