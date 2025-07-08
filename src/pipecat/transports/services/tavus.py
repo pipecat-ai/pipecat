@@ -127,35 +127,6 @@ class TavusApi:
             logger.debug(f"Fetched Tavus persona: {response}")
             return response["persona_name"]
 
-    async def _validate_persona(self, persona_id: str):
-        """Validate that the persona's microphone is enabled.
-
-        Args:
-            persona_id: ID of the persona to validate.
-        """
-        if self._dev_room_url is not None:
-            return
-
-        url = f"{self.BASE_URL}/personas/{persona_id}"
-        async with self._session.get(url, headers=self._headers) as r:
-            r.raise_for_status()
-            response = await r.json()
-            logger.debug(f"Fetched Tavus persona: {response}")
-            try:
-                transport_settings = response.get("layers", {}).get("transport", {})
-                microphone_enabled = transport_settings.get("input_settings", {}).get(
-                    "microphone", ""
-                )
-                if microphone_enabled != "enabled":
-                    raise Exception(
-                        "Microphone is not enabled for this persona. Please update the persona or use the persona pipecat-stream."
-                    )
-            except Exception as e:
-                logger.error(f"Error validating persona {persona_id}: {e}")
-                raise e
-            logger.info(f"Persona {persona_id} is valid")
-            return True
-
 
 class TavusCallbacks(BaseModel):
     """Callback handlers for Tavus events.
@@ -229,7 +200,6 @@ class TavusTransportClient:
 
     async def _initialize(self) -> str:
         """Initialize the conversation and return the room URL."""
-        await self._api._validate_persona(self._persona_id)
         response = await self._api.create_conversation(self._replica_id, self._persona_id)
         self._conversation_id = response["conversation_id"]
         return response["conversation_url"]
