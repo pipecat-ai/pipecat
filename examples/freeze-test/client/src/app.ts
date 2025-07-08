@@ -20,11 +20,10 @@ import {
 } from '@pipecat-ai/client-js';
 import {
   ProtobufFrameSerializer,
-  WebSocketTransport
-} from "@pipecat-ai/websocket-transport";
+  WebSocketTransport,
+} from '@pipecat-ai/websocket-transport';
 
 class RecordingSerializer extends ProtobufFrameSerializer {
-
   private lastTimestamp: number | null = null;
   private recordingAudioToSend: boolean = false;
   private _recordedAudio: { data: ArrayBuffer; delay: number }[] = [];
@@ -40,7 +39,11 @@ class RecordingSerializer extends ProtobufFrameSerializer {
   }
 
   // @ts-ignore
-  serializeAudio(data: ArrayBuffer, sampleRate: number, numChannels: number): Uint8Array | null {
+  serializeAudio(
+    data: ArrayBuffer,
+    sampleRate: number,
+    numChannels: number
+  ): Uint8Array | null {
     if (this.recordingAudioToSend) {
       const now = Date.now();
       // Compute delay since last packet
@@ -55,13 +58,13 @@ class RecordingSerializer extends ProtobufFrameSerializer {
   }
 
   public get recordedAudio() {
-    return this._recordedAudio
+    return this._recordedAudio;
   }
 }
 
 class WebsocketClientApp {
-  private ENABLE_RECORDING_MODE = false
-  private RECORDING_TIME_MS = 10000
+  private ENABLE_RECORDING_MODE = false;
+  private RECORDING_TIME_MS = 10000;
 
   private rtviClient: RTVIClient | null = null;
   private connectBtn: HTMLButtonElement | null = null;
@@ -71,7 +74,7 @@ class WebsocketClientApp {
   private botAudio: HTMLAudioElement;
 
   private declare websocketTransport: WebSocketTransport;
-  private sendRecordedAudio: boolean = false
+  private sendRecordedAudio: boolean = false;
   private declare recordingSerializer: RecordingSerializer;
 
   private playBtn: HTMLButtonElement | null = null;
@@ -91,8 +94,12 @@ class WebsocketClientApp {
    * Set up references to DOM elements and create necessary media elements
    */
   private setupDOMElements(): void {
-    this.connectBtn = document.getElementById('connect-btn') as HTMLButtonElement;
-    this.disconnectBtn = document.getElementById('disconnect-btn') as HTMLButtonElement;
+    this.connectBtn = document.getElementById(
+      'connect-btn'
+    ) as HTMLButtonElement;
+    this.disconnectBtn = document.getElementById(
+      'disconnect-btn'
+    ) as HTMLButtonElement;
     this.statusSpan = document.getElementById('connection-status');
     this.debugLog = document.getElementById('debug-log');
     this.playBtn = document.getElementById('play-btn') as HTMLButtonElement;
@@ -105,8 +112,12 @@ class WebsocketClientApp {
   private setupEventListeners(): void {
     this.connectBtn?.addEventListener('click', () => this.connect());
     this.disconnectBtn?.addEventListener('click', () => this.disconnect());
-    this.playBtn?.addEventListener('click', () => this.startSendingRecordedAudio());
-    this.stopBtn?.addEventListener('click', () => this.stopSendingRecordedAudio());
+    this.playBtn?.addEventListener('click', () =>
+      this.startSendingRecordedAudio()
+    );
+    this.stopBtn?.addEventListener('click', () =>
+      this.stopSendingRecordedAudio()
+    );
   }
 
   /**
@@ -165,7 +176,9 @@ class WebsocketClientApp {
 
     // Listen for tracks stopping
     this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
-      this.log(`Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`);
+      this.log(
+        `Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`
+      );
     });
   }
 
@@ -175,7 +188,10 @@ class WebsocketClientApp {
    */
   private setupAudioTrack(track: MediaStreamTrack): void {
     this.log('Setting up audio track');
-    if (this.botAudio.srcObject && "getAudioTracks" in this.botAudio.srcObject) {
+    if (
+      this.botAudio.srcObject &&
+      'getAudioTracks' in this.botAudio.srcObject
+    ) {
       const oldTrack = this.botAudio.srcObject.getAudioTracks()[0];
       if (oldTrack?.id === track.id) return;
     }
@@ -190,17 +206,17 @@ class WebsocketClientApp {
     try {
       const startTime = Date.now();
 
-      this.recordingSerializer = new RecordingSerializer()
-      const transport = this.ENABLE_RECORDING_MODE ? new WebSocketTransport({serializer: this.recordingSerializer}) : new WebSocketTransport();
-      this.websocketTransport = transport
+      this.recordingSerializer = new RecordingSerializer();
+      const ws_opts = {
+        serializer: this.ENABLE_RECORDING_MODE
+          ? this.recordingSerializer
+          : new ProtobufFrameSerializer(),
+        recorderSampleRate: 8000,
+        playerSampleRate: 8000,
+      };
 
       const RTVIConfig: RTVIClientOptions = {
-        transport,
-        params: {
-          // The baseURL and endpoint of your bot server that the client will connect to
-          baseUrl: 'http://localhost:7860',
-          endpoints: { connect: '/connect' },
-        },
+        transport: new WebSocketTransport(ws_opts),
         enableMic: true,
         enableCam: false,
         callbacks: {
@@ -228,27 +244,34 @@ class WebsocketClientApp {
           onMessageError: (error) => console.error('Message error:', error),
           onError: (error) => console.error('Error:', error),
         },
-      }
+      };
       this.rtviClient = new RTVIClient(RTVIConfig);
+      this.websocketTransport = this.rtviClient.transport;
       this.setupTrackListeners();
 
       this.log('Initializing devices...');
       await this.rtviClient.initDevices();
 
       this.log('Connecting to bot...');
-      await this.rtviClient.connect();
+      await this.rtviClient.connect({
+        endpoint: 'http://localhost:7860/connect',
+      });
 
       const timeTaken = Date.now() - startTime;
       this.log(`Connection complete, timeTaken: ${timeTaken}`);
 
       if (this.ENABLE_RECORDING_MODE) {
-        this.log(`Starting to recording the next ${(this.RECORDING_TIME_MS/1000)}s of audio`);
-        this.recordingSerializer.startRecording()
-        await this.sleep(this.RECORDING_TIME_MS)
-        this.recordingSerializer.stopRecording()
-        this.log("Recording stopped");
-        this.rtviClient.enableMic(false)
-        this.startSendingRecordedAudio()
+        this.log(
+          `Starting to recording the next ${
+            this.RECORDING_TIME_MS / 1000
+          }s of audio`
+        );
+        this.recordingSerializer.startRecording();
+        await this.sleep(this.RECORDING_TIME_MS);
+        this.recordingSerializer.stopRecording();
+        this.log('Recording stopped');
+        this.rtviClient.enableMic(false);
+        this.startSendingRecordedAudio();
       }
     } catch (error) {
       this.log(`Error connecting: ${(error as Error).message}`);
@@ -270,11 +293,16 @@ class WebsocketClientApp {
   public async disconnect(): Promise<void> {
     if (this.rtviClient) {
       try {
-        this.stopSendingRecordedAudio()
+        this.stopSendingRecordedAudio();
         await this.rtviClient.disconnect();
         this.rtviClient = null;
-        if (this.botAudio.srcObject && "getAudioTracks" in this.botAudio.srcObject) {
-          this.botAudio.srcObject.getAudioTracks().forEach((track) => track.stop());
+        if (
+          this.botAudio.srcObject &&
+          'getAudioTracks' in this.botAudio.srcObject
+        ) {
+          this.botAudio.srcObject
+            .getAudioTracks()
+            .forEach((track) => track.stop());
           this.botAudio.srcObject = null;
         }
       } catch (error) {
@@ -284,21 +312,21 @@ class WebsocketClientApp {
   }
 
   private startSendingRecordedAudio() {
-    this.sendRecordedAudio = true
+    this.sendRecordedAudio = true;
     if (this.playBtn) this.playBtn.disabled = true;
     if (this.stopBtn) this.stopBtn.disabled = false;
-    void this.replayAudio()
+    void this.replayAudio();
   }
 
   private stopSendingRecordedAudio() {
     if (this.stopBtn) this.stopBtn.disabled = true;
     if (this.playBtn) this.playBtn.disabled = false;
-    this.sendRecordedAudio = false
+    this.sendRecordedAudio = false;
   }
 
   private async replayAudio() {
     if (this.sendRecordedAudio) {
-      this.log("Sending recorded audio")
+      this.log('Sending recorded audio');
       for (const chunk of this.recordingSerializer.recordedAudio) {
         await this.sleep(chunk.delay);
         this.websocketTransport.handleUserAudioStream(chunk.data);
@@ -306,14 +334,13 @@ class WebsocketClientApp {
       const randomDelay = 1000 + Math.random() * (10000 - 500);
       await this.sleep(randomDelay);
 
-      void this.replayAudio()
+      void this.replayAudio();
     }
   }
 
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
-
 }
 
 declare global {

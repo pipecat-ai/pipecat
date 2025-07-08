@@ -33,13 +33,6 @@ class STTService(AIService):
     Provides common functionality for STT services including audio passthrough,
     muting, settings management, and audio processing. Subclasses must implement
     the run_stt method to provide actual speech recognition.
-
-    Args:
-            audio_passthrough: Whether to pass audio frames downstream after processing.
-                Defaults to True.
-            sample_rate: The sample rate for audio input. If None, will be determined
-                from the start frame.
-            **kwargs: Additional arguments passed to the parent AIService.
     """
 
     def __init__(
@@ -49,12 +42,22 @@ class STTService(AIService):
         sample_rate: Optional[int] = None,
         **kwargs,
     ):
+        """Initialize the STT service.
+
+        Args:
+            audio_passthrough: Whether to pass audio frames downstream after processing.
+                Defaults to True.
+            sample_rate: The sample rate for audio input. If None, will be determined
+                from the start frame.
+            **kwargs: Additional arguments passed to the parent AIService.
+        """
         super().__init__(**kwargs)
         self._audio_passthrough = audio_passthrough
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._settings: Dict[str, Any] = {}
         self._muted: bool = False
+        self._user_id: str = ""
 
     @property
     def is_muted(self) -> bool:
@@ -130,12 +133,24 @@ class STTService(AIService):
     async def process_audio_frame(self, frame: AudioRawFrame, direction: FrameDirection):
         """Process an audio frame for speech recognition.
 
+        If the service is muted, this method does nothing. Otherwise, it
+        processes the audio frame and runs speech-to-text on it, yielding
+        transcription results. If the frame has a user_id, it is stored
+        for later use in transcription.
+
         Args:
             frame: The audio frame to process.
             direction: The direction of frame processing.
         """
         if self._muted:
             return
+
+        # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
+        if hasattr(frame, "user_id"):
+            self._user_id = frame.user_id
+        # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
+        else:
+            self._user_id = ""
 
         await self.process_generator(self.run_stt(frame.audio))
 
@@ -173,14 +188,16 @@ class SegmentedSTTService(STTService):
     Requires VAD to be enabled in the pipeline to function properly. Maintains a
     small audio buffer to account for the delay between actual speech start and
     VAD detection.
-
-    Args:
-            sample_rate: The sample rate for audio input. If None, will be determined
-                from the start frame.
-            **kwargs: Additional arguments passed to the parent STTService.
     """
 
     def __init__(self, *, sample_rate: Optional[int] = None, **kwargs):
+        """Initialize the segmented STT service.
+
+        Args:
+            sample_rate: The sample rate for audio input. If None, will be determined
+                from the start frame.
+            **kwargs: Additional arguments passed to the parent STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._content = None
         self._wave = None
@@ -237,10 +254,19 @@ class SegmentedSTTService(STTService):
         Continuously buffers audio, growing the buffer while user is speaking and
         maintaining a small buffer when not speaking to account for VAD delay.
 
+        If the frame has a user_id, it is stored for later use in transcription.
+
         Args:
             frame: The audio frame to process.
             direction: The direction of frame processing.
         """
+        # UserAudioRawFrame contains a user_id (e.g. Daily, Livekit)
+        if hasattr(frame, "user_id"):
+            self._user_id = frame.user_id
+        # AudioRawFrame does not have a user_id (e.g. SmallWebRTCTransport, websockets)
+        else:
+            self._user_id = ""
+
         # If the user is speaking the audio buffer will keep growing.
         self._audio_buffer += frame.audio
 

@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Turn tracking observer for conversation flow monitoring.
+
+This module provides an observer that monitors conversation turns in a pipeline,
+tracking when turns start and end based on user and bot speech patterns.
+"""
+
 import asyncio
 from collections import deque
 
@@ -23,15 +29,30 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 class TurnTrackingObserver(BaseObserver):
     """Observer that tracks conversation turns in a pipeline.
 
+    This observer monitors the flow of conversation by tracking when turns
+    start and end based on user and bot speaking patterns. It handles
+    interruptions, timeouts, and maintains turn state throughout the pipeline.
+
     Turn tracking logic:
+
     - The first turn starts immediately when the pipeline starts (StartFrame)
     - Subsequent turns start when the user starts speaking
     - A turn ends when the bot stops speaking and either:
+
       - The user starts speaking again
       - A timeout period elapses with no more bot speech
     """
 
     def __init__(self, max_frames=100, turn_end_timeout_secs=2.5, **kwargs):
+        """Initialize the turn tracking observer.
+
+        Args:
+            max_frames: Maximum number of frame IDs to keep in history for
+                duplicate detection. Defaults to 100.
+            turn_end_timeout_secs: Timeout in seconds after bot stops speaking
+                before automatically ending the turn. Defaults to 2.5.
+            **kwargs: Additional arguments passed to the parent observer.
+        """
         super().__init__(**kwargs)
         self._turn_count = 0
         self._is_turn_active = False
@@ -49,7 +70,11 @@ class TurnTrackingObserver(BaseObserver):
         self._register_event_handler("on_turn_ended")
 
     async def on_push_frame(self, data: FramePushed):
-        """Process frame events for turn tracking."""
+        """Process frame events for turn tracking.
+
+        Args:
+            data: Frame push event data containing the frame and metadata.
+        """
         # Skip already processed frames
         if data.frame.id in self._processed_frames:
             return

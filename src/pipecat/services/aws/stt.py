@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""AWS Transcribe Speech-to-Text service implementation.
+
+This module provides a WebSocket-based connection to AWS Transcribe for real-time
+speech-to-text transcription with support for multiple languages and audio formats.
+"""
+
 import asyncio
 import json
 import os
@@ -37,6 +43,13 @@ except ModuleNotFoundError as e:
 
 
 class AWSTranscribeSTTService(STTService):
+    """AWS Transcribe Speech-to-Text service using WebSocket streaming.
+
+    Provides real-time speech transcription using AWS Transcribe's streaming API.
+    Supports multiple languages, configurable sample rates, and both interim and
+    final transcription results.
+    """
+
     def __init__(
         self,
         *,
@@ -48,6 +61,17 @@ class AWSTranscribeSTTService(STTService):
         language: Language = Language.EN,
         **kwargs,
     ):
+        """Initialize the AWS Transcribe STT service.
+
+        Args:
+            api_key: AWS secret access key. If None, uses AWS_SECRET_ACCESS_KEY environment variable.
+            aws_access_key_id: AWS access key ID. If None, uses AWS_ACCESS_KEY_ID environment variable.
+            aws_session_token: AWS session token for temporary credentials. If None, uses AWS_SESSION_TOKEN environment variable.
+            region: AWS region for the service. Defaults to "us-east-1".
+            sample_rate: Audio sample rate in Hz. Must be 8000 or 16000. Defaults to 16000.
+            language: Language for transcription. Defaults to English.
+            **kwargs: Additional arguments passed to parent STTService class.
+        """
         super().__init__(**kwargs)
 
         self._settings = {
@@ -79,14 +103,28 @@ class AWSTranscribeSTTService(STTService):
         self._receive_task = None
 
     def get_service_encoding(self, encoding: str) -> str:
-        """Convert internal encoding format to AWS Transcribe format."""
+        """Convert internal encoding format to AWS Transcribe format.
+
+        Args:
+            encoding: Internal encoding format string.
+
+        Returns:
+            AWS Transcribe compatible encoding format.
+        """
         encoding_map = {
             "linear16": "pcm",  # AWS expects "pcm" for 16-bit linear PCM
         }
         return encoding_map.get(encoding, encoding)
 
     async def start(self, frame: StartFrame):
-        """Initialize the connection when the service starts."""
+        """Initialize the connection when the service starts.
+
+        Args:
+            frame: Start frame signaling service initialization.
+
+        Raises:
+            RuntimeError: If WebSocket connection cannot be established after retries.
+        """
         await super().start(frame)
         logger.info("Starting AWS Transcribe service...")
         retry_count = 0
@@ -108,15 +146,32 @@ class AWSTranscribeSTTService(STTService):
         raise RuntimeError("Failed to establish WebSocket connection after multiple attempts")
 
     async def stop(self, frame: EndFrame):
+        """Stop the service and disconnect from AWS Transcribe.
+
+        Args:
+            frame: End frame signaling service shutdown.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the service and disconnect from AWS Transcribe.
+
+        Args:
+            frame: Cancel frame signaling service cancellation.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Process audio data and send to AWS Transcribe"""
+        """Process audio data and send to AWS Transcribe.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            ErrorFrame: If processing fails or connection issues occur.
+        """
         try:
             # Ensure WebSocket is connected
             if not self._ws_client or not self._ws_client.open:
@@ -255,7 +310,14 @@ class AWSTranscribeSTTService(STTService):
             self._ws_client = None
 
     def language_to_service_language(self, language: Language) -> str | None:
-        """Convert internal language enum to AWS Transcribe language code."""
+        """Convert internal language enum to AWS Transcribe language code.
+
+        Args:
+            language: Internal language enumeration value.
+
+        Returns:
+            AWS Transcribe compatible language code, or None if unsupported.
+        """
         language_map = {
             Language.EN: "en-US",
             Language.ES: "es-US",
@@ -304,7 +366,7 @@ class AWSTranscribeSTTService(STTService):
                                     await self.push_frame(
                                         TranscriptionFrame(
                                             transcript,
-                                            "",
+                                            self._user_id,
                                             time_now_iso8601(),
                                             self._settings["language"],
                                             result=result,
@@ -320,7 +382,7 @@ class AWSTranscribeSTTService(STTService):
                                     await self.push_frame(
                                         InterimTranscriptionFrame(
                                             transcript,
-                                            "",
+                                            self._user_id,
                                             time_now_iso8601(),
                                             self._settings["language"],
                                             result=result,

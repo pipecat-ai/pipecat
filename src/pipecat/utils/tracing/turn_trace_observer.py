@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Turn trace observer for OpenTelemetry tracing in Pipecat.
+
+This module provides an observer that creates trace spans for each conversation
+turn, integrating with the turn tracking system to provide hierarchical tracing
+of conversation flows.
+"""
+
 from typing import TYPE_CHECKING, Dict, Optional
 
 from loguru import logger
@@ -41,6 +48,14 @@ class TurnTraceObserver(BaseObserver):
         additional_span_attributes: Optional[dict] = None,
         **kwargs,
     ):
+        """Initialize the turn trace observer.
+
+        Args:
+            turn_tracker: The turn tracking observer to monitor.
+            conversation_id: Optional conversation ID for grouping turns.
+            additional_span_attributes: Additional attributes to add to spans.
+            **kwargs: Additional arguments passed to parent class.
+        """
         super().__init__(**kwargs)
         self._turn_tracker = turn_tracker
         self._current_span: Optional["Span"] = None
@@ -68,6 +83,9 @@ class TurnTraceObserver(BaseObserver):
 
         This observer doesn't need to process individual frames as it
         relies on turn start/end events from the turn tracker.
+
+        Args:
+            data: The frame push event data.
         """
         pass
 
@@ -198,6 +216,9 @@ class TurnTraceObserver(BaseObserver):
         """Get the span context for the current turn.
 
         This can be used by services to create child spans.
+
+        Returns:
+            The current turn's span context or None if not available.
         """
         if not is_tracing_available() or not self._current_span:
             return None
@@ -208,6 +229,12 @@ class TurnTraceObserver(BaseObserver):
         """Get the span context for a specific turn.
 
         This can be used by services to create child spans.
+
+        Args:
+            turn_number: The turn number to get context for.
+
+        Returns:
+            The specified turn's span context or None if not available.
         """
         if not is_tracing_available():
             return None

@@ -48,15 +48,6 @@ class DeepgramSTTService(STTService):
     Provides real-time speech recognition using Deepgram's WebSocket API.
     Supports configurable models, languages, VAD events, and various audio
     processing options.
-
-    Args:
-        api_key: Deepgram API key for authentication.
-        url: Deprecated. Use base_url instead.
-        base_url: Custom Deepgram API base URL.
-        sample_rate: Audio sample rate. If None, uses default or live_options value.
-        live_options: Deepgram LiveOptions for detailed configuration.
-        addons: Additional Deepgram features to enable.
-        **kwargs: Additional arguments passed to the parent STTService.
     """
 
     def __init__(
@@ -70,6 +61,21 @@ class DeepgramSTTService(STTService):
         addons: Optional[Dict] = None,
         **kwargs,
     ):
+        """Initialize the Deepgram STT service.
+
+        Args:
+            api_key: Deepgram API key for authentication.
+            url: Custom Deepgram API base URL.
+
+                .. deprecated:: 0.0.64
+                    Parameter `url` is deprecated, use `base_url` instead.
+
+            base_url: Custom Deepgram API base URL.
+            sample_rate: Audio sample rate. If None, uses default or live_options value.
+            live_options: Deepgram LiveOptions for detailed configuration.
+            addons: Additional Deepgram features to enable.
+            **kwargs: Additional arguments passed to the parent STTService.
+        """
         sample_rate = sample_rate or (live_options.sample_rate if live_options else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
 
@@ -276,7 +282,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,
@@ -289,7 +295,7 @@ class DeepgramSTTService(STTService):
                 await self.push_frame(
                     InterimTranscriptionFrame(
                         transcript,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                         language,
                         result=result,

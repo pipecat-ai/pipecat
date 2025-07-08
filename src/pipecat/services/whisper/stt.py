@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""This module implements Whisper transcription with a locally-downloaded model."""
+"""Whisper speech-to-text services with locally-downloaded models.
+
+This module implements Whisper transcription using locally-downloaded models,
+supporting both Faster Whisper and MLX Whisper backends for efficient inference.
+"""
 
 import asyncio
 from enum import Enum
@@ -37,25 +41,29 @@ if TYPE_CHECKING:
 
 
 class Model(Enum):
-    """Class of basic Whisper model selection options.
+    """Whisper model selection options for Faster Whisper.
 
-    Available models:
-        Multilingual models:
-            TINY: Smallest multilingual model
-            BASE: Basic multilingual model
-            MEDIUM: Good balance for multilingual
-            LARGE: Best quality multilingual
-            DISTIL_LARGE_V2: Fast multilingual
+    Provides various model sizes and specializations for speech recognition,
+    balancing quality and performance based on use case requirements.
 
-        English-only models:
-            DISTIL_MEDIUM_EN: Fast English-only
+    Parameters:
+        TINY: Smallest multilingual model, fastest inference.
+        BASE: Basic multilingual model, good speed/quality balance.
+        SMALL: Small multilingual model, better speed/quality balance than BASE.
+        MEDIUM: Medium-sized multilingual model, better quality.
+        LARGE: Best quality multilingual model, slower inference.
+        LARGE_V3_TURBO: Fast multilingual model, slightly lower quality than LARGE.
+        DISTIL_LARGE_V2: Fast multilingual distilled model.
+        DISTIL_MEDIUM_EN: Fast English-only distilled model.
     """
 
     # Multilingual models
     TINY = "tiny"
     BASE = "base"
+    SMALL = "small"
     MEDIUM = "medium"
     LARGE = "large-v3"
+    LARGE_V3_TURBO = "deepdml/faster-whisper-large-v3-turbo-ct2"
     DISTIL_LARGE_V2 = "Systran/faster-distil-whisper-large-v2"
 
     # English-only models
@@ -63,16 +71,18 @@ class Model(Enum):
 
 
 class MLXModel(Enum):
-    """Class of MLX Whisper model selection options.
+    """MLX Whisper model selection options for Apple Silicon.
 
-    Available models:
-        Multilingual models:
-            TINY: Smallest multilingual model
-            MEDIUM: Good balance for multilingual
-            LARGE_V3: Best quality multilingual
-            LARGE_V3_TURBO: Finetuned, pruned Whisper large-v3, much faster, slightly lower quality
-            DISTIL_LARGE_V3: Fast multilingual
-            LARGE_V3_TURBO_Q4: LARGE_V3_TURBO, quantized to Q4
+    Provides various model sizes optimized for Apple Silicon hardware,
+    including quantized variants for improved performance.
+
+    Parameters:
+        TINY: Smallest multilingual model for MLX.
+        MEDIUM: Medium-sized multilingual model for MLX.
+        LARGE_V3: Best quality multilingual model for MLX.
+        LARGE_V3_TURBO: Finetuned, pruned Whisper large-v3, much faster with slightly lower quality.
+        DISTIL_LARGE_V3: Fast multilingual distilled model for MLX.
+        LARGE_V3_TURBO_Q4: LARGE_V3_TURBO quantized to Q4 for reduced memory usage.
     """
 
     # Multilingual models
@@ -256,21 +266,6 @@ class WhisperSTTService(SegmentedSTTService):
 
     This service uses Faster Whisper to perform speech-to-text transcription on audio
     segments. It supports multiple languages and various model sizes.
-
-    Args:
-        model: The Whisper model to use for transcription. Can be a Model enum or string.
-        device: The device to run inference on ('cpu', 'cuda', or 'auto').
-        compute_type: The compute type for inference ('default', 'int8', 'int8_float16', etc.).
-        no_speech_prob: Probability threshold for filtering out non-speech segments.
-        language: The default language for transcription.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
-
-    Attributes:
-        _device: The device used for inference.
-        _compute_type: The compute type for inference.
-        _no_speech_prob: Threshold for non-speech filtering.
-        _model: The loaded Whisper model instance.
-        _settings: Dictionary containing service settings.
     """
 
     def __init__(
@@ -283,6 +278,16 @@ class WhisperSTTService(SegmentedSTTService):
         language: Language = Language.EN,
         **kwargs,
     ):
+        """Initialize the Whisper STT service.
+
+        Args:
+            model: The Whisper model to use for transcription. Can be a Model enum or string.
+            device: The device to run inference on ('cpu', 'cuda', or 'auto').
+            compute_type: The compute type for inference ('default', 'int8', 'int8_float16', etc.).
+            no_speech_prob: Probability threshold for filtering out non-speech segments.
+            language: The default language for transcription.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
         super().__init__(**kwargs)
         self._device: str = device
         self._compute_type = compute_type
@@ -355,7 +360,7 @@ class WhisperSTTService(SegmentedSTTService):
         pass
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribes given audio using Whisper.
+        """Transcribe audio data using Whisper.
 
         Args:
             audio: Raw audio bytes in 16-bit PCM format.
@@ -394,7 +399,12 @@ class WhisperSTTService(SegmentedSTTService):
         if text:
             await self._handle_transcription(text, True, self._settings["language"])
             logger.debug(f"Transcription: [{text}]")
-            yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
+            yield TranscriptionFrame(
+                text,
+                self._user_id,
+                time_now_iso8601(),
+                self._settings["language"],
+            )
 
 
 class WhisperSTTServiceMLX(WhisperSTTService):
@@ -402,18 +412,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
     This service uses MLX Whisper to perform speech-to-text transcription on audio
     segments. It's optimized for Apple Silicon and supports multiple languages and quantizations.
-
-    Args:
-        model: The MLX Whisper model to use for transcription. Can be an MLXModel enum or string.
-        no_speech_prob: Probability threshold for filtering out non-speech segments.
-        language: The default language for transcription.
-        temperature: Temperature for sampling. Can be a float or tuple of floats.
-        **kwargs: Additional arguments passed to SegmentedSTTService.
-
-    Attributes:
-        _no_speech_threshold: Threshold for non-speech filtering.
-        _temperature: Temperature for sampling.
-        _settings: Dictionary containing service settings.
     """
 
     def __init__(
@@ -425,6 +423,15 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         temperature: float = 0.0,
         **kwargs,
     ):
+        """Initialize the MLX Whisper STT service.
+
+        Args:
+            model: The MLX Whisper model to use for transcription. Can be an MLXModel enum or string.
+            no_speech_prob: Probability threshold for filtering out non-speech segments.
+            language: The default language for transcription.
+            temperature: Temperature for sampling. Can be a float or tuple of floats.
+            **kwargs: Additional arguments passed to SegmentedSTTService.
+        """
         # Skip WhisperSTTService.__init__ and call its parent directly
         SegmentedSTTService.__init__(self, **kwargs)
 
@@ -455,7 +462,10 @@ class WhisperSTTServiceMLX(WhisperSTTService):
 
     @override
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Transcribes given audio using MLX Whisper.
+        """Transcribe audio data using MLX Whisper.
+
+        The audio is expected to be 16-bit signed PCM data.
+        MLX Whisper will handle the conversion internally.
 
         Args:
             audio: Raw audio bytes in 16-bit PCM format.
@@ -463,10 +473,6 @@ class WhisperSTTServiceMLX(WhisperSTTService):
         Yields:
             Frame: Either a TranscriptionFrame containing the transcribed text
                   or an ErrorFrame if transcription fails.
-
-        Note:
-            The audio is expected to be 16-bit signed PCM data.
-            MLX Whisper will handle the conversion internally.
         """
         try:
             import mlx_whisper
@@ -503,7 +509,12 @@ class WhisperSTTServiceMLX(WhisperSTTService):
             if text:
                 await self._handle_transcription(text, True, self._settings["language"])
                 logger.debug(f"Transcription: [{text}]")
-                yield TranscriptionFrame(text, "", time_now_iso8601(), self._settings["language"])
+                yield TranscriptionFrame(
+                    text,
+                    self._user_id,
+                    time_now_iso8601(),
+                    self._settings["language"],
+                )
 
         except Exception as e:
             logger.exception(f"MLX Whisper transcription error: {e}")

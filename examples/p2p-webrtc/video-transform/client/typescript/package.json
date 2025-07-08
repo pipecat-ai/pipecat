@@ -18,7 +18,7 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^0.3.2",
-    "@pipecat-ai/small-webrtc-transport": "^0.0.2"
+    "@pipecat-ai/client-js": "^1.0.0",
+    "@pipecat-ai/small-webrtc-transport": "^1.0.0"
   }
 }

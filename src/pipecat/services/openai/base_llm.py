@@ -48,16 +48,6 @@ class BaseOpenAILLMService(LLMService):
     to an OpenAILLMContext object. The context defines what is sent to the LLM for
     completion, including user, assistant, and system messages, as well as tool
     choices and function call configurations.
-
-    Args:
-        model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
-        api_key: OpenAI API key. If None, uses environment variable.
-        base_url: Custom base URL for OpenAI API. If None, uses default.
-        organization: OpenAI organization ID.
-        project: OpenAI project ID.
-        default_headers: Additional HTTP headers to include in requests.
-        params: Input parameters for model configuration and behavior.
-        **kwargs: Additional arguments passed to the parent LLMService.
     """
 
     class InputParams(BaseModel):
@@ -103,6 +93,18 @@ class BaseOpenAILLMService(LLMService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the BaseOpenAILLMService.
+
+        Args:
+            model: The OpenAI model name to use (e.g., "gpt-4.1", "gpt-4o").
+            api_key: OpenAI API key. If None, uses environment variable.
+            base_url: Custom base URL for OpenAI API. If None, uses default.
+            organization: OpenAI organization ID.
+            project: OpenAI project ID.
+            default_headers: Additional HTTP headers to include in requests.
+            params: Input parameters for model configuration and behavior.
+            **kwargs: Additional arguments passed to the parent LLMService.
+        """
         super().__init__(**kwargs)
 
         params = params or BaseOpenAILLMService.InputParams()
@@ -245,9 +247,7 @@ class BaseOpenAILLMService(LLMService):
             context
         )
 
-        async for chunk in WatchdogAsyncIterator(
-            chunk_stream, reseter=self, watchdog_enabled=self.watchdog_timers_enabled
-        ):
+        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

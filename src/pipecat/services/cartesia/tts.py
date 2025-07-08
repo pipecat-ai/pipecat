@@ -90,19 +90,6 @@ class CartesiaTTSService(AudioContextWordTTSService):
     Provides text-to-speech using Cartesia's streaming WebSocket API.
     Supports word-level timestamps, audio context management, and various voice
     customization options including speed and emotion controls.
-
-    Args:
-        api_key: Cartesia API key for authentication.
-        voice_id: ID of the voice to use for synthesis.
-        cartesia_version: API version string for Cartesia service.
-        url: WebSocket URL for Cartesia TTS API.
-        model: TTS model to use (e.g., "sonic-2").
-        sample_rate: Audio sample rate. If None, uses default.
-        encoding: Audio encoding format.
-        container: Audio container format.
-        params: Additional input parameters for voice customization.
-        text_aggregator: Custom text aggregator for processing input text.
-        **kwargs: Additional arguments passed to the parent service.
     """
 
     class InputParams(BaseModel):
@@ -111,7 +98,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
         Parameters:
             language: Language to use for synthesis.
             speed: Voice speed control (string or float).
-            emotion: List of emotion controls (deprecated).
+            emotion: List of emotion controls.
+
+                .. deprecated:: 0.0.68
+                        The `emotion` parameter is deprecated and will be removed in a future version.
         """
 
         language: Optional[Language] = Language.EN
@@ -131,8 +121,25 @@ class CartesiaTTSService(AudioContextWordTTSService):
         container: str = "raw",
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
+        aggregate_sentences: Optional[bool] = True,
         **kwargs,
     ):
+        """Initialize the Cartesia TTS service.
+
+        Args:
+            api_key: Cartesia API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            cartesia_version: API version string for Cartesia service.
+            url: WebSocket URL for Cartesia TTS API.
+            model: TTS model to use (e.g., "sonic-2").
+            sample_rate: Audio sample rate. If None, uses default.
+            encoding: Audio encoding format.
+            container: Audio container format.
+            params: Additional input parameters for voice customization.
+            text_aggregator: Custom text aggregator for processing input text.
+            aggregate_sentences: Whether to aggregate sentences within the TTSService.
+            **kwargs: Additional arguments passed to the parent service.
+        """
         # Aggregating sentences still gives cleaner-sounding results and fewer
         # artifacts than streaming one word at a time. On average, waiting for a
         # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
@@ -144,7 +151,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
         super().__init__(
-            aggregate_sentences=True,
+            aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
@@ -329,7 +336,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _receive_messages(self):
         async for message in WatchdogAsyncIterator(
-            self._get_websocket(), reseter=self, watchdog_enabled=self.watchdog_timers_enabled
+            self._get_websocket(), manager=self.task_manager
         ):
             msg = json.loads(message)
             if not msg or not self.audio_context_available(msg["context_id"]):
@@ -404,18 +411,6 @@ class CartesiaHttpTTSService(TTSService):
     Provides text-to-speech using Cartesia's HTTP API for simpler, non-streaming
     synthesis. Suitable for use cases where streaming is not required and simpler
     integration is preferred.
-
-    Args:
-        api_key: Cartesia API key for authentication.
-        voice_id: ID of the voice to use for synthesis.
-        model: TTS model to use (e.g., "sonic-2").
-        base_url: Base URL for Cartesia HTTP API.
-        cartesia_version: API version string for Cartesia service.
-        sample_rate: Audio sample rate. If None, uses default.
-        encoding: Audio encoding format.
-        container: Audio container format.
-        params: Additional input parameters for voice customization.
-        **kwargs: Additional arguments passed to the parent TTSService.
     """
 
     class InputParams(BaseModel):
@@ -424,7 +419,10 @@ class CartesiaHttpTTSService(TTSService):
         Parameters:
             language: Language to use for synthesis.
             speed: Voice speed control (string or float).
-            emotion: List of emotion controls (deprecated).
+            emotion: List of emotion controls.
+
+                .. deprecated:: 0.0.68
+                        The `emotion` parameter is deprecated and will be removed in a future version.
         """
 
         language: Optional[Language] = Language.EN
@@ -445,6 +443,20 @@ class CartesiaHttpTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Cartesia HTTP TTS service.
+
+        Args:
+            api_key: Cartesia API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            model: TTS model to use (e.g., "sonic-2").
+            base_url: Base URL for Cartesia HTTP API.
+            cartesia_version: API version string for Cartesia service.
+            sample_rate: Audio sample rate. If None, uses default.
+            encoding: Audio encoding format.
+            container: Audio container format.
+            params: Additional input parameters for voice customization.
+            **kwargs: Additional arguments passed to the parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or CartesiaHttpTTSService.InputParams()
