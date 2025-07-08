@@ -37,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated the `NeuphonicTTSService` to work with the updated websocket API.
 
+- Fixed an issue with `RivaSTTService` where the watchdog feature was causing
+  an error on initialization.
+
 ### Performance
 
 - Remove unncessary push task in each `FrameProcessor`.
