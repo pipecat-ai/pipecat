@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UserIdleProcessor` in conjunction with function calls that take a while to
   return a result.
 
+### Fixed
+
+- Updated the `NeuphonicTTSService` to work with the updated websocket API.
+
 ### Performance
 
 - Remove unncessary push task in each `FrameProcessor`.

@@ -106,7 +106,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         *,
         api_key: str,
         voice_id: Optional[str] = None,
-        url: str = "wss://api.neuphonic.com",
+        url: str = "wss://eu-west-1.api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
         params: Optional[InputParams] = None,
@@ -281,14 +281,18 @@ class NeuphonicTTSService(InterruptibleTTSService):
                 "voice_id": self._voice_id,
             }
 
-            query_params = [f"api_key={self._api_key}"]
+            query_params = []
             for key, value in tts_config.items():
                 if value is not None:
                     query_params.append(f"{key}={value}")
 
-            url = f"{self._url}/speak/{self._settings['lang_code']}?{'&'.join(query_params)}"
+            url = f"{self._url}/speak/{self._settings['lang_code']}"
+            if query_params:
+                url += f"?{'&'.join(query_params)}"
 
-            self._websocket = await websockets.connect(url)
+            headers = {"x-api-key": self._api_key}
+
+            self._websocket = await websockets.connect(url, extra_headers=headers)
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -313,7 +317,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
             if isinstance(message, str):
                 msg = json.loads(message)
-                if msg.get("data", {}).get("audio") is not None:
+                if msg.get("data") and msg["data"].get("audio"):
                     await self.stop_ttfb_metrics()
 
                     audio = base64.b64decode(msg["data"]["audio"])
@@ -326,12 +330,19 @@ class NeuphonicTTSService(InterruptibleTTSService):
         while True:
             self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
-            await self._send_text("")
+            await self._send_keepalive()
+
+    async def _send_keepalive(self):
+        """Send keepalive message to maintain connection."""
+        if self._websocket:
+            # Send empty text for keepalive
+            msg = {"text": ""}
+            await self._websocket.send(json.dumps(msg))
 
     async def _send_text(self, text: str):
         """Send text to Neuphonic WebSocket for synthesis."""
         if self._websocket:
-            msg = {"text": text}
+            msg = {"text": f"{text} <STOP>"}
             logger.debug(f"Sending text to websocket: {msg}")
             await self._websocket.send(json.dumps(msg))
 
