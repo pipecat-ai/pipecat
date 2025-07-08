@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an `aggregate_sentences` arg in `CartesiaTTSService`,
+  `ElevenLabsTTSService`, `NeuphonicTTSService` and `RimeTTSService`, where the
+  default value is True. When `aggregate_sentences` is True, the `TTSService`
+  aggregates the LLM streamed tokens into sentences by default. Note: setting
+  the value to False requires a custom processor before the `TTSService` to
+  aggregate LLM tokens.
+
+- Added `kwargs` to the `OLLamaLLMService` to allow for configuration args to
+  be passed to Ollama.
+
+- Added call hang-up error handling in `TwilioFrameSerializer`, which handles
+  the case where the user has hung up before the `TwilioFrameSerializer` hangs
+  up the call.
+
+### Changed
+
+- Refactored `AWSBedrockLLMService` and `AWSPollyTTSService` to work
+  asynchronously using `aioboto3` instead of the `boto3` library.
+
+- The `UserIdleProcessor` now handles the scenario where function calls take
+  longer than the idle timeout duration. This allows you to use the
+  `UserIdleProcessor` in conjunction with function calls that take a while to
+  return a result.
+
+### Performance
+
+- Remove unncessary push task in each `FrameProcessor`.
+
+## [0.0.74] - 2025-07-03
+
+### Added
+
+- Added a new STT service, `SpeechmaticsSTTService`. This service provides
+  real-time speech-to-text transcription using the Speechmatics API. It supports
+  partial and final transcriptions, multiple languages, various audio formats,
+  and speaker diarization.
+
+- Added `normalize` and `model_id` to `FishAudioTTSService`.
+
+- Added `http_options` argument to `GoogleLLMService`.
+
 - Added `run_llm` field to `LLMMessagesAppendFrame` and `LLMMessagesUpdateFrame`
   frames. If true, a context frame will be pushed triggering the LLM to respond.
 
@@ -50,9 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tools = ToolsSchema(standard_tools=[do_something])
   ```
 
-  - `user_id` is now populated in the `TranscriptionFrame` and
-    `InterimTranscriptionFrame` when using a transport that provides a
-    `user_id`, like `DailyTransport` or `LiveKitTransport`.
+- `user_id` is now populated in the `TranscriptionFrame` and
+  `InterimTranscriptionFrame` when using a transport that provides a `user_id`,
+  like `DailyTransport` or `LiveKitTransport`.
 
 - Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
   if you have a coroutine that is waiting for a result and that takes a long
@@ -60,6 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timers are reset regularly.
 
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
+
+- Added Gemini Multimodal Live File API for uploading, fetching, listing, and
+  deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
 
 ### Changed
 
@@ -72,13 +116,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed an issue where audio would get stuck in the queue when an interrupt occurs 
+- Fixed an issue where audio would get stuck in the queue when an interrupt occurs
   during Azure TTS synthesis.
 
 - Fixed a race condition that occurs in Python 3.10+ where the task could miss
   the `CancelledError` and continue running indefinitely, freezing the pipeline.
 
 - Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.
+
+### Deprecated
+
+- In `FishAudioTTSService`, deprecated `model` and replaced with
+  `reference_id`. This change is to better align with Fish Audio's variable
+  naming and to reduce confusion about what functionality the variable
+  controls.
 
 ## [0.0.73] - 2025-06-26
 
