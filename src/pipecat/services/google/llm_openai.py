@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Google LLM service using OpenAI-compatible API format.
+
+This module provides integration with Google's AI LLM models using the OpenAI
+API format through Google's Gemini API OpenAI compatibility layer.
+"""
+
 import json
 import os
 
@@ -11,6 +17,7 @@ from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk
 
 from pipecat.services.llm_service import FunctionCallFromLLM
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 # Suppress gRPC fork warnings
 os.environ["GRPC_ENABLE_FORK_SUPPORT"] = "false"
@@ -24,8 +31,17 @@ from pipecat.services.openai.llm import OpenAILLMService
 
 
 class GoogleLLMOpenAIBetaService(OpenAILLMService):
-    """This class implements inference with Google's AI LLM models using the OpenAI format.
-    Ref - https://ai.google.dev/gemini-api/docs/openai
+    """Google LLM service using OpenAI-compatible API format.
+
+    This service provides access to Google's AI LLM models (like Gemini) through
+    the OpenAI API format. It handles streaming responses, function calls, and
+    tool usage while maintaining compatibility with OpenAI's interface.
+
+    Note: This service includes a workaround for a Google API bug where function
+    call indices may be incorrectly set to None, resulting in empty function names.
+
+    Reference:
+        https://ai.google.dev/gemini-api/docs/openai
     """
 
     def __init__(
@@ -36,6 +52,14 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         model: str = "gemini-2.0-flash",
         **kwargs,
     ):
+        """Initialize the Google LLM service.
+
+        Args:
+            api_key: Google API key for authentication.
+            base_url: Base URL for Google's OpenAI-compatible API.
+            model: Google model name to use (e.g., "gemini-2.0-flash").
+            **kwargs: Additional arguments passed to the parent OpenAILLMService.
+        """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     async def _process_context(self, context: OpenAILLMContext):
@@ -53,7 +77,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             context
         )
 
-        async for chunk in chunk_stream:
+        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

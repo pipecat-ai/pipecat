@@ -9,8 +9,8 @@ import asyncio
 import os
 import time
 
-import google.ai.generativelanguage as glm
 from dotenv import load_dotenv
+from google.genai.types import Content, Part
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -611,9 +611,7 @@ class OutputGate(FrameProcessor):
                 await self._notifier.wait()
 
                 transcription = await self._transcription_buffer.wait_for_transcription() or "-"
-                self._context._messages.append(
-                    glm.Content(role="user", parts=[glm.Part(text=transcription)])
-                )
+                self._context.add_message(Content(role="user", parts=[Part(text=transcription)]))
 
                 self.open_gate()
                 for frame, direction in self._frames_buffer:
@@ -746,7 +744,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),

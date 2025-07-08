@@ -5,6 +5,254 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added call hang-up error handling in `TwilioFrameSerializer`, which handles
+  the case where the user has hung up before the `TwilioFrameSerializer` hangs
+  up the call.
+
+### Changed
+
+- The `UserIdleProcessor` now handles the scenario where function calls take
+  longer than the idle timeout duration. This allows you to use the
+  `UserIdleProcessor` in conjunction with function calls that take a while to
+  return a result.
+
+### Performance
+
+- Remove unncessary push task in each `FrameProcessor`.
+
+## [0.0.74] - 2025-07-03
+
+### Added
+
+- Added a new STT service, `SpeechmaticsSTTService`. This service provides
+  real-time speech-to-text transcription using the Speechmatics API. It supports
+  partial and final transcriptions, multiple languages, various audio formats,
+  and speaker diarization.
+
+- Added `normalize` and `model_id` to `FishAudioTTSService`.
+
+- Added `http_options` argument to `GoogleLLMService`.
+
+- Added `run_llm` field to `LLMMessagesAppendFrame` and `LLMMessagesUpdateFrame`
+  frames. If true, a context frame will be pushed triggering the LLM to respond.
+
+- Added a new `SOXRStreamAudioResampler` for processing audio in chunks or
+  streams. If you write your own processor and need to use an audio resampler,
+  use the new `create_stream_resampler()`.
+
+- Added new `DailyParams.audio_in_user_tracks` to allow receiving one track per
+  user (default) or a single track from the room (all participants mixed).
+
+- Added support for providing "direct" functions, which don't need an
+  accompanying `FunctionSchema` or function definition dict. Instead, metadata
+  (i.e. `name`, `description`, `properties`, and `required`) are automatically
+  extracted from a combination of the function signature and docstring.
+
+  Usage:
+
+  ```python
+  # "Direct" function
+  # `params` must be the first parameter
+  async def do_something(params: FunctionCallParams, foo: int, bar: str = ""):
+    """
+    Do something interesting.
+
+    Args:
+      foo (int): The foo to do something interesting with.
+      bar (string): The bar to do something interesting with.
+    """
+
+    result = await process(foo, bar)
+    await params.result_callback({"result": result})
+
+  # ...
+
+  llm.register_direct_function(do_something)
+
+  # ...
+
+  tools = ToolsSchema(standard_tools=[do_something])
+  ```
+
+- `user_id` is now populated in the `TranscriptionFrame` and
+  `InterimTranscriptionFrame` when using a transport that provides a `user_id`,
+  like `DailyTransport` or `LiveKitTransport`.
+
+- Added `watchdog_coroutine()`. This is a watchdog helper for couroutines. So,
+  if you have a coroutine that is waiting for a result and that takes a long
+  time, you will need to wrap it with `watchdog_coroutine()` so the watchdog
+  timers are reset regularly.
+
+- Added `session_token` parameter to `AWSNovaSonicLLMService`.
+
+- Added Gemini Multimodal Live File API for uploading, fetching, listing, and
+  deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
+
+### Changed
+
+- Updated all the services to use the new `SOXRStreamAudioResampler`, ensuring smooth
+  transitions and eliminating clicks.
+
+- Upgraded `daily-python` to 0.19.4.
+
+- Updated `google` optional dependency to use `google-genai` version `1.24.0`.
+
+### Fixed
+
+- Fixed an issue where audio would get stuck in the queue when an interrupt occurs
+  during Azure TTS synthesis.
+
+- Fixed a race condition that occurs in Python 3.10+ where the task could miss
+  the `CancelledError` and continue running indefinitely, freezing the pipeline.
+
+- Fixed a `AWSNovaSonicLLMService` issue introduced in 0.0.72.
+
+### Deprecated
+
+- In `FishAudioTTSService`, deprecated `model` and replaced with
+  `reference_id`. This change is to better align with Fish Audio's variable
+  naming and to reduce confusion about what functionality the variable
+  controls.
+
+## [0.0.73] - 2025-06-26
+
+### Fixed
+
+- Fixed an issue introduced in 0.0.72 that would cause `ElevenLabsTTSService`,
+  `GladiaSTTService`, `NeuphonicTTSService` and `OpenAIRealtimeBetaLLMService`
+  to throw an error.
+
+## [0.0.72] - 2025-06-26
+
+### Added
+
+- Added logging and improved error handling to help diagnose and prevent potential
+  Pipeline freezes.
+
+- Added `WatchdogQueue`, `WatchdogPriorityQueue`, `WatchdogEvent` and
+  `WatchdogAsyncIterator`. These helper utilities reset watchdog timers
+  appropriately before they expire. When watchdog timers are disabled, the
+  utilities behave as standard counterparts without side effects.
+
+- Introduce task watchdog timers. Watchdog timers are used to detect if a
+  Pipecat task is taking longer than expected (by default 5 seconds). Watchdog
+  timers are disabled by default and can be enabled globally by passing
+  `enable_watchdog_timers` argument to `PipelineTask` constructor. It is
+  possible to change the default watchdog timer timeout by using the
+  `watchdog_timeout` argument. You can also log how long it takes to reset the
+  watchdog timers which is done with the `enable_watchdog_logging`. You can
+  control all these settings per each frame processor or even per task. That is,
+  you can set `enable_watchdog_timers`, `enable_watchdog_logging` and
+  `watchdog_timeout` when creating any frame processor through their constructor
+  arguments or when you create a task with `FrameProcessor.create_task()`. Note
+  that watchdog timers only work with Pipecat tasks and will not work if you use
+  `asycio.create_task()` or similar.
+
+- Added `lexicon_names` parameter to `AWSPollyTTSService.InputParams`.
+
+- Added reconnection logic and audio buffer management to `GladiaSTTService`.
+
+- The `TurnTrackingObserver` now ends a turn upon observing an `EndFrame` or
+  `CancelFrame`.
+
+- Added Polish support to `AWSTranscribeSTTService`.
+
+- Added new frames `FrameProcessorPauseFrame` and `FrameProcessorResumeFrame`
+  which allow pausing and resuming frame processing for a given frame
+  processor. These are control frames, so they are ordered. Pausing frame
+  processor will keep old frames in the internal queues until resume takes
+  place. Frames being pushed while a frame processor is paused will be pushed to
+  the queues. When frame processing is resumed all queued frames will be
+  processed in order. Also added `FrameProcessorPauseUrgentFrame` and
+  `FrameProcessorResumeUrgentFrame` which are system frames and therefore they
+  have high priority.
+
+- Added a property called `has_function_calls_in_progress` in
+  `LLMAssistantContextAggregator` that exposes whether a function call is in
+  progress.
+
+- Added `SambaNovaLLMService` which provides llm api integration with an
+  OpenAI-compatible interface.
+
+- Added `SambaNovaTTSService` which provides speech-to-text functionality using
+  SambaNovas's (whisper) API.
+
+- Add fundational examples for function calling and transcription
+  `14s-function-calling-sambanova.py`, `13g-sambanova-transcription.py`
+
+### Changed
+
+- `HeartbeatFrame`s are now control frames. This will make it easier to detect
+  pipeline freezes. Previously, heartbeat frames were system frames which meant
+  they were not get queued with other frames, making it difficult to detect
+  pipeline stalls.
+
+- Updated `OpenAIRealtimeBetaLLMService` to accept `language` in the
+  `InputAudioTranscription` class for all models.
+
+- Updated the default model for `OpenAIRealtimeBetaLLMService` to
+  `gpt-4o-realtime-preview-2025-06-03`.
+
+- The `PipelineParams` arg `allow_interruptions` now defaults to `True`.
+
+- `TavusTransport` and `TavusVideoService` now send audio to Tavus using WebRTC
+  audio tracks instead of `app-messages` over WebSocket. This should improve the
+  overall audio quality.
+
+- Upgraded `daily-python` to 0.19.3.
+
+### Fixed
+
+- Fixed an issue that would cause heartbeat frames to be sent before processors
+  were started.
+
+- Fixed an event loop blocking issue when using `SentryMetrics`.
+
+- Fixed an issue in `FastAPIWebsocketClient` to ensure proper disconnection
+  when the websocket is already closed.
+
+- Fixed an issue where the `UserStoppedSpeakingFrame` was not received if the
+  transport was not receiving new audio frames.
+
+- Fixed an edge case where if the user interrupted the bot but no new aggregation
+  was received, the bot would not resume speaking.
+
+- Fixed an issue with `TelnyxFrameSerializer` where it would throw an exception
+  when the user hung up the call.
+
+- Fixed an issue with `ElevenLabsTTSService` where the context was not being
+  closed.
+
+- Fixed function calling in `AWSNovaSonicLLMService`.
+
+- Fixed an issue that would cause multiple `PipelineTask.on_idle_timeout`
+  events to be triggered repeatedly.
+
+- Fixed an issue that was causing user and bot speech to not be synchronized
+  during recordings.
+
+- Fixed an issue where voice settings weren't applied to ElevenLabsTTSService.
+
+- Fixed an issue with `GroqTTSService` where it was not properly parsing the
+  WAV file header.
+
+- Fixed an issue with `GoogleSTTService` where it was constantly reconnecting
+  before starting to receive audio from the user.
+
+- Fixed an issue where `GoogleLLMService`'s TTFB value was incorrect.
+
+### Deprecated
+
+- `AudioBufferProcessor` parameter `user_continuos_stream` is deprecated.
+
+### Other
+
+- Rename `14e-function-calling-gemini.py` to `14e-function-calling-google.py`.
+
 ## [0.0.71] - 2025-06-10
 
 ### Added

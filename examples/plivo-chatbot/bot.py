@@ -88,7 +88,8 @@ async def run_bot(websocket_client: WebSocket, stream_id: str, call_id: Optional
         params=PipelineParams(
             audio_in_sample_rate=8000,
             audio_out_sample_rate=8000,
-            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
         ),
     )
 

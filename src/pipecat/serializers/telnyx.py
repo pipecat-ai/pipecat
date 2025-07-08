@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Telnyx WebSocket frame serializer for Pipecat."""
+
 import base64
 import json
 from typing import Optional
@@ -14,7 +16,7 @@ from pydantic import BaseModel
 
 from pipecat.audio.utils import (
     alaw_to_pcm,
-    create_default_resampler,
+    create_stream_resampler,
     pcm_to_alaw,
     pcm_to_ulaw,
     ulaw_to_pcm,
@@ -43,22 +45,12 @@ class TelnyxFrameSerializer(FrameSerializer):
     When auto_hang_up is enabled (default), the serializer will automatically terminate
     the Telnyx call when an EndFrame or CancelFrame is processed, but requires Telnyx
     credentials to be provided.
-
-    Attributes:
-        _stream_id: The Telnyx Stream ID.
-        _call_control_id: The associated Telnyx Call Control ID.
-        _api_key: Telnyx API key for API access.
-        _params: Configuration parameters.
-        _telnyx_sample_rate: Sample rate used by Telnyx (typically 8kHz).
-        _sample_rate: Input sample rate for the pipeline.
-        _resampler: Audio resampler for format conversion.
-        _hangup_attempted: Flag to track if hang-up has been attempted.
     """
 
     class InputParams(BaseModel):
         """Configuration parameters for TelnyxFrameSerializer.
 
-        Attributes:
+        Parameters:
             telnyx_sample_rate: Sample rate used by Telnyx, defaults to 8000 Hz.
             sample_rate: Optional override for pipeline input sample rate.
             inbound_encoding: Audio encoding for data sent to Telnyx (e.g., "PCMU").
@@ -101,7 +93,8 @@ class TelnyxFrameSerializer(FrameSerializer):
         self._telnyx_sample_rate = self._params.telnyx_sample_rate
         self._sample_rate = 0  # Pipeline input rate
 
-        self._resampler = create_default_resampler()
+        self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
         self._hangup_attempted = False
 
     @property
@@ -153,11 +146,11 @@ class TelnyxFrameSerializer(FrameSerializer):
             # Output: Convert PCM at frame's rate to 8kHz encoded for Telnyx
             if self._params.inbound_encoding == "PCMU":
                 serialized_data = await pcm_to_ulaw(
-                    data, frame.sample_rate, self._telnyx_sample_rate, self._resampler
+                    data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
                 )
             elif self._params.inbound_encoding == "PCMA":
                 serialized_data = await pcm_to_alaw(
-                    data, frame.sample_rate, self._telnyx_sample_rate, self._resampler
+                    data, frame.sample_rate, self._telnyx_sample_rate, self._output_resampler
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.inbound_encoding}")
@@ -196,8 +189,31 @@ class TelnyxFrameSerializer(FrameSerializer):
                 async with session.post(endpoint, headers=headers) as response:
                     if response.status == 200:
                         logger.info(f"Successfully terminated Telnyx call {call_control_id}")
+                    elif response.status == 422:
+                        # Handle the case where the call has already ended
+                        # Error code 90018: "Call has already ended"
+                        # Source: https://developers.telnyx.com/api/errors/90018
+                        try:
+                            error_data = await response.json()
+                            if any(
+                                error.get("code") == "90018"
+                                for error in error_data.get("errors", [])
+                            ):
+                                logger.debug(
+                                    f"Telnyx call {call_control_id} was already terminated"
+                                )
+                                return
+                        except:
+                            pass  # Fall through to log the raw error
+
+                        # Log other 422 errors
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to terminate Telnyx call {call_control_id}: "
+                            f"Status {response.status}, Response: {error_text}"
+                        )
                     else:
-                        # Get the error details for better debugging
+                        # Log other errors
                         error_text = await response.text()
                         logger.error(
                             f"Failed to terminate Telnyx call {call_control_id}: "
@@ -234,14 +250,14 @@ class TelnyxFrameSerializer(FrameSerializer):
                     payload,
                     self._telnyx_sample_rate,
                     self._sample_rate,
-                    self._resampler,
+                    self._input_resampler,
                 )
             elif self._params.outbound_encoding == "PCMA":
                 deserialized_data = await alaw_to_pcm(
                     payload,
                     self._telnyx_sample_rate,
                     self._sample_rate,
-                    self._resampler,
+                    self._input_resampler,
                 )
             else:
                 raise ValueError(f"Unsupported encoding: {self._params.outbound_encoding}")

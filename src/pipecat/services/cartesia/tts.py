@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Cartesia text-to-speech service implementations."""
+
 import base64
 import json
 import uuid
@@ -27,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -42,6 +45,14 @@ except ModuleNotFoundError as e:
 
 
 def language_to_cartesia_language(language: Language) -> Optional[str]:
+    """Convert a Language enum to Cartesia language code.
+
+    Args:
+        language: The Language enum value to convert.
+
+    Returns:
+        The corresponding Cartesia language code, or None if not supported.
+    """
     BASE_LANGUAGES = {
         Language.DE: "de",
         Language.EN: "en",
@@ -74,7 +85,25 @@ def language_to_cartesia_language(language: Language) -> Optional[str]:
 
 
 class CartesiaTTSService(AudioContextWordTTSService):
+    """Cartesia TTS service with WebSocket streaming and word timestamps.
+
+    Provides text-to-speech using Cartesia's streaming WebSocket API.
+    Supports word-level timestamps, audio context management, and various voice
+    customization options including speed and emotion controls.
+    """
+
     class InputParams(BaseModel):
+        """Input parameters for Cartesia TTS configuration.
+
+        Parameters:
+            language: Language to use for synthesis.
+            speed: Voice speed control (string or float).
+            emotion: List of emotion controls.
+
+                .. deprecated:: 0.0.68
+                        The `emotion` parameter is deprecated and will be removed in a future version.
+        """
+
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
@@ -94,6 +123,21 @@ class CartesiaTTSService(AudioContextWordTTSService):
         text_aggregator: Optional[BaseTextAggregator] = None,
         **kwargs,
     ):
+        """Initialize the Cartesia TTS service.
+
+        Args:
+            api_key: Cartesia API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            cartesia_version: API version string for Cartesia service.
+            url: WebSocket URL for Cartesia TTS API.
+            model: TTS model to use (e.g., "sonic-2").
+            sample_rate: Audio sample rate. If None, uses default.
+            encoding: Audio encoding format.
+            container: Audio container format.
+            params: Additional input parameters for voice customization.
+            text_aggregator: Custom text aggregator for processing input text.
+            **kwargs: Additional arguments passed to the parent service.
+        """
         # Aggregating sentences still gives cleaner-sounding results and fewer
         # artifacts than streaming one word at a time. On average, waiting for a
         # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
@@ -137,14 +181,32 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Cartesia service supports metrics generation.
+        """
         return True
 
     async def set_model(self, model: str):
+        """Set the TTS model.
+
+        Args:
+            model: The model name to use for synthesis.
+        """
         self._model_id = model
         await super().set_model(model)
         logger.info(f"Switching TTS model to: [{model}]")
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Cartesia language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Cartesia-specific language code, or None if not supported.
+        """
         return language_to_cartesia_language(language)
 
     def _build_msg(
@@ -182,15 +244,30 @@ class CartesiaTTSService(AudioContextWordTTSService):
         return json.dumps(msg)
 
     async def start(self, frame: StartFrame):
+        """Start the Cartesia TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._settings["output_format"]["sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the Cartesia TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Stop the Cartesia TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
@@ -247,6 +324,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             self._context_id = None
 
     async def flush_audio(self):
+        """Flush any pending audio and finalize the current context."""
         if not self._context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
@@ -255,7 +333,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._context_id = None
 
     async def _receive_messages(self):
-        async for message in self._get_websocket():
+        async for message in WatchdogAsyncIterator(
+            self._get_websocket(), manager=self.task_manager
+        ):
             msg = json.loads(message)
             if not msg or not self.audio_context_available(msg["context_id"]):
                 continue
@@ -287,6 +367,14 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Cartesia's streaming API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
@@ -316,7 +404,25 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
 
 class CartesiaHttpTTSService(TTSService):
+    """Cartesia HTTP-based TTS service.
+
+    Provides text-to-speech using Cartesia's HTTP API for simpler, non-streaming
+    synthesis. Suitable for use cases where streaming is not required and simpler
+    integration is preferred.
+    """
+
     class InputParams(BaseModel):
+        """Input parameters for Cartesia HTTP TTS configuration.
+
+        Parameters:
+            language: Language to use for synthesis.
+            speed: Voice speed control (string or float).
+            emotion: List of emotion controls.
+
+                .. deprecated:: 0.0.68
+                        The `emotion` parameter is deprecated and will be removed in a future version.
+        """
+
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = Field(default_factory=list)
@@ -335,6 +441,20 @@ class CartesiaHttpTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the Cartesia HTTP TTS service.
+
+        Args:
+            api_key: Cartesia API key for authentication.
+            voice_id: ID of the voice to use for synthesis.
+            model: TTS model to use (e.g., "sonic-2").
+            base_url: Base URL for Cartesia HTTP API.
+            cartesia_version: API version string for Cartesia service.
+            sample_rate: Audio sample rate. If None, uses default.
+            encoding: Audio encoding format.
+            container: Audio container format.
+            params: Additional input parameters for voice customization.
+            **kwargs: Additional arguments passed to the parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or CartesiaHttpTTSService.InputParams()
@@ -363,25 +483,61 @@ class CartesiaHttpTTSService(TTSService):
         )
 
     def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Cartesia HTTP service supports metrics generation.
+        """
         return True
 
     def language_to_service_language(self, language: Language) -> Optional[str]:
+        """Convert a Language enum to Cartesia language format.
+
+        Args:
+            language: The language to convert.
+
+        Returns:
+            The Cartesia-specific language code, or None if not supported.
+        """
         return language_to_cartesia_language(language)
 
     async def start(self, frame: StartFrame):
+        """Start the Cartesia HTTP TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         self._settings["output_format"]["sample_rate"] = self.sample_rate
 
     async def stop(self, frame: EndFrame):
+        """Stop the Cartesia HTTP TTS service.
+
+        Args:
+            frame: The end frame.
+        """
         await super().stop(frame)
         await self._client.close()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the Cartesia HTTP TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
         await super().cancel(frame)
         await self._client.close()
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Cartesia's HTTP API.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech.
+        """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:

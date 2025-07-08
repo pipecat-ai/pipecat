@@ -4,6 +4,17 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Deprecated AI services module.
+
+This module is deprecated. Import services directly from their respective modules:
+- pipecat.services.ai_service
+- pipecat.services.image_service
+- pipecat.services.llm_service
+- pipecat.services.stt_service
+- pipecat.services.tts_service
+- pipecat.services.vision_service
+"""
+
 import sys
 
 from pipecat.services import DeprecatedModuleProxy

@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""AssemblyAI speech-to-text service implementation.
+
+This module provides integration with AssemblyAI's real-time speech-to-text
+WebSocket API for streaming audio transcription.
+"""
+
 import asyncio
 import json
 from typing import Any, AsyncGenerator, Dict
@@ -45,6 +51,13 @@ except ModuleNotFoundError as e:
 
 
 class AssemblyAISTTService(STTService):
+    """AssemblyAI real-time speech-to-text service.
+
+    Provides real-time speech transcription using AssemblyAI's WebSocket API.
+    Supports both interim and final transcriptions with configurable parameters
+    for audio processing and connection management.
+    """
+
     def __init__(
         self,
         *,
@@ -55,6 +68,16 @@ class AssemblyAISTTService(STTService):
         vad_force_turn_endpoint: bool = True,
         **kwargs,
     ):
+        """Initialize the AssemblyAI STT service.
+
+        Args:
+            api_key: AssemblyAI API key for authentication.
+            language: Language code for transcription. Defaults to English (Language.EN).
+            api_endpoint_base_url: WebSocket endpoint URL. Defaults to AssemblyAI's streaming endpoint.
+            connection_params: Connection configuration parameters. Defaults to AssemblyAIConnectionParams().
+            vad_force_turn_endpoint: Whether to force turn endpoint on VAD stop. Defaults to True.
+            **kwargs: Additional arguments passed to parent STTService class.
+        """
         self._api_key = api_key
         self._language = language
         self._api_endpoint_base_url = api_endpoint_base_url
@@ -75,22 +98,50 @@ class AssemblyAISTTService(STTService):
         self._chunk_size_bytes = 0
 
     def can_generate_metrics(self) -> bool:
+        """Check if the service can generate metrics.
+
+        Returns:
+            True if metrics generation is supported.
+        """
         return True
 
     async def start(self, frame: StartFrame):
+        """Start the speech-to-text service.
+
+        Args:
+            frame: Start frame to begin processing.
+        """
         await super().start(frame)
         self._chunk_size_bytes = int(self._chunk_size_ms * self._sample_rate * 2 / 1000)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
+        """Stop the speech-to-text service.
+
+        Args:
+            frame: End frame to stop processing.
+        """
         await super().stop(frame)
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
+        """Cancel the speech-to-text service.
+
+        Args:
+            frame: Cancel frame to abort processing.
+        """
         await super().cancel(frame)
         await self._disconnect()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
+        """Process audio data for speech-to-text conversion.
+
+        Args:
+            audio: Raw audio bytes to process.
+
+        Yields:
+            None (processing handled via WebSocket messages).
+        """
         self._audio_buffer.extend(audio)
 
         while len(self._audio_buffer) >= self._chunk_size_bytes:
@@ -101,6 +152,12 @@ class AssemblyAISTTService(STTService):
         yield None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames for VAD and metrics handling.
+
+        Args:
+            frame: Frame to process.
+            direction: Direction of frame processing.
+        """
         await super().process_frame(frame, direction)
         if isinstance(frame, UserStartedSpeakingFrame):
             await self.start_ttfb_metrics()
@@ -189,9 +246,11 @@ class AssemblyAISTTService(STTService):
         try:
             while self._connected:
                 try:
-                    message = await self._websocket.recv()
+                    message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
                     data = json.loads(message)
                     await self._handle_message(data)
+                except asyncio.TimeoutError:
+                    self.reset_watchdog()
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:
@@ -252,7 +311,7 @@ class AssemblyAISTTService(STTService):
             await self.push_frame(
                 TranscriptionFrame(
                     message.transcript,
-                    "",  # participant
+                    self._user_id,
                     time_now_iso8601(),
                     self._language,
                     message,
@@ -264,7 +323,7 @@ class AssemblyAISTTService(STTService):
             await self.push_frame(
                 InterimTranscriptionFrame(
                     message.transcript,
-                    "",  # participant
+                    self._user_id,
                     time_now_iso8601(),
                     self._language,
                     message,

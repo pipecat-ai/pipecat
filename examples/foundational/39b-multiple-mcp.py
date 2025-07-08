@@ -15,6 +15,7 @@ import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 from mcp import StdioServerParameters
+from mcp.client.session_group import SseServerParameters
 from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -149,7 +150,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             # https://docs.mcp.run/integrating/tutorials/mcp-run-sse-openai-agents/
             # ie. "https://www.mcp.run/api/mcp/sse?..."
             # ensure the profile has a tool or few installed
-            mcp_run = MCPClient(server_params=os.getenv("MCP_RUN_SSE_URL"))
+            mcp_run = MCPClient(server_params=SseServerParameters(url=os.getenv("MCP_RUN_SSE_URL")))
         except Exception as e:
             logger.error(f"error setting up mcp.run")
             logger.exception("error trace:")
@@ -180,8 +181,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
-                allow_interruptions=True,
                 enable_metrics=True,
+                enable_usage_metrics=True,
             ),
         )
 

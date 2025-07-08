@@ -41,36 +41,150 @@ We use Ruff for code linting and formatting. Please ensure your code passes all 
 
 We follow Google-style docstrings with these specific conventions:
 
-- Class docstrings should fully document all parameters used in `__init__`
-- We don't require separate docstrings for `__init__` methods when parameters are documented in the class docstring
-- Property methods should have docstrings explaining their purpose and return value
+**Regular Classes:**
 
-Example of correctly documented class:
+- Class docstring describes the class purpose and key functionality
+- `__init__` method has its own docstring with complete `Args:` section documenting all parameters
+- All public methods must have docstrings with `Args:` and `Returns:` sections as appropriate
+
+**Dataclasses:**
+
+- Class docstring describes the purpose and documents all fields in a `Parameters:` section
+- No `__init__` docstring (auto-generated)
+
+**Properties:**
+
+- Must have docstrings with `Returns:` section
+
+**Abstract Methods:**
+
+- Must have docstrings explaining what subclasses should implement
+
+**`__init__.py` Files:**
+
+- **Skip docstrings** for pure import/re-export modules
+- **Add brief docstrings** for top-level packages or those with initialization logic
+
+**Enums:**
+
+- Class docstring describes the enumeration purpose
+- Use `Parameters:` section to document each enum value and its meaning
+- No `__init__` docstring (Enums don't have custom constructors)
+
+**Code Examples in Docstrings:**
+
+- Use `Examples:` as a section header for multiple examples
+- Use descriptive text followed by double colons (`::`) for each example
+- **Always include a blank line after the `::"`**
+- Indent all code consistently within each block
+- Separate multiple examples with blank lines for readability
+
+**Lists and Bullets in Docstrings:**
+
+- Use dashes (`-`) for bullet points, not asterisks (`*`)
+- **Add a blank line before bullet lists** when they follow a colon
+- Use section headers like "Supported features:" or "Behavior:" before lists
+- For complex nested information, consider using paragraph format instead
+
+**Deprecations:**
+
+- Use `warnings.warn()` in code for runtime deprecation warnings
+- Add `.. deprecated::` directive in docstrings for documentation visibility
+- Include version information and describe current status
+- Describe parameters in present tense, use directive to indicate deprecation status
+
+#### Examples:
 
 ```python
-class MyClass:
-    """Class description.
+# Regular class
+class MyService(BaseService):
+    """Description of what the service does.
 
-    Additional details about the class.
+    Provides detailed explanation of the service's functionality,
+    key features, and usage patterns.
 
-    Args:
-        param1: Description of first parameter.
-        param2: Description of second parameter.
+    Supported features:
+
+    - Feature one with detailed explanation
+    - Feature two with additional context
+    - Feature three for advanced use cases
     """
 
-    def __init__(self, param1, param2):
-        # No docstring required here as parameters are documented above
-        self.param1 = param1
-        self.param2 = param2
+    def __init__(self, param1: str, old_param: str = None, **kwargs):
+        """Initialize the service.
+
+        Args:
+            param1: Description of param1.
+            old_param: Controls legacy behavior.
+
+                .. deprecated:: 1.2.0
+                    This parameter no longer has any effect and will be removed in version 2.0.
+
+            **kwargs: Additional arguments passed to parent.
+        """
+        if old_param is not None:
+            import warnings
+            warnings.warn(
+                "Parameter 'old_param' is deprecated and will be removed in version 2.0.",
+                DeprecationWarning,
+            )
+        super().__init__(**kwargs)
 
     @property
-    def some_property(self) -> str:
-        """Get the formatted property value.
+    def sample_rate(self) -> int:
+        """Get the current sample rate.
 
         Returns:
-            A string representation of the property.
+            The sample rate in Hz.
         """
-        return f"Property: {self.param1}"
+        return self._sample_rate
+
+    async def process_data(self, data: str) -> bool:
+        """Process the provided data.
+
+        Args:
+            data: The data to process.
+
+        Returns:
+            True if processing succeeded.
+        """
+        pass
+
+# Dataclass with code examples
+@dataclass
+class MessageFrame:
+    """Frame containing messages in OpenAI format.
+
+    Supports both simple and content list message formats.
+
+    Example::
+
+        [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"}
+        ]
+
+    Parameters:
+        messages: List of messages in OpenAI format.
+    """
+
+    messages: List[dict]
+
+# Enum class
+class Status(Enum):
+    """Status codes for processing operations.
+
+    Parameters:
+        PENDING: Operation is queued but not started.
+        RUNNING: Operation is currently in progress.
+        COMPLETED: Operation finished successfully.
+        FAILED: Operation encountered an error.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
 ```
 
 # Contributor Covenant Code of Conduct

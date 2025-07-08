@@ -140,7 +140,13 @@ async def run_bot(
     )
 
     # Create pipeline task
-    task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
     # ------------ RETRY LOGIC VARIABLES ------------
     max_retries = 5

@@ -133,7 +133,8 @@ async def main():
             params=PipelineParams(
                 audio_in_sample_rate=16000,
                 audio_out_sample_rate=16000,
-                allow_interruptions=True,
+                enable_metrics=True,
+                enable_usage_metrics=True,
             ),
         )
 

@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""NVIDIA Riva text-to-speech service implementation.
+
+This module provides integration with NVIDIA Riva's TTS services through
+gRPC API for high-quality speech synthesis.
+"""
+
 import asyncio
 import os
 from typing import AsyncGenerator, Mapping, Optional
@@ -37,7 +43,21 @@ RIVA_TTS_TIMEOUT_SECS = 5
 
 
 class RivaTTSService(TTSService):
+    """NVIDIA Riva text-to-speech service.
+
+    Provides high-quality text-to-speech synthesis using NVIDIA Riva's
+    cloud-based TTS models. Supports multiple voices, languages, and
+    configurable quality settings.
+    """
+
     class InputParams(BaseModel):
+        """Input parameters for Riva TTS configuration.
+
+        Parameters:
+            language: Language code for synthesis. Defaults to US English.
+            quality: Audio quality setting (0-100). Defaults to 20.
+        """
+
         language: Optional[Language] = Language.EN_US
         quality: Optional[int] = 20
 
@@ -55,6 +75,17 @@ class RivaTTSService(TTSService):
         params: Optional[InputParams] = None,
         **kwargs,
     ):
+        """Initialize the NVIDIA Riva TTS service.
+
+        Args:
+            api_key: NVIDIA API key for authentication.
+            server: gRPC server endpoint. Defaults to NVIDIA's cloud endpoint.
+            voice_id: Voice model identifier. Defaults to multilingual Ray voice.
+            sample_rate: Audio sample rate. If None, uses service default.
+            model_function_map: Dictionary containing function_id and model_name for the TTS model.
+            params: Additional configuration parameters for TTS synthesis.
+            **kwargs: Additional arguments passed to parent TTSService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         params = params or RivaTTSService.InputParams()
@@ -82,6 +113,13 @@ class RivaTTSService(TTSService):
         )
 
     async def set_model(self, model: str):
+        """Attempt to set the TTS model.
+
+        Note: Model cannot be changed after initialization for Riva service.
+
+        Args:
+            model: The model name to set (operation not supported).
+        """
         logger.warning(f"Cannot set model after initialization. Set model and function id like so:")
         example = {"function_id": "<UUID>", "model_name": "<model_name>"}
         logger.warning(
@@ -90,6 +128,15 @@ class RivaTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using NVIDIA Riva TTS.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech data.
+        """
+
         def read_audio_responses(queue: asyncio.Queue):
             def add_response(r):
                 asyncio.run_coroutine_threadsafe(queue.put(r), self.get_event_loop())
@@ -139,6 +186,13 @@ class RivaTTSService(TTSService):
 
 
 class FastPitchTTSService(RivaTTSService):
+    """Deprecated FastPitch TTS service.
+
+    .. deprecated:: 0.0.66
+        This class is deprecated. Use RivaTTSService instead for new implementations.
+        Provides backward compatibility for existing FastPitch TTS integrations.
+    """
+
     def __init__(
         self,
         *,
@@ -153,6 +207,17 @@ class FastPitchTTSService(RivaTTSService):
         params: Optional[RivaTTSService.InputParams] = None,
         **kwargs,
     ):
+        """Initialize the deprecated FastPitch TTS service.
+
+        Args:
+            api_key: NVIDIA API key for authentication.
+            server: gRPC server endpoint. Defaults to NVIDIA's cloud endpoint.
+            voice_id: Voice model identifier. Defaults to Female-1 voice.
+            sample_rate: Audio sample rate. If None, uses service default.
+            model_function_map: Dictionary containing function_id and model_name for FastPitch model.
+            params: Additional configuration parameters for TTS synthesis.
+            **kwargs: Additional arguments passed to parent RivaTTSService.
+        """
         super().__init__(
             api_key=api_key,
             server=server,

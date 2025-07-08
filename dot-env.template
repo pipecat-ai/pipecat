@@ -111,3 +111,13 @@ SARVAM_API_KEY=...
 
 # Soniox
 SONIOX_API_KEY=
+
+# Speechmatics
+SPEECHMATICS_API_KEY=...
+
+
+# SambaNova
+SAMBANOVA_API_KEY=...
+
+# Sentry
+SENTRY_DSN=...
