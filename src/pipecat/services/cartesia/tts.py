@@ -121,6 +121,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         container: str = "raw",
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
+        aggregate_sentences: Optional[bool] = True,
         **kwargs,
     ):
         """Initialize the Cartesia TTS service.
@@ -136,6 +137,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             container: Audio container format.
             params: Additional input parameters for voice customization.
             text_aggregator: Custom text aggregator for processing input text.
+            aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
         """
         # Aggregating sentences still gives cleaner-sounding results and fewer
@@ -149,7 +151,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         # can use those to generate text frames ourselves aligned with the
         # playout timing of the audio!
         super().__init__(
-            aggregate_sentences=True,
+            aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
