@@ -14,7 +14,7 @@ from pipecat.transcriptions.language import Language
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
-    Attributes:
+    Parameters:
         languages: List of language codes to use for transcription
         code_switching: Whether to auto-detect language changes during transcription
     """
