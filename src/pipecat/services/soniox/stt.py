@@ -49,8 +49,15 @@ class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
     Parameters:
-        languages: List of language codes to use for transcription
-        code_switching: Whether to auto-detect language changes during transcription
+        model: Model to use for transcription.
+        audio_format: Audio format to use for transcription.
+        num_channels: Number of channels to use for transcription.
+        language_hints: List of language hints to use for transcription.
+        context: Customization for transcription.
+        enable_non_final_tokens: Whether to enable non-final tokens. If false, only final tokens will be returned.
+        max_non_final_tokens_duration_ms: Maximum duration of non-final tokens.
+        enable_endpoint_detection: Whether to enable endpoint detection. User will receive interim transcription until the endpoint is detected.
+        client_reference_id: Client reference ID to use for transcription.
     """
 
     model: str = "stt-rt-preview"
@@ -123,7 +130,6 @@ class SonioxSTTService(STTService):
         Args:
             api_key: Soniox API key.
             url: Soniox WebSocket API URL.
-            model: Transcription model to use.
             sample_rate: Audio sample rate. If None, uses value from `params`.
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
@@ -153,7 +159,11 @@ class SonioxSTTService(STTService):
         self._keepalive_task = None
 
     async def start(self, frame: StartFrame):
-        """Start the Soniox STT websocket connection."""
+        """Start the Soniox STT websocket connection.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
         await super().start(frame)
         if self._websocket:
             return
@@ -206,6 +216,9 @@ class SonioxSTTService(STTService):
 
         Stopping waits for the server to close the connection as we might receive
         additional final tokens after sending the stop recording message.
+
+        Args:
+            frame: The end frame.
         """
         await super().stop(frame)
         await self._send_stop_recording()
@@ -216,12 +229,22 @@ class SonioxSTTService(STTService):
         Compared to stop, this method closes the connection immediately without waiting
         for the server to close it. This is useful when we want to stop the connection
         immediately without waiting for the server to send any final tokens.
+
+        Args:
+            frame: The cancel frame.
         """
         await super().cancel(frame)
         await self._cleanup()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Send audio data to Soniox STT Service."""
+        """Send audio data to Soniox STT Service.
+
+        Args:
+            audio: Raw audio bytes to transcribe.
+
+        Yields:
+            Frame: None (transcription results come via WebSocket callbacks).
+        """
         await self.start_processing_metrics()
         if self._websocket and not self._websocket.closed:
             await self._websocket.send(audio)
@@ -237,7 +260,12 @@ class SonioxSTTService(STTService):
         pass
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Processes a frame of audio data, either buffering or transcribing it."""
+        """Processes a frame of audio data, either buffering or transcribing it.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
         await super().process_frame(frame, direction)
 
         if isinstance(frame, UserStoppedSpeakingFrame) and self._enable_vad:
@@ -247,6 +275,7 @@ class SonioxSTTService(STTService):
                 logger.debug(f"Triggered finalize event on: {frame.name=}, {direction=}")
 
     async def _send_stop_recording(self):
+        """Send stop recording message to Soniox."""
         if self._websocket and not self._websocket.closed:
             # Send stop recording message
             await self._websocket.send("")
