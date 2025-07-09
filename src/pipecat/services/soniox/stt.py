@@ -87,7 +87,7 @@ class SonioxSTTService(STTService):
         api_key: str,
         url: str = "wss://stt-rt.soniox.com/transcribe-websocket",
         sample_rate: Optional[int] = None,
-        params: SonioxInputParams = SonioxInputParams(),
+        params: Optional[SonioxInputParams] = None,
         enable_vad: bool = True,
         auto_finalize_delay_ms: Optional[int] = 3000,
         **kwargs,
@@ -98,6 +98,7 @@ class SonioxSTTService(STTService):
             api_key: Soniox API key.
             url: Soniox WebSocket API URL.
             model: Transcription model to use.
+            sample_rate: Audio sample rate. If None, uses value from `params`.
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
             enable_vad: Listen to `UserStoppedSpeakingFrame` to send finalize message to Soniox.
@@ -109,6 +110,7 @@ class SonioxSTTService(STTService):
         """
         sample_rate = sample_rate or (params.sample_rate if params.sample_rate else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
+        params = params or SonioxInputParams()
 
         self._api_key = api_key
         self._url = url
@@ -123,7 +125,6 @@ class SonioxSTTService(STTService):
 
         self._receive_task = None
         self._keepalive_task = None
-        self._finalize_if_no_tokens_task = None
 
     async def start(self, frame: StartFrame):
         """Start the Soniox STT websocket connection."""
@@ -158,14 +159,6 @@ class SonioxSTTService(STTService):
             self._receive_task = self.create_task(self._receive_task_handler())
         if self._websocket and not self._keepalive_task:
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
-        if (
-            self._websocket
-            and not self._finalize_if_no_tokens_task
-            and self._auto_finalize_delay_ms is not None
-        ):
-            self._finalize_if_no_tokens_task = self.create_task(
-                self._finalize_if_no_tokens_task_handler()
-            )
 
     async def _cleanup(self):
         if self._keepalive_task:
@@ -175,10 +168,6 @@ class SonioxSTTService(STTService):
         if self._websocket:
             await self._websocket.close()
             self._websocket = None
-
-        if self._finalize_if_no_tokens_task:
-            await self.cancel_task(self._finalize_if_no_tokens_task)
-            self._finalize_if_no_tokens_task = None
 
         if self._receive_task:
             # Task cannot cancel itself. If task called _cleanup() we expect it to cancel itself.
@@ -260,7 +249,7 @@ class SonioxSTTService(STTService):
                 await self.push_frame(
                     TranscriptionFrame(
                         self._final_transcription_buffer,
-                        "",
+                        self._user_id,
                         time_now_iso8601(),
                     )
                 )
@@ -300,7 +289,7 @@ class SonioxSTTService(STTService):
                             # Even final tokens are sent as interim tokens as we want to send
                             # nicely formatted messages - therefore waiting for the endpoint.
                             self._final_transcription_buffer + non_final_transcription,
-                            "",
+                            self._user_id,
                             time_now_iso8601(),
                         )
                     )
@@ -333,37 +322,3 @@ class SonioxSTTService(STTService):
         except Exception as e:
             logger.error(f"{self} error: {e}")
             await self.push_error(ErrorFrame(f"{self} error: {e}"))
-
-    async def _finalize_if_no_tokens_task_handler(self):
-        """Call finalize if no new tokens are received for a configured duration."""
-        if not self._websocket or self._websocket.closed or self._auto_finalize_delay_ms is None:
-            return
-
-        try:
-            while True:
-                await asyncio.sleep(0.5)
-
-                if not self._websocket or self._websocket.closed:
-                    break
-
-                # Check if we have anything to send.
-                if not self._final_transcription_buffer:
-                    continue
-
-                # Check if enough time has passed since the last tokens were received.
-                if self._last_tokens_received:
-                    last_token_age_ms = (time.time() - self._last_tokens_received) * 1000
-
-                    if last_token_age_ms > self._auto_finalize_delay_ms:
-                        # No new tokens received for a while, finalize the transcription.
-                        logger.debug("No pending frames, sending finalize message")
-                        self._last_tokens_received = None
-                        await self._websocket.send(FINALIZE_MESSAGE)
-        except websockets.exceptions.ConnectionClosed:
-            # Expected when closing the connection.
-            pass
-        except Exception as e:
-            logger.error(f"{self} error (_finalize_if_no_tokens_task_handler): {e}")
-            await self.push_error(
-                ErrorFrame(f"{self} error (_finalize_if_no_tokens_task_handler): {e}")
-            )
