@@ -26,6 +26,7 @@ from pipecat.services.soniox.config import SonioxInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import websockets
@@ -203,6 +204,13 @@ class SonioxSTTService(STTService):
 
         yield None
 
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Processes a frame of audio data, either buffering or transcribing it."""
         await super().process_frame(frame, direction)
@@ -253,6 +261,8 @@ class SonioxSTTService(STTService):
                         time_now_iso8601(),
                     )
                 )
+                await self._handle_transcription(self._final_transcription_buffer, is_final=True)
+                await self.stop_processing_metrics()
                 self._final_transcription_buffer = ""
 
         try:
