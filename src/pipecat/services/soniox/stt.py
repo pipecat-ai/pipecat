@@ -88,7 +88,7 @@ class SonioxSTTService(STTService):
         url: str = "wss://stt-rt.soniox.com/transcribe-websocket",
         sample_rate: Optional[int] = None,
         params: Optional[SonioxInputParams] = None,
-        enable_vad: bool = True,
+        enable_vad: bool = False,
         auto_finalize_delay_ms: Optional[int] = 3000,
         **kwargs,
     ):
@@ -108,7 +108,7 @@ class SonioxSTTService(STTService):
                 to `None`, the auto finalize feature is disabled.
             **kwargs: Additional arguments passed to the STTService.
         """
-        sample_rate = sample_rate or (params.sample_rate if params.sample_rate else None)
+        sample_rate = sample_rate or (params.sample_rate if params and params.sample_rate else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
         params = params or SonioxInputParams()
 
