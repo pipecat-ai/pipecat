@@ -10,6 +10,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, TranscriptionFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -18,9 +19,11 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.soniox.config import SonioxInputParams
 from pipecat.services.soniox.stt import SonioxSTTService
 from pipecat.transcriptions.language import Language
-from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -33,22 +36,27 @@ class TranscriptionLogger(FrameProcessor):
             print(f"Transcription: {frame.text}")
 
 
-async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespace):
-    logger.info(f"Starting bot")
+transport_params = {
+    "daily": lambda: DailyParams(
+        audio_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "twilio": lambda: FastAPIWebsocketParams(
+        audio_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+    "webrtc": lambda: TransportParams(
+        audio_in_enabled=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ),
+}
 
-    transport = SmallWebRTCTransport(
-        webrtc_connection=webrtc_connection,
-        params=TransportParams(audio_in_enabled=True),
-    )
+
+async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+    logger.info(f"Starting bot")
 
     stt = SonioxSTTService(
         api_key=os.getenv("SONIOX_API_KEY"),
-        params=SonioxInputParams(
-            # Add language hints to improve transcription accuracy. Variants are ignored.
-            # For example "en-GB" will be treated same as "en".
-            # List of supported languages: https://soniox.com/docs/speech-to-text/core-concepts/supported-languages
-            language_hints=[Language.EN, Language.ES, Language.JA, Language.ZH],
-        ),
     )
 
     tl = TranscriptionLogger()
@@ -72,6 +80,6 @@ async def run_bot(webrtc_connection: SmallWebRTCConnection, _: argparse.Namespac
 
 
 if __name__ == "__main__":
-    from run import main
+    from pipecat.examples.run import main
 
-    main()
+    main(run_example, transport_params=transport_params)
