@@ -121,7 +121,7 @@ class SonioxSTTService(STTService):
         self._auto_finalize_delay_ms = auto_finalize_delay_ms
         self._websocket = None
 
-        self._final_transcription_buffer = ""
+        self._final_transcription_buffer = []
         self._last_tokens_received: Optional[float] = None
 
         self._receive_task = None
@@ -250,20 +250,22 @@ class SonioxSTTService(STTService):
             return
 
         # Transcription frame will be only sent after we get the "endpoint" event.
-        self._final_transcription_buffer = ""
+        self._final_transcription_buffer = []
 
         async def send_endpoint_transcript():
             if self._final_transcription_buffer:
+                text = "".join(map(lambda token: token["text"], self._final_transcription_buffer))
                 await self.push_frame(
                     TranscriptionFrame(
-                        self._final_transcription_buffer,
-                        self._user_id,
-                        time_now_iso8601(),
+                        text=text,
+                        user_id=self._user_id,
+                        timestamp=time_now_iso8601(),
+                        result=self._final_transcription_buffer,
                     )
                 )
-                await self._handle_transcription(self._final_transcription_buffer, is_final=True)
+                await self._handle_transcription(text, is_final=True)
                 await self.stop_processing_metrics()
-                self._final_transcription_buffer = ""
+                self._final_transcription_buffer = []
 
         try:
             async for message in self._websocket:
@@ -280,7 +282,7 @@ class SonioxSTTService(STTService):
                         self._last_tokens_received = time.time()
 
                 # We will only send the final tokens after we get the "endpoint" event.
-                non_final_transcription = ""
+                non_final_transcription = []
 
                 for token in tokens:
                     if token["is_final"]:
@@ -289,18 +291,26 @@ class SonioxSTTService(STTService):
                             # the rest will be sent as interim tokens (even final tokens).
                             await send_endpoint_transcript()
                         else:
-                            self._final_transcription_buffer += token["text"]
+                            self._final_transcription_buffer.append(token)
                     else:
-                        non_final_transcription += token["text"]
+                        non_final_transcription.append(token)
 
                 if self._final_transcription_buffer or non_final_transcription:
+                    final_text = "".join(
+                        map(lambda token: token["text"], self._final_transcription_buffer)
+                    )
+                    non_final_text = "".join(
+                        map(lambda token: token["text"], non_final_transcription)
+                    )
+
                     await self.push_frame(
                         InterimTranscriptionFrame(
                             # Even final tokens are sent as interim tokens as we want to send
                             # nicely formatted messages - therefore waiting for the endpoint.
-                            self._final_transcription_buffer + non_final_transcription,
-                            self._user_id,
-                            time_now_iso8601(),
+                            text=final_text + non_final_text,
+                            user_id=self._user_id,
+                            timestamp=time_now_iso8601(),
+                            result=self._final_transcription_buffer + non_final_transcription,
                         )
                     )
 
