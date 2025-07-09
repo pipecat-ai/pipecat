@@ -10,6 +10,7 @@ import time
 from typing import AsyncGenerator, List, Optional
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -22,7 +23,6 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.soniox.config import SonioxInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.time import time_now_iso8601
@@ -43,6 +43,31 @@ FINALIZE_MESSAGE = '{"type": "finalize"}'
 END_TOKEN = "<end>"
 
 FINALIZED_TOKEN = "<fin>"
+
+
+class SonioxInputParams(BaseModel):
+    """Real-time transcription settings.
+
+    Parameters:
+        languages: List of language codes to use for transcription
+        code_switching: Whether to auto-detect language changes during transcription
+    """
+
+    model: str = "stt-rt-preview"
+
+    audio_format: Optional[str] = "pcm_s16le"
+    num_channels: Optional[int] = 1
+    sample_rate: Optional[int] = 16000
+
+    language_hints: Optional[List[Language]] = None
+    context: Optional[str] = None
+
+    enable_non_final_tokens: Optional[bool] = True
+    max_non_final_tokens_duration_ms: Optional[int] = None
+
+    enable_endpoint_detection: Optional[bool] = True
+
+    client_reference_id: Optional[str] = None
 
 
 def is_end_token(token: dict) -> bool:
