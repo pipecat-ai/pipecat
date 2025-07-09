@@ -4,5 +4,5 @@ repos:
     hooks:
       - id: ruff
         language_version: python3
-        args: [ --select,  I, ]
+        args: [--select, D, I]
       - id: ruff-format
