@@ -1145,6 +1145,20 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     pass
 
 
+@dataclass
+class VADParamsNotificationFrame(SystemFrame):
+    """Frame for notifying processors of VAD parameter changes.
+
+    This frame is pushed downstream when VAD parameters are set or updated,
+    allowing processors to adjust their behavior accordingly.
+
+    Parameters:
+        params: Current VAD parameters.
+    """
+
+    params: VADParams
+
+
 #
 # Control frames
 #

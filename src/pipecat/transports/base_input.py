@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADParamsNotificationFrame,
     VADParamsUpdateFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -278,6 +279,9 @@ class BaseInputTransport(FrameProcessor):
             # processed by every processor before any other frame is processed.
             await self.push_frame(frame, direction)
             await self.start(frame)
+            if self._params.vad_analyzer:
+                notification = VADParamsNotificationFrame(params=self._params.vad_analyzer.params)
+                await self.push_frame(notification)
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
@@ -310,6 +314,8 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, VADParamsUpdateFrame):
             if self.vad_analyzer:
                 self.vad_analyzer.set_params(frame.params)
+                notification = VADParamsNotificationFrame(params=frame.params)
+                await self.push_frame(notification)
         elif isinstance(frame, FilterUpdateSettingsFrame) and self._params.audio_in_filter:
             await self._params.audio_in_filter.process_frame(frame)
         # Other frames

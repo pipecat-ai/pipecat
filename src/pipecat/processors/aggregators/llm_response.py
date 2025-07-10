@@ -19,6 +19,7 @@ from typing import Dict, List, Literal, Optional, Set
 from loguru import logger
 
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     BotStartedSpeakingFrame,
@@ -50,6 +51,7 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADParamsNotificationFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -390,6 +392,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         """
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
+        self._vad_params: Optional[VADParams] = None
         if "aggregation_timeout" in kwargs:
             import warnings
 
@@ -477,6 +480,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, VADParamsNotificationFrame):
+            self._vad_params = frame.params
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -618,9 +624,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def _aggregation_task_handler(self):
         while True:
             try:
-                await asyncio.wait_for(
-                    self._aggregation_event.wait(), self._params.aggregation_timeout
+                timeout = (
+                    self._vad_params.stop_secs
+                    if self._emulating_vad
+                    else self._params.aggregation_timeout
                 )
+                await asyncio.wait_for(self._aggregation_event.wait(), timeout)
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
