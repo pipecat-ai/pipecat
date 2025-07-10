@@ -6,10 +6,12 @@
 
 import argparse
 import asyncio
+import collections
 import json
 import os
 import sys
 import time
+from typing import Deque
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -24,6 +26,7 @@ from pipecat_flows import (
 )
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -39,6 +42,7 @@ from pipecat.frames.frames import (
     TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
 )
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -74,6 +78,19 @@ MUTE_MODE = "mute"
 
 VOICEMAIL_CONFIDENCE_THRESHOLD = 0.6
 HUMAN_CONFIDENCE_THRESHOLD = 0.6
+
+
+def warm():
+    """
+    Warm up function to ensure the bot is ready to handle requests.
+    This function can be called periodically to keep the bot warm.
+    """
+    logger.info("Warming up the bot...")
+    # Perform any necessary warm-up tasks here
+    # For example, you can load models, initialize connections, etc.
+    # This is just a placeholder for demonstration purposes
+    pass
+
 
 # ------------ FLOW MANAGER SETUP ------------
 
@@ -253,6 +270,87 @@ class VoicemailDetectionObserver(BaseObserver):
                 self._voicemail_speaking = diff_time < self._timeout
             if self._voicemail_speaking:
                 await asyncio.sleep(0.5)
+
+
+class VADPrebufferProcessor(FrameProcessor):
+    """
+    This processor buffers a specified number of audio frames before speech is
+    detected.
+
+    When a VADUserStartedSpeakingFrame is received, it first replays the
+    buffered audio frames in the correct order, ensuring that the very
+    beginning of the user's speech is not missed. After replaying the buffer,
+    all subsequent frames are passed through immediately.
+
+    This is useful for preventing the initial part of a user's utterance from
+    being cut off by the Voice Activity Detection (VAD).
+
+    Args:
+        prebuffer_frame_count (int): The number of InputAudioRawFrames to buffer before speech.
+                                     Defaults to 33.
+        direction (FrameDirection): The direction of frames to process (UPSTREAM or DOWNSTREAM).
+                                    Defaults to DOWNSTREAM.
+    """
+
+    def __init__(
+        self,
+        prebuffer_frame_count: int = 33,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
+        super().__init__()
+        self._direction = direction
+        self._speech_started = False
+        self._prebuffer_frame_count = prebuffer_frame_count
+
+        # A deque with a maxlen is a highly efficient fixed-size buffer.
+        # When it's full, adding a new item automatically discards the oldest item.
+        self._audio_buffer: Deque[InputAudioRawFrame] = collections.deque(
+            maxlen=prebuffer_frame_count
+        )
+
+    def _should_passthrough_frame(self, frame: Frame, direction: FrameDirection) -> bool:
+        """Determines if a frame should bypass the buffering logic entirely."""
+        return isinstance(frame, (SystemFrame, EndFrame)) or direction != self._direction
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # Let system/end frames and frames in the wrong direction pass through immediately.
+        if self._should_passthrough_frame(frame, direction):
+            await self.push_frame(frame, direction)
+            return
+
+        # If speech has already started, the gate is open. Let all frames through.
+        if self._speech_started:
+            await self.push_frame(frame, direction)
+            return
+
+        # --- Speech has NOT started yet ---
+
+        # The VAD frame is the trigger to release the buffered audio.
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            logger.debug(
+                f"Initial VAD Detected. Replaying {len(self._audio_buffer)} buffered audio frames."
+            )
+            # 1. Set the flag so all future frames pass through immediately.
+            self._speech_started = True
+
+            # 2. Push all the buffered audio frames downstream in order.
+            for buffered_frame in self._audio_buffer:
+                await self.push_frame(buffered_frame, direction)
+
+            # 3. Clear the buffer now that it's been sent.
+            self._audio_buffer.clear()
+
+            # 4. Finally, push the VAD frame itself so downstream processors know speech has started.
+            await self.push_frame(frame, direction)
+
+        # If it's an audio frame, add it to our buffer. It won't be pushed downstream yet.
+        elif isinstance(frame, InputAudioRawFrame):
+            self._audio_buffer.append(frame)
+
+        # Any other frames that arrive before speech (e.g., TextFrame) will be
+        # ignored by this processor, as they don't match the conditions above.
 
 
 class BlockAudioFrames(FrameProcessor):
@@ -464,8 +562,10 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             audio_in_enabled=True,
             audio_out_enabled=True,
             video_out_enabled=False,
-            vad_analyzer=SileroVADAnalyzer(),
-            transcription_enabled=False,
+            vad_analyzer=SileroVADAnalyzer(
+                sample_rate=16000,
+                params=VADParams(start_secs=0.1, confidence=0.4, min_volume=0.4),
+            ),
         ),
     )
 
@@ -527,10 +627,6 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         }
     ]
 
-    # human_tools = [
-    #     {"function_declarations": [{"name": "terminate_call", "description": "End the call"}]}
-    # ]
-
     detection_system_instructions = """
     You are an AI Call Analyzer. Your primary function is to determine if the initial audio from an incoming call is a voicemail system/answering machine or a live human attempting to engage in conversation.
 
@@ -578,7 +674,6 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     # Register functions
     detection_llm.register_function("voicemail_detected", voicemail_detected)
     detection_llm.register_function("human_detected", human_detected)
-    # human_llm.register_function("terminate_call", terminate_call)
 
     # ------------ PROCESSORS ------------
 
@@ -589,6 +684,8 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     audio_collector = UserAudioCollector(detection_context, detection_context_aggregator.user())
     human_gate = OutputGate(human_notifier, start_open=False)
     block_audio_frames = BlockAudioFrames(get_current_mode)
+
+    _VADPrebufferProcessor = VADPrebufferProcessor()
 
     # Filter functions
     async def voicemail_filter(frame) -> bool:
@@ -605,6 +702,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             ParallelPipeline(
                 # Voicemail detection branch
                 [
+                    _VADPrebufferProcessor,
                     audio_collector,
                     detection_context_aggregator.user(),
                     detection_llm,
@@ -613,7 +711,6 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                 [voicemail_tts],
                 [
                     # Human conversation branch
-                    # input_audio_gate,
                     block_audio_frames,
                     stt,
                     human_context_aggregator.user(),
@@ -631,7 +728,13 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     pipeline_task = PipelineTask(
         pipeline,
         idle_timeout_secs=90,
-        params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
+        params=PipelineParams(
+            allow_interruptions=True,
+            enable_metrics=True,
+            enable_usage_metrics=True,
+            audio_in_sample_rate=16000,
+            audio_out_sample_rate=16000,
+        ),
         cancel_on_idle_timeout=False,
         observers=[voicemail_observer],
     )
