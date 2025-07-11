@@ -76,6 +76,16 @@ class BaseTurnAnalyzer(ABC):
         """
         pass
 
+    @property
+    @abstractmethod
+    def params(self):
+        """Get the current turn analyzer parameters.
+
+        Returns:
+            Current turn analyzer configuration parameters.
+        """
+        pass
+
     @abstractmethod
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         """Appends audio data for analysis.

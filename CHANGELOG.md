@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `SpeechControlParamsFrame`, a new `SystemFrame` that notifies
+  downstream processors of the VAD and Turn analyzer params. This frame is
+  pushed by the `BaseInputTransport` at Start and any time a
+  `VADParamsUpdateFrame` is received.
+
 ### Changed
 
 - Two package dependencies have been updated:
@@ -24,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue in ParallelPipeline that caused errors when attempting to drain
   the queues.
+
+- Fixed an issue with emulated VAD timeout inconsistency in
+  `LLMUserContextAggregator`. Previously, emulated VAD scenarios (where
+  transcription is received without VAD detection) used a hardcoded
+  `aggregation_timeout` (default 0.5s) instead of matching the VAD's
+  `stop_secs` parameter (default 0.8s). This created different user experiences
+  between real VAD and emulated VAD scenarios. Now, emulated VAD timeouts
+  automatically synchronize with the VAD's `stop_secs` parameter.
 
 - Fix a pipeline freeze when using AWS Nova Sonic, which would occur if the
   user started early, while the bot was still working through

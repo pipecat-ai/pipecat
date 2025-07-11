@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputImageRawFrame,
     MetricsFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     StartInterruptionFrame,
     StopFrame,
@@ -195,6 +196,13 @@ class BaseInputTransport(FrameProcessor):
         if self._params.turn_analyzer:
             self._params.turn_analyzer.set_sample_rate(self._sample_rate)
 
+        if self._params.vad_analyzer or self._params.turn_analyzer:
+            vad_params = self._params.vad_analyzer.params if self._params.vad_analyzer else None
+            turn_params = self._params.turn_analyzer.params if self._params.turn_analyzer else None
+
+            speech_frame = SpeechControlParamsFrame(vad_params=vad_params, turn_params=turn_params)
+            await self.push_frame(speech_frame)
+
         # Start audio filter.
         if self._params.audio_in_filter:
             await self._params.audio_in_filter.start(self._sample_rate)
@@ -310,6 +318,13 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, VADParamsUpdateFrame):
             if self.vad_analyzer:
                 self.vad_analyzer.set_params(frame.params)
+                speech_frame = SpeechControlParamsFrame(
+                    vad_params=frame.params,
+                    turn_params=self._params.turn_analyzer.params
+                    if self._params.turn_analyzer
+                    else None,
+                )
+                await self.push_frame(speech_frame)
         elif isinstance(frame, FilterUpdateSettingsFrame) and self._params.audio_in_filter:
             await self._params.audio_in_filter.process_frame(frame)
         # Other frames
