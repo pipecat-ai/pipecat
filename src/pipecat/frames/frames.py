@@ -616,6 +616,7 @@ class StartFrame(SystemFrame):
         enable_usage_metrics: Whether to enable usage metrics collection.
         interruption_strategies: List of interruption handling strategies.
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
+        has_turn_analyzer: Whether a turn analyzer is configured in the pipeline.
     """
 
     audio_in_sample_rate: int = 16000
@@ -625,6 +626,7 @@ class StartFrame(SystemFrame):
     enable_usage_metrics: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
     report_only_initial_ttfb: bool = False
+    has_turn_analyzer: bool = False
 
 
 @dataclass

@@ -275,6 +275,8 @@ class BaseInputTransport(FrameProcessor):
 
         # Specific system frames
         if isinstance(frame, StartFrame):
+            # Update StartFrame with turn analyzer info before pushing
+            frame.has_turn_analyzer = bool(self._params.turn_analyzer)
             # Push StartFrame before start(), because we want StartFrame to be
             # processed by every processor before any other frame is processed.
             await self.push_frame(frame, direction)
