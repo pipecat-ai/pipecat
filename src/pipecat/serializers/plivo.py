@@ -132,6 +132,10 @@ class PlivoFrameSerializer(FrameSerializer):
             serialized_data = await pcm_to_ulaw(
                 data, frame.sample_rate, self._plivo_sample_rate, self._output_resampler
             )
+            if serialized_data is None or len(serialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
+
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
                 "event": "playAudio",
