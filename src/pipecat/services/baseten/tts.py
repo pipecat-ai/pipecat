@@ -42,12 +42,19 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 class BasetenTTSService(TTSService):
+    """Baseten text-to-speech service.
+
+    Provides text-to-speech synthesis using Baseten's REST API.
+    Supports the Orpheus TTS model with
+    configurable sample rates and quality settings.
+    """
     def __init__(self, 
                  *, 
                  api_key: str, 
                  base_url: str,
                  model: str = "orpheus-3b",
                  voice: str = "tara",
+                 repetition_penalty: int = 1.3,
                  language: str = "en",
                  temperature: float = 0.6,
                  sample_rate: Optional[int] = None,
@@ -65,7 +72,7 @@ class BasetenTTSService(TTSService):
             "max_tokens": 4096,
             "voice": voice,
             "stop_token_ids": [128258, 128009],
-            "repetition_penalty": 1.1,
+            "repetition_penalty": repetition_penalty,
             "temperature": temperature,
             "top_p": 0.9,
         }
@@ -98,7 +105,7 @@ class BasetenTTSService(TTSService):
                 async with session.post(
                     self._base_url,
                     headers=self._headers,
-                    json=self._payload,     # no more stream=True
+                    json=self._payload,  
                 ) as resp:
                     # error handling
                     if resp.status != 200:

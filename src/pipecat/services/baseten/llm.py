@@ -15,8 +15,8 @@ class BasetenLLMService(OpenAILLMService):
 
     Args:
         api_key: The API key for accessing Baseten's API.
-        base_url: The base URL for Baseten API. Defaults to "https://api.baseten.ai/v1".
-        model: The model identifier to use. Defaults to "llama-3.3-70b".
+        base_url: The base URL for Baseten API: should look like https://model-{MODEL_ID}.api.baseten.co/environments/production/sync/v1
+        model: The model identifier to use.
         **kwargs: Additional keyword arguments passed to OpenAILLMService.
     """
 
