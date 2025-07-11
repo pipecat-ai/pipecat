@@ -5,9 +5,11 @@
  */
 
 import {
-  RTVIClient,
-  RTVIClientOptions,
-  RTVIEvent,
+  BotLLMTextData,
+  Participant,
+  PipecatClient,
+  PipecatClientOptions,
+  RTVIEvent, RTVIMessage, TranscriptData,
 } from '@pipecat-ai/client-js';
 import {
   WebSocketTransport,
@@ -18,7 +20,7 @@ class WebsocketClientApp {
   private static STREAM_SID = 'ws_mock_stream_sid';
   private static CALL_SID = 'ws_mock_call_sid';
 
-  private rtviClient: RTVIClient | null = null;
+  private rtviClient: PipecatClient | null = null;
   private connectBtn: HTMLButtonElement | null = null;
   private disconnectBtn: HTMLButtonElement | null = null;
   private statusSpan: HTMLElement | null = null;
@@ -122,7 +124,7 @@ class WebsocketClientApp {
     if (!this.rtviClient) return;
 
     // Listen for new tracks starting
-    this.rtviClient.on(RTVIEvent.TrackStarted, (track, participant) => {
+    this.rtviClient.on(RTVIEvent.TrackStarted, (track: MediaStreamTrack, participant?: Participant) => {
       // Only handle non-local (bot) tracks
       if (!participant?.local && track.kind === 'audio') {
         this.setupAudioTrack(track);
@@ -130,7 +132,7 @@ class WebsocketClientApp {
     });
 
     // Listen for tracks stopping
-    this.rtviClient.on(RTVIEvent.TrackStopped, (track, participant) => {
+    this.rtviClient.on(RTVIEvent.TrackStopped, (track: MediaStreamTrack, participant?: Participant) => {
       this.log(
         `Track stopped: ${track.kind} from ${participant?.name || 'unknown'}`
       );
@@ -167,7 +169,7 @@ class WebsocketClientApp {
         playerSampleRate: 8000,
         ws_url: 'http://localhost:8765/ws',
       };
-      const RTVIConfig: RTVIClientOptions = {
+      const RTVIConfig: PipecatClientOptions = {
         transport: new WebSocketTransport(ws_opts),
         enableMic: true,
         enableCam: false,
@@ -184,21 +186,21 @@ class WebsocketClientApp {
             if (this.disconnectBtn) this.disconnectBtn.disabled = true;
             this.log('Client disconnected');
           },
-          onBotReady: (data) => {
+          onBotReady: (data: any) => {
             this.log(`Bot ready: ${JSON.stringify(data)}`);
             this.setupMediaTracks();
           },
-          onUserTranscript: (data) => {
+          onUserTranscript: (data: TranscriptData) => {
             if (data.final) {
               this.log(`User: ${data.text}`);
             }
           },
-          onBotTranscript: (data) => this.log(`Bot: ${data.text}`),
-          onMessageError: (error) => console.error('Message error:', error),
-          onError: (error) => console.error('Error:', error),
+          onBotTranscript: (data: BotLLMTextData) => this.log(`Bot: ${data.text}`),
+          onMessageError: (error: RTVIMessage) => console.error('Message error:', error),
+          onError: (error: RTVIMessage) => console.error('Error:', error),
         },
       };
-      this.rtviClient = new RTVIClient(RTVIConfig);
+      this.rtviClient = new PipecatClient(RTVIConfig);
       this.setupTrackListeners();
 
       this.log('Initializing devices...');
