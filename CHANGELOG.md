@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where using audio input with a sample rate requiring resampling
+  could result in empty audio being passed to STT services, causing errors.
+
+- Fixed the VAD analyzer to process the full audio buffer as long as it contains
+  more than the minimum required bytes per iteration, instead of only analyzing
+  the first chunk.
+
 - Fixed an issue in ParallelPipeline that caused errors when attempting to drain
   the queues.
 
