@@ -48,6 +48,9 @@ FINALIZED_TOKEN = "<fin>"
 class SonioxInputParams(BaseModel):
     """Real-time transcription settings.
 
+    See Soniox WebSocket API documentation for more details:
+    https://soniox.com/docs/speech-to-text/api-reference/websocket-api#configuration-parameters
+
     Parameters:
         model: Model to use for transcription.
         audio_format: Audio format to use for transcription.
@@ -64,7 +67,6 @@ class SonioxInputParams(BaseModel):
 
     audio_format: Optional[str] = "pcm_s16le"
     num_channels: Optional[int] = 1
-    sample_rate: Optional[int] = 16000
 
     language_hints: Optional[List[Language]] = None
     context: Optional[str] = None
@@ -130,7 +132,7 @@ class SonioxSTTService(STTService):
         Args:
             api_key: Soniox API key.
             url: Soniox WebSocket API URL.
-            sample_rate: Audio sample rate. If None, uses value from `params`.
+            sample_rate: Audio sample rate.
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
             enable_vad: Listen to `UserStoppedSpeakingFrame` to send finalize message to Soniox.
@@ -140,7 +142,6 @@ class SonioxSTTService(STTService):
                 to `None`, the auto finalize feature is disabled.
             **kwargs: Additional arguments passed to the STTService.
         """
-        sample_rate = sample_rate or (params.sample_rate if params and params.sample_rate else None)
         super().__init__(sample_rate=sample_rate, **kwargs)
         params = params or SonioxInputParams()
 
@@ -180,7 +181,7 @@ class SonioxSTTService(STTService):
             "audio_format": self._params.audio_format,
             "num_channels": self._params.num_channels or 1,
             "enable_endpoint_detection": self._params.enable_endpoint_detection,
-            "sample_rate": self._sample_rate,
+            "sample_rate": self.sample_rate,
             "language_hints": _prepare_language_hints(self._params.language_hints),
             "context": self._params.context,
             "enable_non_final_tokens": self._params.enable_non_final_tokens,
