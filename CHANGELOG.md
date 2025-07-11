@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in ParallelPipeline that caused errors when attempting to drain
+  the queues.
+
 - Fix a pipeline freeze when using AWS Nova Sonic, which would occur if the
   user started early, while the bot was still working through
   `trigger_assistant_response()`.
