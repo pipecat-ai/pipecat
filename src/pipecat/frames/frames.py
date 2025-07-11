@@ -28,6 +28,7 @@ from typing import (
 )
 
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -616,7 +617,6 @@ class StartFrame(SystemFrame):
         enable_usage_metrics: Whether to enable usage metrics collection.
         interruption_strategies: List of interruption handling strategies.
         report_only_initial_ttfb: Whether to report only initial time-to-first-byte.
-        has_turn_analyzer: Whether a turn analyzer is configured in the pipeline.
     """
 
     audio_in_sample_rate: int = 16000
@@ -626,7 +626,6 @@ class StartFrame(SystemFrame):
     enable_usage_metrics: bool = False
     interruption_strategies: List[BaseInterruptionStrategy] = field(default_factory=list)
     report_only_initial_ttfb: bool = False
-    has_turn_analyzer: bool = False
 
 
 @dataclass
@@ -1148,17 +1147,20 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
 
 
 @dataclass
-class VADParamsNotificationFrame(SystemFrame):
-    """Frame for notifying processors of VAD parameter changes.
+class SpeechControlParamsFrame(SystemFrame):
+    """Frame for notifying processors of speech control parameter changes.
 
-    This frame is pushed downstream when VAD parameters are set or updated,
-    allowing processors to adjust their behavior accordingly.
+    This includes parameters for both VAD (Voice Activity Detection) and
+    turn-taking analysis. It allows downstream processors to adjust their
+    behavior based on updated interaction control settings.
 
     Parameters:
-        params: Current VAD parameters.
+        vad_params: Current VAD parameters.
+        turn_params: Current turn-taking analysis parameters.
     """
 
-    params: VADParams
+    vad_params: Optional[VADParams] = None
+    turn_params: Optional[SmartTurnParams] = None
 
 
 #

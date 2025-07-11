@@ -19,13 +19,12 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OpenAILLMContextAssistantTimestampFrame,
-    StartFrame,
+    SpeechControlParamsFrame,
     StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    VADParamsNotificationFrame,
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
@@ -287,7 +286,7 @@ class BaseTestUserContextAggregator:
             context, params=LLMUserAggregatorParams(aggregation_timeout=AGGREGATION_TIMEOUT)
         )
         frames_to_send = [
-            VADParamsNotificationFrame(params=VADParams(stop_secs=AGGREGATION_TIMEOUT)),
+            SpeechControlParamsFrame(vad_params=VADParams(stop_secs=AGGREGATION_TIMEOUT)),
             UserStartedSpeakingFrame(),
             TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             SleepFrame(),
@@ -296,7 +295,7 @@ class BaseTestUserContextAggregator:
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
         expected_down_frames = [
-            VADParamsNotificationFrame,
+            SpeechControlParamsFrame,
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
@@ -377,12 +376,12 @@ class BaseTestUserContextAggregator:
         )  # No aggregation timeout; this tests VAD emulation
 
         frames_to_send = [
-            VADParamsNotificationFrame(params=VADParams(stop_secs=AGGREGATION_TIMEOUT)),
+            SpeechControlParamsFrame(vad_params=VADParams(stop_secs=AGGREGATION_TIMEOUT)),
             TranscriptionFrame(text="Hello!", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
         expected_down_frames = [
-            VADParamsNotificationFrame,
+            SpeechControlParamsFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
         expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
@@ -407,13 +406,13 @@ class BaseTestUserContextAggregator:
             context
         )  # No aggregation timeout; this tests VAD emulation
         frames_to_send = [
-            VADParamsNotificationFrame(params=VADParams(stop_secs=AGGREGATION_TIMEOUT)),
+            SpeechControlParamsFrame(vad_params=VADParams(stop_secs=AGGREGATION_TIMEOUT)),
             InterimTranscriptionFrame(text="Hello ", user_id="cat", timestamp=""),
             SleepFrame(),
             TranscriptionFrame(text="Hello Pipecat!", user_id="cat", timestamp=""),
             SleepFrame(sleep=AGGREGATION_SLEEP),
         ]
-        expected_down_frames = [VADParamsNotificationFrame, *self.EXPECTED_CONTEXT_FRAMES]
+        expected_down_frames = [SpeechControlParamsFrame, *self.EXPECTED_CONTEXT_FRAMES]
         expected_up_frames = [EmulateUserStartedSpeakingFrame, EmulateUserStoppedSpeakingFrame]
         start_metadata = {"has_turn_analyzer": False}
         await run_test(

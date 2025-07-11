@@ -15,10 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `VADParamsNotificationFrame`, a new `SystemFrame` that notifies
-  downstream processors when VAD parameters are set or updated. This frame is
-  pushed by the `BaseInputTransport` during initial VAD configuration and
-  whenever a `VADParamsUpdateFrame` is received.
+- Added `SpeechControlParamsFrame`, a new `SystemFrame` that notifies
+  downstream processors of the VAD and Turn analyzer params. This frame is
+  pushed by the `BaseInputTransport` at Start and any time a
+  `VADParamsUpdateFrame` is received.
 
 ### Fixed
 

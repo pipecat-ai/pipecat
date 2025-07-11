@@ -19,6 +19,7 @@ from typing import Dict, List, Literal, Optional, Set
 from loguru import logger
 
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -44,6 +45,7 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     LLMTextFrame,
     OpenAILLMContextAssistantTimestampFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     StartInterruptionFrame,
     TextFrame,
@@ -51,7 +53,6 @@ from pipecat.frames.frames import (
     UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
-    VADParamsNotificationFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -397,7 +398,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
         self._vad_params: Optional[VADParams] = None
-        self._has_turn_analyzer = False
+        self._turn_params: Optional[SmartTurnParams] = None
 
         if "aggregation_timeout" in kwargs:
             import warnings
@@ -486,8 +487,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
-        elif isinstance(frame, VADParamsNotificationFrame):
-            self._vad_params = frame.params
+        elif isinstance(frame, SpeechControlParamsFrame):
+            self._vad_params = frame.vad_params
+            self._turn_params = frame.turn_params
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
@@ -549,7 +551,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _start(self, frame: StartFrame):
         self._create_aggregation_task()
-        self._has_turn_analyzer = frame.has_turn_analyzer
 
     async def _stop(self, frame: EndFrame):
         await self._cancel_aggregation_task()
@@ -655,7 +656,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 #   emulated VAD scenarios.
                 if not self._emulating_vad:
                     timeout = self._params.aggregation_timeout
-                elif self._has_turn_analyzer:
+                elif self._turn_params:
                     timeout = self._params.turn_emulated_vad_timeout
                 else:
                     timeout = self._vad_params.stop_secs
