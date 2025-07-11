@@ -19,7 +19,7 @@
     "vite": "^6.0.2"
   },
   "dependencies": {
-    "@pipecat-ai/client-js": "^0.4.0",
-    "@pipecat-ai/websocket-transport": "^0.4.2"
+    "@pipecat-ai/client-js": "^1.0.0",
+    "@pipecat-ai/websocket-transport": "^1.0.0"
   }
 }
