@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with rtvi's handling of `append-to-context`
+
 - Fixed an issue where using audio input with a sample rate requiring resampling
   could result in empty audio being passed to STT services, causing errors.
 
