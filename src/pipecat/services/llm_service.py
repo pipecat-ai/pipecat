@@ -179,6 +179,7 @@ class LLMService(AIService):
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
+        self._register_event_handler("on_error")
 
     def get_llm_adapter(self) -> BaseLLMAdapter:
         """Get the LLM adapter instance.
