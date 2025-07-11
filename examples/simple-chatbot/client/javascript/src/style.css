@@ -21,6 +21,11 @@ body {
   margin-bottom: 20px;
 }
 
+.device-bar {
+  flex-direction: column;
+  gap: 10px;
+}
+
 .controls,
 .device-controls {
   display: flex;
@@ -60,6 +65,35 @@ body {
 #device-selector:focus {
   outline: none;
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.3); /* Add a subtle focus effect */
+}
+
+.text-input-container {
+  display: flex;
+  gap: 8px;
+  margin-left: 10px;
+  width: 100%;
+  flex: 1;
+}
+
+#text-input {
+  flex: 1;
+  padding: 8px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  min-width: 200px;
+}
+
+#send-text-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  background-color: #007bff;
+  color: white;
+  flex-shrink: 0;
+}
+
+#send-text-btn:hover {
+  background-color: #0056b3;
 }
 
 #connect-btn {
