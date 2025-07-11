@@ -1411,7 +1411,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_function_call_result(data)
                 case "append-to-context":
                     data = RTVIAppendToContextData.model_validate(message.data)
-                    await self._handle_update_context(data, message.id)
+                    await self._handle_update_context(data)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
 
