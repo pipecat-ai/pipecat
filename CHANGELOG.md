@@ -7,18 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Two package dependencies have been updated:
-  - `numpy` now supports 1.26.0 and newer
-  - `transformers` now supports 4.48.0 and newer
-
 ### Added
 
 - Added `SpeechControlParamsFrame`, a new `SystemFrame` that notifies
   downstream processors of the VAD and Turn analyzer params. This frame is
   pushed by the `BaseInputTransport` at Start and any time a
   `VADParamsUpdateFrame` is received.
+
+### Changed
+
+- Two package dependencies have been updated:
+  - `numpy` now supports 1.26.0 and newer
+  - `transformers` now supports 4.48.0 and newer
 
 ### Fixed
 
