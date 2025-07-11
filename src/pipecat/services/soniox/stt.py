@@ -124,7 +124,6 @@ class SonioxSTTService(STTService):
         sample_rate: Optional[int] = None,
         params: Optional[SonioxInputParams] = None,
         enable_vad: bool = False,
-        auto_finalize_delay_ms: Optional[int] = 3000,
         **kwargs,
     ):
         """Initialize the Soniox STT service.
@@ -136,10 +135,6 @@ class SonioxSTTService(STTService):
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
             enable_vad: Listen to `UserStoppedSpeakingFrame` to send finalize message to Soniox.
-            auto_finalize_delay_ms: If no new tokens are received for a while and there is active
-                transcription (only InterimTranscriptionFrame), finalize the transcription by
-                sending the finalize message so user can receive the final transcript. If set
-                to `None`, the auto finalize feature is disabled.
             **kwargs: Additional arguments passed to the STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -150,7 +145,6 @@ class SonioxSTTService(STTService):
         self.set_model_name(params.model)
         self._params = params
         self._enable_vad = enable_vad
-        self._auto_finalize_delay_ms = auto_finalize_delay_ms
         self._websocket = None
 
         self._final_transcription_buffer = []
