@@ -659,7 +659,12 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                 elif self._turn_params:
                     timeout = self._params.turn_emulated_vad_timeout
                 else:
-                    timeout = self._vad_params.stop_secs
+                    # Use VAD stop_secs when no turn analyzer is present, fallback if no VAD params
+                    timeout = (
+                        self._vad_params.stop_secs
+                        if self._vad_params
+                        else self._params.turn_emulated_vad_timeout
+                    )
                 await asyncio.wait_for(self._aggregation_event.wait(), timeout)
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
