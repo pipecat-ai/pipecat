@@ -43,6 +43,7 @@ class ChatbotClient {
     this.botVideoContainer = document.getElementById('bot-video-container');
     this.deviceSelector = document.getElementById('device-selector');
     this.micToggleBtn = document.getElementById('mic-toggle-btn');
+    this.sendTextBtn = document.getElementById('send-text-btn');
 
     // Create an audio element for bot's voice output
     this.botAudio = document.createElement('audio');
@@ -87,6 +88,31 @@ class ChatbotClient {
         this.pcClient.enableMic(!this.pcClient.isMicEnabled);
       }
     });
+
+    const textInput = document.getElementById('text-input');
+
+    const sendTextToLLM = () => {
+      this.sendTextBtn.disabled = true; // Disable button to prevent multiple clicks
+      const text = textInput.value.trim();
+      if (text) {
+        void this.pcClient.appendToContext({
+          role: 'user',
+          content: text,
+          run_immediately: true,
+        });
+      }
+      textInput.value = ''; // Clear the input
+      this.sendTextBtn.disabled = false; // Re-enable button after sending
+    };
+
+    this.sendTextBtn.addEventListener('click', sendTextToLLM);
+
+    // Also handle Enter key in the input
+    textInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        sendTextToLLM();
+      }
+    });
   }
 
   updateMicToggleButton(micEnabled) {
@@ -115,6 +141,7 @@ class ChatbotClient {
           this.updateStatus('Disconnected');
           this.connectBtn.disabled = false;
           this.disconnectBtn.disabled = true;
+          this.sendTextBtn.disabled = true;
           this.log('Client disconnected');
           this.updateMicToggleButton(false);
         },
@@ -136,6 +163,7 @@ class ChatbotClient {
         onBotReady: (data) => {
           this.log(`Bot ready: ${JSON.stringify(data)}`);
           this.setupMediaTracks();
+          this.sendTextBtn.disabled = false;
         },
         // Transcript events
         onUserTranscript: (data) => {
