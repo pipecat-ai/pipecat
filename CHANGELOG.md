@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.76] - 2025-07-11
 
 ### Added
 
@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed an issue with rtvi's handling of `append-to-context`
+- Fixed an issue with RTVI's handling of `append-to-context`.
 
 - Fixed an issue where using audio input with a sample rate requiring resampling
   could result in empty audio being passed to STT services, causing errors.
