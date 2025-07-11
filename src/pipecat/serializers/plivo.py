@@ -227,6 +227,10 @@ class PlivoFrameSerializer(FrameSerializer):
             deserialized_data = await ulaw_to_pcm(
                 payload, self._plivo_sample_rate, self._sample_rate, self._input_resampler
             )
+            if deserialized_data is None or len(deserialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
+
             audio_frame = InputAudioRawFrame(
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
             )
