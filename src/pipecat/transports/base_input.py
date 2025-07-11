@@ -198,7 +198,7 @@ class BaseInputTransport(FrameProcessor):
 
         if self._params.vad_analyzer or self._params.turn_analyzer:
             vad_params = self._params.vad_analyzer.params if self._params.vad_analyzer else None
-            turn_params = self._params.turn_analyzer._params if self._params.turn_analyzer else None
+            turn_params = self._params.turn_analyzer.params if self._params.turn_analyzer else None
 
             speech_frame = SpeechControlParamsFrame(vad_params=vad_params, turn_params=turn_params)
             await self.push_frame(speech_frame)
@@ -320,7 +320,7 @@ class BaseInputTransport(FrameProcessor):
                 self.vad_analyzer.set_params(frame.params)
                 speech_frame = SpeechControlParamsFrame(
                     vad_params=frame.params,
-                    turn_params=self._params.turn_analyzer._params
+                    turn_params=self._params.turn_analyzer.params
                     if self._params.turn_analyzer
                     else None,
                 )
