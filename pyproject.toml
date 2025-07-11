@@ -25,7 +25,7 @@ dependencies = [
     "docstring_parser~=0.16",
     "loguru~=0.7.3",
     "Markdown~=3.7",
-    "numpy~=1.26.4",
+    "numpy>=1.26.4",
     "Pillow~=11.1.0",
     "protobuf~=5.29.3",
     "pydantic~=2.10.6",
@@ -68,7 +68,7 @@ local = [ "pyaudio~=0.2.14" ]
 mcp = [ "mcp[cli]~=1.9.4" ]
 mem0 = [ "mem0ai~=0.1.94" ]
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
-moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers~=4.48.0" ]
+moondream = [ "einops~=0.8.0", "timm~=1.0.13", "transformers>=4.48.0" ]
 nim = []
 neuphonic = [ "pyneuphonic~=1.5.13", "websockets~=13.1" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
