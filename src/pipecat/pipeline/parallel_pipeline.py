@@ -273,12 +273,17 @@ class ParallelPipeline(BasePipeline):
         if not self._down_task:
             self._down_task = self.create_task(self._process_down_queue())
 
+    async def _drain_queue(self, queue: asyncio.Queue):
+        try:
+            while not queue.empty():
+                queue.get_nowait()
+        except asyncio.QueueEmpty:
+            logger.debug(f"Draining {self} queue already empty")
+
     async def _drain_queues(self):
         """Drain all frames from upstream and downstream queues."""
-        while not self._up_queue.empty:
-            await self._up_queue.get()
-        while not self._down_queue.empty:
-            await self._down_queue.get()
+        await self._drain_queue(self._up_queue)
+        await self._drain_queue(self._down_queue)
 
     async def _handle_interruption(self):
         """Handle interruption by cancelling tasks, draining queues, and restarting."""
