@@ -124,6 +124,13 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
 
 if __name__ == "__main__":
+    if not os.getenv("MCP_RUN_SSE_URL"):
+        logger.error(
+            f"Please set MCP_RUN_SSE_URL environment variable for this example. See https://mcp.run"
+        )
+        import sys
+
+        sys.exit(1)
     from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)
