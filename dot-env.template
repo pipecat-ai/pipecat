@@ -109,6 +109,9 @@ MINIMAX_GROUP_ID=...
 # Sarvam AI
 SARVAM_API_KEY=...
 
+# Soniox
+SONIOX_API_KEY=
+
 # Speechmatics
 SPEECHMATICS_API_KEY=...
 
