@@ -346,6 +346,7 @@ class AnthropicLLMService(LLMService):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
+            await self._call_event_handler("on_error")
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
