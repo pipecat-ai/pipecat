@@ -1,3 +1,13 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""server.py.
+Webhook server to handle webhook coming from Daily, create a Daily room and start the bot.
+"""
+
 import json
 import os
 import shlex
@@ -12,6 +22,8 @@ from fastapi.responses import JSONResponse
 from utils.daily_helpers import create_daily_room
 
 load_dotenv()
+
+# ----------------- API ----------------- #
 
 
 @asynccontextmanager
