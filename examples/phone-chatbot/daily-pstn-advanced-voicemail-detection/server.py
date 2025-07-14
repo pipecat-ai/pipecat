@@ -1,14 +1,3 @@
-#
-# Copyright (c) 2024–2025, Daily
-#
-# SPDX-License-Identifier: BSD 2-Clause License
-#
-
-"""server.py.
-
-Webhook server to handle webhook coming from Daily, create a Daily room and start the bot.
-"""
-
 import json
 import os
 import shlex
@@ -19,24 +8,86 @@ import aiohttp
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware  # Add this import
 from fastapi.responses import JSONResponse
 from utils.daily_helpers import create_daily_room
 
 load_dotenv()
 
-# ----------------- API ----------------- #
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create aiohttp session to be used for Daily API calls
     app.state.session = aiohttp.ClientSession()
     yield
-    # Close session when shutting down
     await app.state.session.close()
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Add CORS middleware - ADD THIS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+
+@app.post("/api/connect")
+async def api_connect(request: Request):
+    """Handle voice-ui-kit console connections."""
+    print("Received voice-ui-kit console connection request")
+
+    try:
+        # For console connections, we can use default settings
+        # or extract parameters from the request if needed
+        data = (
+            await request.json()
+            if request.headers.get("content-type") == "application/json"
+            else {}
+        )
+
+        # Use default phone number for console testing, or get from request
+        phone_number = data.get("phone_number", "+1234567890")  # Default for testing
+        caller_id = data.get("caller_id")
+
+        # Create a Daily room
+        room_details = await create_daily_room(request.app.state.session, phone_number)
+        room_url = room_details["room_url"]
+        token = room_details["token"]
+
+        print(f"Created Daily room for console: {room_url}")
+
+        # Prepare bot configuration for console connection
+        bot_config = {"dialout_settings": {"phone_number": phone_number}}
+
+        if caller_id:
+            bot_config["dialout_settings"]["caller_id"] = caller_id
+
+        body_json = json.dumps(bot_config)
+        bot_cmd = f"python3 -m bot -u {room_url} -t {token} -b {shlex.quote(body_json)}"
+
+        try:
+            # Start the bot process
+            subprocess.Popen(
+                bot_cmd,
+                shell=True,
+                # Keep output visible for debugging
+            )
+            print(f"Started bot process for console: {bot_cmd}")
+        except Exception as e:
+            print(f"Error starting bot for console: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to start bot: {str(e)}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Unexpected error in console connect: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+    # Return the format expected by voice-ui-kit
+    return JSONResponse({"room_url": room_url, "token": token})
 
 
 @app.post("/start")

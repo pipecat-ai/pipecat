@@ -6,32 +6,56 @@
 
 import argparse
 import asyncio
+import collections
 import json
 import os
 import sys
-from typing import Any
+import time
+from typing import Deque
 
 from dotenv import load_dotenv
 from loguru import logger
+from pipecat_flows import (
+    ContextStrategy,
+    ContextStrategyConfig,
+    FlowArgs,
+    FlowManager,
+    FlowResult,
+    FlowsFunctionSchema,
+    NodeConfig,
+)
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
+    CancelFrame,
     EndFrame,
     EndTaskFrame,
+    Frame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
     InputAudioRawFrame,
-    StopTaskFrame,
+    StartFrame,
+    StartInterruptionFrame,
+    SystemFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
 )
+from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
 from pipecat.services.llm_service import FunctionCallParams
+from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.services.daily import (
     DailyParams,
     DailyTransport,
@@ -45,61 +69,328 @@ logger.add(sys.stderr, level="DEBUG")
 daily_api_key = os.getenv("DAILY_API_KEY", "")
 daily_api_url = os.getenv("DAILY_API_URL", "https://api.daily.co/v1")
 
-use_prebuilt = True
+# Simple constants for model states
+VOICEMAIL_MODE = "voicemail"
+HUMAN_MODE = "human"
+MUTE_MODE = "mute"
+
+VOICEMAIL_CONFIDENCE_THRESHOLD = 0.6
+HUMAN_CONFIDENCE_THRESHOLD = 0.6
 
 
-# ------------ HELPER CLASSES ------------
+def warm():
+    """
+    Warm up function to ensure the bot is ready to handle requests.
+    This function can be called periodically to keep the bot warm.
+    """
+    logger.info("Warming up the bot...")
+    # Perform any necessary warm-up tasks here
+    # For example, you can load models, initialize connections, etc.
+    # This is just a placeholder for demonstration purposes
+    pass
 
 
-class CallFlowState:
-    """State for tracking call flow operations and state transitions."""
+# ------------ FLOW MANAGER SETUP ------------
 
-    def __init__(self):
-        # Voicemail detection state
-        self.voicemail_detected = False
-        self.human_detected = False
 
-        # Call termination state
-        self.call_terminated = False
-        self.participant_left_early = False
+# ------------ PIPECAT FLOWS FOR HUMAN CONVERSATION ------------
 
-    # Voicemail detection methods
-    def set_voicemail_detected(self):
-        """Mark that a voicemail system has been detected."""
-        self.voicemail_detected = True
-        self.human_detected = False
 
-    def set_human_detected(self):
-        """Mark that a human has been detected (not voicemail)."""
-        self.human_detected = True
-        self.voicemail_detected = False
+# Type definitions for flows
+class GreetingResult(FlowResult):
+    greeting_complete: bool
 
-    # Call termination methods
-    def set_call_terminated(self):
-        """Mark that the call has been terminated by the bot."""
-        self.call_terminated = True
 
-    def set_participant_left_early(self):
-        """Mark that a participant left the call early."""
-        self.participant_left_early = True
+class ConversationResult(FlowResult):
+    message: str
+
+
+class EndConversationResult(FlowResult):
+    status: str
+
+
+# Flow function handlers - updated to return (result, next_node) tuple
+async def handle_greeting(
+    args: FlowArgs, flow_manager: FlowManager
+) -> tuple[GreetingResult, NodeConfig]:
+    """Handle initial greeting to human."""
+    logger.debug("handle_greeting executing")
+
+    result = GreetingResult(greeting_complete=True)
+
+    # Return the next node config directly instead of using set_node
+    next_node = create_conversation_node()
+    return result, next_node
+
+
+async def handle_conversation(
+    args: FlowArgs, flow_manager: FlowManager
+) -> tuple[ConversationResult, NodeConfig]:
+    """Handle ongoing conversation with human."""
+    message = args.get("message", "")
+    logger.debug(f"handle_conversation executing with message: {message}")
+
+    result = ConversationResult(message=message)
+
+    # Return the same conversation node to continue the chat
+    next_node = create_conversation_node()
+    return result, next_node
+
+
+async def handle_end_conversation(
+    args: FlowArgs, flow_manager: FlowManager
+) -> tuple[EndConversationResult, NodeConfig]:
+    """Handle ending the conversation."""
+    logger.debug("handle_end_conversation executing")
+
+    result = EndConversationResult(status="completed")
+
+    # Return the end node config directly
+    next_node = create_end_node()
+    return result, next_node
+
+
+# Node configurations for human conversation flow
+def create_greeting_node() -> NodeConfig:
+    """Create the initial greeting node for human conversation."""
+    return {
+        "name": "greeting",
+        "role_messages": [
+            {
+                "role": "system",
+                "content": """You are a friendly chatbot. Your responses will be
+                    converted to audio, so avoid special characters.
+                    Be conversational and helpful. Please only say 'This is virtual agent John - Am I speaking to Tim?' once at the start of the conversation.""",
+            }
+        ],
+        "task_messages": [
+            {
+                "role": "system",
+                "content": """Please say 'This is virtual agent John - Am I speaking to Tim?""",
+            }
+        ],
+        "functions": [
+            FlowsFunctionSchema(
+                name="handle_greeting",
+                description="Mark that greeting is complete and proceed to conversation",
+                properties={},
+                required=[],
+                handler=handle_greeting,
+            )
+        ],
+    }
+
+
+def create_conversation_node() -> NodeConfig:
+    """Create the main conversation node."""
+    return {
+        "name": "conversation",
+        "task_messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are having a friendly conversation with a human. "
+                    "Listen to what they say and respond helpfully. "
+                    "Keep your responses brief and conversational. "
+                    "If they indicate they want to end the conversation (saying goodbye, "
+                    "thanks, that's all, etc.), call handle_end_conversation. "
+                    "Otherwise, use handle_conversation to continue the chat."
+                ),
+            }
+        ],
+        "functions": [
+            FlowsFunctionSchema(
+                name="handle_conversation",
+                description="Continue the conversation with the human",
+                properties={"message": {"type": "string", "description": "The response message"}},
+                required=["message"],
+                handler=handle_conversation,
+            ),
+            FlowsFunctionSchema(
+                name="handle_end_conversation",
+                description="End the conversation when the human is ready to finish",
+                properties={},
+                required=[],
+                handler=handle_end_conversation,
+            ),
+        ],
+    }
+
+
+def create_end_node() -> NodeConfig:
+    """Create the final conversation end node."""
+    return {
+        "name": "end",
+        "task_messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Thank the person for the conversation and say goodbye. "
+                    "Keep it brief and friendly."
+                ),
+            }
+        ],
+        "functions": [],  # Required by FlowManager, even if empty
+        "post_actions": [{"type": "end_conversation"}],
+    }
+
+
+# ------------ SIMPLIFIED CLASSES ------------
+
+
+class VoicemailDetectionObserver(BaseObserver):
+    """Observes voicemail speaking patterns to know when voicemail is done."""
+
+    def __init__(self, timeout: float = 5.0):
+        super().__init__()
+        self._processed_frames = set()
+        self._timeout = timeout
+        self._last_turn_time = 0
+        self._voicemail_speaking = False
+
+    async def on_push_frame(self, data: FramePushed):
+        if data.frame.id in self._processed_frames:
+            return
+        self._processed_frames.add(data.frame.id)
+
+        if isinstance(data.frame, UserStartedSpeakingFrame):
+            self._voicemail_speaking = True
+            self._last_turn_time = 0
+        elif isinstance(data.frame, UserStoppedSpeakingFrame):
+            self._last_turn_time = time.time()
+
+    async def wait_for_voicemail(self):
+        """Wait for voicemail to finish speaking."""
+        while self._voicemail_speaking:
+            logger.debug("📩️ Waiting for voicemail to finish")
+            if self._last_turn_time:
+                diff_time = time.time() - self._last_turn_time
+                self._voicemail_speaking = diff_time < self._timeout
+            if self._voicemail_speaking:
+                await asyncio.sleep(0.5)
+
+
+class VADPrebufferProcessor(FrameProcessor):
+    """
+    This processor buffers a specified number of audio frames before speech is
+    detected.
+
+    When a VADUserStartedSpeakingFrame is received, it first replays the
+    buffered audio frames in the correct order, ensuring that the very
+    beginning of the user's speech is not missed. After replaying the buffer,
+    all subsequent frames are passed through immediately.
+
+    This is useful for preventing the initial part of a user's utterance from
+    being cut off by the Voice Activity Detection (VAD).
+
+    Args:
+        prebuffer_frame_count (int): The number of InputAudioRawFrames to buffer before speech.
+                                     Defaults to 33.
+        direction (FrameDirection): The direction of frames to process (UPSTREAM or DOWNSTREAM).
+                                    Defaults to DOWNSTREAM.
+    """
+
+    def __init__(
+        self,
+        prebuffer_frame_count: int = 33,
+        direction: FrameDirection = FrameDirection.DOWNSTREAM,
+    ):
+        super().__init__()
+        self._direction = direction
+        self._speech_started = False
+        self._prebuffer_frame_count = prebuffer_frame_count
+
+        # A deque with a maxlen is a highly efficient fixed-size buffer.
+        # When it's full, adding a new item automatically discards the oldest item.
+        self._audio_buffer: Deque[InputAudioRawFrame] = collections.deque(
+            maxlen=prebuffer_frame_count
+        )
+
+    def _should_passthrough_frame(self, frame: Frame, direction: FrameDirection) -> bool:
+        """Determines if a frame should bypass the buffering logic entirely."""
+        return isinstance(frame, (SystemFrame, EndFrame)) or direction != self._direction
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # Let system/end frames and frames in the wrong direction pass through immediately.
+        if self._should_passthrough_frame(frame, direction):
+            await self.push_frame(frame, direction)
+            return
+
+        # If speech has already started, the gate is open. Let all frames through.
+        if self._speech_started:
+            await self.push_frame(frame, direction)
+            return
+
+        # --- Speech has NOT started yet ---
+
+        # The VAD frame is the trigger to release the buffered audio.
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            logger.debug(
+                f"Initial VAD Detected. Replaying {len(self._audio_buffer)} buffered audio frames."
+            )
+            # 1. Set the flag so all future frames pass through immediately.
+            self._speech_started = True
+
+            # 2. Push all the buffered audio frames downstream in order.
+            for buffered_frame in self._audio_buffer:
+                await self.push_frame(buffered_frame, direction)
+
+            # 3. Clear the buffer now that it's been sent.
+            self._audio_buffer.clear()
+
+            # 4. Finally, push the VAD frame itself so downstream processors know speech has started.
+            await self.push_frame(frame, direction)
+
+        # If it's an audio frame, add it to our buffer. It won't be pushed downstream yet.
+        elif isinstance(frame, InputAudioRawFrame):
+            self._audio_buffer.append(frame)
+
+        # Any other frames that arrive before speech (e.g., TextFrame) will be
+        # ignored by this processor, as they don't match the conditions above.
+
+
+class BlockAudioFrames(FrameProcessor):
+    """Blocks audio frames from being processed further, conditionally based on mode."""
+
+    def __init__(self, mode_checker):
+        super().__init__()
+        self._mode_checker = mode_checker
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        # Block audio frames based on current mode
+        if isinstance(frame, InputAudioRawFrame):
+            current_mode = self._mode_checker()
+            if current_mode == MUTE_MODE:
+                return  # Do not push audio frames in MUTE_MODE
+            if current_mode == VOICEMAIL_MODE:
+                return  # Do not push audio frames in VOICEMAIL_MODE
+            if current_mode == HUMAN_MODE:
+                await self.push_frame(frame, direction)
+                return
+
+        # Pass all other frames through
+        await self.push_frame(frame, direction)
 
 
 class UserAudioCollector(FrameProcessor):
-    """Collects audio frames in a buffer, then adds them to the LLM context when the user stops speaking."""
+    """Collects audio frames for the LLM context."""
 
     def __init__(self, context, user_context_aggregator):
         super().__init__()
         self._context = context
         self._user_context_aggregator = user_context_aggregator
         self._audio_frames = []
-        self._start_secs = 0.2  # this should match VAD start_secs (hardcoding for now)
+        self._start_secs = 0.2
         self._user_speaking = False
 
     async def process_frame(self, frame, direction):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
-            # Skip transcription frames - we're handling audio directly
             return
         elif isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
@@ -111,10 +402,9 @@ class UserAudioCollector(FrameProcessor):
             )
         elif isinstance(frame, InputAudioRawFrame):
             if self._user_speaking:
-                # When speaking, collect frames
                 self._audio_frames.append(frame)
             else:
-                # Maintain a rolling buffer of recent audio (for start of speech)
+                # Maintain rolling buffer
                 self._audio_frames.append(frame)
                 frame_duration = len(frame.audio) / 16 * frame.num_channels / frame.sample_rate
                 buffer_duration = frame_duration * len(self._audio_frames)
@@ -125,412 +415,324 @@ class UserAudioCollector(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class FunctionHandlers:
-    """Handlers for the voicemail detection bot functions."""
-
-    def __init__(self, call_flow_state: CallFlowState):
-        self.call_flow_state = call_flow_state
-
-    async def voicemail_response(self, params: FunctionCallParams):
-        """Function the bot can call to leave a voicemail message."""
-        message = """You are Chatbot leaving a voicemail message. Say EXACTLY this message and then terminate the call:
-
-                    'Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you.'"""
-
-        await params.result_callback(message)
-
-    async def human_conversation(self, params: FunctionCallParams):
-        """Function called when bot detects it's talking to a human."""
-        # Update state to indicate human was detected
-        self.call_flow_state.set_human_detected()
-        message = "Please say: 'Hello there, am I speaking to Dom?'"
-        await params.result_callback(message)
-        await params.llm.push_frame(StopTaskFrame(), FrameDirection.UPSTREAM)
-
-
 # ------------ MAIN FUNCTION ------------
 
 
-async def run_bot(
-    room_url: str,
-    token: str,
-    body: dict,
-) -> None:
-    """Run the voice bot with the given parameters.
+async def run_bot(room_url: str, token: str, body: dict) -> None:
+    """Run the voice bot with parallel pipeline architecture."""
 
-    Args:
-        room_url: The Daily room URL
-        token: The Daily room token
-        body: Body passed to the bot from the webhook
-
-    """
-    # ------------ CONFIGURATION AND SETUP ------------
+    # ------------ SETUP ------------
     logger.info(f"Starting bot with room: {room_url}")
-    logger.info(f"Token: {token}")
-    logger.info(f"Body: {body}")
-    # Parse the body to get the dial-in settings
+
     body_data = json.loads(body)
-
-    # Check if the body contains dial-in settings
-    logger.debug(f"Body data: {body_data}")
-
-    if not body_data.get("dialout_settings"):
-        logger.error("Dial-out settings not found in the body data")
-        return
-
     dialout_settings = body_data["dialout_settings"]
-
-    if not dialout_settings.get("phone_number"):
-        logger.error("Dial-out phone number not found in the dial-out settings")
-        return
-
-    # Extract dial-out phone number
     phone_number = dialout_settings["phone_number"]
-    caller_id = dialout_settings.get("caller_id")  # Use .get() to handle optional field
+    caller_id = dialout_settings.get("caller_id")
 
-    if caller_id:
-        logger.info(f"Dial-out caller ID specified: {caller_id}")
-    else:
-        logger.info("Dial-out caller ID not specified; proceeding without it")
+    # Simple state tracking
+    current_mode = MUTE_MODE
+    is_voicemail = False
 
-    # ------------ TRANSPORT SETUP ------------
+    # Notifier for human conversation gate
+    human_notifier = EventNotifier()
 
-    transport_params = DailyParams(
-        api_url=daily_api_url,
-        api_key=daily_api_key,
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        video_out_enabled=False,
-        vad_analyzer=SileroVADAnalyzer(),
-        transcription_enabled=False,
-    )
+    # Observer for voicemail detection
+    voicemail_observer = VoicemailDetectionObserver()
 
-    # Initialize transport with Daily
+    # ------------ FUNCTION HANDLERS ------------
+
+    async def voicemail_detected(params: FunctionCallParams):
+        nonlocal current_mode, is_voicemail
+
+        confidence = params.arguments["confidence"]
+        reasoning = params.arguments["reasoning"]
+
+        logger.info(f"Voicemail detected - confidence: {confidence}, reasoning: {reasoning}")
+
+        if confidence >= VOICEMAIL_CONFIDENCE_THRESHOLD and current_mode == MUTE_MODE:
+            current_mode = VOICEMAIL_MODE
+            is_voicemail = True
+
+            await voicemail_observer.wait_for_voicemail()
+
+            # Generate voicemail message
+            message = "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
+            await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
+            await voicemail_tts.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+
+        await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
+
+    async def human_detected(params: FunctionCallParams):
+        nonlocal current_mode, is_voicemail
+
+        confidence = params.arguments["confidence"]
+        reasoning = params.arguments["reasoning"]
+
+        logger.info(f"Human detected - confidence: {confidence}, reasoning: {reasoning}")
+
+        if confidence >= HUMAN_CONFIDENCE_THRESHOLD and current_mode == MUTE_MODE:
+            current_mode = HUMAN_MODE
+            is_voicemail = False
+
+            await human_notifier.notify()
+            await flow_manager.initialize(create_greeting_node())
+
+        await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
+
+    # async def terminate_call(params: FunctionCallParams):
+    #     logger.info("Terminating call")
+    #     await asyncio.sleep(3)  # Brief delay before termination
+    #     await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+    #     await params.result_callback({"status": "call terminated"})
+
+    # ------------ TRANSPORT & SERVICES ------------
+
     transport = DailyTransport(
         room_url,
         token,
         "Voicemail Detection Bot",
-        transport_params,
+        DailyParams(
+            api_url=daily_api_url,
+            api_key=daily_api_key,
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            video_out_enabled=False,
+            vad_analyzer=SileroVADAnalyzer(
+                sample_rate=16000,
+                params=VADParams(start_secs=0.1, confidence=0.4, min_volume=0.4),
+            ),
+        ),
     )
 
-    # Initialize TTS
-    tts = CartesiaTTSService(
+    # TTS services
+    voicemail_tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
-        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",  # Use Helpful Woman voice by default
+        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",
     )
 
-    # Initialize speech-to-text service (for human conversation phase)
+    human_tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY", ""),
+        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",
+    )
+
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    # ------------ FUNCTION DEFINITIONS ------------
+    # ------------ LLM SETUP ------------
 
-    async def terminate_call(
-        params: FunctionCallParams,
-        call_flow_state: CallFlowState = None,
-    ):
-        """Function the bot can call to terminate the call."""
-        if call_flow_state:
-            # Set call terminated flag in the session manager
-            call_flow_state.set_call_terminated()
-
-        await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-
-    # ------------ VOICEMAIL DETECTION PHASE SETUP ------------
-
-    # Define tools for both LLMs
-    tools = [
+    detection_tools = [
         {
             "function_declarations": [
                 {
-                    "name": "switch_to_voicemail_response",
-                    "description": "Call this function when you detect this is a voicemail system.",
+                    "name": "voicemail_detected",
+                    "description": "Signals that a voicemail greeting has been detected by the LLM.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "confidence": {
+                                "type": "number",
+                                "description": "The LLM's confidence score (ranging from 0.0 to 1.0) that a voicemail greeting was detected.",
+                            },
+                            "reasoning": {
+                                "type": "string",
+                                "description": "The LLM's textual explanation for why it believes a voicemail was detected, often citing specific phrases from the transcript.",
+                            },
+                        },
+                        "required": ["confidence", "reasoning"],
+                    },
                 },
                 {
-                    "name": "switch_to_human_conversation",
-                    "description": "Call this function when you detect this is a human.",
-                },
-                {
-                    "name": "terminate_call",
-                    "description": "Call this function to terminate the call.",
+                    "name": "human_detected",
+                    "description": "Signals that a human attempting to communicate has been detected by the LLM.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "confidence": {
+                                "type": "number",
+                                "description": "The LLM's confidence score (ranging from 0.0 to 1.0) that a human conversation has been detected.",
+                            },
+                            "reasoning": {
+                                "type": "string",
+                                "description": "The LLM's textual explanation for why it believes a human communication was detected, often citing specific phrases from the transcript.",
+                            },
+                        },
+                        "required": ["confidence", "reasoning"],
+                    },
                 },
             ]
         }
     ]
 
-    system_instruction = """You are Chatbot trying to determine if this is a voicemail system or a human.
+    detection_system_instructions = """
+    You are an AI Call Analyzer. Your primary function is to determine if the initial audio from an incoming call is a voicemail system/answering machine or a live human attempting to engage in conversation.
 
-        If you hear any of these phrases (or very similar ones):
-        - "Please leave a message after the beep"
-        - "No one is available to take your call"
-        - "Record your message after the tone"
-        - "You have reached voicemail for..."
-        - "You have reached [phone number]"
-        - "[phone number] is unavailable"
-        - "The person you are trying to reach..."
-        - "The number you have dialed..."
-        - "Your call has been forwarded to an automated voice messaging system"
+    You will be provided with a transcript of the first few seconds of an audio interaction.
 
-        Then call the function switch_to_voicemail_response.
+    Based on your analysis of this transcript, you MUST decide to call ONE of the following two functions:
 
-        If it sounds like a human (saying hello, asking questions, etc.), call the function switch_to_human_conversation.
+    1.  voicemail_detected
+        *   Call this function if the transcript strongly indicates a pre-recorded voicemail greeting, an answering machine message, or instructions to leave a message.
+        *   Keywords and phrases to look for: "you've reached," "not available," "leave a message," "at the tone/beep," "sorry I missed your call," "please leave your name and number."
+        *   Also consider if the speech sounds like a monologue without expecting an immediate response.
+        *   Keep in mind that the beep noise from a typical pre-recorded voicemail greeting comes after the greeting and not before.
 
-        DO NOT say anything until you've determined if this is a voicemail or human.
+    2.  human_detected
+        *   Call this function if the transcript indicates a human is present and actively trying to communicate or expecting an immediate response.
+        *   Keywords and phrases to look for: "Hello?", "Hi," "[Company Name], how can I help you?", "Speaking.", or any direct question aimed at initiating a dialogue.
+        *   Consider if the speech sounds like the beginning of a two-way conversation.
 
-        If you are asked to terminate the call, **IMMEDIATELY** call the `terminate_call` function. **FAILURE TO CALL `terminate_call` IMMEDIATELY IS A MISTAKE.**"""
+    **Decision Guidelines:**
 
-    # Initialize voicemail detection LLM
-    voicemail_detection_llm = GoogleLLMService(
-        model="models/gemini-2.0-flash-lite",  # Lighter model for faster detection
+    *   **Prioritize Human:** If there's ambiguity but a slight indication of a human trying to speak (e.g., a simple "Hello?" followed by a pause, which could be either), err on the side of `human_detected` to avoid missing a live interaction. Only call `voicemail_detected` if there are clear, strong indicators of a voicemail system.
+    *   **Focus on Intent:** Is the speaker *delivering information* (likely voicemail) or *seeking interaction* (likely human)?
+    *   **Brevity:** Voicemail greetings are often concise and formulaic. Human openings can be more varied."""
+
+    detection_llm = GoogleLLMService(
+        model="models/gemini-2.0-flash-lite",
         api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=system_instruction,
-        tools=tools,
+        system_instruction=detection_system_instructions,
+        tools=detection_tools,
     )
 
-    # Initialize context and context aggregator
-    context = GoogleLLMContext()
-    context_aggregator = voicemail_detection_llm.create_context_aggregator(context)
-
-    # Set up function handlers
-    call_flow_state = CallFlowState()
-    handlers = FunctionHandlers(call_flow_state)
-
-    # Register functions with the voicemail detection LLM
-    voicemail_detection_llm.register_function(
-        "switch_to_voicemail_response",
-        handlers.voicemail_response,
-    )
-    voicemail_detection_llm.register_function(
-        "switch_to_human_conversation", handlers.human_conversation
-    )
-    voicemail_detection_llm.register_function(
-        "terminate_call", lambda params: terminate_call(params, call_flow_state)
+    human_llm = GoogleLLMService(
+        model="models/gemini-2.0-flash-001",
+        api_key=os.getenv("GOOGLE_API_KEY"),
     )
 
-    # Set up audio collector for handling audio input
-    voicemail_detection_audio_collector = UserAudioCollector(context, context_aggregator.user())
+    # ------------ CONTEXTS & FUNCTIONS ------------
 
-    # Build voicemail detection pipeline
-    voicemail_detection_pipeline = Pipeline(
+    detection_context = GoogleLLMContext()
+    detection_context_aggregator = detection_llm.create_context_aggregator(detection_context)
+
+    human_context = GoogleLLMContext()
+    human_context_aggregator = human_llm.create_context_aggregator(human_context)
+
+    # Register functions
+    detection_llm.register_function("voicemail_detected", voicemail_detected)
+    detection_llm.register_function("human_detected", human_detected)
+
+    # ------------ PROCESSORS ------------
+
+    def get_current_mode():
+        """Get the current conversation mode."""
+        return current_mode
+
+    audio_collector = UserAudioCollector(detection_context, detection_context_aggregator.user())
+    block_audio_frames = BlockAudioFrames(get_current_mode)
+
+    _VADPrebufferProcessor = VADPrebufferProcessor()
+
+    # Filter functions
+    async def voicemail_filter(frame) -> bool:
+        return current_mode == VOICEMAIL_MODE
+
+    async def human_filter(frame) -> bool:
+        return current_mode == HUMAN_MODE
+
+    # ------------ PIPELINE ------------
+
+    pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
-            voicemail_detection_audio_collector,  # Collect audio frames
-            context_aggregator.user(),  # User context
-            voicemail_detection_llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant context
+            transport.input(),
+            ParallelPipeline(
+                # Voicemail detection branch
+                [
+                    _VADPrebufferProcessor,
+                    audio_collector,
+                    detection_context_aggregator.user(),
+                    detection_llm,
+                    FunctionFilter(voicemail_filter),
+                ],
+                [voicemail_tts],
+                [
+                    # Human conversation branch
+                    block_audio_frames,
+                    stt,
+                    human_context_aggregator.user(),
+                    human_llm,
+                    human_tts,
+                    FunctionFilter(human_filter),
+                    human_context_aggregator.assistant(),
+                ],
+            ),
+            transport.output(),
         ]
     )
 
-    # Create pipeline task
-    voicemail_detection_pipeline_task = PipelineTask(
-        voicemail_detection_pipeline,
+    pipeline_task = PipelineTask(
+        pipeline,
+        idle_timeout_secs=90,
         params=PipelineParams(
+            allow_interruptions=True,
             enable_metrics=True,
             enable_usage_metrics=True,
+            audio_in_sample_rate=16000,
+            audio_out_sample_rate=16000,
         ),
+        cancel_on_idle_timeout=False,
+        observers=[voicemail_observer],
     )
 
-    # ------------ RETRY LOGIC VARIABLES ------------
-    max_retries = 5
-    retry_count = 0
-    dialout_successful = False
-
-    # Build dialout parameters conditionally
-    dialout_params = {"phoneNumber": phone_number}
-    if caller_id:
-        dialout_params["callerId"] = caller_id
-        logger.debug(f"Including caller ID in dialout: {caller_id}")
-
-    logger.debug(f"Dialout parameters: {dialout_params}")
-
-    async def attempt_dialout():
-        """Attempt to start dialout with retry logic."""
-        nonlocal retry_count, dialout_successful
-
-        if retry_count < max_retries and not dialout_successful:
-            retry_count += 1
-            logger.info(
-                f"Attempting dialout (attempt {retry_count}/{max_retries}) to: {phone_number}"
-            )
-            await transport.start_dialout(dialout_params)
-        else:
-            logger.error(f"Maximum retry attempts ({max_retries}) reached. Giving up on dialout.")
+    flow_manager = FlowManager(
+        task=pipeline_task,
+        tts=human_tts,
+        llm=human_llm,
+        context_aggregator=human_context_aggregator,
+        transport=transport,
+    )
 
     # ------------ EVENT HANDLERS ------------
 
     @transport.event_handler("on_joined")
     async def on_joined(transport, data):
-        # Start initial dialout attempt
+        dialout_params = {"phoneNumber": phone_number}
+        if caller_id:
+            dialout_params["callerId"] = caller_id
+        await transport.start_dialout(dialout_params)
 
-        if not use_prebuilt:
-            logger.debug(f"Dialout settings detected; starting dialout to number: {phone_number}")
-            await attempt_dialout()
-        else:
-            logger.debug("Using Prebuilt")
-
-    @transport.event_handler("on_dialout_connected")
-    async def on_dialout_connected(transport, data):
-        logger.debug(f"Dial-out connected: {data}")
+    @transport.event_handler("on_participant_updated")
+    async def on_participant_updated(transport, participant):
+        logger.debug(f"Participant updated: {participant}")
 
     @transport.event_handler("on_dialout_answered")
     async def on_dialout_answered(transport, data):
-        nonlocal dialout_successful
-        logger.debug(f"Dial-out answered: {data}")
-        dialout_successful = True  # Mark as successful to stop retries
-        # Automatically start capturing transcription for the participant
+        logger.debug(f"Call answered: {data}")
         await transport.capture_participant_transcription(data["sessionId"])
-        # The bot will wait to hear the user before the bot speaks
 
     @transport.event_handler("on_dialout_error")
-    async def on_dialout_error(transport, data: Any):
-        logger.error(f"Dial-out error (attempt {retry_count}/{max_retries}): {data}")
-
-        if retry_count < max_retries:
-            logger.info(f"Retrying dialout")
-            await attempt_dialout()
-        else:
-            logger.error(f"All {max_retries} dialout attempts failed. Stopping bot.")
-            await voicemail_detection_pipeline_task.queue_frame(EndFrame())
-
-    @transport.event_handler("on_first_participant_joined")
-    async def on_first_participant_joined(transport, participant):
-        logger.debug(f"First participant joined: {participant['id']}")
+    async def on_dialout_error(transport, data):
+        logger.error(f"Dialout error: {data}")
+        await pipeline_task.queue_frame(EndFrame())
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
-        # Mark that a participant left early
-        call_flow_state.set_participant_left_early()
-        await voicemail_detection_pipeline_task.queue_frame(EndFrame())
+        await pipeline_task.queue_frame(EndFrame())
 
-    # ------------ RUN VOICEMAIL DETECTION PIPELINE ------------
+    # ------------ RUN ------------
 
     runner = PipelineRunner()
+    logger.info("Starting simplified parallel pipeline bot")
 
-    print("!!! starting voicemail detection pipeline")
     try:
-        await runner.run(voicemail_detection_pipeline_task)
+        await runner.run(pipeline_task)
     except Exception as e:
-        logger.error(f"Error in voicemail detection pipeline: {e}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-    print("!!! Done with voicemail detection pipeline")
-
-    # Check if we should exit early
-    if call_flow_state.participant_left_early or call_flow_state.call_terminated:
-        if call_flow_state.participant_left_early:
-            print("!!! Participant left early; terminating call")
-        elif call_flow_state.call_terminated:
-            print("!!! Bot terminated call; not proceeding to human conversation")
-        return
-
-    # ------------ HUMAN CONVERSATION PHASE SETUP ------------
-
-    # Get human conversation prompt
-    human_conversation_system_instruction = """You are Chatbot talking to a human. Be friendly and helpful.
-
-        Start with: "Hello! I'm a friendly chatbot. How can I help you today?"
-
-        Keep your responses brief and to the point. Listen to what the person says.
-
-        When the person indicates they're done with the conversation by saying something like:
-        - "Goodbye"
-        - "That's all"
-        - "I'm done"
-        - "Thank you, that's all I needed"
-
-        THEN say: "Thank you for chatting. Goodbye!" and call the terminate_call function."""
-
-    # Initialize human conversation LLM
-    human_conversation_llm = GoogleLLMService(
-        model="models/gemini-2.0-flash-001",  # Full model for better conversation
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        system_instruction=human_conversation_system_instruction,
-        tools=tools,
-    )
-
-    # Register terminate function with the human conversation LLM
-    human_conversation_llm.register_function(
-        "terminate_call", lambda params: terminate_call(params, call_flow_state)
-    )
-
-    # Build human conversation pipeline
-    human_conversation_pipeline = Pipeline(
-        [
-            transport.input(),  # Transport user input
-            stt,  # Speech-to-text
-            context_aggregator.user(),  # User context
-            human_conversation_llm,  # LLM
-            tts,  # TTS
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant context
-        ]
-    )
-
-    # Create pipeline task
-    human_conversation_pipeline_task = PipelineTask(
-        human_conversation_pipeline,
-        params=PipelineParams(
-            enable_metrics=True,
-            enable_usage_metrics=True,
-        ),
-    )
-
-    # Update participant left handler for human conversation phase
-    @transport.event_handler("on_participant_left")
-    async def on_participant_left(transport, participant, reason):
-        await voicemail_detection_pipeline_task.queue_frame(EndFrame())
-        await human_conversation_pipeline_task.queue_frame(EndFrame())
-
-    # ------------ RUN HUMAN CONVERSATION PIPELINE ------------
-
-    print("!!! starting human conversation pipeline")
-
-    # Initialize the context with system message
-    context_aggregator.user().set_messages(
-        [
-            {
-                "role": "system",
-                "content": human_conversation_system_instruction,
-            }
-        ]
-    )
-
-    # Queue the context frame to start the conversation
-    await human_conversation_pipeline_task.queue_frames(
-        [context_aggregator.user().get_context_frame()]
-    )
-
-    # Run the human conversation pipeline
-    try:
-        await runner.run(human_conversation_pipeline_task)
-    except Exception as e:
-        logger.error(f"Error in voicemail detection pipeline: {e}")
+        logger.error(f"Pipeline error: {e}")
         import traceback
 
         logger.error(traceback.format_exc())
 
-    print("!!! Done with human conversation pipeline")
 
-
-# ------------ SCRIPT ENTRY POINT ------------
+# ------------ ENTRY POINT ------------
 
 
 async def main():
-    """Parse command line arguments and run the bot."""
-    parser = argparse.ArgumentParser(description="Simple Dial-out Bot")
+    parser = argparse.ArgumentParser(description="Simplified Parallel Pipeline Bot")
     parser.add_argument("-u", "--url", type=str, help="Room URL")
     parser.add_argument("-t", "--token", type=str, help="Room Token")
-    parser.add_argument("-b", "--body", type=str, help="JSON configuration string")
+    parser.add_argument("-b", "--body", type=str, help="JSON config")
 
     args = parser.parse_args()
-
-    logger.debug(f"url: {args.url}")
-    logger.debug(f"token: {args.token}")
-    logger.debug(f"body: {args.body}")
     if not all([args.url, args.token, args.body]):
-        logger.error("All arguments (-u, -t, -b) are required")
+        logger.error("All arguments required")
         parser.print_help()
         sys.exit(1)
 

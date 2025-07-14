@@ -1,7 +1,0 @@
-pipecat-ai[daily,cartesia,google,deepgram,silero]
-pipecat-ai-flows
-fastapi==0.115.6
-uvicorn
-python-dotenv
-python-multipart
-aiohttp
