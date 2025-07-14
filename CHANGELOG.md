@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
   recommended model.
 
+### Fixed
+
+- Fixed an issue where, in some edge cases, the `EmulateUserStartedSpeakingFrame`
+  could be created even if we didn't have a transcription.
+
 ## [0.0.76] - 2025-07-11
 
 ### Added
