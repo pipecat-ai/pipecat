@@ -301,7 +301,7 @@ def fastapi_app():
         allow_headers=["*"],
     )
 
-    # Include the endpoints from endpoints.py
+    # Include the endpoints from this file
     web_app.include_router(router)
 
     return web_app
