@@ -693,7 +693,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         # to emulate VAD (i.e. user start/stopped speaking), but we do it only
         # if the bot is not speaking. If the bot is speaking and we really have
         # a short utterance we don't really want to interrupt the bot.
-        if not self._user_speaking and not self._waiting_for_aggregation:
+        if (
+            not self._user_speaking
+            and not self._waiting_for_aggregation
+            and len(self._aggregation) > 0
+        ):
             if self._bot_speaking:
                 # If we reached this case and the bot is speaking, let's ignore
                 # what the user said.
