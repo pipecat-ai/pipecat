@@ -173,7 +173,6 @@ class InworldTTSService(TTSService):
             frame: The end frame.
         """
         await super().stop(frame)
-        # await self._client.close()
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the Inworld HTTP TTS service.
@@ -182,7 +181,6 @@ class InworldTTSService(TTSService):
             frame: The cancel frame.
         """
         await super().cancel(frame)
-        # await self._client.close()
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
