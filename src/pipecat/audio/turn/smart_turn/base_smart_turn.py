@@ -87,6 +87,15 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         """
         return self._speech_triggered
 
+    @property
+    def params(self) -> SmartTurnParams:
+        """Get the current smart turn parameters.
+
+        Returns:
+            Current smart turn configuration parameters.
+        """
+        return self._params
+
     def append_audio(self, buffer: bytes, is_speech: bool) -> EndOfTurnState:
         """Append audio data for turn analysis.
 

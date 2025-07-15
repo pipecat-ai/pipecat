@@ -5,7 +5,7 @@ on:
     inputs:
       gitref:
         type: string
-        description: "what git ref to build"
+        description: "what git tag to build (e.g. v0.0.74)"
         required: true
 
 jobs:

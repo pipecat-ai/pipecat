@@ -132,6 +132,10 @@ class TwilioFrameSerializer(FrameSerializer):
             serialized_data = await pcm_to_ulaw(
                 data, frame.sample_rate, self._twilio_sample_rate, self._output_resampler
             )
+            if serialized_data is None or len(serialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
+
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
                 "event": "media",
@@ -185,8 +189,26 @@ class TwilioFrameSerializer(FrameSerializer):
                 async with session.post(endpoint, auth=auth, data=params) as response:
                     if response.status == 200:
                         logger.info(f"Successfully terminated Twilio call {call_sid}")
+                    elif response.status == 404:
+                        # Handle the case where the call has already ended
+                        # Error code 20404: "The requested resource was not found"
+                        # Source: https://www.twilio.com/docs/errors/20404
+                        try:
+                            error_data = await response.json()
+                            if error_data.get("code") == 20404:
+                                logger.debug(f"Twilio call {call_sid} was already terminated")
+                                return
+                        except:
+                            pass  # Fall through to log the raw error
+
+                        # Log other 404 errors
+                        error_text = await response.text()
+                        logger.error(
+                            f"Failed to terminate Twilio call {call_sid}: "
+                            f"Status {response.status}, Response: {error_text}"
+                        )
                     else:
-                        # Get the error details for better debugging
+                        # Log other errors
                         error_text = await response.text()
                         logger.error(
                             f"Failed to terminate Twilio call {call_sid}: "
@@ -217,6 +239,10 @@ class TwilioFrameSerializer(FrameSerializer):
             deserialized_data = await ulaw_to_pcm(
                 payload, self._twilio_sample_rate, self._sample_rate, self._input_resampler
             )
+            if deserialized_data is None or len(deserialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
+
             audio_frame = InputAudioRawFrame(
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
             )

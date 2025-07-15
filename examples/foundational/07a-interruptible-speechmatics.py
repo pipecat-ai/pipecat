@@ -21,7 +21,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.speechmatics.stt import OperatingPoint, SpeechmaticsSTTService
+from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -52,15 +52,28 @@ transport_params = {
 
 
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
-    """Run example using Speechmatics STT."""
+    """Run example using Speechmatics STT.
+
+    This example will use diarization within our STT service and output the words spoken by
+    each individual speaker and wrap them with XML tags for the LLM to process. Note the
+    instructions in the system context for the LLM. This greatly improves the conversation
+    experience by allowing the LLM to understand who is speaking in a multi-party call.
+
+    If you do not wish to use diarization, then set the `enable_speaker_diarization` parameter
+    to `False` or omit it altogether. The `text_format` will only be used if diarization is enabled.
+
+    By default, this example will use our ENHANCED operating point, which is optimized for
+    high accuracy. You can change this by setting the `operating_point` parameter to a different
+    value.
+
+    For more information on operating points, see the Speechmatics documentation:
+    https://docs.speechmatics.com/rt-api-ref
+    """
     logger.info(f"Starting bot")
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
-        output_locale=Language.EN_GB,
-        operating_point=OperatingPoint.ENHANCED,
-        end_of_utterance_silence_trigger=0.5,
         enable_speaker_diarization=True,
         text_format="<{speaker_id}>{text}</{speaker_id}>",
     )
@@ -100,7 +113,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
+            stt,  # STT
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS

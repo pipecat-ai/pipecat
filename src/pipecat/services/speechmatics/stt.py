@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Speechmatics STT service integration."""
+
 import asyncio
 import datetime
 import re
@@ -27,6 +29,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     from speechmatics.rt import (
@@ -55,12 +58,14 @@ class AudioBuffer:
     buffer will accumulate the data from the pipeline and provide it to the
     STT client in the correct lengths, waiting for the number of frames to
     be available.
-
-    Args:
-        maxsize: Maximum size of the buffer.
     """
 
     def __init__(self, maxsize: int = 0):
+        """Initialize the audio buffer.
+
+        Args:
+            maxsize: Maximum size of the buffer.
+        """
         self._queue = asyncio.Queue(maxsize=maxsize)
         self._current_chunk = b""
         self._position = 0
@@ -166,7 +171,7 @@ class DiarizationConfig:
 class SpeechFragment:
     """Fragment of an utterance.
 
-    Attributes:
+    Parameters:
         start_time: Start time of the fragment in seconds (from session start).
         end_time: End time of the fragment in seconds (from session start).
         language: Language of the fragment. Defaults to `Language.EN`.
@@ -199,7 +204,7 @@ class SpeechFragment:
 class SpeakerFragments:
     """SpeechFragment items grouped by speaker_id.
 
-    Attributes:
+    Parameters:
         speaker_id: The ID of the speaker.
         is_active: Whether the speaker is active (emits frame).
         timestamp: The timestamp of the frame.
@@ -270,29 +275,6 @@ class SpeechmaticsSTTService(STTService):
     This service provides real-time speech-to-text transcription using the Speechmatics API.
     It supports partial and final transcriptions, multiple languages, various audio formats,
     and speaker diarization.
-
-    Args:
-        api_key: Speechmatics API key for authentication.
-        operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
-        base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
-        language: Language code for transcription. Defaults to `None`.
-        language_code: Language code string for transcription. Defaults to `None`.
-        domain: Domain for Speechmatics API. Defaults to `None`.
-        output_locale: Output locale for transcription, e.g. `Language.EN_GB`. Defaults to `None`.
-        output_locale_code: Output locale code for transcription. Defaults to `None`.
-        max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
-        enable_partials: Enable partial transcriptions. Defaults to `True`.
-        sample_rate: Audio sample rate in Hz. Defaults to `16000`.
-        chunk_size: Audio chunk size for streaming. Defaults to `256`.
-        audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
-        enable_vad: Enable VAD to trigger end of utterance detection. Defaults to `False`.
-        end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
-        operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
-        speaker_active_format: Formatter for active speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
-        speaker_passive_format: Formatter for passive speaker ID. Defaults to `<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>`.
-        diarization_config: Configuration for speaker diarization. Defaults to `None`.
-        transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
-        **kwargs: Additional arguments passed to STTService.
     """
 
     def __init__(
@@ -318,10 +300,39 @@ class SpeechmaticsSTTService(STTService):
         speaker_passive_format: str = "<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         transcription_config: Optional[TranscriptionConfig] = None,
         enable_speaker_diarization: Optional[bool] = None,  # deprecated, use diarization_config
-        text_format: Optional[str] = None,  # deprecated, use diarization_config
+        text_format: Optional[
+            str
+        ] = None,  # deprecated, use speaker_active_format and speaker_passive_format instead
         max_speakers: Optional[int] = None,  # deprecated, use diarization_config
         **kwargs,
     ):
+        """Initialize the Speechmatics STT service.
+
+        Args:
+            api_key: Speechmatics API key for authentication.
+            operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
+            base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
+            language: Language code for transcription. Defaults to `None`.
+            language_code: Language code string for transcription. Defaults to `None`.
+            domain: Domain for Speechmatics API. Defaults to `None`.
+            output_locale: Output locale for transcription, e.g. `Language.EN_GB`. Defaults to `None`.
+            output_locale_code: Output locale code for transcription. Defaults to `None`.
+            max_delay: Maximum delay for transcription in seconds. Defaults to `2.0`.
+            enable_partials: Enable partial transcriptions. Defaults to `True`.
+            sample_rate: Audio sample rate in Hz. Defaults to `16000`.
+            chunk_size: Audio chunk size for streaming. Defaults to `256`.
+            audio_encoding: Audio encoding format. Defaults to `pcm_s16le`.
+            enable_vad: Enable VAD to trigger end of utterance detection. Defaults to `False`.
+            end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
+            diarization_config: Configuration for speaker diarization. Defaults to `None`.
+            speaker_active_format: Formatter for active speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
+            speaker_passive_format: Formatter for passive speaker ID. Defaults to `<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>`.
+            transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
+            enable_speaker_diarization: Deprecated, use diarization_config instead.
+            text_format: Deprecated, use speaker_active_format and speaker_passive_format instead.
+            max_speakers: Deprecated, use diarization_config instead.
+            **kwargs: Additional arguments passed to STTService.
+        """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Client configuration
@@ -485,8 +496,15 @@ class SpeechmaticsSTTService(STTService):
         self._audio_buffer.stop()
 
         # Disconnect the client
-        if self._client:
-            await self._client.close()
+        try:
+            if self._client:
+                await asyncio.wait_for(self._client.close(), timeout=1.0)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout while closing Speechmatics client connection")
+        except Exception as e:
+            logger.error(f"Error closing Speechmatics client: {e}")
+        finally:
+            self._client = None
 
         # Cancel the client task
         if self._client_task:
@@ -572,6 +590,13 @@ class SpeechmaticsSTTService(STTService):
 
         # Send frames
         asyncio.run_coroutine_threadsafe(self._send_frames(), self.get_event_loop())
+
+    @traced_stt
+    async def _handle_transcription(
+        self, transcript: str, is_final: bool, language: Optional[Language] = None
+    ):
+        """Handle a transcription result with tracing."""
+        pass
 
     async def _send_frames(self, finalized: bool = False) -> None:
         """Send frames to the pipeline.

@@ -99,6 +99,7 @@ class RimeTTSService(AudioContextWordTTSService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
+        aggregate_sentences: Optional[bool] = True,
         **kwargs,
     ):
         """Initialize Rime TTS service.
@@ -111,11 +112,12 @@ class RimeTTSService(AudioContextWordTTSService):
             sample_rate: Audio sample rate in Hz.
             params: Additional configuration parameters.
             text_aggregator: Custom text aggregator for processing input text.
+            aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to parent class.
         """
         # Initialize with parent class settings for proper frame handling
         super().__init__(
-            aggregate_sentences=True,
+            aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
             pause_frame_processing=True,
