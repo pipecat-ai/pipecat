@@ -168,15 +168,17 @@ class MCPClient(BaseObject):
 
         async def mcp_tool_wrapper(params: FunctionCallParams) -> None:
             """Wrapper for mcp tool calls to match Pipecat's function call interface."""
-            logger.debug(f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}")
+            logger.debug(
+                f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}"
+            )
             logger.trace(f"Tool arguments: {json.dumps(params.arguments, indent=2)}")
             try:
-                async with self._client(
-                    **self._server_params.model_dump()
-                ) as (read, write):
+                async with self._client(**self._server_params.model_dump()) as (read, write):
                     async with self._session(read, write) as session:
                         await session.initialize()
-                        await self._call_tool(session, params.function_name, params.arguments, params.result_callback)
+                        await self._call_tool(
+                            session, params.function_name, params.arguments, params.result_callback
+                        )
             except Exception as e:
                 error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
                 logger.error(error_msg)
@@ -186,9 +188,7 @@ class MCPClient(BaseObject):
         logger.debug(f"SSE server parameters: {self._server_params}")
         logger.debug("Starting registration of mcp tools")
 
-        async with self._client(
-            **self._server_params.model_dump()
-        ) as (read, write):
+        async with self._client(**self._server_params.model_dump()) as (read, write):
             async with self._session(read, write) as session:
                 await session.initialize()
                 tools_schema = await self._list_tools(session, mcp_tool_wrapper, llm)
@@ -205,13 +205,17 @@ class MCPClient(BaseObject):
 
         async def mcp_tool_wrapper(params: FunctionCallParams) -> None:
             """Wrapper for mcp tool calls to match Pipecat's function call interface."""
-            logger.debug(f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}")
+            logger.debug(
+                f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}"
+            )
             logger.trace(f"Tool arguments: {json.dumps(params.arguments, indent=2)}")
             try:
                 async with self._client(self._server_params) as streams:
                     async with self._session(streams[0], streams[1]) as session:
                         await session.initialize()
-                        await self._call_tool(session, params.function_name, params.arguments, params.result_callback)
+                        await self._call_tool(
+                            session, params.function_name, params.arguments, params.result_callback
+                        )
             except Exception as e:
                 error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
                 logger.error(error_msg)
@@ -237,19 +241,21 @@ class MCPClient(BaseObject):
 
         async def mcp_tool_wrapper(params: FunctionCallParams) -> None:
             """Wrapper for mcp tool calls to match Pipecat's function call interface."""
-            logger.debug(f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}")
+            logger.debug(
+                f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}"
+            )
             logger.trace(f"Tool arguments: {json.dumps(params.arguments, indent=2)}")
             try:
-                async with self._client(
-                    **self._server_params.model_dump()
-                ) as (
+                async with self._client(**self._server_params.model_dump()) as (
                     read_stream,
                     write_stream,
                     _,
                 ):
                     async with self._session(read_stream, write_stream) as session:
                         await session.initialize()
-                        await self._call_tool(session, params.function_name, params.arguments, params.result_callback)
+                        await self._call_tool(
+                            session, params.function_name, params.arguments, params.result_callback
+                        )
             except Exception as e:
                 error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
                 logger.error(error_msg)
@@ -258,9 +264,7 @@ class MCPClient(BaseObject):
 
         logger.debug("Starting registration of mcp tools using streamable HTTP")
 
-        async with self._client(
-            **self._server_params.model_dump()
-        ) as (
+        async with self._client(**self._server_params.model_dump()) as (
             read_stream,
             write_stream,
             _,
