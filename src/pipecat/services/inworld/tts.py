@@ -89,7 +89,8 @@ class InworldHttpTTSService(TTSService):
         """
 
         language: Optional[Language] = Language.EN
-        voice_id: str = "Ashley"
+        voice_id: str = "Ashley" ## QUESTION: How to make this modifyable/how to modify?
+        # QUESTION: What about speed, pitch, and temperature??
 
     def __init__(
         self,
