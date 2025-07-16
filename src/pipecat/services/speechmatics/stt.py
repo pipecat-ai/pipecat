@@ -8,6 +8,7 @@
 
 import asyncio
 import datetime
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
@@ -36,6 +37,7 @@ try:
         AsyncClient,
         AudioEncoding,
         AudioFormat,
+        ClientMessageType,
         ConversationConfig,
         OperatingPoint,
         ServerMessageType,
@@ -151,7 +153,7 @@ class DiarizationConfig:
     Attributes:
         enable: Whether to enable speaker diarization. Defaults to `False`.
         max_speakers: Maximum number of speakers. Defaults to `4`.
-        speaker_sensitivity: Speaker sensitivity. Defaults to `None`.
+        speaker_sensitivity: Speaker sensitivity, higher value is more sensitive (`0.0` to `1.0`). Defaults to `0.5` of not set.
         prefer_current_speaker: Whether to prefer the current speaker. Defaults to `None`.
         focus_speakers: List of speakers to focus on.
         ignore_speakers: List of speakers to ignore.
@@ -299,11 +301,9 @@ class SpeechmaticsSTTService(STTService):
         speaker_active_format: str = "<{speaker_id}>{text}</{speaker_id}>",
         speaker_passive_format: str = "<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         transcription_config: Optional[TranscriptionConfig] = None,
-        enable_speaker_diarization: Optional[bool] = None,  # deprecated, use diarization_config
-        text_format: Optional[
-            str
-        ] = None,  # deprecated, use speaker_active_format and speaker_passive_format instead
-        max_speakers: Optional[int] = None,  # deprecated, use diarization_config
+        enable_speaker_diarization: Optional[bool] = None,  # deprecated
+        text_format: Optional[str] = None,  # deprecated
+        max_speakers: Optional[int] = None,  # deprecated
         **kwargs,
     ):
         """Initialize the Speechmatics STT service.
@@ -353,20 +353,7 @@ class SpeechmaticsSTTService(STTService):
         self._operating_point: OperatingPoint = operating_point
         self._speaker_active_format: str = speaker_active_format
         self._speaker_passive_format: str = speaker_passive_format
-        self._diarization_config: Optional[DiarizationConfig] = diarization_config
-
-        # Deprecation warnings
-        if enable_speaker_diarization is not None:
-            logger.warning(
-                "enable_speaker_diarization is deprecated, use diarization_config instead"
-            )
-            self._diarization_config.enable = enable_speaker_diarization
-        if max_speakers is not None:
-            logger.warning("max_speakers is deprecated, use diarization_config instead")
-            self._diarization_config.max_speakers = max_speakers
-        if text_format is not None:
-            logger.warning("text_format is deprecated, use speaker_active_format instead")
-            self._diarization_config.speaker_active_format = text_format
+        self._diarization_config: DiarizationConfig = diarization_config
 
         # Check we have required attributes
         if not self._api_key:
@@ -387,6 +374,19 @@ class SpeechmaticsSTTService(STTService):
             self._output_locale_code = _locale_to_speechmatics_locale(
                 self._language_code, self._output_locale
             )
+
+        # Deprecation warnings
+        if enable_speaker_diarization is not None:
+            logger.warning(
+                "enable_speaker_diarization is deprecated, use diarization_config instead"
+            )
+            self._diarization_config.enable = enable_speaker_diarization
+        if max_speakers is not None:
+            logger.warning("max_speakers is deprecated, use diarization_config instead")
+            self._diarization_config.max_speakers = max_speakers
+        if text_format is not None:
+            logger.warning("text_format is deprecated, use speaker_active_format instead")
+            self._diarization_config.speaker_active_format = text_format
 
         # Complete configuration objects
         self._transcription_config: TranscriptionConfig = None
@@ -438,7 +438,42 @@ class SpeechmaticsSTTService(STTService):
         Args:
             diarization_config: Diarization configuration to use.
         """
+        # Show warnings if the diarization configuration cannot be changed
+        if diarization_config.enable != self._diarization_config.enable:
+            logger.warning("Diarization enabled state cannot be changed during the session.")
+        if diarization_config.max_speakers != self._diarization_config.max_speakers:
+            logger.warning("Max diarization speakers cannot be changed during the session.")
+        if diarization_config.speaker_sensitivity != self._diarization_config.speaker_sensitivity:
+            logger.warning("Diarization speaker sensitivity cannot be changed during the session.")
+        if (
+            diarization_config.prefer_current_speaker
+            != self._diarization_config.prefer_current_speaker
+        ):
+            logger.warning(
+                "Diarization prefer current speaker preference cannot be changed during the session."
+            )
+
+        # Update the diarization configuration
         self._diarization_config = diarization_config
+
+    async def send_message(self, message: ClientMessageType | str, **kwargs: Any) -> None:
+        """Send a message to the STT service.
+
+        This sends a message to the STT service via the underlying transport. If the session
+        is not running, this will raise an exception. Messages in the wrong format will also
+        cause an error.
+
+        Args:
+            message: Message to send to the STT service.
+            **kwargs: Additional arguments passed to the underlying transport.
+        """
+        try:
+            payload = {"message": message}
+            payload.update(kwargs)
+            logger.debug(f"Sending message to STT: {payload}")
+            await self._client.send_message(payload)
+        except Exception as e:
+            raise RuntimeError(f"error sending message to STT: {e}")
 
     async def _run_client(self) -> None:
         """Runs the Speechmatics client in a thread."""
@@ -485,6 +520,15 @@ class SpeechmaticsSTTService(STTService):
             logger.debug("End of utterance received from STT")
             asyncio.run_coroutine_threadsafe(
                 self._send_frames(finalized=True), self.get_event_loop()
+            )
+
+        # Speaker Result (dump to screen)
+        @self._client.on(ServerMessageType.SPEAKERS_RESULT)
+        def _evt_on_speakers_result(message: dict[str, Any]):
+            logger.debug("Speakers result received from STT")
+            asyncio.run_coroutine_threadsafe(
+                self._call_event_handler("on_speakers_result", message),
+                self.get_event_loop(),
             )
 
         # Start the client in a thread
@@ -567,6 +611,12 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.conversation_config = ConversationConfig(
                 end_of_utterance_silence_trigger=self._end_of_utterance_silence_trigger,
             )
+
+        # Always use streaming mode
+        # transcription_config.streaming_mode = True
+
+        # Dump config
+        logger.debug(f"Transcription config: {transcription_config}")
 
         # Set config
         self._transcription_config = transcription_config
