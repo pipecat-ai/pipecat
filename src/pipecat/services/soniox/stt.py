@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Soniox speech-to-text service implementation."""
+
 import asyncio
 import json
 import time
