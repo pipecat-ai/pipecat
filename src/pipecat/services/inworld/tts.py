@@ -68,7 +68,7 @@ def language_to_inworld_language(language: Language) -> Optional[str]:
     return result
 
 
-class InworldTTSService(TTSService):
+class InworldHttpTTSService(TTSService):
     """Inworld HTTP-based TTS service.
 
     Provides text-to-speech using Inworld's HTTP API for simpler, non-streaming
