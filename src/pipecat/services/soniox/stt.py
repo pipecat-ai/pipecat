@@ -59,7 +59,6 @@ class SonioxInputParams(BaseModel):
         context: Customization for transcription.
         enable_non_final_tokens: Whether to enable non-final tokens. If false, only final tokens will be returned.
         max_non_final_tokens_duration_ms: Maximum duration of non-final tokens.
-        enable_endpoint_detection: Whether to enable endpoint detection. User will receive interim transcription until the endpoint is detected.
         client_reference_id: Client reference ID to use for transcription.
     """
 
@@ -73,8 +72,6 @@ class SonioxInputParams(BaseModel):
 
     enable_non_final_tokens: Optional[bool] = True
     max_non_final_tokens_duration_ms: Optional[int] = None
-
-    enable_endpoint_detection: Optional[bool] = True
 
     client_reference_id: Optional[str] = None
 
@@ -123,7 +120,7 @@ class SonioxSTTService(STTService):
         url: str = "wss://stt-rt.soniox.com/transcribe-websocket",
         sample_rate: Optional[int] = None,
         params: Optional[SonioxInputParams] = None,
-        enable_vad: bool = False,
+        vad_force_turn_endpoint: bool = False,
         **kwargs,
     ):
         """Initialize the Soniox STT service.
@@ -134,7 +131,7 @@ class SonioxSTTService(STTService):
             sample_rate: Audio sample rate.
             params: Additional configuration parameters, such as language hints, context and
                 speaker diarization.
-            enable_vad: Listen to `UserStoppedSpeakingFrame` to send finalize message to Soniox.
+            vad_force_turn_endpoint: Listen to `UserStoppedSpeakingFrame` to send finalize message to Soniox. If disabled, Soniox will detect the end of the speech.
             **kwargs: Additional arguments passed to the STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -144,7 +141,7 @@ class SonioxSTTService(STTService):
         self._url = url
         self.set_model_name(params.model)
         self._params = params
-        self._enable_vad = enable_vad
+        self._vad_force_turn_endpoint = vad_force_turn_endpoint
         self._websocket = None
 
         self._final_transcription_buffer = []
@@ -168,13 +165,17 @@ class SonioxSTTService(STTService):
         if not self._websocket:
             logger.error(f"Unable to connect to Soniox API at {self._url}")
 
+        # If vad_force_turn_endpoint is not enabled, we need to enable endpoint detection.
+        # Either one or the other is required.
+        enable_endpoint_detection = not self._vad_force_turn_endpoint
+
         # Send the initial configuration message.
         config = {
             "api_key": self._api_key,
             "model": self._model_name,
             "audio_format": self._params.audio_format,
             "num_channels": self._params.num_channels or 1,
-            "enable_endpoint_detection": self._params.enable_endpoint_detection,
+            "enable_endpoint_detection": enable_endpoint_detection,
             "sample_rate": self.sample_rate,
             "language_hints": _prepare_language_hints(self._params.language_hints),
             "context": self._params.context,
@@ -263,7 +264,7 @@ class SonioxSTTService(STTService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, UserStoppedSpeakingFrame) and self._enable_vad:
+        if isinstance(frame, UserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
             # Send finalize message to Soniox so we get the final tokens asap.
             if self._websocket and not self._websocket.closed:
                 await self._websocket.send(FINALIZE_MESSAGE)
