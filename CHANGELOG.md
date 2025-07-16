@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `LocalSmartTurnAnalyzerV2`, which supports local on-device inference
+  with the new `smart-turn-v2` turn detection model.
+
 ### Changed
 
 - For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
