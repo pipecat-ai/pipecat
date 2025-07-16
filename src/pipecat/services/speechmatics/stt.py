@@ -616,7 +616,7 @@ class SpeechmaticsSTTService(STTService):
         # transcription_config.streaming_mode = True
 
         # Dump config
-        logger.debug(f"Transcription config: {transcription_config}")
+        logger.debug(f"Transcription config: {json.dumps(transcription_config.to_dict())}")
 
         # Set config
         self._transcription_config = transcription_config
