@@ -44,6 +44,7 @@ class AIService(FrameProcessor):
         self._model_name: str = ""
         self._settings: Dict[str, Any] = {}
         self._session_properties: Dict[str, Any] = {}
+        self._has_started = False
 
     @property
     def model_name(self) -> str:
@@ -72,7 +73,7 @@ class AIService(FrameProcessor):
         Args:
             frame: The start frame containing initialization parameters.
         """
-        pass
+        self._has_started = True
 
     async def stop(self, frame: EndFrame):
         """Stop the AI service.
@@ -83,7 +84,7 @@ class AIService(FrameProcessor):
         Args:
             frame: The end frame.
         """
-        pass
+        self._has_started = False
 
     async def cancel(self, frame: CancelFrame):
         """Cancel the AI service.
@@ -94,7 +95,7 @@ class AIService(FrameProcessor):
         Args:
             frame: The cancel frame.
         """
-        pass
+        self._has_started = False
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         from pipecat.services.openai_realtime_beta.events import (
@@ -153,6 +154,8 @@ class AIService(FrameProcessor):
 
         if isinstance(frame, StartFrame):
             await self.start(frame)
+            if not self._has_started:
+                await self.start(frame)
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
         elif isinstance(frame, EndFrame):

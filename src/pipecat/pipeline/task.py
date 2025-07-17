@@ -45,6 +45,9 @@ from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.services.ai_service import AIService
+from pipecat.transports.base_input import BaseInputTransport
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.utils.asyncio.task_manager import (
     WATCHDOG_TIMEOUT,
     BaseTaskManager,
@@ -67,6 +70,7 @@ class PipelineParams(BaseModel):
     constructor arguments instead.
 
     Parameters:
+        parallel_startup: [Experimental] Whether to start services in parallel.
         allow_interruptions: Whether to allow pipeline interruptions.
         audio_in_sample_rate: Input audio sample rate in Hz.
         audio_out_sample_rate: Output audio sample rate in Hz.
@@ -87,6 +91,7 @@ class PipelineParams(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    parallel_startup: bool = False
     allow_interruptions: bool = True
     audio_in_sample_rate: int = 16000
     audio_out_sample_rate: int = 24000
@@ -573,6 +578,20 @@ class PipelineTask(BasePipelineTask):
             await self._task_manager.cancel_task(self._idle_monitor_task)
             self._idle_monitor_task = None
 
+    def _collect_pre_startup_services(self, processor: FrameProcessor) -> List[FrameProcessor]:
+        """Recursively collect services and transports that require startup."""
+        services = []
+        if isinstance(processor, (AIService, BaseInputTransport, BaseOutputTransport)):
+            services.append(processor)
+
+        if isinstance(processor, BasePipeline):
+            for attr in ("_processors", "_pipelines"):
+                if hasattr(processor, attr):
+                    for p in getattr(processor, attr):
+                        services.extend(self._collect_pre_startup_services(p))
+
+        return services
+
     def _initial_metrics_frame(self) -> MetricsFrame:
         """Create an initial metrics frame with zero values for all processors."""
         processors = self._pipeline.processors_with_metrics()
@@ -643,6 +662,17 @@ class PipelineTask(BasePipelineTask):
             interruption_strategies=self._params.interruption_strategies,
         )
         start_frame.metadata = self._params.start_metadata
+
+        pre_startup_services = self._collect_pre_startup_services(self._pipeline)
+        if pre_startup_services:
+            start_time = time.time()
+            if self._params.parallel_startup:
+                await asyncio.gather(*(s.start(start_frame) for s in pre_startup_services))
+            else:
+                for s in pre_startup_services:
+                    await s.start(start_frame)
+            logger.info(f"AI and transport services started in {time.time() - start_time:.2f}s")
+
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 
         if self._params.enable_metrics and self._params.send_initial_empty_metrics:
