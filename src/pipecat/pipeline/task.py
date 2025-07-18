@@ -663,15 +663,10 @@ class PipelineTask(BasePipelineTask):
         )
         start_frame.metadata = self._params.start_metadata
 
-        pre_startup_services = self._collect_pre_startup_services(self._pipeline)
-        if pre_startup_services:
-            start_time = time.time()
-            if self._params.parallel_startup:
+        if self._params.parallel_startup:
+            pre_startup_services = self._collect_pre_startup_services(self._pipeline)
+            if pre_startup_services:
                 await asyncio.gather(*(s.start(start_frame) for s in pre_startup_services))
-            else:
-                for s in pre_startup_services:
-                    await s.start(start_frame)
-            logger.info(f"AI and transport services started in {time.time() - start_time:.2f}s")
 
         await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
 
