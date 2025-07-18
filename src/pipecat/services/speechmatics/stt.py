@@ -408,6 +408,10 @@ class SpeechmaticsSTTService(STTService):
         self._base_time: Optional[datetime.datetime] = None
         self._total_time: Optional[datetime.timedelta] = None
 
+        # Event handlers
+        if self._diarization_config.enable:
+            self._register_event_handler("on_speakers_result")
+
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
         await super().start(frame)
@@ -471,7 +475,9 @@ class SpeechmaticsSTTService(STTService):
             payload = {"message": message}
             payload.update(kwargs)
             logger.debug(f"Sending message to STT: {payload}")
-            await self._client.send_message(payload)
+            asyncio.run_coroutine_threadsafe(
+                self._client.send_message(payload), self.get_event_loop()
+            )
         except Exception as e:
             raise RuntimeError(f"error sending message to STT: {e}")
 
@@ -522,7 +528,7 @@ class SpeechmaticsSTTService(STTService):
                 self._send_frames(finalized=True), self.get_event_loop()
             )
 
-        # Speaker Result (dump to screen)
+        # Speaker Result
         @self._client.on(ServerMessageType.SPEAKERS_RESULT)
         def _evt_on_speakers_result(message: dict[str, Any]):
             logger.debug("Speakers result received from STT")
@@ -611,9 +617,6 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.conversation_config = ConversationConfig(
                 end_of_utterance_silence_trigger=self._end_of_utterance_silence_trigger,
             )
-
-        # Always use streaming mode
-        # transcription_config.streaming_mode = True
 
         # Dump config
         logger.debug(f"Transcription config: {json.dumps(transcription_config.to_dict())}")
