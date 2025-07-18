@@ -153,7 +153,6 @@ class AIService(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self.start(frame)
             if not self._has_started:
                 await self.start(frame)
         elif isinstance(frame, CancelFrame):
