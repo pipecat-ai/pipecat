@@ -627,9 +627,9 @@ class GoogleLLMContext(OpenAILLMContext):
         # Check if we only have function-related messages (no regular text)
         has_regular_messages = any(
             len(msg.parts) == 1
-            and not getattr(msg.parts[0], "text", None)
-            and getattr(msg.parts[0], "function_call", None)
-            and getattr(msg.parts[0], "function_response", None)
+            and getattr(msg.parts[0], "text", None)
+            and not getattr(msg.parts[0], "function_call", None)
+            and not getattr(msg.parts[0], "function_response", None)
             for msg in self._messages
         )
 
