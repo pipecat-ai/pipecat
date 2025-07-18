@@ -7,6 +7,7 @@
 """Inworld's text-to-speech service implementations."""
 
 import base64
+import io
 import json
 import uuid
 import warnings
@@ -15,7 +16,6 @@ from typing import AsyncGenerator, List, Optional, Union
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, Field
-import io, json, base64
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -89,7 +89,7 @@ class InworldHttpTTSService(TTSService):
         """
 
         language: Optional[Language] = Language.EN
-        voice_id: str = "Ashley" ## QUESTION: How to make this modifyable/how to modify?
+        voice_id: str = "Ashley"  ## QUESTION: How to make this modifyable/how to modify?
         # QUESTION: What about speed, pitch, and temperature??
 
     def __init__(
@@ -109,9 +109,8 @@ class InworldHttpTTSService(TTSService):
         Args:
             api_key: Inworld API key for authentication.
             aiohttp_session: Shared aiohttp session for HTTP requests.
-            voice_id: ID of the voice to use for synthesis.
-            model: TTS model to use (e.g., "sonic-2").
-            endpoint_url: Base URL for Inworld HTTP API.
+            model: TTS model to use (e.g., "inworld-tts-1").
+            base_url: Base URL for Inworld HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             params: Additional input parameters for voice customization.
@@ -137,7 +136,6 @@ class InworldHttpTTSService(TTSService):
         }
         self.set_voice(params.voice_id)
         self.set_model_name(model)
-
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -187,6 +185,8 @@ class InworldHttpTTSService(TTSService):
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
         """Generate speech from text using Inworld's HTTP API.
 
+        This implementation streams audio chunk by chunk as it's received.
+
         Args:
             text: The text to synthesize into speech.
 
@@ -213,48 +213,50 @@ class InworldHttpTTSService(TTSService):
 
             yield TTSStartedFrame()
 
-            async with self._session.post(self._base_url, json=payload, headers=headers) as response:
+            # A flag to ensure we only strip the header from the very first chunk.
+            is_first_chunk = True
+
+            async with self._session.post(
+                self._base_url, json=payload, headers=headers
+            ) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Inworld API error: {error_text}")
                     await self.push_error(ErrorFrame(f"Inworld API error: {error_text}"))
                     return
 
-                raw_audio_data = io.BytesIO()
-
+                # Process the stream line by line.
                 async for line in response.content.iter_lines():
-                    line_str = line.decode('utf-8').strip()
+                    line_str = line.decode("utf-8").strip()
                     if not line_str:
                         continue
-                    
+
                     try:
                         chunk = json.loads(line_str)
                         if "result" in chunk and "audioContent" in chunk["result"]:
                             audio_chunk = base64.b64decode(chunk["result"]["audioContent"])
-                            # Skip WAV header if present (first 44 bytes)
-                            if len(audio_chunk) > 44 and audio_chunk.startswith(b"RIFF"):
+                            audio_data = audio_chunk
+
+                            # Correctly strip the header only from the first chunk.
+                            if (
+                                is_first_chunk
+                                and len(audio_chunk) > 44
+                                and audio_chunk.startswith(b"RIFF")
+                            ):
                                 audio_data = audio_chunk[44:]
-                            else:
-                                audio_data = audio_chunk
-                            raw_audio_data.write(audio_data)
+                                is_first_chunk = False  # Unset the flag.
+
+                            # Yield each audio frame as it's processed.
+                            yield TTSAudioRawFrame(
+                                audio=audio_data,
+                                sample_rate=self.sample_rate,
+                                num_channels=1,
+                            )
+
                     except json.JSONDecodeError:
                         continue
 
             await self.start_tts_usage_metrics(text)
-
-            audio_bytes = raw_audio_data.getvalue()
-            if not audio_bytes:
-                logger.error("No audio data received from Inworld API")
-                await self.push_error(ErrorFrame("No audio data received"))
-                return
-
-            frame = TTSAudioRawFrame(
-                audio=audio_bytes,
-                sample_rate=self.sample_rate,
-                num_channels=1,
-            )
-
-            yield frame
 
         except Exception as e:
             logger.error(f"{self} exception: {e}")
@@ -262,3 +264,83 @@ class InworldHttpTTSService(TTSService):
         finally:
             await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
+
+    # @traced_tts
+    # async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    #     """Generate speech from text using Inworld's HTTP API.
+
+    #     Args:
+    #         text: The text to synthesize into speech.
+
+    #     Yields:
+    #         Frame: Audio frames containing the synthesized speech.
+    #     """
+    #     logger.debug(f"{self}: Generating TTS [{text}]")
+
+    #     payload = {
+    #         "text": text,
+    #         "voiceId": self._settings["voiceId"],
+    #         "modelId": self._settings["modelId"],
+    #         "audio_config": self._settings["audio_config"],
+    #         "language": self._settings["language"],
+    #     }
+
+    #     headers = {
+    #         "Authorization": f"Basic {self._api_key}",
+    #         "Content-Type": "application/json",
+    #     }
+
+    #     try:
+    #         await self.start_ttfb_metrics()
+
+    #         yield TTSStartedFrame()
+
+    #         async with self._session.post(self._base_url, json=payload, headers=headers) as response:
+    #             if response.status != 200:
+    #                 error_text = await response.text()
+    #                 logger.error(f"Inworld API error: {error_text}")
+    #                 await self.push_error(ErrorFrame(f"Inworld API error: {error_text}"))
+    #                 return
+
+    #             raw_audio_data = io.BytesIO()
+
+    #             async for line in response.content.iter_lines():
+    #                 line_str = line.decode('utf-8').strip()
+    #                 if not line_str:
+    #                     continue
+
+    #                 try:
+    #                     chunk = json.loads(line_str)
+    #                     if "result" in chunk and "audioContent" in chunk["result"]:
+    #                         audio_chunk = base64.b64decode(chunk["result"]["audioContent"])
+    #                         # Skip WAV header if present (first 44 bytes)
+    #                         if len(audio_chunk) > 44 and audio_chunk.startswith(b"RIFF"):
+    #                             audio_data = audio_chunk[44:]
+    #                         else:
+    #                             audio_data = audio_chunk
+    #                         raw_audio_data.write(audio_data)
+    #                 except json.JSONDecodeError:
+    #                     continue
+
+    #         await self.start_tts_usage_metrics(text)
+
+    #         audio_bytes = raw_audio_data.getvalue()
+    #         if not audio_bytes:
+    #             logger.error("No audio data received from Inworld API")
+    #             await self.push_error(ErrorFrame("No audio data received"))
+    #             return
+
+    #         frame = TTSAudioRawFrame(
+    #             audio=audio_bytes,
+    #             sample_rate=self.sample_rate,
+    #             num_channels=1,
+    #         )
+
+    #         yield frame
+
+    #     except Exception as e:
+    #         logger.error(f"{self} exception: {e}")
+    #         await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+    #     finally:
+    #         await self.stop_ttfb_metrics()
+    #         yield TTSStoppedFrame()
