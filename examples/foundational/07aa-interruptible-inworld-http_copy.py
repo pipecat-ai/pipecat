@@ -16,14 +16,15 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.inworld.tts import InworldHttpTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
+
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -52,11 +53,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
-        stt = OpenAISTTService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o-transcribe",
-            prompt="Expect words related to dogs, such as breed names.",
-        )
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = InworldHttpTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
@@ -70,7 +67,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         messages = [
             {
                 "role": "system",
-                "content": "You are very knowledgable about dogs. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
             },
         ]
 
@@ -80,7 +77,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         pipeline = Pipeline(
             [
                 transport.input(),  # Transport user input
-                stt,  # STT
+                stt,
                 context_aggregator.user(),  # User responses
                 llm,  # LLM
                 tts,  # TTS
@@ -92,7 +89,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         task = PipelineTask(
             pipeline,
             params=PipelineParams(
-                audio_out_sample_rate=24000,
                 enable_metrics=True,
                 enable_usage_metrics=True,
             ),
