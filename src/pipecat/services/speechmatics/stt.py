@@ -8,7 +8,6 @@
 
 import asyncio
 import datetime
-import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
@@ -41,7 +40,6 @@ try:
         ConversationConfig,
         OperatingPoint,
         ServerMessageType,
-        SpeakerDiarizationConfig,
         TranscriptionConfig,
         __version__,
     )
@@ -134,7 +132,7 @@ class AudioBuffer:
 
 
 @dataclass
-class DiarizationKnownSpeakers:
+class DiarizationKnownSpeaker:
     """Known speakers for speaker diarization.
 
     Attributes:
@@ -166,7 +164,7 @@ class DiarizationConfig:
     prefer_current_speaker: Optional[bool] = None
     focus_speakers: list[str] = field(default_factory=list)
     ignore_speakers: list[str] = field(default_factory=list)
-    known_speakers: list[DiarizationKnownSpeakers] = field(default_factory=list)
+    known_speakers: Optional[list[DiarizationKnownSpeaker]] = None
 
 
 @dataclass
@@ -447,15 +445,14 @@ class SpeechmaticsSTTService(STTService):
             logger.warning("Diarization enabled state cannot be changed during the session.")
         if diarization_config.max_speakers != self._diarization_config.max_speakers:
             logger.warning("Max diarization speakers cannot be changed during the session.")
-        if diarization_config.speaker_sensitivity != self._diarization_config.speaker_sensitivity:
+        if diarization_config.speaker_sensitivity is not None:
             logger.warning("Diarization speaker sensitivity cannot be changed during the session.")
-        if (
-            diarization_config.prefer_current_speaker
-            != self._diarization_config.prefer_current_speaker
-        ):
+        if diarization_config.prefer_current_speaker is not None:
             logger.warning(
                 "Diarization prefer current speaker preference cannot be changed during the session."
             )
+        if diarization_config.known_speakers is not None:
+            logger.warning("Known speakers cannot be updated during the session.")
 
         # Update the diarization configuration
         self._diarization_config = diarization_config
@@ -603,13 +600,16 @@ class SpeechmaticsSTTService(STTService):
 
         # Diarization
         if self._diarization_config.enable:
-            dz_cfg = SpeakerDiarizationConfig()
+            dz_cfg = {}
             if self._diarization_config.max_speakers is not None:
-                dz_cfg.max_speakers = self._diarization_config.max_speakers
+                dz_cfg["max_speakers"] = self._diarization_config.max_speakers
             if self._diarization_config.speaker_sensitivity is not None:
-                dz_cfg.speaker_sensitivity = self._diarization_config.speaker_sensitivity
+                dz_cfg["speaker_sensitivity"] = self._diarization_config.speaker_sensitivity
             if self._diarization_config.prefer_current_speaker is not None:
-                dz_cfg.prefer_current_speaker = self._diarization_config.prefer_current_speaker
+                dz_cfg["prefer_current_speaker"] = self._diarization_config.prefer_current_speaker
+            if self._diarization_config.known_speakers:
+                speakers = {s.speaker_id: s.data for s in self._diarization_config.known_speakers}
+                dz_cfg["speakers"] = speakers
             transcription_config.speaker_diarization_config = dz_cfg
 
         # End of Utterance
@@ -617,9 +617,6 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.conversation_config = ConversationConfig(
                 end_of_utterance_silence_trigger=self._end_of_utterance_silence_trigger,
             )
-
-        # Dump config
-        logger.debug(f"Transcription config: {json.dumps(transcription_config.to_dict())}")
 
         # Set config
         self._transcription_config = transcription_config
