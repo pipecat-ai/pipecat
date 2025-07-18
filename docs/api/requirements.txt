@@ -23,6 +23,7 @@ pipecat-ai[gladia]
 pipecat-ai[google]
 pipecat-ai[grok]
 pipecat-ai[groq]
+pipecat-ai[inworld]
 # pipecat-ai[krisp] # Mocked
 pipecat-ai[koala]
 # pipecat-ai[langchain] # Mocked
