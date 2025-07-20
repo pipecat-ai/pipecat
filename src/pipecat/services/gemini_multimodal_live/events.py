@@ -256,22 +256,26 @@ class Config(BaseModel):
 
 class SearchEntryPoint(BaseModel):
     """Represents the search entry point with rendered content for search suggestions."""
+
     renderedContent: Optional[str] = None
 
 
 class WebSource(BaseModel):
     """Represents a web source from grounding chunks."""
+
     uri: Optional[str] = None
     title: Optional[str] = None
 
 
 class GroundingChunk(BaseModel):
     """Represents a grounding chunk containing web source information."""
+
     web: Optional[WebSource] = None
 
 
 class GroundingSegment(BaseModel):
     """Represents a segment of text that is grounded."""
+
     startIndex: Optional[int] = None
     endIndex: Optional[int] = None
     text: Optional[str] = None
@@ -279,6 +283,7 @@ class GroundingSegment(BaseModel):
 
 class GroundingSupport(BaseModel):
     """Represents support information for grounded text segments."""
+
     segment: Optional[GroundingSegment] = None
     groundingChunkIndices: Optional[List[int]] = None
     confidenceScores: Optional[List[float]] = None
@@ -286,6 +291,7 @@ class GroundingSupport(BaseModel):
 
 class GroundingMetadata(BaseModel):
     """Represents grounding metadata from Google Search."""
+
     searchEntryPoint: Optional[SearchEntryPoint] = None
     groundingChunks: Optional[List[GroundingChunk]] = None
     groundingSupports: Optional[List[GroundingSupport]] = None
@@ -475,8 +481,6 @@ class ServerEvent(BaseModel):
     toolCall: Optional[ToolCall] = None
     usageMetadata: Optional[UsageMetadata] = None
 
-
-    
 
 def parse_server_event(str):
     """Parse a server event from JSON string.
