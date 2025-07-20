@@ -488,16 +488,10 @@ def parse_server_event(str):
         ServerEvent instance if parsing succeeds, None otherwise.
     """
     try:
-        evt_dict = json.loads(str)
-        evt = ServerEvent.model_validate(evt_dict)
-        return evt
+        evt = json.loads(str)
+        return ServerEvent.model_validate(evt)
     except Exception as e:
-        logger.error(f"Error parsing server event: {e}")
-        # Truncate raw message to avoid logging potentially sensitive or overly long data
-        truncated_message = str[:200] + "..." if len(str) > 200 else str
-        logger.error(f"Raw message (truncated): {truncated_message}")
-        return None
-
+        print(f"Error parsing server event: {e}")
 
 class ContextWindowCompressionConfig(BaseModel):
     """Configuration for context window compression.
