@@ -961,12 +961,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_error(evt)
                 # errors are fatal, so exit the receive loop
                 return
-            else:
-                # Log unhandled events that might contain grounding metadata
-                logger.warning(f"Received unhandled server event type: {evt}")
-                pass
-
-
+            
     #
     #
     #
