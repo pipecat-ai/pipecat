@@ -733,6 +733,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
+        elif isinstance(frame, LLMTextFrame):
+            await self._send_user_text(frame.text)
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
@@ -963,6 +965,17 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._user_audio_buffer.extend(audio)
             length = int((frame.sample_rate * frame.num_channels * 2) * 0.5)
             self._user_audio_buffer = self._user_audio_buffer[-length:]
+
+    async def _send_user_text(self, text: str):
+        """Send user text to Gemini Live API."""
+        logger.debug(f"Sending text to Gemini: {text}")
+        evt = events.TextInputMessage.from_text(text)
+        await self.send_client_event(evt)
+        # After sending text, we need to signal that the turn is complete.
+        evt = events.ClientContentMessage.model_validate(
+            {"clientContent": {"turnComplete": True}}
+        )
+        await self.send_client_event(evt)
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""
