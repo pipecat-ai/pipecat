@@ -227,9 +227,9 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
 
     def add_file_reference(self, file_uri: str, mime_type: str, text: Optional[str] = None):
         """Add a file reference to the context.
-        
+
         This adds a user message with a file reference that will be sent during context initialization.
-        
+
         Args:
             file_uri: URI of the uploaded file
             mime_type: MIME type of the file
@@ -482,7 +482,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     # Overriding the default adapter to use the Gemini one.
     adapter_class = GeminiLLMAdapter
-    
+
     def __init__(
         self,
         *,
@@ -1024,10 +1024,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._needs_turn_complete_message = True
 
     async def _create_single_response(self, messages_list):
-
         """Create a single response from a list of messages."""
-       
-      # Refactor to combine this logic with same logic in GeminiMultimodalLiveContext
+
+        # Refactor to combine this logic with same logic in GeminiMultimodalLiveContext
         messages = []
         for item in messages_list:
             role = item.get("role")
@@ -1206,7 +1205,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         # Process grounding metadata if we have accumulated any
         if self._accumulated_grounding_metadata:
-            await self._process_grounding_metadata(self._accumulated_grounding_metadata, self._search_result_buffer)
+            await self._process_grounding_metadata(
+                self._accumulated_grounding_metadata, self._search_result_buffer
+            )
 
         # Reset grounding tracking for next response
         self._search_result_buffer = ""
@@ -1305,29 +1306,32 @@ class GeminiMultimodalLiveLLMService(LLMService):
             # Process the grounding metadata immediately
             await self._process_grounding_metadata(grounding_metadata, self._search_result_buffer)
 
-    async def _process_grounding_metadata(self, grounding_metadata: events.GroundingMetadata, search_result: str = ""):
+    async def _process_grounding_metadata(
+        self, grounding_metadata: events.GroundingMetadata, search_result: str = ""
+    ):
         """Process grounding metadata and emit LLMSearchResponseFrame."""
         if not grounding_metadata:
             return
 
         # Extract rendered content for search suggestions
         rendered_content = None
-        if grounding_metadata.searchEntryPoint and grounding_metadata.searchEntryPoint.renderedContent:
+        if (
+            grounding_metadata.searchEntryPoint
+            and grounding_metadata.searchEntryPoint.renderedContent
+        ):
             rendered_content = grounding_metadata.searchEntryPoint.renderedContent
 
         # Convert grounding chunks and supports to LLMSearchOrigin format
         origins = []
-        
+
         if grounding_metadata.groundingChunks and grounding_metadata.groundingSupports:
             # Create a mapping of chunk indices to origins
             chunk_to_origin = {}
-            
+
             for index, chunk in enumerate(grounding_metadata.groundingChunks):
                 if chunk.web:
                     origin = LLMSearchOrigin(
-                        site_uri=chunk.web.uri,
-                        site_title=chunk.web.title,
-                        results=[]
+                        site_uri=chunk.web.uri, site_title=chunk.web.title, results=[]
                     )
                     chunk_to_origin[index] = origin
                     origins.append(origin)
@@ -1341,20 +1345,16 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     # Add this result to all origins referenced by this support
                     for chunk_index in support.groundingChunkIndices:
                         if chunk_index in chunk_to_origin:
-                            result = LLMSearchResult(
-                                text=text,
-                                confidence=confidence_scores
-                            )
+                            result = LLMSearchResult(text=text, confidence=confidence_scores)
                             chunk_to_origin[chunk_index].results.append(result)
 
         # Create and push the search response frame
         search_frame = LLMSearchResponseFrame(
-            search_result=search_result,
-            origins=origins,
-            rendered_content=rendered_content
+            search_result=search_result, origins=origins, rendered_content=rendered_content
         )
-        
+
         await self.push_frame(search_frame)
+
     async def _handle_evt_usage_metadata(self, evt):
         """Handle the usage metadata event."""
         if not evt.usageMetadata:
