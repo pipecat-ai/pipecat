@@ -971,9 +971,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         evt = events.TextInputMessage.from_text(text)
         await self.send_client_event(evt)
         # After sending text, we need to signal that the turn is complete.
-        evt = events.ClientContentMessage.model_validate(
-            {"clientContent": {"turnComplete": True}}
-        )
+        evt = events.ClientContentMessage.model_validate({"clientContent": {"turnComplete": True}})
         await self.send_client_event(evt)
 
     async def _send_user_video(self, frame):
