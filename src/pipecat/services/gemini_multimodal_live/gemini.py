@@ -579,12 +579,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
-        # Initialize the File API client
-        self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
-
-        # Initialize the File API client
-        self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
-
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
 
