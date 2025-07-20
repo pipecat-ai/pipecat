@@ -69,6 +69,7 @@ class Mem0MemoryService(FrameProcessor):
         agent_id: Optional[str] = None,
         run_id: Optional[str] = None,
         params: Optional[InputParams] = None,
+        host: Optional[str] = None,
     ):
         """Initialize the Mem0 memory service.
 
@@ -79,6 +80,7 @@ class Mem0MemoryService(FrameProcessor):
             agent_id: The agent ID to associate with memories in Mem0.
             run_id: The run ID to associate with memories in Mem0.
             params: Configuration parameters for memory retrieval and storage.
+            host: The host of the Mem0 server.
 
         Raises:
             ValueError: If none of user_id, agent_id, or run_id are provided.
@@ -92,7 +94,7 @@ class Mem0MemoryService(FrameProcessor):
         if local_config:
             self.memory_client = Memory.from_config(local_config)
         else:
-            self.memory_client = MemoryClient(api_key=api_key)
+            self.memory_client = MemoryClient(api_key=api_key, host=host)
         # At least one of user_id, agent_id, or run_id must be provided
         if not any([user_id, agent_id, run_id]):
             raise ValueError("At least one of user_id, agent_id, or run_id must be provided")

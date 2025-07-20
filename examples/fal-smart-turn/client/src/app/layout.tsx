@@ -1,5 +1,5 @@
 import './globals.css';
-import { RTVIProvider } from '@/providers/RTVIProvider';
+import { PipecatProvider } from '@/providers/PipecatProvider';
 
 export const metadata = {
   title: 'Pipecat React Client',
@@ -20,7 +20,7 @@ export default function RootLayout({
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
       </head>
       <body>
-        <RTVIProvider>{children}</RTVIProvider>
+        <PipecatProvider>{children}</PipecatProvider>
       </body>
     </html>
   );

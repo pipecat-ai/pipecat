@@ -77,6 +77,7 @@ autodoc_mock_imports = [
     "openpipe",
     "simli",
     "soundfile",
+    "soniox",
     "pipecat_ai_krisp",
     "pyaudio",
     "_tkinter",

@@ -9,6 +9,21 @@
 This module provides a unified interface for running Pipecat examples across
 different transport types including Daily.co, WebRTC, and Twilio. It handles
 setup, configuration, and lifecycle management for each transport type.
+
+Example usage:
+    SmallWebRTCTransport::
+
+        python bot.py --transport webrtc
+
+    DailyTransport::
+
+        python bot.py --transport daily
+
+    Twilio::
+
+        python bot.py --transport twilio --proxy username.ngrok.io
+        # Note: Concurrently, run an ngrok tunnel to your local server:
+        # ngrok http 7860
 """
 
 import argparse
