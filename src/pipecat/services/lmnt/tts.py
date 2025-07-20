@@ -95,7 +95,7 @@ class LmntTTSService(InterruptibleTTSService):
         voice_id: str,
         sample_rate: Optional[int] = None,
         language: Language = Language.EN,
-        model: str = "aurora",
+        model: str = "blizzard",
         **kwargs,
     ):
         """Initialize the LMNT TTS service.
@@ -105,7 +105,7 @@ class LmntTTSService(InterruptibleTTSService):
             voice_id: ID of the voice to use for synthesis.
             sample_rate: Audio sample rate. If None, uses default.
             language: Language for synthesis. Defaults to English.
-            model: TTS model to use. Defaults to "aurora".
+            model: TTS model to use. Defaults to "blizzard".
             **kwargs: Additional arguments passed to parent InterruptibleTTSService.
         """
         super().__init__(

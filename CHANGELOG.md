@@ -7,6 +7,124 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `LocalSmartTurnAnalyzerV2`, which supports local on-device inference
+  with the new `smart-turn-v2` turn detection model.
+
+### Changed
+
+- For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
+  recommended model.
+
+### Fixed
+
+- Fixed an issue where, in some edge cases, the `EmulateUserStartedSpeakingFrame`
+  could be created even if we didn't have a transcription.
+
+- Fixed an issue in `GoogleLLMContext` where it would inject the
+  `system_message` as a "user" message into cases where it was not meant to;
+  it was only meant to do that when there were no "regular" (non-function-call)
+  messages in the context, to ensure that inference would run properly.
+
+## [0.0.76] - 2025-07-11
+
+### Added
+
+- Added `SpeechControlParamsFrame`, a new `SystemFrame` that notifies
+  downstream processors of the VAD and Turn analyzer params. This frame is
+  pushed by the `BaseInputTransport` at Start and any time a
+  `VADParamsUpdateFrame` is received.
+
+### Changed
+
+- Two package dependencies have been updated:
+  - `numpy` now supports 1.26.0 and newer
+  - `transformers` now supports 4.48.0 and newer
+
+### Fixed
+
+- Fixed an issue with RTVI's handling of `append-to-context`.
+
+- Fixed an issue where using audio input with a sample rate requiring resampling
+  could result in empty audio being passed to STT services, causing errors.
+
+- Fixed the VAD analyzer to process the full audio buffer as long as it contains
+  more than the minimum required bytes per iteration, instead of only analyzing
+  the first chunk.
+
+- Fixed an issue in ParallelPipeline that caused errors when attempting to drain
+  the queues.
+
+- Fixed an issue with emulated VAD timeout inconsistency in
+  `LLMUserContextAggregator`. Previously, emulated VAD scenarios (where
+  transcription is received without VAD detection) used a hardcoded
+  `aggregation_timeout` (default 0.5s) instead of matching the VAD's
+  `stop_secs` parameter (default 0.8s). This created different user experiences
+  between real VAD and emulated VAD scenarios. Now, emulated VAD timeouts
+  automatically synchronize with the VAD's `stop_secs` parameter.
+
+- Fix a pipeline freeze when using AWS Nova Sonic, which would occur if the
+  user started early, while the bot was still working through
+  `trigger_assistant_response()`.
+
+## [0.0.75] - 2025-07-08
+
+### Added
+
+- Added an `aggregate_sentences` arg in `CartesiaTTSService`,
+  `ElevenLabsTTSService`, `NeuphonicTTSService` and `RimeTTSService`, where the
+  default value is True. When `aggregate_sentences` is True, the `TTSService`
+  aggregates the LLM streamed tokens into sentences by default. Note: setting
+  the value to False requires a custom processor before the `TTSService` to
+  aggregate LLM tokens.
+
+- Added `kwargs` to the `OLLamaLLMService` to allow for configuration args to
+  be passed to Ollama.
+
+- Added call hang-up error handling in `TwilioFrameSerializer`, which handles
+  the case where the user has hung up before the `TwilioFrameSerializer` hangs
+  up the call.
+
+### Changed
+
+- Updated `RTVIObserver` and `RTVIProcessor` to match the new RTVI 1.0.0 protocol.
+  This includes:
+
+  - Deprecating support for all messages related to service configuaration and
+    actions.
+  - Adding support for obtaining and logging data about client, including its
+    RTVI version and optionally included system information (OS/browser/etc.)
+  - Adding support for handling the new `client-message` RTVI message through
+    either a `on_client_message` event handler or listening for a new
+    `RTVIClientMessageFrame`
+  - Adding support for responding to a `client-message` with a `server-response`
+    via either a direct call on the `RTVIProcessor` or via pushing a new
+    `RTVIServerResponseFrame`
+  - Adding built-in support for handling the new `append-to-context` RTVI message
+    which allows a client to add to the user or assistant llm context. No extra
+    code is required for supporting this behavior.
+  - Updating all JavaScript and React client RTVI examples to use versions 1.0.0
+    of the clients.
+
+  Get started migrating to RTVI protocol 1.0.0 by following the migration guide:
+  https://docs.pipecat.ai/client/migration-guide
+
+- Refactored `AWSBedrockLLMService` and `AWSPollyTTSService` to work
+  asynchronously using `aioboto3` instead of the `boto3` library.
+
+- The `UserIdleProcessor` now handles the scenario where function calls take
+  longer than the idle timeout duration. This allows you to use the
+  `UserIdleProcessor` in conjunction with function calls that take a while to
+  return a result.
+
+### Fixed
+
+- Updated the `NeuphonicTTSService` to work with the updated websocket API.
+
+- Fixed an issue with `RivaSTTService` where the watchdog feature was causing
+  an error on initialization.
+
 ### Performance
 
 - Remove unncessary push task in each `FrameProcessor`.

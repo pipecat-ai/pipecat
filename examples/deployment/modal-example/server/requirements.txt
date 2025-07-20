@@ -1,2 +1,3 @@
 python-dotenv==1.0.1
-modal==0.71.3
+modal==1.0.5
+fastapi[all]

@@ -10,7 +10,8 @@ body {
   margin: 0 auto;
 }
 
-.status-bar {
+.status-bar,
+.device-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -20,12 +21,79 @@ body {
   margin-bottom: 20px;
 }
 
-.controls button {
+.device-bar {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.controls,
+.device-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px; /* Adds spacing between elements */
+}
+
+.device-controls {
+  margin-left: auto;
+}
+
+.controls button,
+.device-controls button {
   padding: 8px 16px;
   margin-left: 10px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
+}
+
+#bot-selector,
+#device-selector {
+  padding: 8px 16px;
+  padding-right: 40px;
+  border: none;
+  border-radius: 4px;
+  background-color: #6c757d; /* Gray background */
+  color: white; /* White text */
+  cursor: pointer;
+  appearance: none; /* Removes default browser styling for dropdowns */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E"); /* Custom arrow */
+  background-repeat: no-repeat;
+  background-position: right 8px center; /* Position the arrow */
+}
+
+#bot-selector:focus,
+#device-selector:focus {
+  outline: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3); /* Add a subtle focus effect */
+}
+
+.text-input-container {
+  display: flex;
+  gap: 8px;
+  margin-left: 10px;
+  width: 100%;
+  flex: 1;
+}
+
+#text-input {
+  flex: 1;
+  padding: 8px 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  min-width: 200px;
+}
+
+#send-text-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  background-color: #007bff;
+  color: white;
+  flex-shrink: 0;
+}
+
+#send-text-btn:hover {
+  background-color: #0056b3;
 }
 
 #connect-btn {
@@ -36,6 +104,9 @@ body {
 #disconnect-btn {
   background-color: #f44336;
   color: white;
+}
+
+#mic-toggle-btn {
 }
 
 button:disabled {

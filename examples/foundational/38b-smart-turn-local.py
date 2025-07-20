@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
-from pipecat.audio.turn.smart_turn.local_smart_turn import LocalSmartTurnAnalyzer
+from pipecat.audio.turn.smart_turn.local_smart_turn_v2 import LocalSmartTurnAnalyzerV2
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.pipeline.pipeline import Pipeline
@@ -37,7 +37,7 @@ load_dotenv(override=True)
 #   # Hugging Face uses LFS to store large model files, including .mlpackage
 #   git lfs install
 #   # Clone the repo with the smart_turn_classifier.mlpackage
-#   git clone https://huggingface.co/pipecat-ai/smart-turn
+#   git clone https://huggingface.co/pipecat-ai/smart-turn-v2
 #
 # Then set the env variable:
 #   export LOCAL_SMART_TURN_MODEL_PATH=./smart-turn
@@ -52,7 +52,7 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzer(
+        turn_analyzer=LocalSmartTurnAnalyzerV2(
             smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
         ),
     ),
@@ -60,7 +60,7 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzer(
+        turn_analyzer=LocalSmartTurnAnalyzerV2(
             smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
         ),
     ),
@@ -68,7 +68,7 @@ transport_params = {
         audio_in_enabled=True,
         audio_out_enabled=True,
         vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
-        turn_analyzer=LocalSmartTurnAnalyzer(
+        turn_analyzer=LocalSmartTurnAnalyzerV2(
             smart_turn_model_path=smart_turn_model_path, params=SmartTurnParams()
         ),
     ),

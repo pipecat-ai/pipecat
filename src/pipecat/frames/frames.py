@@ -28,6 +28,7 @@ from typing import (
 )
 
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.metrics.metrics import MetricsData
 from pipecat.transcriptions.language import Language
@@ -1143,6 +1144,23 @@ class OutputDTMFUrgentFrame(DTMFFrame, SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class SpeechControlParamsFrame(SystemFrame):
+    """Frame for notifying processors of speech control parameter changes.
+
+    This includes parameters for both VAD (Voice Activity Detection) and
+    turn-taking analysis. It allows downstream processors to adjust their
+    behavior based on updated interaction control settings.
+
+    Parameters:
+        vad_params: Current VAD parameters.
+        turn_params: Current turn-taking analysis parameters.
+    """
+
+    vad_params: Optional[VADParams] = None
+    turn_params: Optional[SmartTurnParams] = None
 
 
 #

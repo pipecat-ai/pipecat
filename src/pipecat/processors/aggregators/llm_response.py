@@ -19,6 +19,8 @@ from typing import Dict, List, Literal, Optional, Set
 from loguru import logger
 
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     BotStartedSpeakingFrame,
@@ -43,6 +45,7 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     LLMTextFrame,
     OpenAILLMContextAssistantTimestampFrame,
+    SpeechControlParamsFrame,
     StartFrame,
     StartInterruptionFrame,
     TextFrame,
@@ -67,9 +70,13 @@ class LLMUserAggregatorParams:
         aggregation_timeout: Maximum time in seconds to wait for additional
             transcription content before pushing aggregated result. This
             timeout is used only when the transcription is slow to arrive.
+        turn_emulated_vad_timeout: Maximum time in seconds to wait for emulated
+            VAD when using turn-based analysis. Applied when transcription is
+            received but VAD didn't detect speech (e.g., whispered utterances).
     """
 
     aggregation_timeout: float = 0.5
+    turn_emulated_vad_timeout: float = 0.8
 
 
 @dataclass
@@ -390,6 +397,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         """
         super().__init__(context=context, role="user", **kwargs)
         self._params = params or LLMUserAggregatorParams()
+        self._vad_params: Optional[VADParams] = None
+        self._turn_params: Optional[SmartTurnParams] = None
+
         if "aggregation_timeout" in kwargs:
             import warnings
 
@@ -477,6 +487,10 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             self.set_tools(frame.tools)
         elif isinstance(frame, LLMSetToolChoiceFrame):
             self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, SpeechControlParamsFrame):
+            self._vad_params = frame.vad_params
+            self._turn_params = frame.turn_params
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
@@ -618,9 +632,40 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
     async def _aggregation_task_handler(self):
         while True:
             try:
-                await asyncio.wait_for(
-                    self._aggregation_event.wait(), self._params.aggregation_timeout
-                )
+                # The _aggregation_task_handler handles two distinct timeout scenarios:
+                #
+                # 1. When emulating_vad=True: Wait for emulated VAD timeout before
+                #    pushing aggregation (simulating VAD behavior when no actual VAD
+                #    detection occurred).
+                #
+                # 2. When emulating_vad=False: Use aggregation_timeout as a buffer
+                #    to wait for potential late-arriving transcription frames after
+                #    a real VAD event.
+                #
+                # For emulated VAD scenarios, the timeout strategy depends on whether
+                # a turn analyzer is configured:
+                #
+                # - WITH turn analyzer: Use turn_emulated_vad_timeout parameter because
+                #   the VAD's stop_secs is set very low (e.g. 0.2s) for rapid speech
+                #   chunking to feed the turn analyzer. This low value is too fast
+                #   for emulated VAD scenarios where we need to allow users time to
+                #   finish speaking (e.g. 0.8s).
+                #
+                # - WITHOUT turn analyzer: Use VAD's stop_secs directly to maintain
+                #   consistent user experience between real VAD detection and
+                #   emulated VAD scenarios.
+                if not self._emulating_vad:
+                    timeout = self._params.aggregation_timeout
+                elif self._turn_params:
+                    timeout = self._params.turn_emulated_vad_timeout
+                else:
+                    # Use VAD stop_secs when no turn analyzer is present, fallback if no VAD params
+                    timeout = (
+                        self._vad_params.stop_secs
+                        if self._vad_params
+                        else self._params.turn_emulated_vad_timeout
+                    )
+                await asyncio.wait_for(self._aggregation_event.wait(), timeout)
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
@@ -648,7 +693,11 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         # to emulate VAD (i.e. user start/stopped speaking), but we do it only
         # if the bot is not speaking. If the bot is speaking and we really have
         # a short utterance we don't really want to interrupt the bot.
-        if not self._user_speaking and not self._waiting_for_aggregation:
+        if (
+            not self._user_speaking
+            and not self._waiting_for_aggregation
+            and len(self._aggregation) > 0
+        ):
             if self._bot_speaking:
                 # If we reached this case and the bot is speaking, let's ignore
                 # what the user said.
