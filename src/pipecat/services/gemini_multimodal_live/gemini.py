@@ -968,7 +968,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _send_user_text(self, text: str):
         """Send user text to Gemini Live API."""
-        logger.debug(f"Sending text to Gemini: {text}")
         evt = events.TextInputMessage.from_text(text)
         await self.send_client_event(evt)
         # After sending text, we need to signal that the turn is complete.
