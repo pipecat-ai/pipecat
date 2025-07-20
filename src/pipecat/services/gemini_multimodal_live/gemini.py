@@ -61,8 +61,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchOrigin, LLMSearchResponseFrame, LLMSearchResult
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-
-
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
@@ -74,10 +72,8 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
-
 from .audio_transcriber import AudioTranscriber
 from .file_api import GeminiFileAPI
-
 
 try:
     import websockets
@@ -575,7 +571,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             else {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
-        
+
         # Initialize the File API client
         self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
 
@@ -961,7 +957,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 await self._handle_evt_error(evt)
                 # errors are fatal, so exit the receive loop
                 return
-            
+
     #
     #
     #
@@ -1025,7 +1021,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _create_single_response(self, messages_list):
         """Create a single response from a list of messages."""
-
         # Refactor to combine this logic with same logic in GeminiMultimodalLiveContext
         messages = []
         for item in messages_list:
@@ -1202,7 +1197,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_text_buffer = ""
         self._llm_output_buffer = ""
 
-
         # Process grounding metadata if we have accumulated any
         if self._accumulated_grounding_metadata:
             await self._process_grounding_metadata(
@@ -1295,7 +1289,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Collect text for tracing
         self._llm_output_buffer += text
 
-
         await self.push_frame(LLMTextFrame(text=text))
         await self.push_frame(TTSTextFrame(text=text))
 
@@ -1335,13 +1328,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     )
                     chunk_to_origin[index] = origin
                     origins.append(origin)
-            
+
             # Add grounding support results to the appropriate origins
             for support in grounding_metadata.groundingSupports:
                 if support.segment and support.groundingChunkIndices:
                     text = support.segment.text or ""
                     confidence_scores = support.confidenceScores or []
-                    
+
                     # Add this result to all origins referenced by this support
                     for chunk_index in support.groundingChunkIndices:
                         if chunk_index in chunk_to_origin:

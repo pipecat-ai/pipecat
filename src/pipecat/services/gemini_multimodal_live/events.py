@@ -497,6 +497,7 @@ def parse_server_event(str):
     except Exception as e:
         print(f"Error parsing server event: {e}")
 
+
 class ContextWindowCompressionConfig(BaseModel):
     """Configuration for context window compression.
 
