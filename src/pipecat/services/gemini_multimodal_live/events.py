@@ -12,7 +12,6 @@ import json
 from enum import Enum
 from typing import List, Literal, Optional
 
-from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
@@ -496,6 +495,7 @@ def parse_server_event(str):
         return ServerEvent.model_validate(evt)
     except Exception as e:
         print(f"Error parsing server event: {e}")
+        return None
 
 
 class ContextWindowCompressionConfig(BaseModel):
