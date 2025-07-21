@@ -63,7 +63,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             aiohttp_session=session,
             params=InworldHttpTTSService.InputParams(
                 voice_id="Ashley",
-                model="inworld-tts-1-max",
+                model="inworld-tts-1",
             ),
         )
 
