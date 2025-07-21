@@ -47,7 +47,26 @@ transport_params = {
 
 
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
-    """Run example using Speechmatics STT."""
+    """Run example using Speechmatics STT.
+
+    This example will use diarization within our STT service and output the words spoken by
+    each individual speaker and wrap them with XML tags for the LLM to process. Note the
+    instructions in the system context for the LLM. This greatly improves the conversation
+    experience by allowing the LLM to understand who is speaking in a multi-party call.
+
+    Using the `enable_vad` parameter will use the detection of speakers to emit speaker
+    started and stopped frames. This is useful when only wanting to listen to the first
+    speaker. Using `focus_speakers` will result in only words from those speakers being
+    processed as part of the conversation. Other speakers will be wrapped in PASSIVE tags
+    and not trigger any responses from the LLM until words from a focussed speaker have
+    been transcribed.
+
+    By default, this example will use our ENHANCED operating point, which is optimized for
+    high accuracy. You can change this by setting the `operating_point` parameter to a different
+    value.
+
+    For more information on operating points, see the Speechmatics documentation:
+    https://docs.speechmatics.com/rt-api-ref"""
     logger.info(f"Starting bot")
 
     stt = SpeechmaticsSTTService(
@@ -60,6 +79,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         diarization_config=DiarizationConfig(
             enable=True,
             max_speakers=10,
+            focus_speakers=["S1"],
         ),
     )
 
