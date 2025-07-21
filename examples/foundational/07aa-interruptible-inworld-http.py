@@ -60,9 +60,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
         tts = InworldHttpTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
-            voice_id="Ashley",
-            model="inworld-tts-1",
             aiohttp_session=session,
+            params=InworldHttpTTSService.InputParams(
+                voice_id="Ashley",
+                model="inworld-tts-1-max",
+            ),
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
