@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `LocalSmartTurnAnalyzerV2`, which supports local on-device inference
+  with the new `smart-turn-v2` turn detection model.
+
 ### Changed
 
 - For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
@@ -16,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where, in some edge cases, the `EmulateUserStartedSpeakingFrame`
   could be created even if we didn't have a transcription.
+
+- Fixed an issue in `GoogleLLMContext` where it would inject the
+  `system_message` as a "user" message into cases where it was not meant to;
+  it was only meant to do that when there were no "regular" (non-function-call)
+  messages in the context, to ensure that inference would run properly.
 
 ## [0.0.76] - 2025-07-11
 
