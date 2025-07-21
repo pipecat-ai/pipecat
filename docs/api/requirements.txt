@@ -29,6 +29,7 @@ pipecat-ai[koala]
 # pipecat-ai[livekit] # Mocked
 pipecat-ai[lmnt]
 pipecat-ai[local]
+pipecat-ai[murf]
 # pipecat-ai[local-smart-turn] # Mocked
 # pipecat-ai[mem0] # Mocked
 # pipecat-ai[mlx-whisper] # Mocked
