@@ -61,6 +61,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     and not trigger any responses from the LLM until words from a focussed speaker have
     been transcribed.
 
+    To use the module's VAD, you must remove `vad_analyzer` from the transport config.
+
     By default, this example will use our ENHANCED operating point, which is optimized for
     high accuracy. You can change this by setting the `operating_point` parameter to a different
     value.
