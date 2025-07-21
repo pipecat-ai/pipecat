@@ -9,6 +9,7 @@
 import asyncio
 import datetime
 import re
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlencode
@@ -326,9 +327,21 @@ class SpeechmaticsSTTService(STTService):
             speaker_active_format: Formatter for active speaker ID. Defaults to transcription output.
             speaker_passive_format: Formatter for passive speaker ID. Defaults to transcription output.
             transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
-            enable_speaker_diarization: Deprecated, use diarization_config instead.
-            text_format: Deprecated, use speaker_active_format and speaker_passive_format instead.
-            max_speakers: Deprecated, use diarization_config instead.
+            enable_speaker_diarization: Enable speaker diarization to identify different speakers. Defaults to `False`.
+
+                .. deprecated:: 0.0.77
+                    Parameter `enable_speaker_diarization` is deprecated, use `diarization_config` instead.
+
+            text_format: Wrapper for speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
+
+                .. deprecated:: 0.0.77
+                    Parameter `text_format` is deprecated, use `speaker_active_format` and `speaker_passive_format` instead.
+
+            max_speakers: Maximum number of speakers to detect. Defaults to `None` (auto-detect).
+
+                .. deprecated:: 0.0.77
+                    Parameter `max_speakers` is deprecated, use `diarization_config` instead.
+
             **kwargs: Additional arguments passed to STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -375,15 +388,15 @@ class SpeechmaticsSTTService(STTService):
 
         # Deprecation warnings
         if enable_speaker_diarization is not None:
-            logger.warning(
+            warnings.warn(
                 "enable_speaker_diarization is deprecated, use diarization_config instead"
             )
             self._diarization_config.enable = enable_speaker_diarization
         if max_speakers is not None:
-            logger.warning("max_speakers is deprecated, use diarization_config instead")
+            warnings.warn("max_speakers is deprecated, use diarization_config instead")
             self._diarization_config.max_speakers = max_speakers
         if text_format is not None:
-            logger.warning("text_format is deprecated, use speaker_active_format instead")
+            warnings.warn("text_format is deprecated, use speaker_active_format instead")
             self._diarization_config.speaker_active_format = text_format
 
         # Complete configuration objects
@@ -442,17 +455,17 @@ class SpeechmaticsSTTService(STTService):
         """
         # Show warnings if the diarization configuration cannot be changed
         if diarization_config.enable != self._diarization_config.enable:
-            logger.warning("Diarization enabled state cannot be changed during the session.")
+            warnings.warn("Diarization enabled state cannot be changed during the session.")
         if diarization_config.max_speakers != self._diarization_config.max_speakers:
-            logger.warning("Max diarization speakers cannot be changed during the session.")
+            warnings.warn("Max diarization speakers cannot be changed during the session.")
         if diarization_config.speaker_sensitivity is not None:
-            logger.warning("Diarization speaker sensitivity cannot be changed during the session.")
+            warnings.warn("Diarization speaker sensitivity cannot be changed during the session.")
         if diarization_config.prefer_current_speaker is not None:
-            logger.warning(
+            warnings.warn(
                 "Diarization prefer current speaker preference cannot be changed during the session."
             )
         if diarization_config.known_speakers is not None:
-            logger.warning("Known speakers cannot be updated during the session.")
+            warnings.warn("Known speakers cannot be updated during the session.")
 
         # Update the diarization configuration
         self._diarization_config = diarization_config
