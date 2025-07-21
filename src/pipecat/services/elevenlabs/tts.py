@@ -213,7 +213,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             similarity_boost: Similarity boost control (0.0 to 1.0).
             style: Style control for voice expression (0.0 to 1.0).
             use_speaker_boost: Whether to use speaker boost enhancement.
-            speed: Voice speed control (0.25 to 4.0).
+            speed: Voice speed control (0.7 to 1.2).
             auto_mode: Whether to enable automatic mode optimization.
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs logging.
