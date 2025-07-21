@@ -62,8 +62,12 @@ class LocalSmartTurnAnalyzerV2(BaseSmartTurn):
         self._turn_model = _Wav2Vec2ForEndpointing.from_pretrained(smart_turn_model_path)
         # Load the corresponding feature extractor for preprocessing audio
         self._turn_processor = Wav2Vec2Processor.from_pretrained(smart_turn_model_path)
-        # Set device to GPU if available, else CPU
-        self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Use platform-optimized backend if available (MPS for Apple silicon, CUDA for NVIDIA)
+        self._device = "cpu"
+        if torch.backends.mps.is_available():
+            self._device = "mps"
+        elif torch.cuda.is_available():
+            self._device = "cuda"
         # Move model to selected device and set it to evaluation mode
         self._turn_model = self._turn_model.to(self._device)
         self._turn_model.eval()
