@@ -13,6 +13,7 @@ Key Features:
 
 - HTTP streaming API support for low-latency audio generation
 - Multiple voice options (Ashley, Hades, etc.)
+- Automatic language detection from input text (no manual language setting required)
 - Real-time audio chunk processing with proper buffering
 - WAV header handling and audio format conversion
 - Comprehensive error handling and metrics tracking
@@ -26,12 +27,16 @@ Technical Implementation:
 - Integrates with Pipecat's frame-based pipeline architecture
 
 Usage::
-    tts = InworldHttpTTSService(
-        api_key=os.getenv("INWORLD_API_KEY"),
-        voice_id="Ashley",
-        model="inworld-tts-1",
-        aiohttp_session=session
-    )
+
+    async with aiohttp.ClientSession() as session:
+        tts = InworldHttpTTSService(
+            api_key=os.getenv("INWORLD_API_KEY"),
+            aiohttp_session=session,
+            params=InworldHttpTTSService.InputParams(
+                voice_id="Ashley",
+                model="inworld-tts-1",
+            ),
+        )
 """
 
 import base64
@@ -58,67 +63,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
-from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
-
-
-def language_to_inworld_language(language: Language) -> Optional[str]:
-    """Convert Pipecat's Language enum to Inworld's language code.
-
-    Inworld AI supports a specific set of language codes for TTS synthesis.
-    This function maps Pipecat's standardized Language enum values to the
-    corresponding language codes expected by Inworld's API.
-
-    Supported Languages:
-
-    - EN (English) -> "en"
-    - ES (Spanish) -> "es"
-    - FR (French) -> "fr"
-    - KO (Korean) -> "ko"
-    - NL (Dutch) -> "nl"
-    - ZH (Chinese) -> "zh"
-
-    The function also handles language variants (e.g., es-ES, en-US) by
-    extracting the base language code and mapping it if supported.
-
-    Args:
-        language: The Language enum value to convert (e.g., Language.EN).
-
-    Returns:
-        The corresponding Inworld language code string (e.g., "en"),
-        or None if the language is not supported by Inworld's API.
-
-    Example:
-        >>> language_to_inworld_language(Language.EN)
-        "en"
-        >>> language_to_inworld_language(Language.ES)
-        "es"
-        >>> language_to_inworld_language(Language.DE)  # Not supported
-        None
-    """
-    BASE_LANGUAGES = {
-        Language.EN: "en",
-        Language.ES: "es",
-        Language.FR: "fr",
-        Language.KO: "ko",
-        Language.NL: "nl",
-        Language.ZH: "zh",
-    }
-
-    result = BASE_LANGUAGES.get(language)
-
-    # If not found in base languages, try to find the base language from a variant
-    if not result:
-        # Convert enum value to string and get the base language part (e.g. es-ES -> es)
-        lang_str = str(language.value)
-        base_code = lang_str.split("-")[0].lower()
-        # Look up the base code in our supported languages
-        result = base_code if base_code in BASE_LANGUAGES.values() else None
-
-    return result
 
 
 class InworldHttpTTSService(TTSService):
@@ -150,16 +98,26 @@ class InworldHttpTTSService(TTSService):
     - Voice Selection: Ashley, Hades, and other Inworld voices
     - Models: inworld-tts-1 and other available models
     - Audio Formats: LINEAR16 PCM at various sample rates
-    - Languages: English, Spanish, French, Korean, Dutch, Chinese
+    - Language Detection: Automatically inferred from input text (no explicit language setting required)
 
     Example Usage::
+
         async with aiohttp.ClientSession() as session:
+            # Using default settings (Ashley voice, inworld-tts-1 model)
             tts = InworldHttpTTSService(
                 api_key=os.getenv("INWORLD_API_KEY"),
-                voice_id="Ashley",                   # Voice selection
-                model="inworld-tts-1",               # TTS model
-                aiohttp_session=session,             # Required HTTP session
-                sample_rate=48000,                   # Audio quality
+                aiohttp_session=session,
+            )
+
+            # Or with custom voice and model via params
+            params = InworldHttpTTSService.InputParams(
+                voice_id="Hades",
+                model="inworld-tts-1-max",
+            )
+            tts = InworldHttpTTSService(
+                api_key=os.getenv("INWORLD_API_KEY"),
+                aiohttp_session=session,
+                params=params,
             )
     """
 
@@ -167,19 +125,22 @@ class InworldHttpTTSService(TTSService):
         """Input parameters for Inworld HTTP TTS configuration.
 
         Parameters:
-            language: Language to use for synthesis.
+            voice_id: Voice selection for speech synthesis (e.g., "Ashley", "Hades").
+            model: TTS model to use (e.g., "inworld-tts-1", "inworld-tts-1-max").
+
+        Note:
+            Language is automatically inferred from the input text by Inworld's TTS models,
+            so no explicit language parameter is required.
         """
 
-        language: Optional[Language] = Language.EN
+        voice_id: Optional[str] = "Ashley"  # defaults to the Ashley voice
+        model: Optional[str] = "inworld-tts-1"  # defaults to the inworld-tts-1 model
 
     def __init__(
         self,
         *,
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
-        voice_id: str = "Ashley",
-        # language: Optional[Language] = Language.EN,
-        model: str = "inworld-tts-1",
         base_url: str = "https://api.inworld.ai/tts/v1/voice:stream",
         sample_rate: Optional[int] = 48000,
         encoding: str = "LINEAR16",
@@ -196,13 +157,6 @@ class InworldHttpTTSService(TTSService):
                     Get this from: Inworld Portal > Settings > API Keys > Runtime API Key
             aiohttp_session: Shared aiohttp session for HTTP requests. Must be provided
                            for proper connection pooling and resource management.
-            voice_id: Voice to use for synthesis. Available options include:
-                     - "Ashley" (default) - Natural female voice
-                     - "Hades" - Distinctive character voice
-                     - Other voices available through Inworld's voice catalog
-            model: TTS model to use. Currently supported:
-                  - "inworld-tts-1" (default) - Latest high-quality model
-                  - Other models as available in Inworld's API
             base_url: Base URL for Inworld HTTP API. Uses streaming endpoint by default.
                      Should normally not be changed unless using a different environment.
             sample_rate: Audio sample rate in Hz. Common values:
@@ -212,8 +166,11 @@ class InworldHttpTTSService(TTSService):
             encoding: Audio encoding format. Supported options:
                      - "LINEAR16" (default) - Uncompressed PCM, best quality
                      - Other formats as supported by Inworld API
-            params: Additional input parameters for advanced voice customization.
-                   Usually None for standard usage.
+            params: Input parameters for voice and model configuration. Use this to specify:
+                   - voice_id: Voice selection ("Ashley", "Hades", etc.)
+                   - model: TTS model ("inworld-tts-1", "inworld-tts-1-max", etc.)
+                   If None, uses default values (Ashley voice, inworld-tts-1 model).
+                   Note: Language is automatically inferred from input text.
             **kwargs: Additional arguments passed to the parent TTSService class.
 
         Note:
@@ -233,22 +190,19 @@ class InworldHttpTTSService(TTSService):
 
         # Build settings dictionary that matches Inworld's API expectations
         # This will be sent as JSON payload in each TTS request
+        # Note: Language is automatically inferred from text by Inworld's models
         self._settings = {
-            "voiceId": voice_id,  # Voice selection (fixes bug where this was ignored)
-            "modelId": model,  # TTS model selection
+            "voiceId": params.voice_id or "Ashley",  # Voice selection from params
+            "modelId": params.model or "inworld-tts-1",  # TTS model selection from params
             "audio_config": {  # Audio format configuration
                 "audio_encoding": encoding,  # Format: LINEAR16, MP3, etc.
                 "sample_rate_hertz": sample_rate,  # Sample rate: 48000, 24000, etc.
             },
-            # Language configuration with fallback to English
-            "language": self.language_to_service_language(params.language)
-            if params.language
-            else "en",
         }
 
         # Register voice and model with parent service for metrics and tracking
-        self.set_voice(voice_id)  # Used for logging and metrics
-        self.set_model_name(model)  # Used for performance tracking
+        self.set_voice(params.voice_id or "Ashley")  # Used for logging and metrics
+        self.set_model_name(params.model or "inworld-tts-1")  # Used for performance tracking
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -257,17 +211,6 @@ class InworldHttpTTSService(TTSService):
             True, as Inworld HTTP service supports metrics generation.
         """
         return True
-
-    def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert a Language enum to Inworld language format.
-
-        Args:
-            language: The language to convert.
-
-        Returns:
-            The Inworld-specific language code, or None if not supported.
-        """
-        return language_to_inworld_language(language)
 
     async def start(self, frame: StartFrame):
         """Start the Inworld HTTP TTS service.
@@ -328,6 +271,7 @@ class InworldHttpTTSService(TTSService):
         # ================================================================================
         # Build the JSON payload according to Inworld's API specification
         # This matches the format shown in their documentation examples
+        # Note: Language is automatically inferred from the input text by Inworld's models
         payload = {
             "text": text,  # Text to synthesize
             "voiceId": self._settings["voiceId"],  # Voice selection (Ashley, Hades, etc.)
@@ -335,7 +279,6 @@ class InworldHttpTTSService(TTSService):
             "audio_config": self._settings[
                 "audio_config"
             ],  # Audio format settings (LINEAR16, 48kHz)
-            # "language": self._settings["language"],  # Language code (en, es, etc.)
         }
 
         # Set up HTTP headers for authentication and content type
