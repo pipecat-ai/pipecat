@@ -142,7 +142,7 @@ class InworldHttpTTSService(TTSService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         base_url: str = "https://api.inworld.ai/tts/v1/voice:stream",
-        sample_rate: Optional[int] = 48000,
+        sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: Optional[InputParams] = None,
         **kwargs,
@@ -159,10 +159,8 @@ class InworldHttpTTSService(TTSService):
                            for proper connection pooling and resource management.
             base_url: Base URL for Inworld HTTP API. Uses streaming endpoint by default.
                      Should normally not be changed unless using a different environment.
-            sample_rate: Audio sample rate in Hz. Common values:
-                        - 48000 (default) - High quality, suitable for most applications
-                        - 24000 - Good quality, lower bandwidth
-                        - 16000 - Basic quality, minimal bandwidth
+            sample_rate: Audio sample rate in Hz. If None, uses default from StartFrame.
+                        Common values: 48000 (high quality), 24000 (good quality), 16000 (basic)
             encoding: Audio encoding format. Supported options:
                      - "LINEAR16" (default) - Uncompressed PCM, best quality
                      - Other formats as supported by Inworld API
@@ -196,7 +194,7 @@ class InworldHttpTTSService(TTSService):
             "modelId": params.model or "inworld-tts-1",  # TTS model selection from params
             "audio_config": {  # Audio format configuration
                 "audio_encoding": encoding,  # Format: LINEAR16, MP3, etc.
-                "sample_rate_hertz": sample_rate,  # Sample rate: 48000, 24000, etc.
+                "sample_rate_hertz": 0,  # Will be set in start() from parent service
             },
         }
 
