@@ -64,8 +64,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     )
 
     tts = ElevenLabsTTSService(
-        api_key=os.getenv("ELEVENLABS_API_KEY", ""),
-        voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
+        api_key=os.getenv("ELEVENLABS_API_KEY"),
+        voice_id=os.getenv("ELEVENLABS_VOICE_ID"),
         model="eleven_turbo_v2_5",
     )
 
