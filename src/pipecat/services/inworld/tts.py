@@ -297,10 +297,6 @@ class InworldHttpTTSService(TTSService):
             # This allows downstream processors to prepare for incoming audio
             yield TTSStartedFrame()
 
-            # Flag to track if we're processing the first audio chunk
-            # Used for WAV header handling and debugging
-            is_first_chunk = True
-
             # ================================================================================
             # STEP 3: MAKE HTTP STREAMING REQUEST
             # ================================================================================
@@ -394,10 +390,6 @@ class InworldHttpTTSService(TTSService):
                                 ):
                                     # Remove the 44-byte WAV header to get pure audio data
                                     audio_data = audio_chunk[44:]
-
-                                    # Track that we've seen our first chunk (for debugging)
-                                    if is_first_chunk:
-                                        is_first_chunk = False
 
                                 # ========================================================
                                 # STEP 11: YIELD AUDIO FRAME TO PIPELINE
