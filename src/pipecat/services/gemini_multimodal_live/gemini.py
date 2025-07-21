@@ -72,7 +72,6 @@ from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
 
 from . import events
-from .audio_transcriber import AudioTranscriber
 from .file_api import GeminiFileAPI
 
 try:
@@ -281,7 +280,6 @@ class GeminiMultimodalLiveContext(OpenAILLMContext):
                                 }
                             }
                         )
-
                     else:
                         logger.warning(f"Unsupported content type: {str(part)[:80]}")
             else:
@@ -1201,6 +1199,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
+        # Only push the TTSStoppedFrame if the bot is outputting audio
+        # when text is found, modalities is set to TEXT and no audio
+        # is produced.
         if not text:
             await self.push_frame(TTSStoppedFrame())
 
