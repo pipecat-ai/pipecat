@@ -53,7 +53,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
-        output_locale=Language.EN_GB,
         enable_vad=True,
         end_of_utterance_silence_trigger=0.5,
         speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
@@ -61,7 +60,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         diarization_config=DiarizationConfig(
             enable=True,
             max_speakers=10,
-            focus_speakers=["S1"],
         ),
     )
 

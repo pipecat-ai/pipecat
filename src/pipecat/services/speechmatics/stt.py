@@ -296,8 +296,8 @@ class SpeechmaticsSTTService(STTService):
         enable_vad: bool = False,
         end_of_utterance_silence_trigger: Optional[float] = None,
         diarization_config: DiarizationConfig = DiarizationConfig(),
-        speaker_active_format: str = "<{speaker_id}>{text}</{speaker_id}>",
-        speaker_passive_format: str = "<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
+        speaker_active_format: Optional[str] = None,
+        speaker_passive_format: Optional[str] = None,
         transcription_config: Optional[TranscriptionConfig] = None,
         enable_speaker_diarization: Optional[bool] = None,  # deprecated
         text_format: Optional[str] = None,  # deprecated
@@ -323,8 +323,8 @@ class SpeechmaticsSTTService(STTService):
             enable_vad: Enable VAD to trigger end of utterance detection. Defaults to `False`.
             end_of_utterance_silence_trigger: Silence duration in seconds to trigger end of utterance detection. Defaults to `None`.
             diarization_config: Configuration for speaker diarization. Defaults to `None`.
-            speaker_active_format: Formatter for active speaker ID. Defaults to `<{speaker_id}>{text}</{speaker_id}>`.
-            speaker_passive_format: Formatter for passive speaker ID. Defaults to `<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>`.
+            speaker_active_format: Formatter for active speaker ID. Defaults to transcription output.
+            speaker_passive_format: Formatter for passive speaker ID. Defaults to transcription output.
             transcription_config: Custom transcription configuration (other set parameters are merged). Defaults to `None`.
             enable_speaker_diarization: Deprecated, use diarization_config instead.
             text_format: Deprecated, use speaker_active_format and speaker_passive_format instead.
@@ -610,7 +610,8 @@ class SpeechmaticsSTTService(STTService):
             if self._diarization_config.known_speakers:
                 speakers = {s.speaker_id: s.data for s in self._diarization_config.known_speakers}
                 dz_cfg["speakers"] = speakers
-            transcription_config.speaker_diarization_config = dz_cfg
+            if dz_cfg:
+                transcription_config.speaker_diarization_config = dz_cfg
 
         # End of Utterance
         if self._end_of_utterance_silence_trigger:
