@@ -10,6 +10,7 @@ This module provides integration with Inworld AI's HTTP-based TTS API, enabling
 real-time text-to-speech synthesis with high-quality, natural-sounding voices.
 
 Key Features:
+
 - HTTP streaming API support for low-latency audio generation
 - Multiple voice options (Ashley, Hades, etc.)
 - Real-time audio chunk processing with proper buffering
@@ -17,13 +18,14 @@ Key Features:
 - Comprehensive error handling and metrics tracking
 
 Technical Implementation:
+
 - Uses aiohttp for HTTP streaming connections
 - Implements JSON line-by-line parsing for streaming responses
 - Handles base64-encoded audio data with proper decoding
 - Manages audio continuity to prevent clicks and artifacts
 - Integrates with Pipecat's frame-based pipeline architecture
 
-Usage:
+Usage::
     tts = InworldHttpTTSService(
         api_key=os.getenv("INWORLD_API_KEY"),
         voice_id="Ashley",
@@ -71,6 +73,7 @@ def language_to_inworld_language(language: Language) -> Optional[str]:
     corresponding language codes expected by Inworld's API.
 
     Supported Languages:
+
     - EN (English) -> "en"
     - ES (Spanish) -> "es"
     - FR (French) -> "fr"
@@ -126,6 +129,7 @@ class InworldHttpTTSService(TTSService):
     and low-latency streaming audio delivery.
 
     Key Features:
+
     - Real-time HTTP streaming for minimal latency
     - Multiple voice options (Ashley, Hades, etc.)
     - High-quality audio output (48kHz LINEAR16 PCM)
@@ -134,6 +138,7 @@ class InworldHttpTTSService(TTSService):
     - Built-in performance metrics and monitoring
 
     Technical Architecture:
+
     - Uses aiohttp for non-blocking HTTP requests
     - Implements JSON line-by-line streaming protocol
     - Processes base64-encoded audio chunks in real-time
@@ -141,16 +146,17 @@ class InworldHttpTTSService(TTSService):
     - Integrates with Pipecat's frame-based pipeline system
 
     Supported Configuration:
+
     - Voice Selection: Ashley, Hades, and other Inworld voices
     - Models: inworld-tts-1 and other available models
     - Audio Formats: LINEAR16 PCM at various sample rates
     - Languages: English, Spanish, French, Korean, Dutch, Chinese
 
-    Example Usage:
+    Example Usage::
         async with aiohttp.ClientSession() as session:
             tts = InworldHttpTTSService(
                 api_key=os.getenv("INWORLD_API_KEY"),
-                voice_id="Ashley",                    # Voice selection
+                voice_id="Ashley",                   # Voice selection
                 model="inworld-tts-1",               # TTS model
                 aiohttp_session=session,             # Required HTTP session
                 sample_rate=48000,                   # Audio quality
@@ -162,16 +168,9 @@ class InworldHttpTTSService(TTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control (string or float).
-            emotion: List of emotion controls.
-
-                .. deprecated:: 0.0.68
-                        The `emotion` parameter is deprecated and will be removed in a future version.
         """
 
         language: Optional[Language] = Language.EN
-        voice_id: str = "Hades"  ## QUESTION: How to make this modifyable/how to modify?
-        # QUESTION: What about speed, pitch, and temperature??
 
     def __init__(
         self,
@@ -179,6 +178,7 @@ class InworldHttpTTSService(TTSService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         voice_id: str = "Ashley",
+        # language: Optional[Language] = Language.EN,
         model: str = "inworld-tts-1",
         base_url: str = "https://api.inworld.ai/tts/v1/voice:stream",
         sample_rate: Optional[int] = 48000,
@@ -305,6 +305,7 @@ class InworldHttpTTSService(TTSService):
         4. Yields audio frames for immediate playback in the pipeline
 
         Technical Details:
+
         - Uses HTTP streaming with JSON line-by-line responses
         - Each JSON line contains base64-encoded audio data
         - Implements buffering to handle partial JSON lines
@@ -334,7 +335,7 @@ class InworldHttpTTSService(TTSService):
             "audio_config": self._settings[
                 "audio_config"
             ],  # Audio format settings (LINEAR16, 48kHz)
-            "language": self._settings["language"],  # Language code (en, es, etc.)
+            # "language": self._settings["language"],  # Language code (en, es, etc.)
         }
 
         # Set up HTTP headers for authentication and content type
