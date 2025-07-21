@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `OLLamaLLMService` where kwargs were not passed correctly
   to the parent class.
 
+- Fixed an issue in `ElevenLabsTTSService` where the word/timestamp pairs were
+  calculating word boundaries incorrectly.
+
 - Fixed an issue where, in some edge cases, the `EmulateUserStartedSpeakingFrame`
   could be created even if we didn't have a transcription.
 
