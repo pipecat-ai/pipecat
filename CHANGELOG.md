@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added foundational example `14u-function-calling-ollama.py` for Ollama
+  function calling.
+
 - Added `LocalSmartTurnAnalyzerV2`, which supports local on-device inference
   with the new `smart-turn-v2` turn detection model.
 
