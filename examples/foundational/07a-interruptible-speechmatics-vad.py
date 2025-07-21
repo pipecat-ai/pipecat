@@ -10,7 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -18,9 +17,8 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.openai.base_llm import BaseOpenAILLMService
-from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.speechmatics.stt import DiarizationConfig, SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -36,17 +34,14 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
@@ -59,23 +54,32 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     instructions in the system context for the LLM. This greatly improves the conversation
     experience by allowing the LLM to understand who is speaking in a multi-party call.
 
+    Using the `enable_vad` parameter will use the detection of speakers to emit speaker
+    started and stopped frames. This is useful when only wanting to listen to the first
+    speaker. Using `focus_speakers` will result in only words from those speakers being
+    processed as part of the conversation. Other speakers will be wrapped in PASSIVE tags
+    and not trigger any responses from the LLM until words from a focussed speaker have
+    been transcribed.
+
     By default, this example will use our ENHANCED operating point, which is optimized for
     high accuracy. You can change this by setting the `operating_point` parameter to a different
     value.
 
     For more information on operating points, see the Speechmatics documentation:
-    https://docs.speechmatics.com/rt-api-ref
-    """
+    https://docs.speechmatics.com/rt-api-ref"""
     logger.info(f"Starting bot")
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
+        enable_vad=True,
         end_of_utterance_silence_trigger=0.5,
         speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+        speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         diarization_config=DiarizationConfig(
             enable=True,
             max_speakers=10,
+            focus_speakers=["S1"],
         ),
     )
 
@@ -85,9 +89,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         model="eleven_turbo_v2_5",
     )
 
-    llm = OpenAILLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        params=BaseOpenAILLMService.InputParams(temperature=0.75),
+    llm = AzureLLMService(
+        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
+        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
+        model=os.getenv("AZURE_CHATGPT_MODEL"),
     )
 
     messages = [
@@ -100,7 +105,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "Always include punctuation in your responses. "
                 "Give very short replies - do not give longer replies unless strictly necessary. "
                 "Respond to what the user said in a concise, funny, creative and helpful way. "
-                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
+                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies. "
+                "Do not respond to speakers within `<PASSIVE/>` tags unless explicitly asked to. "
             ),
         },
     ]
@@ -114,7 +120,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
+            stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
