@@ -8,6 +8,7 @@
 
 import asyncio
 import datetime
+import os
 import re
 import warnings
 from dataclasses import dataclass, field
@@ -281,9 +282,9 @@ class SpeechmaticsSTTService(STTService):
     def __init__(
         self,
         *,
-        api_key: str,
+        api_key: Optional[str] = None,
         operating_point: OperatingPoint = OperatingPoint.ENHANCED,
-        base_url: str = "wss://eu2.rt.speechmatics.com/v2",
+        base_url: Optional[str] = None,
         language: Optional[Language] = None,
         language_code: Optional[str] = None,
         domain: Optional[str] = None,
@@ -308,9 +309,9 @@ class SpeechmaticsSTTService(STTService):
         """Initialize the Speechmatics STT service.
 
         Args:
-            api_key: Speechmatics API key for authentication.
+            api_key: Speechmatics API key for authentication (or environment variable `SPEECHMATICS_API_KEY`).
             operating_point: Operating point for transcription accuracy vs. latency tradeoff. Defaults to `enhanced`.
-            base_url: Base URL for Speechmatics API. Defaults to `wss://eu2.rt.speechmatics.com/v2`.
+            base_url: Base URL for Speechmatics API (or environment variable `SPEECHMATICS_RT_URL`). Defaults to `wss://eu2.rt.speechmatics.com/v2`.
             language: Language code for transcription. Defaults to `None`.
             language_code: Language code string for transcription. Defaults to `None`.
             domain: Domain for Speechmatics API. Defaults to `None`.
@@ -347,10 +348,10 @@ class SpeechmaticsSTTService(STTService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Client configuration
-        self._api_key: str = api_key
+        self._api_key: Optional[str] = api_key
         self._language: Optional[Language] = language
         self._language_code: Optional[str] = language_code
-        self._base_url: str = base_url
+        self._base_url: Optional[str] = base_url
         self._domain: Optional[str] = domain
         self._output_locale: Optional[Language] = output_locale
         self._output_locale_code: Optional[str] = output_locale_code
@@ -365,6 +366,12 @@ class SpeechmaticsSTTService(STTService):
         self._speaker_active_format: str = speaker_active_format
         self._speaker_passive_format: str = speaker_passive_format
         self._diarization_config: DiarizationConfig = diarization_config
+
+        # Environment variables
+        if not self._api_key:
+            self._api_key = os.getenv("SPEECHMATICS_API_KEY")
+        if not self._base_url:
+            self._base_url = os.getenv("SPEECHMATICS_RT_URL", "wss://eu2.rt.speechmatics.com/v2")
 
         # Check we have required attributes
         if not self._api_key:
