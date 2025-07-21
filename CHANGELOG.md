@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Changed the `livekit` optional dependency for `tenacity` to
+  `tenacity>=8.2.3,<10.0.0` in order to support the `google-genai` package.
+
 - For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
   recommended model.
 
