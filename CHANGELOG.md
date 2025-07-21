@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
   recommended model.
 
+- Updated `SpeechmaticsSTTService`:
+  - Added support for additional diarization options.
+  - Added example of VAD detection within the `SpeechmaticsSTTService`.
+
 ### Fixed
 
 - Fixed an issue where, in some edge cases, the `EmulateUserStartedSpeakingFrame`
