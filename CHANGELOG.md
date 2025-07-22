@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `MiniMaxHttpTTSService` where the `pitch` param was the
   incorrect type.
 
+- Fixed an issue with OpenTelemetry tracing where the `enable_tracing` flag did
+  not disable the internal tracing decorator functions.
+
 - Fixed an issue in `OLLamaLLMService` where kwargs were not passed correctly
   to the parent class.
 
