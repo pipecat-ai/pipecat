@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `MiniMaxHttpTTSService` with a `base_url` arg where you can specify
+  the Global endpoint (default) or Mainland China.
+
 - Changed the `livekit` optional dependency for `tenacity` to
   `tenacity>=8.2.3,<10.0.0` in order to support the `google-genai` package.
 
@@ -24,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recommended model.
 
 ### Fixed
+
+- Fixed an issue in `MiniMaxHttpTTSService` where the `pitch` param was the
+  incorrect type.
 
 - Fixed an issue in `OLLamaLLMService` where kwargs were not passed correctly
   to the parent class.
