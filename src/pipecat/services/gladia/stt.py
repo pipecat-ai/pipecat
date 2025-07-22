@@ -37,6 +37,8 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Gladia, you need to `pip install pipecat-ai[gladia]`.")
@@ -402,7 +404,7 @@ class GladiaSTTService(STTService):
                 logger.warning(f"Audio buffer exceeded max size, trimmed {trim_size} bytes")
 
         # Send audio if connected
-        if self._connection_active and self._websocket and not self._websocket.closed:
+        if self._connection_active and self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._send_audio(audio)
             except websockets.exceptions.ConnectionClosed as e:
@@ -423,7 +425,7 @@ class GladiaSTTService(STTService):
                     self._reconnection_attempts = 0
 
                 # Connect with automatic reconnection
-                async with websockets.connect(self._session_url) as websocket:
+                async with websocket_connect(self._session_url) as websocket:
                     try:
                         self._websocket = websocket
                         self._connection_active = True
@@ -507,7 +509,7 @@ class GladiaSTTService(STTService):
 
     async def _send_audio(self, audio: bytes):
         """Send audio chunk with proper message format."""
-        if self._websocket and not self._websocket.closed:
+        if self._websocket and self._websocket.state is State.OPEN:
             data = base64.b64encode(audio).decode("utf-8")
             message = {"type": "audio_chunk", "data": {"chunk": data}}
             await self._websocket.send(json.dumps(message))
@@ -520,7 +522,7 @@ class GladiaSTTService(STTService):
                 await self._send_audio(bytes(self._audio_buffer))
 
     async def _send_stop_recording(self):
-        if self._websocket and not self._websocket.closed:
+        if self._websocket and self._websocket.state is State.OPEN:
             await self._websocket.send(json.dumps({"type": "stop_recording"}))
 
     async def _keepalive_task_handler(self):
@@ -531,7 +533,7 @@ class GladiaSTTService(STTService):
                 self.reset_watchdog()
                 # Send keepalive (Gladia times out after 30 seconds)
                 await asyncio.sleep(KEEPALIVE_SLEEP)
-                if self._websocket and not self._websocket.closed:
+                if self._websocket and self._websocket.state is State.OPEN:
                     # Send an empty audio chunk as keepalive
                     empty_audio = b""
                     await self._send_audio(empty_audio)

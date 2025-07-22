@@ -44,6 +44,8 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 # See .env.example for ElevenLabs configuration needed
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
@@ -447,7 +449,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             logger.debug("Connecting to ElevenLabs")
@@ -474,7 +476,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 )
 
             # Set max websocket message size to 16MB for large audio responses
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 url, max_size=16 * 1024 * 1024, additional_headers={"xi-api-key": self._api_key}
             )
 
@@ -587,7 +589,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
-                if self._websocket and self._websocket.open:
+                if self._websocket and self._websocket.state is State.OPEN:
                     if self._context_id:
                         # Send keepalive with context ID to keep the connection alive
                         keepalive_message = {
@@ -625,7 +627,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             try:
