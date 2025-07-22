@@ -389,7 +389,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 return
             self._websocket = await websockets.connect(
                 uri=self.base_url,
-                extra_headers={
+                additional_headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "OpenAI-Beta": "realtime=v1",
                 },

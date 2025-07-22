@@ -192,7 +192,7 @@ class AssemblyAISTTService(STTService):
             }
             self._websocket = await websockets.connect(
                 ws_url,
-                extra_headers=headers,
+                additional_headers=headers,
             )
             self._connected = True
             self._receive_task = self.create_task(self._receive_task_handler())

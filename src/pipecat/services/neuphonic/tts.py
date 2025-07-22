@@ -292,7 +292,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
             headers = {"x-api-key": self._api_key}
 
-            self._websocket = await websockets.connect(url, extra_headers=headers)
+            self._websocket = await websockets.connect(url, additional_headers=headers)
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
