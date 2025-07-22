@@ -38,14 +38,16 @@ class PipelineRunner(BaseObject):
         handle_sigint: bool = True,
         force_gc: bool = False,
         loop: Optional[asyncio.AbstractEventLoop] = None,
+        handle_sigterm: bool = False,
     ):
         """Initialize the pipeline runner.
 
         Args:
             name: Optional name for the runner instance.
-            handle_sigint: Whether to automatically handle SIGINT/SIGTERM signals.
+            handle_sigint: Whether to automatically handle SIGINT signals.
             force_gc: Whether to force garbage collection after task completion.
             loop: Event loop to use. If None, uses the current running loop.
+            handle_sigterm: Whether to automatically handle SIGTERM signals.
         """
         super().__init__(name=name)
 
@@ -56,6 +58,9 @@ class PipelineRunner(BaseObject):
 
         if handle_sigint:
             self._setup_sigint()
+
+        if handle_sigterm:
+            self._setup_sigterm()
 
     async def run(self, task: PipelineTask):
         """Run a pipeline task to completion.
@@ -96,6 +101,10 @@ class PipelineRunner(BaseObject):
         """Set up signal handlers for graceful shutdown."""
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGINT, lambda *args: self._sig_handler())
+
+    def _setup_sigterm(self):
+        """Set up signal handlers for graceful shutdown."""
+        loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, lambda *args: self._sig_handler())
 
     def _sig_handler(self):
