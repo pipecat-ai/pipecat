@@ -216,7 +216,7 @@ class FishAudioTTSService(InterruptibleTTSService):
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
             headers["model"] = self.model_name
-            self._websocket = await websockets.connect(self._base_url, extra_headers=headers)
+            self._websocket = await websockets.connect(self._base_url, additional_headers=headers)
 
             # Send initial start message with ormsgpack
             start_message = {"event": "start", "request": {"text": "", **self._settings}}

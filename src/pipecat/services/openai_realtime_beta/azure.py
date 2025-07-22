@@ -57,7 +57,7 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
             logger.info(f"Connecting to {self.base_url}, api key: {self.api_key}")
             self._websocket = await websockets.connect(
                 uri=self.base_url,
-                extra_headers={
+                additional_headers={
                     "api-key": self.api_key,
                 },
             )

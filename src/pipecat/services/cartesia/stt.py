@@ -229,7 +229,7 @@ class CartesiaSTTService(STTService):
         headers = {"Cartesia-Version": "2025-04-16", "X-API-Key": self._api_key}
 
         try:
-            self._connection = await websockets.connect(ws_url, extra_headers=headers)
+            self._connection = await websockets.connect(ws_url, additional_headers=headers)
             # Setup the receiver task to handle the incoming messages from the Cartesia server
             if self._receiver_task is None or self._receiver_task.done():
                 self._receiver_task = asyncio.create_task(self._receive_messages())

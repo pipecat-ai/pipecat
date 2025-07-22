@@ -238,7 +238,7 @@ class AWSTranscribeSTTService(STTService):
                 )
 
                 # Add required headers
-                extra_headers = {
+                additional_headers = {
                     "Origin": "https://localhost",
                     "Sec-WebSocket-Key": websocket_key,
                     "Sec-WebSocket-Version": "13",
@@ -270,7 +270,7 @@ class AWSTranscribeSTTService(STTService):
                 # Connect with the required headers and settings
                 self._ws_client = await websockets.connect(
                     presigned_url,
-                    extra_headers=extra_headers,
+                    additional_headers=additional_headers,
                     subprotocols=["mqtt"],
                     ping_interval=None,
                     ping_timeout=None,
