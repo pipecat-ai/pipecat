@@ -9,15 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added foundational example `14u-function-calling-ollama.py` for Ollama
+  function calling.
+
 - Added `LocalSmartTurnAnalyzerV2`, which supports local on-device inference
   with the new `smart-turn-v2` turn detection model.
 
 ### Changed
 
+- Updated `MiniMaxHttpTTSService` with a `base_url` arg where you can specify
+  the Global endpoint (default) or Mainland China.
+
+- Replaced regex-based sentence detection in `match_endofsentence` with NLTK's
+  punkt_tab tokenizer for more reliable sentence boundary detection.
+
+- Changed the `livekit` optional dependency for `tenacity` to
+  `tenacity>=8.2.3,<10.0.0` in order to support the `google-genai` package.
+
 - For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
   recommended model.
 
 ### Fixed
+
+- Fixed a dependency issue for uv users where an `llvmlite` version required python 3.9.
+
+- Fixed an issue in `MiniMaxHttpTTSService` where the `pitch` param was the
+  incorrect type.
+
+- Fixed an issue with OpenTelemetry tracing where the `enable_tracing` flag did
+  not disable the internal tracing decorator functions.
+
+- Fixed an issue in `OLLamaLLMService` where kwargs were not passed correctly
+  to the parent class.
+
+- Fixed an issue in `ElevenLabsTTSService` where the word/timestamp pairs were
+  calculating word boundaries incorrectly.
 
 - Fixed an issue where, in some edge cases, the `EmulateUserStartedSpeakingFrame`
   could be created even if we didn't have a transcription.

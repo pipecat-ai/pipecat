@@ -178,20 +178,46 @@ def calculate_word_times(
     Returns:
         List of (word, timestamp) tuples.
     """
-    zipped_times = list(zip(alignment_info["chars"], alignment_info["charStartTimesMs"]))
+    chars = alignment_info["chars"]
+    char_start_times_ms = alignment_info["charStartTimesMs"]
 
-    words = "".join(alignment_info["chars"]).split(" ")
+    if len(chars) != len(char_start_times_ms):
+        logger.error(
+            f"calculate_word_times: length mismatch - chars={len(chars)}, times={len(char_start_times_ms)}"
+        )
+        return []
 
-    # Calculate start time for each word. We do this by finding a space character
-    # and using the previous word time, also taking into account there might not
-    # be a space at the end.
-    times = []
-    for i, (a, b) in enumerate(zipped_times):
-        if a == " " or i == len(zipped_times) - 1:
-            t = cumulative_time + (zipped_times[i - 1][1] / 1000.0)
-            times.append(t)
+    # Build words and track their start positions
+    words = []
+    word_start_indices = []
+    current_word = ""
+    word_start_index = None
 
-    word_times = list(zip(words, times))
+    for i, char in enumerate(chars):
+        if char == " ":
+            # End of current word
+            if current_word:  # Only add non-empty words
+                words.append(current_word)
+                word_start_indices.append(word_start_index)
+                current_word = ""
+                word_start_index = None
+        else:
+            # Building a word
+            if word_start_index is None:  # First character of new word
+                word_start_index = i
+            current_word += char
+
+    # Handle the last word if there's no trailing space
+    if current_word and word_start_index is not None:
+        words.append(current_word)
+        word_start_indices.append(word_start_index)
+
+    # Calculate timestamps for each word
+    word_times = []
+    for word, start_idx in zip(words, word_start_indices):
+        # Convert from milliseconds to seconds and add cumulative offset
+        start_time_seconds = cumulative_time + (char_start_times_ms[start_idx] / 1000.0)
+        word_times.append((word, start_time_seconds))
 
     return word_times
 
@@ -213,7 +239,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             similarity_boost: Similarity boost control (0.0 to 1.0).
             style: Style control for voice expression (0.0 to 1.0).
             use_speaker_boost: Whether to use speaker boost enhancement.
-            speed: Voice speed control (0.25 to 4.0).
+            speed: Voice speed control (0.7 to 1.2).
             auto_mode: Whether to enable automatic mode optimization.
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs logging.
@@ -530,10 +556,29 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 audio = base64.b64decode(msg["audio"])
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
                 await self.append_to_audio_context(received_ctx_id, frame)
+
             if msg.get("alignment"):
-                word_times = calculate_word_times(msg["alignment"], self._cumulative_time)
-                await self.add_word_timestamps(word_times)
-                self._cumulative_time = word_times[-1][1]
+                alignment = msg["alignment"]
+                word_times = calculate_word_times(alignment, self._cumulative_time)
+
+                if word_times:
+                    await self.add_word_timestamps(word_times)
+
+                    # Calculate the actual end time of this audio chunk
+                    char_start_times_ms = alignment.get("charStartTimesMs", [])
+                    char_durations_ms = alignment.get("charDurationsMs", [])
+
+                    if char_start_times_ms and char_durations_ms:
+                        # End time = start time of last character + duration of last character
+                        chunk_end_time_ms = char_start_times_ms[-1] + char_durations_ms[-1]
+                        chunk_end_time_seconds = chunk_end_time_ms / 1000.0
+                        self._cumulative_time += chunk_end_time_seconds
+                    else:
+                        # Fallback: use the last word's start time (current behavior)
+                        self._cumulative_time = word_times[-1][1]
+                        logger.warning(
+                            "_receive_messages: using fallback timing method - consider investigating alignment data structure"
+                        )
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""

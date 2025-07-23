@@ -25,6 +25,7 @@ dependencies = [
     "docstring_parser~=0.16",
     "loguru~=0.7.3",
     "Markdown~=3.7",
+    "nltk>=3.9.1",
     "numpy>=1.26.4",
     "Pillow~=11.1.0",
     "protobuf~=5.29.3",
@@ -33,6 +34,8 @@ dependencies = [
     "resampy~=0.4.3",
     "soxr~=0.5.0",
     "openai~=1.74.0",
+    # Explicit dependency pins for Python 3.11+ compatibility
+    "numba>=0.61.0",
 ]
 
 [project.urls]
@@ -62,7 +65,7 @@ gstreamer = [ "pygobject~=3.50.0" ]
 krisp = [ "pipecat-ai-krisp~=0.4.0" ]
 koala = [ "pvkoala~=2.0.3" ]
 langchain = [ "langchain~=0.3.20", "langchain-community~=0.3.20", "langchain-openai~=0.3.9" ]
-livekit = [ "livekit~=0.22.0", "livekit-api~=0.8.2", "tenacity~=9.0.0" ]
+livekit = [ "livekit~=0.22.0", "livekit-api~=0.8.2", "tenacity>=8.2.3,<10.0.0" ]
 lmnt = [ "websockets~=13.1" ]
 local = [ "pyaudio~=0.2.14" ]
 mcp = [ "mcp[cli]~=1.9.4" ]
