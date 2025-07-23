@@ -16,7 +16,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.inworld.tts import InworldHttpTTSService
+from pipecat.services.inworld.tts import InworldHttpNonStreamingService, InworldHttpStreamingService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -58,14 +58,30 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             prompt="Expect words related to dogs, such as breed names.",
         )
 
-        tts = InworldHttpTTSService(
-            api_key=os.getenv("INWORLD_API_KEY", ""),
-            aiohttp_session=session,
-            params=InworldHttpTTSService.InputParams(
-                voice_id="Ashley",
-                model="inworld-tts-1",
-            ),
-        )
+        streaming = True
+
+        if streaming:
+            # Streaming TTS - Real-time audio generation as text is processed
+            tts = InworldHttpStreamingService(
+                api_key=os.getenv("INWORLD_API_KEY", ""),
+                aiohttp_session=session,
+                params=InworldHttpStreamingService.InputParams(
+                    voice_id="Ashley",
+                    model="inworld-tts-1",
+                    temperature=0.8,
+                ),
+            )
+        else:
+            # Non-streaming TTS - Complete audio generation then playback
+            tts = InworldHttpNonStreamingService(
+                api_key=os.getenv("INWORLD_API_KEY", ""),
+                aiohttp_session=session,
+                params=InworldHttpNonStreamingService.InputParams(
+                    voice_id="Ashley",
+                    model="inworld-tts-1",
+                    temperature=0.8,
+                ),
+            )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 

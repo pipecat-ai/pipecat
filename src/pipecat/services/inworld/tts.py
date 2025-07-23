@@ -29,10 +29,10 @@ Technical Implementation:
 Usage::
 
     async with aiohttp.ClientSession() as session:
-        tts = InworldHttpTTSService(
+        tts = InworldHttpStreamingService(
             api_key=os.getenv("INWORLD_API_KEY"),
             aiohttp_session=session,
-            params=InworldHttpTTSService.InputParams(
+            params=InworldHttpStreamingService.InputParams(
                 voice_id="Ashley",
                 model="inworld-tts-1",
                 temperature=0.8,  # Optional: control synthesis variability (range: [0, 2])
@@ -70,7 +70,7 @@ from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
-class InworldHttpTTSService(TTSService):
+class InworldHttpStreamingService(TTSService):
     """Inworld AI HTTP-based Text-to-Speech Service.
 
     This service integrates Inworld AI's high-quality TTS API with Pipecat's pipeline
@@ -105,18 +105,18 @@ class InworldHttpTTSService(TTSService):
 
         async with aiohttp.ClientSession() as session:
             # Using default settings (Ashley voice, inworld-tts-1 model)
-            tts = InworldHttpTTSService(
+            tts = InworldHttpStreamingService(
                 api_key=os.getenv("INWORLD_API_KEY"),
                 aiohttp_session=session,
             )
 
             # Or with custom voice, model, and temperature via params
-            params = InworldHttpTTSService.InputParams(
+            params = InworldHttpStreamingService.InputParams(
                 voice_id="Hades",
                 model="inworld-tts-1-max",
                 temperature=0.8,  # Add variability to speech synthesis (range: [0, 2])
             )
-            tts = InworldHttpTTSService(
+            tts = InworldHttpStreamingService(
                 api_key=os.getenv("INWORLD_API_KEY"),
                 aiohttp_session=session,
                 params=params,
@@ -185,7 +185,7 @@ class InworldHttpTTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Use provided params or create default configuration
-        params = params or InworldHttpTTSService.InputParams()
+        params = params or InworldHttpStreamingService.InputParams()
 
         # Store core configuration for API requests
         self._api_key = api_key  # Authentication credentials
@@ -439,6 +439,367 @@ class InworldHttpTTSService(TTSService):
         finally:
             # ================================================================================
             # STEP 14: CLEANUP AND COMPLETION
+            # ================================================================================
+            # Always stop metrics tracking, even if errors occurred
+            await self.stop_ttfb_metrics()
+
+            # Signal to pipeline that TTS generation is complete
+            # This allows downstream processors to finalize audio processing
+            yield TTSStoppedFrame()
+
+
+class InworldHttpNonStreamingService(TTSService):
+    """Inworld AI HTTP-based Text-to-Speech Service (Non-Streaming).
+
+    This service integrates with Inworld AI's non-streaming TTS API for simpler,
+    complete audio synthesis. Suitable for use cases where streaming is not required
+    and you prefer to receive the complete audio file at once.
+
+    Key Features:
+
+    - Simple HTTP request/response for complete audio synthesis
+    - Same voice options as streaming version (Ashley, Hades, etc.)
+    - High-quality audio output (48kHz LINEAR16 PCM)
+    - Automatic language detection from input text
+    - Support for temperature parameter for synthesis variability
+    - Lower complexity compared to streaming implementation
+
+    Technical Architecture:
+
+    - Uses aiohttp for single HTTP POST request
+    - Downloads complete audio as base64-encoded data
+    - Processes entire audio file and chunks for playback
+    - Integrates with Pipecat's frame-based pipeline system
+
+    Usage::
+
+        async with aiohttp.ClientSession() as session:
+            # Using default settings (Ashley voice, inworld-tts-1 model)
+            tts = InworldHttpNonStreamingService(
+                api_key=os.getenv("INWORLD_API_KEY"),
+                aiohttp_session=session,
+            )
+
+            # Or with custom voice, model, and temperature
+            params = InworldHttpNonStreamingService.InputParams(
+                voice_id="Hades",
+                model="inworld-tts-1-max",
+                temperature=0.8,  # Control synthesis variability (range: [0, 2])
+            )
+            tts = InworldHttpNonStreamingService(
+                api_key=os.getenv("INWORLD_API_KEY"),
+                aiohttp_session=session,
+                params=params,
+            )
+    """
+
+    class InputParams(BaseModel):
+        """Input parameters for Inworld non-streaming TTS configuration.
+
+        Parameters:
+            voice_id: Voice selection for speech synthesis (e.g., "Ashley", "Hades").
+            model: TTS model to use (e.g., "inworld-tts-1", "inworld-tts-1-max").
+            temperature: Voice temperature control for synthesis variability (e.g., 0.8).
+                        Valid range: [0, 2]. Higher values increase variability.
+
+        Note:
+            Language is automatically inferred from the input text by Inworld's TTS models,
+            so no explicit language parameter is required.
+        """
+
+        voice_id: Optional[str] = "Ashley"  # defaults to the Ashley voice
+        model: Optional[str] = "inworld-tts-1"  # defaults to the inworld-tts-1 model
+        temperature: Optional[float] = None  # optional temperature control (range: [0, 2])
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        aiohttp_session: Optional[aiohttp.ClientSession] = None,
+        base_url: str = "https://api.inworld.ai/tts/v1/voice",  # Non-streaming endpoint
+        sample_rate: Optional[int] = None,
+        encoding: str = "LINEAR16",
+        params: Optional[InputParams] = None,
+        **kwargs,
+    ):
+        """Initialize the Inworld non-streaming TTS service.
+
+        Sets up the TTS service with Inworld AI's non-streaming API configuration.
+        This constructor prepares all necessary parameters for complete audio synthesis.
+
+        Args:
+            api_key: Inworld API key for authentication (base64-encoded from Inworld Portal).
+                    Get this from: Inworld Portal > Settings > API Keys > Runtime API Key
+            aiohttp_session: Shared aiohttp session for HTTP requests. Must be provided
+                           for proper connection pooling and resource management.
+            base_url: Base URL for Inworld non-streaming HTTP API. Uses non-streaming endpoint by default.
+                     Should normally not be changed unless using a different environment.
+            sample_rate: Audio sample rate in Hz. If None, uses default from StartFrame.
+                        Common values: 48000 (high quality), 24000 (good quality), 16000 (basic)
+            encoding: Audio encoding format. Supported options:
+                     - "LINEAR16" (default) - Uncompressed PCM, best quality
+                     - Other formats as supported by Inworld API
+            params: Input parameters for voice and model configuration. Use this to specify:
+                   - voice_id: Voice selection ("Ashley", "Hades", etc.)
+                   - model: TTS model ("inworld-tts-1", "inworld-tts-1-max", etc.)
+                   - temperature: Voice temperature control for variability (range: [0, 2], e.g., 0.8, optional)
+                   If None, uses default values (Ashley voice, inworld-tts-1 model).
+                   Note: Language is automatically inferred from input text.
+            **kwargs: Additional arguments passed to the parent TTSService class.
+
+        Note:
+            The aiohttp_session parameter is required because Inworld's HTTP API
+            benefits from connection reuse and proper async session management.
+        """
+        # Initialize parent TTSService with audio configuration
+        super().__init__(sample_rate=sample_rate, **kwargs)
+
+        # Use provided params or create default configuration
+        params = params or InworldHttpNonStreamingService.InputParams()
+
+        # Store core configuration for API requests
+        self._api_key = api_key  # Authentication credentials
+        self._session = aiohttp_session  # HTTP session for requests (optional)
+        self._base_url = base_url  # API endpoint URL
+
+        # Build settings dictionary that matches Inworld's API expectations
+        # This will be sent as JSON payload in the TTS request
+        # Note: Language is automatically inferred from text by Inworld's models
+        self._settings = {
+            "voiceId": params.voice_id or "Ashley",  # Voice selection from params
+            "modelId": params.model or "inworld-tts-1",  # TTS model selection from params
+            "audio_config": {  # Audio format configuration
+                "audio_encoding": encoding,  # Format: LINEAR16, MP3, etc.
+                "sample_rate_hertz": 0,  # Will be set in start() from parent service
+            },
+        }
+
+        # Add optional temperature parameter if provided (valid range: [0, 2])
+        if params.temperature is not None:
+            self._settings["temperature"] = params.temperature
+
+        # Register voice and model with parent service for metrics and tracking
+        self.set_voice(params.voice_id or "Ashley")  # Used for logging and metrics
+        self.set_model_name(params.model or "inworld-tts-1")  # Used for performance tracking
+
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate processing metrics.
+
+        Returns:
+            True, as Inworld non-streaming service supports metrics generation.
+        """
+        return True
+
+    async def start(self, frame: StartFrame):
+        """Start the Inworld non-streaming TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        self._settings["audio_config"]["sample_rate_hertz"] = self.sample_rate
+
+    async def stop(self, frame: EndFrame):
+        """Stop the Inworld non-streaming TTS service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the Inworld non-streaming TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+
+    @traced_tts
+    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+        """Generate speech from text using Inworld's non-streaming HTTP API.
+
+        This method sends text to Inworld's non-streaming TTS endpoint and receives
+        the complete audio file as a base64-encoded response. The audio is then
+        chunked and yielded for playback in the pipeline.
+
+        Args:
+            text: The text to synthesize into speech.
+
+        Yields:
+            Frame: Audio frames containing the synthesized speech, plus control frames.
+
+        Raises:
+            ErrorFrame: If API errors occur or audio processing fails.
+        """
+        logger.debug(f"{self}: Generating TTS [{text}]")
+
+        # ================================================================================
+        # STEP 1: PREPARE API REQUEST
+        # ================================================================================
+        # Build the JSON payload according to Inworld's non-streaming API specification
+        # This matches the format shown in their documentation examples
+        # Note: Language is automatically inferred from the input text by Inworld's models
+        payload = {
+            "text": text,  # Text to synthesize
+            "voiceId": self._settings["voiceId"],  # Voice selection (Ashley, Hades, etc.)
+            "modelId": self._settings["modelId"],  # TTS model (inworld-tts-1)
+            "audio_config": self._settings["audio_config"],  # Audio format settings
+        }
+
+        # Add optional temperature parameter if configured (valid range: [0, 2])
+        if "temperature" in self._settings:
+            payload["temperature"] = self._settings["temperature"]
+
+        # Set up HTTP headers for authentication and content type
+        # Inworld requires Basic auth with base64-encoded API key
+        headers = {
+            "Authorization": f"Basic {self._api_key}",  # Base64 API key from Inworld Portal
+            "Content-Type": "application/json",  # JSON request body
+        }
+
+        try:
+            # ================================================================================
+            # STEP 2: INITIALIZE METRICS AND STREAMING
+            # ================================================================================
+            # Start measuring Time To First Byte (TTFB) for performance tracking
+            await self.start_ttfb_metrics()
+
+            # Signal to the pipeline that TTS generation has started
+            # This allows downstream processors to prepare for incoming audio
+            yield TTSStartedFrame()
+
+            # ================================================================================
+            # STEP 3: MAKE HTTP NON-STREAMING REQUEST
+            # ================================================================================
+            # Make single HTTP POST request to Inworld's non-streaming endpoint
+            # This endpoint returns complete audio as base64-encoded data
+            # Create session if none was provided
+            if self._session:
+                session = self._session
+            else:
+                session = aiohttp.ClientSession()
+
+            async with (
+                session
+                if not self._session
+                else session.post(
+                    self._base_url, json=payload, headers=headers
+                ) as context_or_response
+            ):
+                if self._session:
+                    response = context_or_response
+                else:
+                    async with context_or_response.post(
+                        self._base_url, json=payload, headers=headers
+                    ) as response:
+                        # ================================================================
+                        # STEP 4: HANDLE HTTP ERRORS
+                        # ================================================================
+                        # Check for API errors (expired keys, invalid requests, etc.)
+                        if response.status != 200:
+                            error_text = await response.text()
+                            logger.error(f"Inworld API error: {error_text}")
+                            await self.push_error(ErrorFrame(f"Inworld API error: {error_text}"))
+                            return
+
+                        # ================================================================
+                        # STEP 5: PARSE COMPLETE JSON RESPONSE
+                        # ================================================================
+                        # Parse the complete JSON response containing base64 audio data
+                        response_data = await response.json()
+
+                        # ================================================================
+                        # STEP 6: EXTRACT AND VALIDATE AUDIO CONTENT
+                        # ================================================================
+                        # Extract the base64-encoded audio content from response
+                        if "audioContent" not in response_data:
+                            logger.error("No audioContent in Inworld API response")
+                            await self.push_error(ErrorFrame("No audioContent in response"))
+                            return
+
+                        # ================================================================
+                        # STEP 7: DECODE AND PROCESS AUDIO DATA
+                        # ================================================================
+                        # Decode the base64 audio data to binary
+                        audio_data = base64.b64decode(response_data["audioContent"])
+
+                        # Strip WAV header if present (Inworld may include WAV header)
+                        # This prevents audio clicks and ensures clean audio playback
+                        if len(audio_data) > 44 and audio_data.startswith(b"RIFF"):
+                            audio_data = audio_data[44:]
+
+                        # ================================================================
+                        # STEP 8: START USAGE METRICS TRACKING
+                        # ================================================================
+                        await self.start_tts_usage_metrics(text)
+
+                        # ================================================================
+                        # STEP 9: CHUNK AND YIELD AUDIO FOR PLAYBACK
+                        # ================================================================
+                        # Chunk the complete audio for streaming playback
+                        # This allows the pipeline to process audio in manageable pieces
+                        CHUNK_SIZE = self.chunk_size
+
+                        for i in range(0, len(audio_data), CHUNK_SIZE):
+                            chunk = audio_data[i : i + CHUNK_SIZE]
+                            if len(chunk) > 0:
+                                await self.stop_ttfb_metrics()
+                                yield TTSAudioRawFrame(
+                                    audio=chunk,
+                                    sample_rate=self.sample_rate,
+                                    num_channels=1,
+                                )
+
+                if self._session:
+                    # Handle HTTP errors
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"Inworld API error: {error_text}")
+                        await self.push_error(ErrorFrame(f"Inworld API error: {error_text}"))
+                        return
+
+                    # Parse the complete JSON response
+                    response_data = await response.json()
+
+                    # Extract the base64-encoded audio content
+                    if "audioContent" not in response_data:
+                        logger.error("No audioContent in Inworld API response")
+                        await self.push_error(ErrorFrame("No audioContent in response"))
+                        return
+
+                    # Decode the base64 audio data
+                    audio_data = base64.b64decode(response_data["audioContent"])
+
+                    # Strip WAV header if present (Inworld may include WAV header)
+                    if len(audio_data) > 44 and audio_data.startswith(b"RIFF"):
+                        audio_data = audio_data[44:]
+
+                    await self.start_tts_usage_metrics(text)
+
+                    # Chunk the complete audio for streaming playback
+                    CHUNK_SIZE = self.chunk_size
+
+                    for i in range(0, len(audio_data), CHUNK_SIZE):
+                        chunk = audio_data[i : i + CHUNK_SIZE]
+                        if len(chunk) > 0:
+                            await self.stop_ttfb_metrics()
+                            yield TTSAudioRawFrame(
+                                audio=chunk,
+                                sample_rate=self.sample_rate,
+                                num_channels=1,
+                            )
+
+        except Exception as e:
+            # ================================================================================
+            # STEP 10: ERROR HANDLING
+            # ================================================================================
+            # Log any unexpected errors and notify the pipeline
+            logger.error(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
+        finally:
+            # ================================================================================
+            # STEP 11: CLEANUP AND COMPLETION
             # ================================================================================
             # Always stop metrics tracking, even if errors occurred
             await self.stop_ttfb_metrics()
