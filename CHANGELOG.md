@@ -68,6 +68,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it was only meant to do that when there were no "regular" (non-function-call)
   messages in the context, to ensure that inference would run properly.
 
+- Fixed an issue in `LiveKitTransport` where the `on_audio_track_subscribed` was never emitted.
+
 ## [0.0.76] - 2025-07-11
 
 ### Added
