@@ -17,6 +17,7 @@ from typing import List, Literal, Optional
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, CancelFrame, EndFrame, InputAudioRawFrame, InterimTranscriptionFrame, LLMMessagesAppendFrame, LLMMessagesUpdateFrame, LLMSetToolChoiceFrame, LLMSetToolsFrame, SpeechControlParamsFrame, StartFrame, TranscriptionFrame, UserStartedSpeakingFrame, UserStoppedSpeakingFrame
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -140,7 +141,6 @@ class LLMContextAggregator(FrameProcessor):
         """
         self._context.set_tools(tools)
 
-    # TODO: should we be using LLMContextToolChoice here?
     def set_tool_choice(self, tool_choice: Literal["none", "auto", "required"] | dict):
         """Set tool choice in the context.
 
@@ -226,5 +226,104 @@ class LLMUserContextAggregator(LLMContextAggregator):
             aggregation: The aggregated user text to add as a user message.
         """
         self._context.add_message({"role": self.role, "content": aggregation})
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames for user speech aggregation and context management.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            # Push StartFrame before start(), because we want StartFrame to be
+            # processed by every processor before any other frame is processed.
+            await self.push_frame(frame, direction)
+            await self._start(frame)
+        elif isinstance(frame, EndFrame):
+            # Push EndFrame before stop(), because stop() waits on the task to
+            # finish and the task finishes when EndFrame is processed.
+            await self.push_frame(frame, direction)
+            await self._stop(frame)
+        elif isinstance(frame, CancelFrame):
+            await self._cancel(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, InputAudioRawFrame):
+            await self._handle_input_audio(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStartedSpeakingFrame):
+            await self._handle_user_started_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, UserStoppedSpeakingFrame):
+            await self._handle_user_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            await self._handle_bot_started_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._handle_bot_stopped_speaking(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, TranscriptionFrame):
+            await self._handle_transcription(frame)
+        elif isinstance(frame, InterimTranscriptionFrame):
+            await self._handle_interim_transcription(frame)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            await self._handle_llm_messages_append(frame)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            await self._handle_llm_messages_update(frame)
+        elif isinstance(frame, LLMSetToolsFrame):
+            self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, SpeechControlParamsFrame):
+            self._vad_params = frame.vad_params
+            self._turn_params = frame.turn_params
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+    async def _process_aggregation(self):
+        """Process the current aggregation and push it downstream."""
+        aggregation = self._aggregation
+        await self.reset()
+        await self.handle_aggregation(aggregation)
+        frame = LLMContextFrame(self._context)
+        await self.push_frame(frame)
+
+    # TODO: you are here—there are errors to work out in the following method
+    async def push_aggregation(self):
+        """Push the current aggregation based on interruption strategies and conditions."""
+        if len(self._aggregation) > 0:
+            if self.interruption_strategies and self._bot_speaking:
+                should_interrupt = await self._should_interrupt_based_on_strategies()
+
+                if should_interrupt:
+                    logger.debug(
+                        "Interruption conditions met - pushing BotInterruptionFrame and aggregation"
+                    )
+                    await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                    await self._process_aggregation()
+                else:
+                    logger.debug("Interruption conditions not met - not pushing aggregation")
+                    # Don't process aggregation, just reset it
+                    await self.reset()
+            else:
+                # No interruption config - normal behavior (always push aggregation)
+                await self._process_aggregation()
+        # Handles the case where both the user and the bot are not speaking,
+        # and the bot was previously speaking before the user interruption.
+        # Normally, when the user stops speaking, new text is expected,
+        # which triggers the bot to respond. However, if no new text
+        # is received, this safeguard ensures
+        # the bot doesn't hang indefinitely while waiting to speak again.
+        elif not self._seen_interim_results and self._was_bot_speaking and not self._bot_speaking:
+            logger.warning("User stopped speaking but no new aggregation received.")
+            # Resetting it so we don't trigger this twice
+            self._was_bot_speaking = False
+            # TODO: we are not enabling this for now, due to some STT services which can take as long as 2 seconds two return a transcription
+            # So we need more tests and probably make this feature configurable, disabled it by default.
+            # We are just pushing the same previous context to be processed again in this case
+            # await self.push_frame(LLMContextFrame(self._context))
 
     # TODO: continue porting things over from LLMUserContextAggregator in backup file
