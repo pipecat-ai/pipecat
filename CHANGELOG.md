@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a dependency issue for uv users where an `llvmlite` version required python 3.9.
+
 - Fixed an issue in `MiniMaxHttpTTSService` where the `pitch` param was the
   incorrect type.
 
