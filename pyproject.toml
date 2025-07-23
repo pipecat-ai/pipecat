@@ -25,6 +25,7 @@ dependencies = [
     "docstring_parser~=0.16",
     "loguru~=0.7.3",
     "Markdown~=3.7",
+    "nltk>=3.9.1",
     "numpy>=1.26.4",
     "Pillow~=11.1.0",
     "protobuf~=5.29.3",

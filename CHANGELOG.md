@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `MiniMaxHttpTTSService` with a `base_url` arg where you can specify
   the Global endpoint (default) or Mainland China.
 
+- Replaced regex-based sentence detection in `match_endofsentence` with NLTK's
+  punkt_tab tokenizer for more reliable sentence boundary detection.
+
 - Changed the `livekit` optional dependency for `tenacity` to
   `tenacity>=8.2.3,<10.0.0` in order to support the `google-genai` package.
 
