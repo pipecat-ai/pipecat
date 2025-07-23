@@ -39,8 +39,9 @@ from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
-    import websockets
     from pyneuphonic import Neuphonic, TTSConfig
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Neuphonic, you need to `pip install pipecat-ai[neuphonic]`.")
@@ -271,7 +272,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
     async def _connect_websocket(self):
         """Establish WebSocket connection to Neuphonic API."""
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             logger.debug("Connecting to Neuphonic")
@@ -292,7 +293,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
 
             headers = {"x-api-key": self._api_key}
 
-            self._websocket = await websockets.connect(url, extra_headers=headers)
+            self._websocket = await websocket_connect(url, additional_headers=headers)
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -359,7 +360,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             try:
