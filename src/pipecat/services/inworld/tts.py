@@ -35,6 +35,7 @@ Usage::
             params=InworldHttpTTSService.InputParams(
                 voice_id="Ashley",
                 model="inworld-tts-1",
+                temperature=0.8,  # Optional: control synthesis variability (range: [0, 2])
             ),
         )
 """
@@ -109,10 +110,11 @@ class InworldHttpTTSService(TTSService):
                 aiohttp_session=session,
             )
 
-            # Or with custom voice and model via params
+            # Or with custom voice, model, and temperature via params
             params = InworldHttpTTSService.InputParams(
                 voice_id="Hades",
                 model="inworld-tts-1-max",
+                temperature=0.8,  # Add variability to speech synthesis (range: [0, 2])
             )
             tts = InworldHttpTTSService(
                 api_key=os.getenv("INWORLD_API_KEY"),
@@ -124,9 +126,11 @@ class InworldHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Inworld HTTP TTS configuration.
 
-        Parameters:
+                Parameters:
             voice_id: Voice selection for speech synthesis (e.g., "Ashley", "Hades").
             model: TTS model to use (e.g., "inworld-tts-1", "inworld-tts-1-max").
+            temperature: Voice temperature control for synthesis variability (e.g., 0.8).
+                        Valid range: [0, 2]. Higher values increase variability.
 
         Note:
             Language is automatically inferred from the input text by Inworld's TTS models,
@@ -135,6 +139,7 @@ class InworldHttpTTSService(TTSService):
 
         voice_id: Optional[str] = "Ashley"  # defaults to the Ashley voice
         model: Optional[str] = "inworld-tts-1"  # defaults to the inworld-tts-1 model
+        temperature: Optional[float] = None  # optional temperature control (range: [0, 2])
 
     def __init__(
         self,
@@ -167,6 +172,7 @@ class InworldHttpTTSService(TTSService):
             params: Input parameters for voice and model configuration. Use this to specify:
                    - voice_id: Voice selection ("Ashley", "Hades", etc.)
                    - model: TTS model ("inworld-tts-1", "inworld-tts-1-max", etc.)
+                   - temperature: Voice temperature control for variability (range: [0, 2], e.g., 0.8, optional)
                    If None, uses default values (Ashley voice, inworld-tts-1 model).
                    Note: Language is automatically inferred from input text.
             **kwargs: Additional arguments passed to the parent TTSService class.
@@ -197,6 +203,10 @@ class InworldHttpTTSService(TTSService):
                 "sample_rate_hertz": 0,  # Will be set in start() from parent service
             },
         }
+
+        # Add optional temperature parameter if provided (valid range: [0, 2])
+        if params.temperature is not None:
+            self._settings["temperature"] = params.temperature
 
         # Register voice and model with parent service for metrics and tracking
         self.set_voice(params.voice_id or "Ashley")  # Used for logging and metrics
@@ -278,6 +288,10 @@ class InworldHttpTTSService(TTSService):
                 "audio_config"
             ],  # Audio format settings (LINEAR16, 48kHz)
         }
+
+        # Add optional temperature parameter if configured (valid range: [0, 2])
+        if "temperature" in self._settings:
+            payload["temperature"] = self._settings["temperature"]
 
         # Set up HTTP headers for authentication and content type
         # Inworld requires Basic auth with base64-encoded API key
