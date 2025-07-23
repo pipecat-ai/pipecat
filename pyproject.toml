@@ -36,7 +36,6 @@ dependencies = [
     "openai~=1.74.0",
     # Explicit dependency pins for Python 3.11+ compatibility
     "numba>=0.61.0",
-    "llvmlite>=0.44.0",
 ]
 
 [project.urls]
