@@ -10,7 +10,7 @@ import asyncio
 import base64
 import json
 import uuid
-from typing import AsyncGenerator, Dict, Optional
+from typing import AsyncGenerator, Dict, Optional, Mapping, Any
 
 from loguru import logger
 from pydantic import BaseModel
@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import InterruptibleTTSService
+from pipecat.services.tts_service import AudioContextWordTTSService
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -39,7 +39,7 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class MurfTTSService(InterruptibleTTSService):
+class MurfTTSService(AudioContextWordTTSService):
     """Murf AI WebSocket-based text-to-speech service.
 
     Provides real-time text-to-speech synthesis using Murf's WebSocket API.
@@ -63,7 +63,7 @@ class MurfTTSService(InterruptibleTTSService):
             format: The audio format for output. Defaults to "PCM".
         """
 
-        voice_id: Optional[str] = "en-US-daniel"
+        voice_id: Optional[str] = "en-US-natalie"
         style: Optional[str] = "Conversational"
         rate: Optional[int] = 0
         pitch: Optional[int] = 0
@@ -91,7 +91,7 @@ class MurfTTSService(InterruptibleTTSService):
             sample_rate: Audio sample rate (overrides params.sample_rate if provided).
             params: Additional input parameters for voice customization.
             aggregate_sentences: Whether to aggregate sentences before synthesis.
-            **kwargs: Additional arguments passed to parent InterruptibleTTSService.
+            **kwargs: Additional arguments passed to parent AudioContextWordTTSService.
         """
         params = params or MurfTTSService.InputParams()
 
@@ -99,7 +99,8 @@ class MurfTTSService(InterruptibleTTSService):
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             push_stop_frames=True,
-            sample_rate= params.sample_rate,
+            pause_frame_processing=True,
+            sample_rate=params.sample_rate,
             **kwargs,
         )
 
@@ -129,6 +130,26 @@ class MurfTTSService(InterruptibleTTSService):
             True, as Murf service supports metrics generation.
         """
         return True
+
+    def set_voice(self, voice_id: str):
+        logger.info(f"Setting Murf TTS voice to: [{voice_id}]")
+        self._settings["voice_id"] = voice_id
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Update service settings and reconnect if URL parameters changed.
+
+        Args:
+            settings: Dictionary of settings to update.
+        """
+        await super()._update_settings(settings)
+
+        url_params = {"sample_rate", "format", "channel_type"}
+        needs_reconnect = any(key in url_params for key in settings.keys())
+
+        if needs_reconnect:
+            await self._disconnect()
+            await self._connect()
+            logger.info(f"Reconnected Murf TTS due to URL parameter changes")
 
     async def _verify_connection(self) -> bool:
         """Verify the websocket connection is active and responsive.
@@ -220,6 +241,9 @@ class MurfTTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
         finally:
+            if self._context_id:
+                if self.audio_context_available(self._context_id):
+                    await self.remove_audio_context(self._context_id)
             self._context_id = None
             self._websocket = None
 
@@ -254,7 +278,6 @@ class MurfTTSService(InterruptibleTTSService):
         """Receive and process messages from Murf WebSocket."""
         async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
             try:
-                logger.debug(f"{self} received message: {message}")
                 if isinstance(message, str):
                     data = json.loads(message)
                     await self._process_json_message(data)
@@ -272,12 +295,17 @@ class MurfTTSService(InterruptibleTTSService):
         1. audioOutput: Contains base64-encoded audio data
         2. finalOutput: Indicates end of synthesis (final=true)
         """
+        received_ctx_id = data.get("context_id", self._context_id)
+        if not self.audio_context_available(received_ctx_id):
+            logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
+            return
+
         if "error" in data:
             logger.error(f"{self} error: {data['error']}")
             await self.push_frame(TTSStoppedFrame())
             await self.stop_all_metrics()
             await self.push_error(ErrorFrame(f"{self} error: {data['error']}"))
-
+            await self.remove_audio_context(received_ctx_id)
             self._context_id = None
             return
 
@@ -285,31 +313,30 @@ class MurfTTSService(InterruptibleTTSService):
             try:
                 audio_b64 = data["audio"]
                 audio_data = base64.b64decode(audio_b64)
-                await self._process_audio_data(audio_data)
-                logger.debug(f"{self} processed audio chunk ({len(audio_data)} bytes)")
+                await self._process_audio_data_to_context(received_ctx_id, audio_data)
             except Exception as e:
                 logger.error(f"{self} error decoding audio data: {e}")
             return
 
         if data.get("final") is True:
-            logger.debug(f"{self} received final output for context {data.get('context_id')}")
+            logger.debug(f"{self} received final output for context {received_ctx_id}")
             await self.push_frame(TTSStoppedFrame())
             await self.stop_all_metrics()
-
+            await self.remove_audio_context(received_ctx_id)
             self._context_id = None
             return
 
         logger.debug(f"{self} received unknown message: {data}")
 
-    async def _process_audio_data(self, audio_data: bytes):
-        """Process decoded audio data from Murf."""
+    async def _process_audio_data_to_context(self, context_id: str, audio_data: bytes):
+        """Process decoded audio data from Murf and append to context."""
         await self.stop_ttfb_metrics()
         frame = TTSAudioRawFrame(
             audio=audio_data,
             sample_rate=self.sample_rate,
             num_channels=1,
         )
-        await self.push_frame(frame)
+        await self.append_to_audio_context(context_id, frame)
 
     def _build_voice_config_message(self, text: str, is_last: bool = False) -> Dict:
         """Build voice configuration message for Murf API.
@@ -361,9 +388,10 @@ class MurfTTSService(InterruptibleTTSService):
                 await self._connect()
 
             if not self._context_id:
-                self._context_id = str(uuid.uuid4())
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame()
+                self._context_id = str(uuid.uuid4())
+                await self.create_audio_context(self._context_id)
 
             voice_config_msg = self._build_voice_config_message(text, is_last=True)
 
