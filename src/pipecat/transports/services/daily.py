@@ -62,6 +62,9 @@ try:
         VirtualCameraDevice,
         VirtualSpeakerDevice,
     )
+    from daily import (
+        LogLevel as DailyLogLevel,
+    )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -1923,6 +1926,18 @@ class DailyTransport(BaseTransport):
             The participant ID assigned by Daily.
         """
         return self._client.participant_id
+
+    def set_log_level(self, level: DailyLogLevel):
+        """Set the logging level for Daily's internal logging system.
+
+        Args:
+            level: The log level to set. Should be a member of the DailyLogLevel enum,
+                  such as DailyLogLevel.Info, DailyLogLevel.Debug, etc.
+
+        Example:
+            transport.set_log_level(DailyLogLevel.Info)
+        """
+        Daily.set_log_level(level)
 
     async def send_image(self, frame: OutputImageRawFrame | SpriteFrame):
         """Send an image frame to the Daily call.
