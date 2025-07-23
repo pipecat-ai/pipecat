@@ -126,7 +126,7 @@ class InworldHttpTTSService(TTSService):
     class InputParams(BaseModel):
         """Input parameters for Inworld HTTP TTS configuration.
 
-                Parameters:
+        Parameters:
             voice_id: Voice selection for speech synthesis (e.g., "Ashley", "Hades").
             model: TTS model to use (e.g., "inworld-tts-1", "inworld-tts-1-max").
             temperature: Voice temperature control for synthesis variability (e.g., 0.8).
