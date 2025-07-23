@@ -295,6 +295,22 @@ This project uses TypeScript, React, and Next.js, making it a perfect fit for [V
 
 Again, we'll use Pipecat Cloud. Follow the steps from above. The only difference will be the secrets required; in addition to a GOOGLE_API_KEY, you'll need `GOOGLE_APPLICATION_CREDENTIALS` in the format of a .json file with your [Google Cloud service account](https://console.cloud.google.com/iam-admin/serviceaccounts) information.
 
+You'll need to modify the Dockerfile so that the credentials.json and word_list.py are accessible. This Dockerfile will work:
+
+```Dockerfile
+FROM dailyco/pipecat-base:latest
+
+COPY ./requirements.txt requirements.txt
+
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
+
+COPY ./word_list.py word_list.py
+COPY ./credentials.json credentials.json
+COPY ./bot_phone_twilio.py bot.py
+```
+
+Note: Your `credentials.json` file should have your Google service account credentials.
+
 #### Buy and Configure a Twilio Number
 
 Check out the [Twilio Websocket Telephony guide](https://docs.pipecat.daily.co/pipecat-in-production/telephony/twilio-mediastreams) for a step-by-step walkthrough on how to purchase a phone number, configure your TwiML, and make or receive calls.
