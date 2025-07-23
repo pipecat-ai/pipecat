@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tasks cancelled error` to a debug log. This removes the log from appearing
   in Pipecat logs upon leaving.
 
+- Upgraded the `websockets` implementation to the new asyncio implementation.
+  Along with this change, we're updating support for versions >=13.1.0 and
+  <15.0.0. All services have been update to use the asyncio implementation.
+
 - Updated `MiniMaxHttpTTSService` with a `base_url` arg where you can specify
   the Global endpoint (default) or Mainland China.
 
