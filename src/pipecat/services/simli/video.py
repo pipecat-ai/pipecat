@@ -77,9 +77,8 @@ class SimliVideoService(FrameProcessor):
 
         self._audio_task: asyncio.Task = None
         self._video_task: asyncio.Task = None
-        self._started = False
         self._is_trinity_avatar = is_trinity_avatar
-        self._previously_interrupted = True
+        self._previously_interrupted = is_trinity_avatar
         self._audio_buffer = bytearray()
 
     async def _start_connection(self):
@@ -153,7 +152,7 @@ class SimliVideoService(FrameProcessor):
                 resampled_frames = self._simli_resampler.resample(old_frame)
                 for resampled_frame in resampled_frames:
                     audioBytes = resampled_frame.to_ndarray().astype(np.int16).tobytes()
-                    if self._previously_interrupted and self._is_trinity_avatar:
+                    if self._previously_interrupted:
                         self._audio_buffer.extend(audioBytes)
                         if len(self._audio_buffer) >= 128000:
                             try:
@@ -176,12 +175,9 @@ class SimliVideoService(FrameProcessor):
                     await self._simli_client.playImmediate(self._audio_buffer)
                     self._previously_interrupted = False
                     self._audio_buffer = bytearray()
-
             except Exception as e:
                 logger.exception(f"{self} exception: {e}")
             return
-            self._started = True
-            await self._simli_client.send((0).to_bytes(1, "big") * 6000)
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
         elif isinstance(frame, (StartInterruptionFrame, UserStartedSpeakingFrame)):
