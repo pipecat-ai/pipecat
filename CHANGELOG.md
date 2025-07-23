@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `LocalSmartTurnAnalyzerV2`, which supports local on-device inference
   with the new `smart-turn-v2` turn detection model.
 
+- Added `set_log_level` to `DailyTransport`, allowing setting the logging level
+  for Daily's internal logging system.
+
 ### Changed
 
 - Updated the `deepgram` optional dependency to 4.7.0, which downgrades the

@@ -20,7 +20,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.daily import DailyLogLevel, DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -43,6 +43,7 @@ async def main():
                 vad_analyzer=SileroVADAnalyzer(),
             ),
         )
+        transport.set_log_level(DailyLogLevel.Info)
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),
