@@ -9,13 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new field `handle_sigterm` to `PipelineRunner`. It defaults to `False`.
+  This field handles SIGTERM signals. The `handle_sigint` field still defaults
+  to `True`, but now it handles only SIGINT signals.
+
 - Added foundational example `14u-function-calling-ollama.py` for Ollama
   function calling.
 
 - Added `LocalSmartTurnAnalyzerV2`, which supports local on-device inference
   with the new `smart-turn-v2` turn detection model.
 
+- Added `set_log_level` to `DailyTransport`, allowing setting the logging level
+  for Daily's internal logging system.
+
 ### Changed
+
+- Updated the `deepgram` optional dependency to 4.7.0, which downgrades the
+  `tasks cancelled error` to a debug log. This removes the log from appearing
+  in Pipecat logs upon leaving.
+
+- Upgraded the `websockets` implementation to the new asyncio implementation.
+  Along with this change, we're updating support for versions >=13.1.0 and
+  <15.0.0. All services have been update to use the asyncio implementation.
 
 - Updated `MiniMaxHttpTTSService` with a `base_url` arg where you can specify
   the Global endpoint (default) or Mainland China.
@@ -52,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `system_message` as a "user" message into cases where it was not meant to;
   it was only meant to do that when there were no "regular" (non-function-call)
   messages in the context, to ensure that inference would run properly.
+
+- Fixed an issue in `LiveKitTransport` where the `on_audio_track_subscribed` was never emitted.
 
 ## [0.0.76] - 2025-07-11
 

@@ -44,6 +44,7 @@ from .models import (
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use AssemblyAI, you need to `pip install "pipecat-ai[assemblyai]"`.')
@@ -190,9 +191,9 @@ class AssemblyAISTTService(STTService):
                 "Authorization": self._api_key,
                 "User-Agent": f"AssemblyAI/1.0 (integration=Pipecat/{pipecat_version})",
             }
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 ws_url,
-                extra_headers=headers,
+                additional_headers=headers,
             )
             self._connected = True
             self._receive_task = self.create_task(self._receive_task_handler())

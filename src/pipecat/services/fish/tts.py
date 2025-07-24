@@ -34,7 +34,8 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import ormsgpack
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Fish Audio, you need to `pip install pipecat-ai[fish]`.")
@@ -210,13 +211,13 @@ class FishAudioTTSService(InterruptibleTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             logger.debug("Connecting to Fish Audio")
             headers = {"Authorization": f"Bearer {self._api_key}"}
             headers["model"] = self.model_name
-            self._websocket = await websockets.connect(self._base_url, extra_headers=headers)
+            self._websocket = await websocket_connect(self._base_url, additional_headers=headers)
 
             # Send initial start message with ormsgpack
             start_message = {"event": "start", "request": {"text": "", **self._settings}}
@@ -246,7 +247,7 @@ class FishAudioTTSService(InterruptibleTTSService):
     async def flush_audio(self):
         """Flush any buffered audio by sending a flush event to Fish Audio."""
         logger.trace(f"{self}: Flushing audio buffers")
-        if not self._websocket or self._websocket.closed:
+        if not self._websocket or self._websocket.state is State.CLOSED:
             return
         flush_message = {"event": "flush"}
         await self._get_websocket().send(ormsgpack.packb(flush_message))
@@ -292,7 +293,7 @@ class FishAudioTTSService(InterruptibleTTSService):
         """
         logger.debug(f"{self}: Generating Fish TTS: [{text}]")
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             if not self._request_id:

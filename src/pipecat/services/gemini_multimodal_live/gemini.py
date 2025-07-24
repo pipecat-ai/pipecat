@@ -75,7 +75,7 @@ from . import events
 from .file_api import GeminiFileAPI
 
 try:
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -791,7 +791,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         try:
             logger.info(f"Connecting to wss://{self._base_url}")
             uri = f"wss://{self._base_url}?key={self._api_key}"
-            self._websocket = await websockets.connect(uri=uri)
+            self._websocket = await websocket_connect(uri=uri)
             self._receive_task = self.create_task(self._receive_task_handler())
 
             # Create the basic configuration

@@ -439,6 +439,7 @@ class LiveKitTransportClient:
                 self._process_audio_stream(audio_stream, participant.sid),
                 f"{self}::_process_audio_stream",
             )
+            await self._callbacks.on_audio_track_subscribed(participant.sid)
 
     async def _async_on_track_unsubscribed(
         self,
