@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Play delayed messages from `ElevenLabsTTSService` if they still belong to the
+  current context.
+
 - Dependency compatibility improvements: Relaxed version constraints for core
   dependencies to support broader version ranges while maintaining stability:
 
