@@ -12,8 +12,9 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 """
 
 import asyncio
+import json
 from dataclasses import dataclass
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Set
 
 from loguru import logger
 
@@ -29,20 +30,31 @@ from pipecat.frames.frames import (
     EmulateUserStoppedSpeakingFrame,
     EndFrame,
     Frame,
+    FunctionCallCancelFrame,
+    FunctionCallInProgressFrame,
+    FunctionCallResultFrame,
+    FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextAssistantTimestampFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     SpeechControlParamsFrame,
     StartFrame,
+    StartInterruptionFrame,
+    TextFrame,
     TranscriptionFrame,
+    UserImageRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.time import time_now_iso8601
 
 
 @dataclass
@@ -242,14 +254,6 @@ class LLMUserContextAggregator(LLMContextAggregator):
         self._waiting_for_aggregation = False
         [await s.reset() for s in self._interruption_strategies]
 
-    async def handle_aggregation(self, aggregation: str):
-        """Add the aggregated user text to the context.
-
-        Args:
-            aggregation: The aggregated user text to add as a user message.
-        """
-        self._context.add_message({"role": self.role, "content": aggregation})
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for user speech aggregation and context management.
 
@@ -310,11 +314,11 @@ class LLMUserContextAggregator(LLMContextAggregator):
         """Process the current aggregation and push it downstream."""
         aggregation = self._aggregation
         await self.reset()
-        await self.handle_aggregation(aggregation)
+        self._context.add_message({"role": self.role, "content": aggregation})
         frame = LLMContextFrame(self._context)
         await self.push_frame(frame)
 
-    async def push_aggregation(self):
+    async def _push_aggregation(self):
         """Push the current aggregation based on interruption strategies and conditions."""
         if len(self._aggregation) > 0:
             if self.interruption_strategies and self._bot_speaking:
@@ -402,7 +406,7 @@ class LLMUserContextAggregator(LLMContextAggregator):
         # pushing the aggregation as we will probably get a final transcription.
         if len(self._aggregation) > 0:
             if not self._seen_interim_results:
-                await self.push_aggregation()
+                await self._push_aggregation()
         # Handles the case where both the user and the bot are not speaking,
         # and the bot was previously speaking before the user interruption.
         # So in this case we are resetting the aggregation timer
@@ -481,7 +485,7 @@ class LLMUserContextAggregator(LLMContextAggregator):
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
-                    await self.push_aggregation()
+                    await self._push_aggregation()
 
                 # If we are emulating VAD we still need to send the user stopped
                 # speaking frame.
@@ -520,3 +524,291 @@ class LLMUserContextAggregator(LLMContextAggregator):
                 # emulation.
                 await self.push_frame(EmulateUserStartedSpeakingFrame(), FrameDirection.UPSTREAM)
                 self._emulating_vad = True
+
+
+class LLMAssistantContextAggregator(LLMContextAggregator):
+    """Assistant LLM aggregator that processes bot responses and function calls.
+
+    This aggregator handles the complex logic of processing assistant responses including:
+
+    - Text frame aggregation between response start/end markers
+    - Function call lifecycle management
+    - Context updates with timestamps
+    - Tool execution and result handling
+    - Interruption handling during responses
+
+    The aggregator manages function calls in progress and coordinates between
+    text generation and tool execution phases of LLM responses.
+    """
+
+    def __init__(
+        self,
+        context: LLMContext,
+        *,
+        params: Optional[LLMAssistantContextAggregatorParams] = None,
+        **kwargs,
+    ):
+        """Initialize the assistant context aggregator.
+
+        Args:
+            context: The OpenAI LLM context for conversation storage.
+            params: Configuration parameters for aggregation behavior.
+            **kwargs: Additional arguments. Supports deprecated 'expect_stripped_words'.
+        """
+        super().__init__(context=context, role="assistant", **kwargs)
+        self._params = params or LLMAssistantContextAggregatorParams()
+
+        if "expect_stripped_words" in kwargs:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'expect_stripped_words' is deprecated, use 'params' instead.",
+                    DeprecationWarning,
+                )
+
+            self._params.expect_stripped_words = kwargs["expect_stripped_words"]
+
+        self._started = 0
+        self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
+        self._context_updated_tasks: Set[asyncio.Task] = set()
+
+    @property
+    def has_function_calls_in_progress(self) -> bool:
+        """Check if there are any function calls currently in progress.
+
+        Returns:
+            True if function calls are in progress, False otherwise.
+        """
+        return bool(self._function_calls_in_progress)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames for assistant response aggregation and function call management.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartInterruptionFrame):
+            await self._handle_interruptions(frame)
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, LLMFullResponseStartFrame):
+            await self._handle_llm_start(frame)
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            await self._handle_llm_end(frame)
+        elif isinstance(frame, TextFrame):
+            await self._handle_text(frame)
+        elif isinstance(frame, LLMMessagesAppendFrame):
+            await self._handle_llm_messages_append(frame)
+        elif isinstance(frame, LLMMessagesUpdateFrame):
+            await self._handle_llm_messages_update(frame)
+        elif isinstance(frame, LLMSetToolsFrame):
+            self.set_tools(frame.tools)
+        elif isinstance(frame, LLMSetToolChoiceFrame):
+            self.set_tool_choice(frame.tool_choice)
+        elif isinstance(frame, FunctionCallsStartedFrame):
+            await self._handle_function_calls_started(frame)
+        elif isinstance(frame, FunctionCallInProgressFrame):
+            await self._handle_function_call_in_progress(frame)
+        elif isinstance(frame, FunctionCallResultFrame):
+            await self._handle_function_call_result(frame)
+        elif isinstance(frame, FunctionCallCancelFrame):
+            await self._handle_function_call_cancel(frame)
+        elif isinstance(frame, UserImageRawFrame) and frame.request and frame.request.tool_call_id:
+            await self._handle_user_image_frame(frame)
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            await self._push_aggregation()
+            await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+    async def _push_aggregation(self):
+        """Push the current assistant aggregation with timestamp."""
+        if not self._aggregation:
+            return
+
+        aggregation = self._aggregation.strip()
+        await self.reset()
+
+        if aggregation:
+            self._context.add_message({"role": "assistant", "content": aggregation})
+
+        # Push context frame
+        await self.push_context_frame()
+
+        # Push timestamp frame with current time
+        timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
+        await self.push_frame(timestamp_frame)
+
+    async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
+        self.add_messages(frame.messages)
+        if frame.run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
+
+    async def _handle_llm_messages_update(self, frame: LLMMessagesUpdateFrame):
+        self.set_messages(frame.messages)
+        if frame.run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
+
+    async def _handle_interruptions(self, frame: StartInterruptionFrame):
+        await self._push_aggregation()
+        self._started = 0
+        await self.reset()
+
+    async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
+        function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
+        logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
+        for function_call in frame.function_calls:
+            self._function_calls_in_progress[function_call.tool_call_id] = None
+
+    async def _handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        logger.debug(
+            f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
+        )
+
+        # Update context with the in-progress function call
+        self._context.add_message(
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": frame.tool_call_id,
+                        "function": {
+                            "name": frame.function_name,
+                            "arguments": json.dumps(frame.arguments),
+                        },
+                        "type": "function",
+                    }
+                ],
+            }
+        )
+        self._context.add_message(
+            {
+                "role": "tool",
+                "content": "IN_PROGRESS",
+                "tool_call_id": frame.tool_call_id,
+            }
+        )
+
+        self._function_calls_in_progress[frame.tool_call_id] = frame
+
+    async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
+        logger.debug(
+            f"{self} FunctionCallResultFrame: [{frame.function_name}:{frame.tool_call_id}]"
+        )
+        if frame.tool_call_id not in self._function_calls_in_progress:
+            logger.warning(
+                f"FunctionCallResultFrame tool_call_id [{frame.tool_call_id}] is not running"
+            )
+            return
+
+        del self._function_calls_in_progress[frame.tool_call_id]
+
+        properties = frame.properties
+
+        # Update context with the function call result
+        if frame.result:
+            result = json.dumps(frame.result)
+            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+        else:
+            self._update_function_call_result(frame.function_name, frame.tool_call_id, "COMPLETED")
+
+        run_llm = False
+
+        # Run inference if the function call result requires it.
+        if frame.result:
+            if properties and properties.run_llm is not None:
+                # If the tool call result has a run_llm property, use it.
+                run_llm = properties.run_llm
+            elif frame.run_llm is not None:
+                # If the frame is indicating we should run the LLM, do it.
+                run_llm = frame.run_llm
+            else:
+                # If this is the last function call in progress, run the LLM.
+                run_llm = not bool(self._function_calls_in_progress)
+
+        if run_llm:
+            await self.push_context_frame(FrameDirection.UPSTREAM)
+
+        # Call the `on_context_updated` callback once the function call result
+        # is added to the context. Also, run this in a separate task to make
+        # sure we don't block the pipeline.
+        if properties and properties.on_context_updated:
+            task_name = f"{frame.function_name}:{frame.tool_call_id}:on_context_updated"
+            task = self.create_task(properties.on_context_updated(), task_name)
+            self._context_updated_tasks.add(task)
+            task.add_done_callback(self._context_updated_task_finished)
+
+    async def _handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
+        logger.debug(
+            f"{self} FunctionCallCancelFrame: [{frame.function_name}:{frame.tool_call_id}]"
+        )
+        if frame.tool_call_id not in self._function_calls_in_progress:
+            return
+
+        if self._function_calls_in_progress[frame.tool_call_id].cancel_on_interruption:
+            # Update context with the function call cancellation
+            self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
+            del self._function_calls_in_progress[frame.tool_call_id]
+
+    def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
+        for message in self._context.messages:
+            if (
+                message["role"] == "tool"
+                and message["tool_call_id"]
+                and message["tool_call_id"] == tool_call_id
+            ):
+                message["content"] = result
+
+    async def _handle_user_image_frame(self, frame: UserImageRawFrame):
+        logger.debug(
+            f"{self} UserImageRawFrame: [{frame.request.function_name}:{frame.request.tool_call_id}]"
+        )
+
+        if frame.request.tool_call_id not in self._function_calls_in_progress:
+            logger.warning(
+                f"UserImageRawFrame tool_call_id [{frame.request.tool_call_id}] is not running"
+            )
+            return
+
+        del self._function_calls_in_progress[frame.request.tool_call_id]
+
+        # Update context with the image frame
+        await self._update_function_call_result(
+            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
+        )
+        self._context.add_image_frame_message(
+            format=frame.format,
+            size=frame.size,
+            image=frame.image,
+            text=frame.request.context,
+        )
+
+        await self._push_aggregation()
+        await self.push_context_frame(FrameDirection.UPSTREAM)
+
+    async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
+        self._started += 1
+
+    async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
+        self._started -= 1
+        await self._push_aggregation()
+
+    async def _handle_text(self, frame: TextFrame):
+        if not self._started:
+            return
+
+        if self._params.expect_stripped_words:
+            self._aggregation += f" {frame.text}" if self._aggregation else frame.text
+        else:
+            self._aggregation += frame.text
+
+    def _context_updated_task_finished(self, task: asyncio.Task):
+        self._context_updated_tasks.discard(task)
+        # The task is finished so this should exit immediately. We need to do
+        # this because otherwise the task manager would report a dangling task
+        # if we don't remove it.
+        asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
