@@ -20,22 +20,22 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiohttp~=3.11.12",
+    "aiohttp>=3.11.12,<4",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "docstring_parser~=0.16",
     "loguru~=0.7.3",
-    "Markdown~=3.7",
-    "nltk>=3.9.1",
-    "numpy>=1.26.4",
-    "Pillow~=11.1.0",
+    "Markdown>=3.7,<4",
+    "nltk>=3.9.1,<4",
+    "numpy>=1.26.4,<3",
+    "Pillow>=11.1.0,<12",
     "protobuf~=5.29.3",
-    "pydantic~=2.10.6",
+    "pydantic>=2.10.6,<3",
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.74.0",
+    "openai>=1.74.0,<2",
     # Explicit dependency pins for Python 3.11+ compatibility
-    "numba>=0.61.0",
+    "numba>=0.60.0,<1",
 ]
 
 [project.urls]
@@ -46,7 +46,7 @@ Website = "https://pipecat.ai"
 anthropic = [ "anthropic~=0.49.0" ]
 assemblyai = [ "websockets>=13.1,<15.0" ]
 aws = [ "aioboto3~=15.0.0", "websockets>=13.1,<15.0" ]
-aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.0.2" ]
+aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.0.2; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "websockets>=13.1,<15.0" ]
 cerebras = []
@@ -79,13 +79,13 @@ openai = [ "websockets>=13.1,<15.0" ]
 openpipe = [ "openpipe~=4.50.0" ]
 openrouter = []
 perplexity = []
-playht = [ "pyht~=0.1.12", "websockets>=13.1,<15.0" ]
+playht = [ "pyht>=0.1.6", "websockets>=13.1,<15.0" ]
 qwen = []
 rime = [ "websockets>=13.1,<15.0" ]
 riva = [ "nvidia-riva-client~=2.21.1" ]
 sambanova = []
 sentry = [ "sentry-sdk~=2.23.1" ]
-local-smart-turn = [ "coremltools>=8.0", "transformers", "torch==2.5.0", "torchaudio==2.5.0" ]
+local-smart-turn = [ "coremltools>=8.0", "transformers", "torch~=2.5.0", "torchaudio~=2.5.0" ]
 remote-smart-turn = []
 silero = [ "onnxruntime~=1.20.1" ]
 simli = [ "simli-ai~=0.1.10"]
@@ -97,7 +97,7 @@ together = []
 tracing = [ "opentelemetry-sdk>=1.33.0", "opentelemetry-api>=1.33.0", "opentelemetry-instrumentation>=0.54b0" ]
 ultravox = [ "transformers>=4.48.0", "vllm~=0.7.3" ]
 webrtc = [ "aiortc~=1.11.0", "opencv-python~=4.11.0.86" ]
-websocket = [ "websockets>=13.1,<15.0", "fastapi~=0.115.6" ]
+websocket = [ "websockets>=13.1,<15.0", "fastapi>=0.115.6,<0.117.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
 
 [tool.setuptools.packages.find]
