@@ -650,7 +650,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     # an interruption, which resets the context ID.
                     if not self._context_id:
                         self._context_id = str(uuid.uuid4())
-                    await self.create_audio_context(self._context_id)
+                    if not self.audio_context_available(self._context_id):
+                        await self.create_audio_context(self._context_id)
 
                     # Initialize context with voice settings
                     msg = {"text": " ", "context_id": self._context_id}
