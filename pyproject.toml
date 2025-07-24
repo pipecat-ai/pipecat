@@ -152,3 +152,6 @@ convention = "google"
 command_line = "--module pytest"
 source = ["src"]
 omit = ["*/tests/*"]
+
+[project.scripts]
+pipecat = "pipecat.__main__:main"
