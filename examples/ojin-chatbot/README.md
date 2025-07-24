@@ -37,6 +37,14 @@ Make sure to fill out proper values for required environment variables in the `.
 
 ---
 
+## Ojin Pipecat development
+
+If you want to develop the pipecat ojin integration, you can use the dev-requirements.txt to install pipecat from source
+```bash
+pip install -r dev-requirements.txt
+```
+
+
 ## 🚀 Usage
 
 Run the main script:
@@ -52,7 +60,7 @@ When the app launches, it will connect to the OjinAvatarService and begin proces
 The project relies on:
 
 - [pipecat](https://github.com/pipecat-ai/pipecat) – For building the audio processing pipeline.
-- **OjinAvatarService** – For connecting to the Ojin platform and generating avatar video. https://dashboard.ojin.ai/
+- **Ojin** – For avatar video generation from tts audio. https://dashboard.ojin.ai/
 - **OpenAI** – For LLM processing.
 - **ElevenLabs** – For TTS processing.
 - **Deepgram** – For STT processing.
