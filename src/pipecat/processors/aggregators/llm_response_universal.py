@@ -822,3 +822,53 @@ class LLMAssistantContextAggregator_Universal(LLMContextAggregator):
         # this because otherwise the task manager would report a dangling task
         # if we don't remove it.
         asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
+
+
+@dataclass
+class LLMContextAggregatorPair:
+    """Pair of LLM context aggregators for user and assistant messages.
+
+    Parameters:
+        _user: User context aggregator for processing user messages.
+        _assistant: Assistant context aggregator for processing assistant messages.
+    """
+
+    _user: LLMUserContextAggregator_Universal
+    _assistant: LLMAssistantContextAggregator_Universal
+
+    @staticmethod
+    def create(
+        context: LLMContext,
+        *,
+        user_params: LLMUserContextAggregatorParams = LLMUserContextAggregatorParams(),
+        assistant_params: LLMAssistantContextAggregatorParams = LLMAssistantContextAggregatorParams(),
+    ) -> "LLMContextAggregatorPair":
+        """Factory method to create an LLMContextAggregatorPair.
+
+        Args:
+            context: The context managed by the aggregators.
+            user_params: Parameters for the user context aggregator.
+            assistant_params: Parameters for the assistant context aggregator.
+
+        Returns:
+            LLMContextAggregatorPair: A new instance with configured aggregators.
+        """
+        user = LLMUserContextAggregator_Universal(context, params=user_params)
+        assistant = LLMAssistantContextAggregator_Universal(context, params=assistant_params)
+        return LLMContextAggregatorPair(_user=user, _assistant=assistant)
+
+    def user(self) -> LLMUserContextAggregator_Universal:
+        """Get the user context aggregator.
+
+        Returns:
+            The user context aggregator instance.
+        """
+        return self._user
+
+    def assistant(self) -> LLMAssistantContextAggregator_Universal:
+        """Get the assistant context aggregator.
+
+        Returns:
+            The assistant context aggregator instance.
+        """
+        return self._assistant
