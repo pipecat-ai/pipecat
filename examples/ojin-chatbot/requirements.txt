@@ -1,5 +1,4 @@
-./dependencies/ojin-0.1.0-py3-none-any.whl
-pipecat-ai[whisper, openai, elevenlabs, deepgram]
+pipecat-ai[whisper, openai, elevenlabs, deepgram, ojin]
 textual==1.0.0
 pydantic-settings==2.7.1
 pyaudio==0.2.14
