@@ -505,6 +505,17 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
     while maintaining compatibility with the standard aggregation pipeline.
     """
 
+    async def handle_aggregation(self, aggregation: str):
+        """Add the aggregated user text to the context.
+
+        Args:
+            aggregation: The aggregated user text to add as a user message.
+        """
+        print(f"_____________________________________________gemini_vertex.py * USER handle_aggregation:..")
+        turn = {"role": self.role, "content": aggregation}
+        converted = self._context.from_standard_message(turn)
+        self._context.add_message(converted)
+
     async def process_frame(self, frame, direction):
         """Process incoming frames for user context aggregation.
 
@@ -525,6 +536,16 @@ class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggre
     to prevent duplicate context entries, as Gemini Live pushes both
     LLMTextFrames and TTSTextFrames.
     """
+    async def handle_aggregation(self, aggregation: str):
+        """Add the aggregated user text to the context.
+
+        Args:
+            aggregation: The aggregated user text to add as a user message.
+        """
+        print(f"_____________________________________________gemini_vertex.py * ASSISTENT handle_aggregation:..")
+        turn = {"role": "assistant", "content": aggregation}
+        converted = self._context.from_standard_message(turn)
+        self._context.add_message(converted)    
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames for assistant context aggregation.
@@ -807,8 +828,8 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
 
-        # self._config = LiveConnectConfig(
-        #     response_modalities=[params.modalities],
+        self._config = LiveConnectConfig(
+            response_modalities=[params.modalities],
         #         speech_config=SpeechConfig(
         #         voice_config=VoiceConfig(
         #             prebuilt_voice_config=PrebuiltVoiceConfig(
@@ -816,7 +837,11 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         #             )
         #         ),
         #     ),
-        # )
+        )
+
+        ## probably not needed
+        self._lcc = LiveClientContent()
+
 
     def set_model_name(self, model: str):
         sanitized_model = re.sub("models/","", model)
@@ -935,10 +960,13 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         await self.push_frame(LLMFullResponseEndFrame())
 
     async def _handle_user_started_speaking(self, frame):
+        #////
         self._user_is_speaking = True
         pass
 
     async def _handle_user_stopped_speaking(self, frame):
+        self._lcc.turn_complete = True
+
         self._user_is_speaking = False
         self._user_audio_buffer = bytearray()
         await self.start_ttfb_metrics()
@@ -947,6 +975,8 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             evt = events.ClientContentMessage.model_validate(
                 {"clientContent": {"turnComplete": True}}
             )
+
+
             await self.send_client_event(evt)
 
     async def send_client_event(self, evt):
@@ -972,7 +1002,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, OpenAILLMContextFrame):
-            print(f"_____gemini.py * OpenAILLMContextFrame: {frame.context}")
+            # print(f"_____gemini.py * OpenAILLMContextFrame: {frame.context}")
             context: GeminiMultimodalLiveContext = GeminiMultimodalLiveContext.upgrade(
                 frame.context
             )
@@ -983,23 +1013,23 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             if not self._context:
                 self._context = context
                 if not self._receive_task:
-                    self._receive_task = self.create_task(self._receive_task_handler(self._context))
+                    self._receive_task = self.create_task(self._receive_task_handler(self._context, "OpenAILLMContextFrame one"))
                 if frame.context.tools:
                     self._tools = frame.context.tools
                 await self._create_initial_response()
-            elif context.messages and context.messages[-1].get("role") == "tool":
+            elif context.messages and context.messages[-1] and context.messages[-1].role == "tool":
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
-            elif context.messages and context.messages[-1].get("role") == "model":
+            elif context.messages and context.messages[-1] and context.messages[-1].role == "model":
                 self._context = context
                 # await self.push_frame(frame, direction)
 
         elif isinstance(frame, LLMMessagesFrame):
-            if frame.messages and frame.messages[-1].get("role") == "system":
+            if frame.messages and frame.messages[-1] and frame.messages[-1].role == "system":
                 self._context.add_messages(frame.messages)
                 # self._context.set_messages(frame.messages)
-                self._receive_task = self.create_task(self._receive_task_handler(self._context))
+                self._receive_task = self.create_task(self._receive_task_handler(self._context, "LLMMessagesFrame two"))
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, InputAudioRawFrame):
@@ -1015,7 +1045,11 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             await self._handle_user_started_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            await self._handle_user_stopped_speaking(frame)
+            # self._context.add_messages(frame.messages)
+            # await self._handle_user_stopped_speaking(frame)
+            print(f"_____gemini_vertex.py * UserStoppedSpeakingFrame  self._context.messages: {self._context.messages}")
+            self._receive_task = self.create_task(self._receive_task_handler(self._context, "UserStoppedSpeakingFrame three"))
+
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
             # Ignore this frame. Use the serverContent API message instead
@@ -1035,70 +1069,92 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
     # https://github.com/google-gemini/cookbook/issues/781
     # https://github.com/google-gemini/cookbook/blob/cb04a04359ac7937c4b22e8b4c381451ba1e5d93/quickstarts/Get_started_LiveAPI.py
 
-    async def _receive_task_handler(self, context):
-        print(f"_____gemini.py * _receive_task_handler::::_receive_task_handler")
-        selfsettingsmodal= self._settings["modalities"]
-        print(f"_____gemini_vertex.py * self._settings[modalities]: {selfsettingsmodal}")
-
-        connfig = LiveConnectConfig(response_modalities=[self._settings["modalities"]])
-        print(f"_____gemini_vertex.py * connfig: {connfig}")
-        print(f"_____gemini_vertex.py * self._model_name: {self._model_name}")
+    async def _receive_task_handler(self, context, blame):
+        print(f"_____gemini.py * _receive_task_handler::::_receive_task_handler {blame}")
 
         async with self._client.aio.live.connect(
             model=self._model_name,
-            # config=self._config,
-            config=connfig,
+            config=self._config,
         ) as session:
-            lcc = LiveClientContent()
-
-            print(f"_____gemini_vertex.py * lcc: {lcc}")
 
             try:
                 if GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
                     print(f"_____gemini.py * GeminiMultimodalModalities.TEXT - send_client_content")
+                    print(f"_____gemini_vertex.py * self._context.messages: {self._context.messages}")
                     await session.send_client_content(turns=self._context.messages)
+
                 elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
+                    
                     print(f"WIP_____gemini.py * GeminiMultimodalModalities.AUDIO - send")
-                    # await session.send_realtime_input(
-                    #     audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
-                    # )
+                    await session.send_realtime_input(
+                        audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
+                    )
 
                 else:
                     pass
 
                 async for message in session.receive():
+                    # print(f"_____gemini.py * message____________________: {message}")
                     if message.text:
                         print(f"_____gemini.py * message.text: {message.text}")
                         await self.push_frame(LLMTextFrame(message.text))
+                        # await self.push_frame(LLMTextFrame("something else."))
 
-                    ## TODO/WIP audio
-                    # elif message.audio:
-                    # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api#:~:text=Vertex%20AI%20Studio.-,Context%20window,inputs%2C%20model%20outputs%2C%20etc.
-                    # if (
-                    #     message.server_content.model_turn
-                    #     and message.server_content.model_turn.parts
-                    # ):
-                    #     audio_data = []
-                    #     for part in message.server_content.model_turn.parts:
-                    #         if part.inline_data:
-                    #             audio_data.append(
-                    #                 np.frombuffer(part.inline_data.data, dtype=np.int16)
-                    #             )
+                    ## WIP audio
+                    elif message.data:
+                        print(f"_____gemini_vertex.py * audio:::")
+                        # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api#:~:text=Vertex%20AI%20Studio.-,Context%20window,inputs%2C%20model%20outputs%2C%20etc.
+                        if (
+                            message.server_content.model_turn
+                            and message.server_content.model_turn.parts
+                        ):
+                            audio_data = []
+                            for part in message.server_content.model_turn.parts:
 
-                    elif False:  # !!! todo: error events?
-                        await self._handle_evt_error("evt")
-                        # errors are fatal, so exit the receive loop
-                        return
-                    else:
-                        pass
+                                if part.inline_data:
+                                    inline_data = part.inlineData
+                                    if not inline_data:
+                                        return
+                                    if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
+                                        logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
+                                        return
+
+                                    audio = base64.b64decode(inline_data.data)
+                                    if not audio:
+                                        return
+
+                                    if not self._bot_is_speaking:
+                                        self._bot_is_speaking = True
+                                        await self.push_frame(TTSStartedFrame())
+                                        await self.push_frame(LLMFullResponseStartFrame())
+
+                                    self._bot_audio_buffer.extend(audio)
+                                    frame = TTSAudioRawFrame(
+                                        audio=audio,
+                                        sample_rate=self._sample_rate,
+                                        num_channels=1,
+                                    )
+                                    await self.push_frame(frame)
+
+
+
+                    # elif False:  # !!! todo: error events?
+                    #     await self._handle_evt_error("evt")
+                    #     # errors are fatal, so exit the receive loop
+                    #     return
+
             except Exception as e:
                 print(f"___eeee__gemini.py * e: {e}")
+                
+            await self.push_frame(LLMFullResponseEndFrame())                
+            print(f"_____gemini_vertex.py * _receive_task_handler end:::::::")
 
     #
     #
     #
 
     async def _send_user_audio(self, frame):
+        # print(f"_____gemini_vertex.py * _send_user_audio:::::::")
         """Send user audio frame to Gemini Live API."""
         if self._audio_input_paused:
             return
@@ -1246,51 +1302,51 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             self._run_llm_when_api_session_ready = False
             await self._create_initial_response()
 
-    async def _handle_evt_model_turn(self, evt):
-        """Handle the model turn event."""
-        part = evt.serverContent.modelTurn.parts[0]
-        if not part:
-            return
+    # async def _handle_evt_model_turn(self, evt):
+    #     """Handle the model turn event."""
+    #     part = evt.serverContent.modelTurn.parts[0]
+    #     if not part:
+    #         return
 
-        await self.stop_ttfb_metrics()
+    #     await self.stop_ttfb_metrics()
 
-        # part.text is added when `modalities` is set to TEXT; otherwise, it's None
-        text = part.text
-        if text:
-            if not self._bot_text_buffer:
-                await self.push_frame(LLMFullResponseStartFrame())
+    #     # part.text is added when `modalities` is set to TEXT; otherwise, it's None
+    #     text = part.text
+    #     if text:
+    #         if not self._bot_text_buffer:
+    #             await self.push_frame(LLMFullResponseStartFrame())
 
-            self._bot_text_buffer += text
-            self._search_result_buffer += text  # Also accumulate for grounding
-            await self.push_frame(LLMTextFrame(text=text))
+    #         self._bot_text_buffer += text
+    #         self._search_result_buffer += text  # Also accumulate for grounding
+    #         await self.push_frame(LLMTextFrame(text=text))
 
-        # Check for grounding metadata in server content
-        if evt.serverContent and evt.serverContent.groundingMetadata:
-            self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
+    #     # Check for grounding metadata in server content
+    #     if evt.serverContent and evt.serverContent.groundingMetadata:
+    #         self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
 
-        inline_data = part.inlineData
-        if not inline_data:
-            return
-        if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
-            logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
-            return
+    #     inline_data = part.inlineData
+    #     if not inline_data:
+    #         return
+    #     if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
+    #         logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
+    #         return
 
-        audio = base64.b64decode(inline_data.data)
-        if not audio:
-            return
+    #     audio = base64.b64decode(inline_data.data)
+    #     if not audio:
+    #         return
 
-        if not self._bot_is_speaking:
-            self._bot_is_speaking = True
-            await self.push_frame(TTSStartedFrame())
-            await self.push_frame(LLMFullResponseStartFrame())
+    #     if not self._bot_is_speaking:
+    #         self._bot_is_speaking = True
+    #         await self.push_frame(TTSStartedFrame())
+    #         await self.push_frame(LLMFullResponseStartFrame())
 
-        self._bot_audio_buffer.extend(audio)
-        frame = TTSAudioRawFrame(
-            audio=audio,
-            sample_rate=self._sample_rate,
-            num_channels=1,
-        )
-        await self.push_frame(frame)
+    #     self._bot_audio_buffer.extend(audio)
+    #     frame = TTSAudioRawFrame(
+    #         audio=audio,
+    #         sample_rate=self._sample_rate,
+    #         num_channels=1,
+    #     )
+    #     await self.push_frame(frame)
 
     @traced_gemini_live(operation="llm_tool_call")
     async def _handle_evt_tool_call(self, evt):

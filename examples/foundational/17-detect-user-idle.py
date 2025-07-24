@@ -105,14 +105,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     #     # model="models/gemini-2.0-flash-live-preview-04-09"
     # )
 
-    print(f"_____17-detect-user-idle.py * GeminiMultimodalModalities.TEXT:::: {GeminiMultimodalModalities.TEXT}")
     #### 4. live llm on vertex ai
     llm = GoogleVertexMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
-        params=GoogleVertexMultimodalLiveLLMService.InputParams( ## need to merge these with default InputParams
+        params=GoogleVertexMultimodalLiveLLMService.InputParams(
             project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-            modalities="TEXT",
-            # modalities=GeminiMultimodalModalities.TEXT,
+            modalities="TEXT", 
+            # modalities=GeminiMultimodalModalities.TEXT, #ug, figure out why this isn't a string later
         ),
         # model="models/gemini-2.0-flash-live-001"
         # model="gemini-2.0-flash-live-preview-04-09"
@@ -162,7 +161,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             stt,
-            user_idle,  # Idle user check-in
+            # user_idle,  # Idle user check-in
             context_aggregator.user(),
             llm,  # LLM
             tts,  # TTS
