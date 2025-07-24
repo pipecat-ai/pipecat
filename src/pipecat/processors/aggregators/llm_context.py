@@ -17,7 +17,7 @@ service-specific adapter.
 import base64
 import io
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
@@ -122,6 +122,7 @@ class LLMContext:
             tools: List of tools available to the LLM, a ToolsSchema, or NOT_GIVEN to disable tools.
         """
         # TODO: convert empty ToolsSchema to NOT_GIVEN if needed
+        # TODO: maybe also convert non-ToolsSchema tools to ToolsSchema? See open_ai_adapter.py for related comment
         if isinstance(tools, list) and len(tools) == 0:
             tools = NOT_GIVEN
         self._tools = tools

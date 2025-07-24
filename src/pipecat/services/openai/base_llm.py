@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Base OpenAI LLM service implementation."""
+"""Base LLM service implementation for services that use the AsyncOpenAI client."""
 
 import base64
 import json
@@ -31,9 +31,9 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
@@ -44,8 +44,8 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 class BaseOpenAILLMService(LLMService):
     """Base class for all services that use the AsyncOpenAI client.
 
-    This service consumes OpenAILLMContextFrame frames, which contain a reference
-    to an OpenAILLMContext object. The context defines what is sent to the LLM for
+    This service consumes LLMContextFrame frames, which contain a reference to
+    an LLMContext object. The context defines what is sent to the LLM for
     completion, including user, assistant, and system messages, as well as tool
     choices and function call configurations.
     """
@@ -173,13 +173,13 @@ class BaseOpenAILLMService(LLMService):
         return True
 
     async def get_chat_completions(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+        self, params_from_context: dict[str, Any]
     ) -> AsyncStream[ChatCompletionChunk]:
         """Get streaming chat completions from OpenAI API.
 
         Args:
-            context: The LLM context containing tools and configuration.
-            messages: List of chat completion messages to send.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool choice.
 
         Returns:
             Async stream of chat completion chunks.
@@ -187,9 +187,6 @@ class BaseOpenAILLMService(LLMService):
         params = {
             "model": self.model_name,
             "stream": True,
-            "messages": messages,
-            "tools": context.tools,
-            "tool_choice": context.tool_choice,
             "stream_options": {"include_usage": True},
             "frequency_penalty": self._settings["frequency_penalty"],
             "presence_penalty": self._settings["presence_penalty"],
@@ -200,39 +197,28 @@ class BaseOpenAILLMService(LLMService):
             "max_completion_tokens": self._settings["max_completion_tokens"],
         }
 
+        # Messages, tools, tool_choice
+        params.update(params_from_context)
+
         params.update(self._settings["extra"])
 
         chunks = await self._client.chat.completions.create(**params)
         return chunks
 
     async def _stream_chat_completions(
-        self, context: OpenAILLMContext
+        self, context: LLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
+        adapter = self.get_llm_adapter()
+        logger.debug(f"{self}: Generating chat [{adapter.get_messages_for_logging(context)}]")
 
-        messages: List[ChatCompletionMessageParam] = context.get_messages()
+        params = adapter.get_llm_invocation_params(context)
 
-        # base64 encode any images
-        for message in messages:
-            if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
-                text = message["content"]
-                message["content"] = [
-                    {"type": "text", "text": text},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
-                    },
-                ]
-                del message["data"]
-                del message["mime_type"]
-
-        chunks = await self.get_chat_completions(context, messages)
+        chunks = await self.get_chat_completions(params)
 
         return chunks
 
     @traced_llm
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: LLMContext):
         functions_list = []
         arguments_list = []
         tool_id_list = []
@@ -331,7 +317,7 @@ class BaseOpenAILLMService(LLMService):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
-        Handles OpenAILLMContextFrame, LLMMessagesFrame, VisionImageRawFrame,
+        Handles LLMContextFrame, LLMMessagesFrame, VisionImageRawFrame,
         and LLMUpdateSettingsFrame to trigger LLM completions and manage settings.
 
         Args:
@@ -341,12 +327,12 @@ class BaseOpenAILLMService(LLMService):
         await super().process_frame(frame, direction)
 
         context = None
-        if isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAILLMContext = frame.context
+        if isinstance(frame, LLMContextFrame):
+            context: LLMContext = frame.context
         elif isinstance(frame, LLMMessagesFrame):
-            context = OpenAILLMContext.from_messages(frame.messages)
+            context = LLMContext(messages=frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
-            context = OpenAILLMContext()
+            context = LLMContext()
             context.add_image_frame_message(
                 format=frame.format, size=frame.size, image=frame.image, text=frame.text
             )

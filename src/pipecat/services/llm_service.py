@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     UserImageRequestFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -89,7 +90,8 @@ class FunctionCallParams:
     tool_call_id: str
     arguments: Mapping[str, Any]
     llm: "LLMService"
-    context: OpenAILLMContext
+    # TODO: after migration of all services to universal LLMContext, OpenAILLMContext can be removed
+    context: LLMContext | OpenAILLMContext
     result_callback: FunctionCallResultCallback
 
 
@@ -418,7 +420,10 @@ class LLMService(AIService):
             else:
                 await self._sequential_runner_queue.put(runner_item)
 
-    async def _call_start_function(self, context: OpenAILLMContext, function_name: str):
+    # TODO: after migration of all services to universal LLMContext, OpenAILLMContext can be removed
+    async def _call_start_function(
+        self, context: LLMContext | OpenAILLMContext, function_name: str
+    ):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():

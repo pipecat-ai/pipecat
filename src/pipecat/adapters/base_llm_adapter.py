@@ -16,15 +16,35 @@ from typing import Any, List, Union, cast
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.processors.aggregators.llm_context import LLMContext
 
 
 class BaseLLMAdapter(ABC):
     """Abstract base class for LLM provider adapters.
 
-    Provides a standard interface for converting between Pipecat's standardized
-    tool schemas and provider-specific tool formats. Subclasses must implement
-    provider-specific conversion logic.
+    Provides a standard interface for converting to provider-specific formats.
+
+    Handles:
+    - Converting universal LLM context to provider-specific parameters for LLM
+      invocation.
+    - Converting standardized tools schema to provider-specific tool formats.
+    - Extracting messages from the LLM context for the purposes of logging
+      about the specific provider.
+
+    Subclasses must implement provider-specific conversion logic.
     """
+
+    @abstractmethod
+    def get_llm_invocation_params(self, context: LLMContext) -> dict[str, Any]:
+        """Get provider-specific LLM invocation parameters from a universal LLM context.
+
+        Args:
+            context: The LLM context containing messages, tools, etc.
+
+        Returns:
+            Provider-specific parameters for invoking the LLM.
+        """
+        pass
 
     @abstractmethod
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Any]:
@@ -35,6 +55,19 @@ class BaseLLMAdapter(ABC):
 
         Returns:
             List of tools in the provider's expected format.
+        """
+        pass
+
+    @abstractmethod
+    def get_messages_for_logging(self, context: LLMContext) -> List[dict[str, Any]]:
+        """Get messages from the LLM context in a format ready for logging about this provider.
+
+        Args:
+            context: The LLM context containing messages.
+
+        Returns:
+            List of messages in a format ready for logging about this
+            provider.
         """
         pass
 
