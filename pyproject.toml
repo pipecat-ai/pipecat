@@ -20,22 +20,22 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
-    "aiohttp~=3.11.12",
+    "aiohttp>=3.11.12,<4",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "docstring_parser~=0.16",
     "loguru~=0.7.3",
-    "Markdown~=3.7",
-    "nltk>=3.9.1",
-    "numpy>=1.26.4",
-    "Pillow~=11.1.0",
+    "Markdown>=3.7,<4",
+    "nltk>=3.9.1,<4",
+    "numpy>=1.26.4,<3",
+    "Pillow>=11.1.0,<12",
     "protobuf~=5.29.3",
-    "pydantic~=2.10.6",
+    "pydantic>=2.10.6,<3",
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai~=1.74.0",
+    "openai>=1.74.0,<2",
     # Explicit dependency pins for Python 3.11+ compatibility
-    "numba>=0.60.0",
+    "numba>=0.60.0,<1",
 ]
 
 [project.urls]
