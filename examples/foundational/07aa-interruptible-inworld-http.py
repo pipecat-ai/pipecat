@@ -60,7 +60,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
         # Inworld TTS Service - Unified streaming and non-streaming
         # Set streaming=True for real-time audio, streaming=False for complete audio generation
-        streaming = False  # Toggle this to switch between modes
+        streaming = True  # Toggle this to switch between modes
 
         tts = InworldTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
