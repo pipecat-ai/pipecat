@@ -549,7 +549,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             # This should never happen, so warn about it.
             if not self.audio_context_available(received_ctx_id):
                 if self._context_id == received_ctx_id:
-                    logger.debug(f"Received a delayed message,  recreating the context: {self._context_id}")
+                    logger.debug(
+                        f"Received a delayed message,  recreating the context: {self._context_id}"
+                    )
                     await self.create_audio_context(self._context_id)
                 else:
                     logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
