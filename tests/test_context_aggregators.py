@@ -17,9 +17,9 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     InterimTranscriptionFrame,
+    LLMContextAssistantTimestampFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    OpenAILLMContextAssistantTimestampFrame,
     SpeechControlParamsFrame,
     StartInterruptionFrame,
     TextFrame,
@@ -738,7 +738,7 @@ class TestAnthropicAssistantContextAggregator(
 ):
     CONTEXT_CLASS = AnthropicLLMContext
     AGGREGATOR_CLASS = AnthropicAssistantContextAggregator
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, LLMContextAssistantTimestampFrame]
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
@@ -773,7 +773,7 @@ class TestAWSBedrockAssistantContextAggregator(
 ):
     CONTEXT_CLASS = AWSBedrockLLMContext
     AGGREGATOR_CLASS = AWSBedrockAssistantContextAggregator
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, LLMContextAssistantTimestampFrame]
 
     def check_message_multi_content(
         self, context: OpenAILLMContext, content_index: int, index: int, content: str
@@ -814,7 +814,7 @@ class TestGoogleAssistantContextAggregator(
 ):
     CONTEXT_CLASS = GoogleLLMContext
     AGGREGATOR_CLASS = GoogleAssistantContextAggregator
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, LLMContextAssistantTimestampFrame]
 
     def check_message_content(self, context: OpenAILLMContext, index: int, content: str):
         obj = context.messages[index].to_json_dict()
@@ -848,4 +848,4 @@ class TestOpenAIAssistantContextAggregator(
 ):
     CONTEXT_CLASS = OpenAILLMContext
     AGGREGATOR_CLASS = OpenAIAssistantContextAggregator
-    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, OpenAILLMContextAssistantTimestampFrame]
+    EXPECTED_CONTEXT_FRAMES = [OpenAILLMContextFrame, LLMContextAssistantTimestampFrame]

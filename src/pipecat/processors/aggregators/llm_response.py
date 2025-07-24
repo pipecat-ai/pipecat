@@ -36,6 +36,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextAssistantTimestampFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -44,7 +45,6 @@ from pipecat.frames.frames import (
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
-    OpenAILLMContextAssistantTimestampFrame,
     SpeechControlParamsFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -864,7 +864,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         await self.push_context_frame()
 
         # Push timestamp frame with current time
-        timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
+        timestamp_frame = LLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
