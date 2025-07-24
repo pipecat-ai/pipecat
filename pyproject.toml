@@ -35,7 +35,7 @@ dependencies = [
     "soxr~=0.5.0",
     "openai~=1.74.0",
     # Explicit dependency pins for Python 3.11+ compatibility
-    "numba>=0.61.0",
+    "numba>=0.60.0",
 ]
 
 [project.urls]
@@ -46,7 +46,7 @@ Website = "https://pipecat.ai"
 anthropic = [ "anthropic~=0.49.0" ]
 assemblyai = [ "websockets>=13.1,<15.0" ]
 aws = [ "aioboto3~=15.0.0", "websockets>=13.1,<15.0" ]
-aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.0.2" ]
+aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.0.2; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "websockets>=13.1,<15.0" ]
 cerebras = []
@@ -79,13 +79,13 @@ openai = [ "websockets>=13.1,<15.0" ]
 openpipe = [ "openpipe~=4.50.0" ]
 openrouter = []
 perplexity = []
-playht = [ "pyht~=0.1.12", "websockets>=13.1,<15.0" ]
+playht = [ "pyht>=0.1.6", "websockets>=13.1,<15.0" ]
 qwen = []
 rime = [ "websockets>=13.1,<15.0" ]
 riva = [ "nvidia-riva-client~=2.21.1" ]
 sambanova = []
 sentry = [ "sentry-sdk~=2.23.1" ]
-local-smart-turn = [ "coremltools>=8.0", "transformers", "torch==2.5.0", "torchaudio==2.5.0" ]
+local-smart-turn = [ "coremltools>=8.0", "transformers", "torch~=2.5.0", "torchaudio~=2.5.0" ]
 remote-smart-turn = []
 silero = [ "onnxruntime~=1.20.1" ]
 simli = [ "simli-ai~=0.1.10"]
