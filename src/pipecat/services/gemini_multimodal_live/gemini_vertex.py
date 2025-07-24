@@ -83,6 +83,7 @@ from .file_api import GeminiFileAPI
 try:
     from websockets.asyncio.client import connect as websocket_connect
     from google import genai
+    from google.genai import types
     from google.genai.types import Content, LiveConnectConfig, Part, LiveClientContent, Modality
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -511,7 +512,6 @@ class GeminiMultimodalLiveUserContextAggregator(OpenAIUserContextAggregator):
         Args:
             aggregation: The aggregated user text to add as a user message.
         """
-        print(f"_____________________________________________gemini_vertex.py * USER handle_aggregation:..")
         turn = {"role": self.role, "content": aggregation}
         converted = self._context.from_standard_message(turn)
         self._context.add_message(converted)
@@ -542,7 +542,6 @@ class GeminiMultimodalLiveAssistantContextAggregator(OpenAIAssistantContextAggre
         Args:
             aggregation: The aggregated user text to add as a user message.
         """
-        print(f"_____________________________________________gemini_vertex.py * ASSISTENT handle_aggregation:..")
         turn = {"role": "assistant", "content": aggregation}
         converted = self._context.from_standard_message(turn)
         self._context.add_message(converted)    
@@ -1070,7 +1069,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
     # https://github.com/google-gemini/cookbook/blob/cb04a04359ac7937c4b22e8b4c381451ba1e5d93/quickstarts/Get_started_LiveAPI.py
 
     async def _receive_task_handler(self, context, blame):
-        print(f"_____gemini.py * _receive_task_handler::::_receive_task_handler {blame}")
+        print(f"_____gemini.py * _receive_task_handler:::: {blame}")
 
         async with self._client.aio.live.connect(
             model=self._model_name,
@@ -1079,24 +1078,25 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
 
             try:
                 if GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
-                    print(f"_____gemini.py * GeminiMultimodalModalities.TEXT - send_client_content")
                     print(f"_____gemini_vertex.py * self._context.messages: {self._context.messages}")
                     await session.send_client_content(turns=self._context.messages)
 
                 elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
-                    
-                    print(f"WIP_____gemini.py * GeminiMultimodalModalities.AUDIO - send")
                     await session.send_realtime_input(
-                        audio=types.Blob(data=audio_bytes, mime_type="audio/pcm;rate=16000")
+                        audio=types.Blob(data=self._user_audio_buffer, mime_type="audio/pcm;rate=16000")
                     )
 
                 else:
                     pass
 
                 async for message in session.receive():
-                    # print(f"_____gemini.py * message____________________: {message}")
                     if message.text:
-                        print(f"_____gemini.py * message.text: {message.text}")
+                        print(f"_____gemini.py * message.text::::::: {message.text}")
+
+                        if not self._bot_is_speaking:
+                            self._bot_is_speaking = True
+                            await self.push_frame(TTSStartedFrame())
+                            await self.push_frame(LLMFullResponseStartFrame())                        
                         await self.push_frame(LLMTextFrame(message.text))
                         # await self.push_frame(LLMTextFrame("something else."))
 
@@ -1137,16 +1137,11 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                                     await self.push_frame(frame)
 
 
-
-                    # elif False:  # !!! todo: error events?
-                    #     await self._handle_evt_error("evt")
-                    #     # errors are fatal, so exit the receive loop
-                    #     return
-
             except Exception as e:
-                print(f"___eeee__gemini.py * e: {e}")
+                print(f"_TODO throw exception?__eeee__gemini.py * e: {e}")
                 
-            await self.push_frame(LLMFullResponseEndFrame())                
+            await self.push_frame(LLMFullResponseEndFrame())    
+            self._bot_is_speaking = False            
             print(f"_____gemini_vertex.py * _receive_task_handler end:::::::")
 
     #
@@ -1570,7 +1565,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         context: OpenAILLMContext,
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(expect_stripped_words=True),
     ) -> GeminiMultimodalLiveContextAggregatorPair:
         """Create an instance of GeminiMultimodalLiveContextAggregatorPair from an OpenAILLMContext.
 
@@ -1591,6 +1586,5 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         GeminiMultimodalLiveContext.upgrade(context)
         user = GeminiMultimodalLiveUserContextAggregator(context, params=user_params)
 
-        assistant_params.expect_stripped_words = False
         assistant = GeminiMultimodalLiveAssistantContextAggregator(context, params=assistant_params)
         return GeminiMultimodalLiveContextAggregatorPair(_user=user, _assistant=assistant)
