@@ -27,7 +27,7 @@ Technical Implementation:
 - Manages audio continuity to prevent clicks and artifacts
 - Integrates with Pipecat's frame-based pipeline architecture
 
-Usage::
+Examples::
 
     async with aiohttp.ClientSession() as session:
         # Streaming mode (default) - real-time audio generation
@@ -120,7 +120,7 @@ class InworldTTSService(TTSService):
     - Language Detection: Automatically inferred from input text (no explicit language setting required)
     - Mode Selection: streaming=True for real-time, streaming=False for complete synthesis
 
-    Example Usage::
+    Examples::
 
         async with aiohttp.ClientSession() as session:
             # Streaming mode (default) - Real-time audio generation
