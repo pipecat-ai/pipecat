@@ -51,7 +51,7 @@ class MurfTTSService(AudioContextWordTTSService):
         """Input parameters for Murf TTS configuration.
 
         Parameters:
-            voice_id: Voice ID to use for TTS. Defaults to "en-US-daniel".
+            voice_id: Voice ID to use for TTS. Defaults to "en-UK-ruby".
             style: The style of speech. Defaults to "Conversational".
             rate: Speech rate (optional).
             pitch: Speech pitch (optional).
@@ -63,7 +63,7 @@ class MurfTTSService(AudioContextWordTTSService):
             format: The audio format for output. Defaults to "PCM".
         """
 
-        voice_id: Optional[str] = "en-US-natalie"
+        voice_id: Optional[str] = "en-UK-ruby"
         style: Optional[str] = "Conversational"
         rate: Optional[int] = 0
         pitch: Optional[int] = 0
@@ -223,7 +223,7 @@ class MurfTTSService(AudioContextWordTTSService):
             )
 
             self._websocket = await websockets.connect(url)
-            logger.debug(f"Connected to Murf {url}")
+            logger.debug(f"Connected to Murf")
 
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
@@ -366,9 +366,7 @@ class MurfTTSService(AudioContextWordTTSService):
         if self._settings["multi_native_locale"]:
             message["voice_config"]["multi_native_locale"] = self._settings["multi_native_locale"]
 
-        if is_last:
-            message["voice_config"]["end"] = True
-
+    
         return message
 
     @traced_tts

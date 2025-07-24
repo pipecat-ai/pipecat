@@ -34,7 +34,7 @@ from pipecat.services.murf.tts import MurfTTSService
 tts = MurfTTSService(
     api_key="your_murf_api_key",
     params=MurfTTSService.InputParams(
-        voice_id="en-US-daniel",
+        voice_id="en-UK-ruby",
         style="Conversational",
         rate=0,
         pitch=0,
@@ -62,7 +62,7 @@ tts = MurfTTSService(
     sample_rate=24000,  # Optional: audio sample rate
     aggregate_sentences=True,  # Optional: aggregate sentences before synthesis
     params=MurfTTSService.InputParams(
-        voice_id="en-US-daniel",
+        voice_id="en-UK-ruby",
         style="Conversational",
         rate=0,  # Speech rate adjustment
         pitch=0,  # Pitch adjustment
@@ -70,14 +70,13 @@ tts = MurfTTSService(
         pronunciation_dictionary={
             "live": {"type": "IPA", "pronunciation": "laɪv"}
         },
-        multi_native_locale="en-US", 
     ),
 )
 ```
 
 ## Voice Configuration Parameters
 
-- **voice_id**: Voice identifier (default: "en-US-daniel")
+- **voice_id**: Voice identifier (default: "en-UK-ruby")
 - **style**: Speech style (default: "Conversational")
 - **rate**: Speech rate adjustment (integer, default: 0)
 - **pitch**: Pitch adjustment (integer, default: 0)
