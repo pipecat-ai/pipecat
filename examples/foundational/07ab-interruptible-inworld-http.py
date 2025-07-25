@@ -16,9 +16,9 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.inworld.tts import InworldTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
@@ -52,11 +52,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
-        stt = OpenAISTTService(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o-transcribe",
-            prompt="Expect words related to dogs, such as breed names.",
-        )
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         # Inworld TTS Service - Unified streaming and non-streaming
         # Set streaming=True for real-time audio, streaming=False for complete audio generation
