@@ -56,15 +56,12 @@ Examples::
 """
 
 import base64
-import io
 import json
-import uuid
-import warnings
-from typing import AsyncGenerator, List, Optional, Union
+from typing import AsyncGenerator, Optional
 
 import aiohttp
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -72,16 +69,11 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
-from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
-from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
+from pipecat.services.tts_service import TTSService
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 
