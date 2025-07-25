@@ -240,8 +240,8 @@ class InworldTTSService(TTSService):
             self._settings["temperature"] = params.temperature
 
         # Register voice and model with parent service for metrics and tracking
-        self.set_voice(self._settings["voice_id"])  # Used for logging and metrics
-        self.set_model_name(params.model or "inworld-tts-1")  # Used for performance tracking
+        self.set_voice(self._settings["voiceId"])  # Used for logging and metrics
+        self.set_model_name(self._settings["modelId"])  # Used for performance tracking
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
