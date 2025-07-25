@@ -548,8 +548,14 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             # Check if this message belongs to the current context.
             # This should never happen, so warn about it.
             if not self.audio_context_available(received_ctx_id):
-                logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
-                continue
+                if self._context_id == received_ctx_id:
+                    logger.debug(
+                        f"Received a delayed message, recreating the context: {self._context_id}"
+                    )
+                    await self.create_audio_context(self._context_id)
+                else:
+                    logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
+                    continue
 
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
@@ -636,9 +642,16 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
-                    # Create new context ID and register it
-                    self._context_id = str(uuid.uuid4())
-                    await self.create_audio_context(self._context_id)
+                    # If a context ID does not exist, create a new one and
+                    # register it. If an ID exists, that means the Pipeline is
+                    # configured for allow_interruptions=False, so continue
+                    # using the current ID. When interruptions are enabled
+                    # (e.g. allow_interruptions=True), user speech results in
+                    # an interruption, which resets the context ID.
+                    if not self._context_id:
+                        self._context_id = str(uuid.uuid4())
+                    if not self.audio_context_available(self._context_id):
+                        await self.create_audio_context(self._context_id)
 
                     # Initialize context with voice settings
                     msg = {"text": " ", "context_id": self._context_id}
