@@ -521,7 +521,7 @@ class OjinAvatarService(FrameProcessor):
             # Send silence to avatar with idle_sequence_duration
             silence_duration = self._settings.idle_sequence_duration
             num_samples = silence_duration * OJIN_AVATAR_SAMPLE_RATE
-            silence_audio = b"\x00\x00\x00\x00" * num_samples
+            silence_audio = b"\x00\x00" * num_samples
             logger.debug(f"Sending {silence_duration}s of silence to initialize avatar")
             await self._start_interaction(is_speech=False)
             assert self._interaction is not None
