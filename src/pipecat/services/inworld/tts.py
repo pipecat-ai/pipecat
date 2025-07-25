@@ -400,7 +400,7 @@ class InworldTTSService(TTSService):
             # STEP 8: CLEANUP AND COMPLETION
             # ================================================================================
             # Always stop metrics tracking, even if errors occurred
-            await self.stop_ttfb_metrics()
+            await self.stop_all_metrics()
 
             # Signal to pipeline that TTS generation is complete
             # This allows downstream processors to finalize audio processing
