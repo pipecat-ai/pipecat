@@ -5,6 +5,7 @@ import time
 import math
 from dataclasses import dataclass, field
 from enum import Enum
+import numpy as np
 from typing import Optional, Tuple, Callable, Awaitable
 
 # Will use numpy when implementing avatar-specific processing
@@ -520,7 +521,7 @@ class OjinAvatarService(FrameProcessor):
             # Send silence to avatar with idle_sequence_duration
             silence_duration = self._settings.idle_sequence_duration
             num_samples = silence_duration * OJIN_AVATAR_SAMPLE_RATE
-            silence_audio = b"\x00\x00" * num_samples
+            silence_audio = b"\x00\x00\x00\x00" * num_samples
             logger.debug(f"Sending {silence_duration}s of silence to initialize avatar")
             await self._start_interaction(is_speech=False)
             assert self._interaction is not None
@@ -536,7 +537,7 @@ class OjinAvatarService(FrameProcessor):
             )
             await self._interaction.audio_input_queue.put(
                 OjinAvatarInteractionInputMessage(
-                    audio_bytes=silence_audio,
+                    audio_int16_bytes=silence_audio,
                     interaction_id=self._interaction.interaction_id,
                     is_last_input=True,
                     start_frame_idx=self._interaction.start_frame_idx,
@@ -860,6 +861,7 @@ class OjinAvatarService(FrameProcessor):
             frame.audio, frame.sample_rate, OJIN_AVATAR_SAMPLE_RATE
         )
 
+        # Convert to float32
         if not self.is_tts_input_allowed():
             if self._interaction is None or self._interaction.interaction_id is None:
                 logger.debug("No interaction is set")
@@ -875,7 +877,7 @@ class OjinAvatarService(FrameProcessor):
             self._pending_interaction.audio_input_queue.put_nowait(
                 OjinAvatarInteractionInputMessage(
                     interaction_id=self._interaction.interaction_id,
-                    audio_bytes=resampled_audio,
+                    audio_int16_bytes=resampled_audio,
                 )
             )
             self._pending_interaction.pending_first_input = False
@@ -899,7 +901,7 @@ class OjinAvatarService(FrameProcessor):
             await self._interaction.audio_input_queue.put(
                 OjinAvatarInteractionInputMessage(
                     interaction_id=self._interaction.interaction_id,
-                    audio_bytes=resampled_audio,
+                    audio_int16_bytes=resampled_audio,
                     start_frame_idx=start_frame_idx,
                 )
             )
@@ -949,34 +951,19 @@ class OjinAvatarService(FrameProcessor):
 
             # Get audio from the queue
             should_finish_task = False
-            try:
-                message: OjinAvatarInteractionInputMessage = (
-                    self._interaction.audio_input_queue.get_nowait()
-                )
-                should_finish_task = True
-            except asyncio.QueueEmpty:
-                message = OjinAvatarInteractionInputMessage(
-                    audio_bytes=b"\x00\x00\x00\x00",
-                    interaction_id=self._interaction.interaction_id,
-                )
-
-            audio_buffer += message.audio_bytes
-            audio_reminder = len(audio_buffer) % 4
-            if audio_reminder != 0:
-                audio_padding = 4 - audio_reminder
-                audio_buffer += b"\x00" * audio_padding
-
-            message.audio_bytes = audio_buffer
+            message: OjinAvatarInteractionInputMessage = (
+                self._interaction.audio_input_queue.get_nowait()
+            )
+            should_finish_task = True 
             if is_final_message:
                 self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
                 message.is_last_input = True
 
             logger.debug(
-                f"Sending audio bytes: {len(message.audio_bytes)} is_final: {message.is_last_input}"
+                f"Sending audio int16: {len(message.audio_int16_bytes)} is_final: {message.is_last_input}"
             )
             await self.push_ojin_message(message)
-            await self.enqueue_audio_output(message.audio_bytes)
-            audio_buffer = b""
+            await self.enqueue_audio_output(message.audio_int16_bytes)          
 
             if should_finish_task:
                 self._interaction.audio_input_queue.task_done()

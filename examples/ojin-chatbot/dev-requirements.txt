@@ -1,4 +1,4 @@
-./dependencies/ojin-0.1.0-py3-none-any.whl
+-e ../../../ojin/managed-models/avatar/services
 -e ../../[openai,elevenlabs,deepgram,ojin]
 textual==1.0.0
 pydantic-settings>=2.7.1
