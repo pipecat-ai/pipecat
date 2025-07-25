@@ -8,34 +8,55 @@
 
 import copy
 import json
-from typing import Any, List
+from typing import Any, List, TypedDict
 
-from openai.types.chat import ChatCompletionToolParam
+from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
+from openai._types import NotGiven as OpenAINotGiven
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+    ChatCompletionToolChoiceOptionParam,
+    ChatCompletionToolParam,
+)
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMContextToolChoice,
+    NotGiven,
+)
 
 
-class OpenAILLMAdapter(BaseLLMAdapter):
-    """Adapter for converting tool schemas to OpenAI's format.
+class OpenAILLMInvocationParams(TypedDict):
+    """Context-based parameters for invoking OpenAI ChatCompletion API."""
 
-    Provides conversion utilities for transforming Pipecat's standard tool
-    schemas into the format expected by OpenAI's ChatCompletion API for
-    function calling capabilities.
+    messages: List[ChatCompletionMessageParam]
+    tools: List[ChatCompletionToolParam] | OpenAINotGiven
+    tool_choice: ChatCompletionToolChoiceOptionParam | OpenAINotGiven
+
+
+class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
+    """OpenAI-specific adapter for Pipecat.
+
+    Handles:
+    - Extracting parameters for OpenAI's ChatCompletion API from a universal
+      LLM context
+    - Converting Pipecat's standardized tools schema to OpenAI's function-calling format.
+    - Extracting and sanitizing messages from the LLM context for logging with OpenAI.
     """
 
-    def get_llm_invocation_params(self, context: LLMContext) -> dict[str, Any]:
+    def get_llm_invocation_params(self, context: LLMContext) -> OpenAILLMInvocationParams:
         """Get OpenAI-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
 
         Returns:
-            Dictionary of parameters for OpenAI's chat completion API.
+            Dictionary of parameters for OpenAI's ChatCompletion API.
         """
         return {
-            "messages": context.messages,
+            "messages": self._from_standard_messages(context.messages),
             # TODO: doesn't seem right that we may or may not need to convert tools here; they should already be guaranteed to exist in a universal format in the LLMContext, right?
             "tools": self.from_standard_tools(context.tools),
             "tool_choice": context.tool_choice,
@@ -81,3 +102,15 @@ class OpenAILLMAdapter(BaseLLMAdapter):
                 msg["data"] = "..."
             msgs.append(msg)
         return json.dumps(msgs, ensure_ascii=False)
+
+    def _from_standard_messages(
+        self, messages: List[LLMContextMessage]
+    ) -> List[ChatCompletionMessageParam]:
+        # Just a pass-through: messages is already the right type
+        return messages
+
+    def _from_standard_tool_choice(
+        self, tool_choice: LLMContextToolChoice | NotGiven
+    ) -> ChatCompletionToolChoiceOptionParam | OpenAINotGiven:
+        # Just a pass-through: tool_choice is already the right type
+        return tool_choice

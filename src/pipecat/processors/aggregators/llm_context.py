@@ -32,6 +32,9 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame, Frame
 
 # "Re-export" types from OpenAI that we're using as universal context types.
+# NOTE: this is just for convenience, for now. As soon as the universal types
+# diverge from OpenAI's, we should ditch this. In fact, audio frames already
+# diverge from OpenAI's standard format...we really ought to do this.
 LLMContextMessage = ChatCompletionMessageParam
 LLMContextTool = ChatCompletionToolParam
 LLMContextToolChoice = ChatCompletionToolChoiceOptionParam
@@ -148,6 +151,7 @@ class LLMContext:
         """
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
+        # TODO: we might not want the universal format to be base64 encoded, since encoding is not needed by all LLM services; today, te Gemini adapter has to decode from base64, which is less than ideal.
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         content = []
@@ -158,18 +162,39 @@ class LLMContext:
         )
         self.add_message({"role": "user", "content": content})
 
-    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
+    # NOTE: today we've only built support for audio frames with the Google
+    # LLM, so this "universal" representation skews towards that.
+    # When we add support for other LLMs, we may need to adjust this.
+    def add_audio_frames_message(
+        self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
+    ):
         """Add a message containing audio frames.
 
         Args:
             audio_frames: List of audio frame objects to include.
             text: Optional text to include with the audio.
-
-        Note:
-            This method is currently a placeholder for future implementation.
         """
-        # TODO: implement storing universal representation of audio frames in context (only used by Google for now)
-        pass
+        if not audio_frames:
+            return
+
+        sample_rate = audio_frames[0].sample_rate
+        num_channels = audio_frames[0].num_channels
+
+        content = []
+        content.append({"type": "text", "text": text})
+        data = b"".join(frame.audio for frame in audio_frames)
+        # TODO: filter this out in OpenAI adapter, since it doesn't support audio frames
+        content.append(
+            {
+                "type": "input_audio",
+                "input_audio": {
+                    "data": data,
+                    "sample_rate": sample_rate,
+                    "num_channels": num_channels,
+                },
+            }
+        )
+        self.add_message({"role": "user", "content": content})
 
 
 @dataclass

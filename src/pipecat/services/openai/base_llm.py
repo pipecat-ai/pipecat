@@ -21,6 +21,7 @@ from openai import (
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
@@ -173,7 +174,7 @@ class BaseOpenAILLMService(LLMService):
         return True
 
     async def get_chat_completions(
-        self, params_from_context: dict[str, Any]
+        self, params_from_context: OpenAILLMInvocationParams
     ) -> AsyncStream[ChatCompletionChunk]:
         """Get streaming chat completions from OpenAI API.
 
@@ -211,7 +212,7 @@ class BaseOpenAILLMService(LLMService):
         adapter = self.get_llm_adapter()
         logger.debug(f"{self}: Generating chat [{adapter.get_messages_for_logging(context)}]")
 
-        params = adapter.get_llm_invocation_params(context)
+        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
 
         chunks = await self.get_chat_completions(params)
 

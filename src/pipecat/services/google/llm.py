@@ -10,49 +10,29 @@ This module provides Google Gemini integration for the Pipecat framework,
 including LLM services, context management, and message aggregation.
 """
 
-import base64
-import io
-import json
 import os
 import uuid
-from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.frames.frames import (
-    AudioRawFrame,
     Frame,
-    FunctionCallCancelFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    UserImageRawFrame,
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantAggregatorParams,
-    LLMUserAggregatorParams,
-)
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.services.openai.llm import (
-    OpenAIAssistantContextAggregator,
-    OpenAIUserContextAggregator,
-)
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
@@ -63,13 +43,8 @@ try:
     from google import genai
     from google.api_core.exceptions import DeadlineExceeded
     from google.genai.types import (
-        Blob,
-        Content,
-        FunctionCall,
-        FunctionResponse,
         GenerateContentConfig,
         HttpOptions,
-        Part,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -77,577 +52,12 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class GoogleUserContextAggregator(OpenAIUserContextAggregator):
-    """Google-specific user context aggregator.
-
-    Extends OpenAI user context aggregator to handle Google AI's specific
-    Content and Part message format for user messages.
-    """
-
-    async def push_aggregation(self):
-        """Push aggregated user text as a Google Content message."""
-        if len(self._aggregation) > 0:
-            self._context.add_message(Content(role="user", parts=[Part(text=self._aggregation)]))
-
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
-
-            # Push context frame
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
-
-            # Reset our accumulator state.
-            await self.reset()
-
-
-class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):
-    """Google-specific assistant context aggregator.
-
-    Extends OpenAI assistant context aggregator to handle Google AI's specific
-    Content and Part message format for assistant responses and function calls.
-    """
-
-    async def handle_aggregation(self, aggregation: str):
-        """Handle aggregated assistant text response.
-
-        Args:
-            aggregation: The aggregated text response from the assistant.
-        """
-        self._context.add_message(Content(role="model", parts=[Part(text=aggregation)]))
-
-    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
-        """Handle function call in progress frame.
-
-        Args:
-            frame: Frame containing function call details.
-        """
-        self._context.add_message(
-            Content(
-                role="model",
-                parts=[
-                    Part(
-                        function_call=FunctionCall(
-                            id=frame.tool_call_id, name=frame.function_name, args=frame.arguments
-                        )
-                    )
-                ],
-            )
-        )
-        self._context.add_message(
-            Content(
-                role="user",
-                parts=[
-                    Part(
-                        function_response=FunctionResponse(
-                            id=frame.tool_call_id,
-                            name=frame.function_name,
-                            response={"response": "IN_PROGRESS"},
-                        )
-                    )
-                ],
-            )
-        )
-
-    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
-        """Handle function call result frame.
-
-        Args:
-            frame: Frame containing function call result.
-        """
-        if frame.result:
-            await self._update_function_call_result(
-                frame.function_name, frame.tool_call_id, frame.result
-            )
-        else:
-            await self._update_function_call_result(
-                frame.function_name, frame.tool_call_id, "COMPLETED"
-            )
-
-    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
-        """Handle function call cancellation frame.
-
-        Args:
-            frame: Frame containing function call cancellation details.
-        """
-        await self._update_function_call_result(
-            frame.function_name, frame.tool_call_id, "CANCELLED"
-        )
-
-    async def _update_function_call_result(
-        self, function_name: str, tool_call_id: str, result: Any
-    ):
-        for message in self._context.messages:
-            if message.role == "user":
-                for part in message.parts:
-                    if part.function_response and part.function_response.id == tool_call_id:
-                        part.function_response.response = {"value": json.dumps(result)}
-
-    async def handle_user_image_frame(self, frame: UserImageRawFrame):
-        """Handle user image frame.
-
-        Args:
-            frame: Frame containing user image data and request context.
-        """
-        await self._update_function_call_result(
-            frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
-        )
-        self._context.add_image_frame_message(
-            format=frame.format,
-            size=frame.size,
-            image=frame.image,
-            text=frame.request.context,
-        )
-
-
-@dataclass
-class GoogleContextAggregatorPair:
-    """Pair of Google context aggregators for user and assistant messages.
-
-    Parameters:
-        _user: User context aggregator for handling user messages.
-        _assistant: Assistant context aggregator for handling assistant responses.
-    """
-
-    _user: GoogleUserContextAggregator
-    _assistant: GoogleAssistantContextAggregator
-
-    def user(self) -> GoogleUserContextAggregator:
-        """Get the user context aggregator.
-
-        Returns:
-            The user context aggregator instance.
-        """
-        return self._user
-
-    def assistant(self) -> GoogleAssistantContextAggregator:
-        """Get the assistant context aggregator.
-
-        Returns:
-            The assistant context aggregator instance.
-        """
-        return self._assistant
-
-
-class GoogleLLMContext(OpenAILLMContext):
-    """Google AI LLM context that extends OpenAI context for Google-specific formatting.
-
-    This class handles conversion between OpenAI-style messages and Google AI's
-    Content/Part format, including system messages, function calls, and media.
-    """
-
-    def __init__(
-        self,
-        messages: Optional[List[dict]] = None,
-        tools: Optional[List[dict]] = None,
-        tool_choice: Optional[dict] = None,
-    ):
-        """Initialize GoogleLLMContext.
-
-        Args:
-            messages: Initial messages in OpenAI format.
-            tools: Available tools/functions for the model.
-            tool_choice: Tool choice configuration.
-        """
-        super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
-        self.system_message = None
-
-    @staticmethod
-    def upgrade_to_google(obj: OpenAILLMContext) -> "GoogleLLMContext":
-        """Upgrade an OpenAI context to a Google context.
-
-        Args:
-            obj: OpenAI LLM context to upgrade.
-
-        Returns:
-            GoogleLLMContext instance with converted messages.
-        """
-        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, GoogleLLMContext):
-            logger.debug(f"Upgrading to Google: {obj}")
-            obj.__class__ = GoogleLLMContext
-            obj._restructure_from_openai_messages()
-        return obj
-
-    def set_messages(self, messages: List):
-        """Set messages and restructure them for Google format.
-
-        Args:
-            messages: List of messages to set.
-        """
-        self._messages[:] = messages
-        self._restructure_from_openai_messages()
-
-    def add_messages(self, messages: List):
-        """Add messages to the context, converting to Google format as needed.
-
-        Args:
-            messages: List of messages to add (can be mixed formats).
-        """
-        # Convert each message individually
-        converted_messages = []
-        for msg in messages:
-            if isinstance(msg, Content):
-                # Already in Gemini format
-                converted_messages.append(msg)
-            else:
-                # Convert from standard format to Gemini format
-                converted = self.from_standard_message(msg)
-                if converted is not None:
-                    converted_messages.append(converted)
-
-        # Add the converted messages to our existing messages
-        self._messages.extend(converted_messages)
-
-    def get_messages_for_logging(self):
-        """Get messages formatted for logging with sensitive data redacted.
-
-        Returns:
-            List of message dictionaries with inline data redacted.
-        """
-        msgs = []
-        for message in self.messages:
-            obj = message.to_json_dict()
-            try:
-                if "parts" in obj:
-                    for part in obj["parts"]:
-                        if "inline_data" in part:
-                            part["inline_data"]["data"] = "..."
-            except Exception as e:
-                logger.debug(f"Error: {e}")
-            msgs.append(obj)
-        return msgs
-
-    def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
-    ):
-        """Add an image message to the context.
-
-        Args:
-            format: Image format (e.g., 'RGB', 'RGBA').
-            size: Image dimensions as (width, height).
-            image: Raw image bytes.
-            text: Optional text to accompany the image.
-        """
-        buffer = io.BytesIO()
-        Image.frombytes(format, size, image).save(buffer, format="JPEG")
-
-        parts = []
-        if text:
-            parts.append(Part(text=text))
-        parts.append(Part(inline_data=Blob(mime_type="image/jpeg", data=buffer.getvalue())))
-
-        self.add_message(Content(role="user", parts=parts))
-
-    def add_audio_frames_message(
-        self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
-    ):
-        """Add audio frames as a message to the context.
-
-        Args:
-            audio_frames: List of audio frames to add.
-            text: Text description of the audio content.
-        """
-        if not audio_frames:
-            return
-
-        sample_rate = audio_frames[0].sample_rate
-        num_channels = audio_frames[0].num_channels
-
-        parts = []
-        data = b"".join(frame.audio for frame in audio_frames)
-        # NOTE(aleix): According to the docs only text or inline_data should be needed.
-        # (see https://cloud.google.com/vertex-ai/generative-ai/docs/model-reference/inference)
-        parts.append(Part(text=text))
-        parts.append(
-            Part(
-                inline_data=Blob(
-                    mime_type="audio/wav",
-                    data=(
-                        bytes(
-                            self.create_wav_header(sample_rate, num_channels, 16, len(data)) + data
-                        )
-                    ),
-                )
-            ),
-        )
-        self.add_message(Content(role="user", parts=parts))
-        # message = {"mime_type": "audio/mp3", "data": bytes(data + create_wav_header(sample_rate, num_channels, 16, len(data)))}
-        # self.add_message(message)
-
-    def from_standard_message(self, message):
-        """Convert standard format message to Google Content object.
-
-        Handles conversion of text, images, and function calls to Google's format.
-        System messages are stored separately and return None.
-
-        Args:
-            message: Message in standard format.
-
-        Returns:
-            Content object with role and parts, or None for system messages.
-
-        Examples:
-            Standard text message::
-
-                {
-                    "role": "user",
-                    "content": "Hello there"
-                }
-
-            Converts to Google Content with::
-
-                Content(
-                    role="user",
-                    parts=[Part(text="Hello there")]
-                )
-
-            Standard function call message::
-
-                {
-                    "role": "assistant",
-                    "tool_calls": [
-                        {
-                            "function": {
-                                "name": "search",
-                                "arguments": '{"query": "test"}'
-                            }
-                        }
-                    ]
-                }
-
-            Converts to Google Content with::
-
-                Content(
-                    role="model",
-                    parts=[Part(function_call=FunctionCall(name="search", args={"query": "test"}))]
-                )
-
-            System message returns None and stores content in self.system_message.
-        """
-        role = message["role"]
-        content = message.get("content", [])
-        if role == "system":
-            self.system_message = content
-            return None
-        elif role == "assistant":
-            role = "model"
-
-        parts = []
-        if message.get("tool_calls"):
-            for tc in message["tool_calls"]:
-                parts.append(
-                    Part(
-                        function_call=FunctionCall(
-                            name=tc["function"]["name"],
-                            args=json.loads(tc["function"]["arguments"]),
-                        )
-                    )
-                )
-        elif role == "tool":
-            role = "model"
-            parts.append(
-                Part(
-                    function_response=FunctionResponse(
-                        name="tool_call_result",  # seems to work to hard-code the same name every time
-                        response=json.loads(message["content"]),
-                    )
-                )
-            )
-        elif isinstance(content, str):
-            parts.append(Part(text=content))
-        elif isinstance(content, list):
-            for c in content:
-                if c["type"] == "text":
-                    parts.append(Part(text=c["text"]))
-                elif c["type"] == "image_url":
-                    parts.append(
-                        Part(
-                            inline_data=Blob(
-                                mime_type="image/jpeg",
-                                data=base64.b64decode(c["image_url"]["url"].split(",")[1]),
-                            )
-                        )
-                    )
-
-        message = Content(role=role, parts=parts)
-        return message
-
-    def to_standard_messages(self, obj) -> list:
-        """Convert Google Content object to standard structured format.
-
-        Handles text, images, and function calls from Google's Content/Part objects.
-
-        Args:
-            obj: Google Content object with role and parts.
-
-        Returns:
-            List containing a single message in standard format.
-
-        Examples:
-            Google Content with text::
-
-                Content(
-                    role="user",
-                    parts=[Part(text="Hello")]
-                )
-
-            Converts to::
-
-                [
-                    {
-                        "role": "user",
-                        "content": [{"type": "text", "text": "Hello"}]
-                    }
-                ]
-
-            Google Content with function call::
-
-                Content(
-                    role="model",
-                    parts=[Part(function_call=FunctionCall(name="search", args={"q": "test"}))]
-                )
-
-            Converts to::
-
-                [
-                    {
-                        "role": "assistant",
-                        "tool_calls": [
-                            {
-                                "id": "search",
-                                "type": "function",
-                                "function": {
-                                    "name": "search",
-                                    "arguments": '{"q": "test"}'
-                                }
-                            }
-                        ]
-                    }
-                ]
-
-            Google Content with image::
-
-                Content(
-                    role="user",
-                    parts=[Part(inline_data=Blob(mime_type="image/jpeg", data=bytes_data))]
-                )
-
-            Converts to::
-
-                [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": "data:image/jpeg;base64,<encoded_data>"}
-                            }
-                        ]
-                    }
-                ]
-        """
-        msg = {"role": obj.role, "content": []}
-        if msg["role"] == "model":
-            msg["role"] = "assistant"
-
-        for part in obj.parts:
-            if part.text:
-                msg["content"].append({"type": "text", "text": part.text})
-            elif part.inline_data:
-                encoded = base64.b64encode(part.inline_data.data).decode("utf-8")
-                msg["content"].append(
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{part.inline_data.mime_type};base64,{encoded}"},
-                    }
-                )
-            elif part.function_call:
-                args = part.function_call.args if hasattr(part.function_call, "args") else {}
-                msg["tool_calls"] = [
-                    {
-                        "id": part.function_call.name,
-                        "type": "function",
-                        "function": {
-                            "name": part.function_call.name,
-                            "arguments": json.dumps(args),
-                        },
-                    }
-                ]
-
-            elif part.function_response:
-                msg["role"] = "tool"
-                resp = (
-                    part.function_response.response
-                    if hasattr(part.function_response, "response")
-                    else {}
-                )
-                msg["tool_call_id"] = part.function_response.name
-                msg["content"] = json.dumps(resp)
-
-        # there might be no content parts for tool_calls messages
-        if not msg["content"]:
-            del msg["content"]
-        return [msg]
-
-    def _restructure_from_openai_messages(self):
-        """Restructures messages to ensure proper Google format and message ordering.
-
-        This method handles conversion of OpenAI-formatted messages to Google format,
-        with special handling for function calls, function responses, and system messages.
-        System messages are added back to the context as user messages when needed.
-
-        The final message order is preserved as:
-        1. Function calls (from model)
-        2. Function responses (from user)
-        3. Text messages (converted from system messages)
-
-        Note:
-            System messages are only added back when there are no regular text
-            messages in the context, ensuring proper conversation continuity
-            after function calls.
-        """
-        self.system_message = None
-        converted_messages = []
-
-        # Process each message, preserving Google-formatted messages and converting others
-        for message in self._messages:
-            if isinstance(message, Content):
-                # Keep existing Google-formatted messages (e.g., function calls/responses)
-                converted_messages.append(message)
-                continue
-
-            # Convert OpenAI format to Google format, system messages return None
-            converted = self.from_standard_message(message)
-            if converted is not None:
-                converted_messages.append(converted)
-
-        # Update message list
-        self._messages[:] = converted_messages
-
-        # Check if we only have function-related messages (no regular text)
-        has_regular_messages = any(
-            len(msg.parts) == 1
-            and getattr(msg.parts[0], "text", None)
-            and not getattr(msg.parts[0], "function_call", None)
-            and not getattr(msg.parts[0], "function_response", None)
-            for msg in self._messages
-        )
-
-        # Add system message back as a user message if we only have function messages
-        if self.system_message and not has_regular_messages:
-            self._messages.append(Content(role="user", parts=[Part(text=self.system_message)]))
-
-        # Remove any empty messages
-        self._messages = [m for m in self._messages if m.parts]
-
-
 class GoogleLLMService(LLMService):
     """Google AI (Gemini) LLM service implementation.
 
     This class implements inference with Google's AI models, translating internally
-    from OpenAILLMContext to the messages format expected by the Google AI model.
-    We use OpenAILLMContext as a lingua franca for all LLM services to enable
-    easy switching between different LLMs.
+    from the universal LLMContext to the message format expected by the Google
+    AI model.
     """
 
     # Overriding the default adapter to use the Gemini one.
@@ -750,7 +160,7 @@ class GoogleLLMService(LLMService):
             logger.exception(f"Failed to unset thinking budget: {e}")
 
     @traced_llm
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: LLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
 
         prompt_tokens = 0
@@ -763,19 +173,31 @@ class GoogleLLMService(LLMService):
         search_result = ""
 
         try:
+            adapter = self.get_llm_adapter()
+            llm_invocation_params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(
+                context
+            )
+
             logger.debug(
-                # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
-                f"{self}: Generating chat [{context.get_messages_for_logging()}]"
+                # TODO: figure out a nice way to also log system instruction
+                # f"{self}: Generating chat [{self._system_instruction}] | [{adapter.get_messages_for_logging(context)}]"
+                f"{self}: Generating chat [{adapter.get_messages_for_logging(context)}]"
             )
 
             messages = context.messages
-            if context.system_message and self._system_instruction != context.system_message:
-                logger.debug(f"System instruction changed: {context.system_message}")
-                self._system_instruction = context.system_message
+            if (
+                llm_invocation_params.get("system_instruction")
+                and self._system_instruction != llm_invocation_params["system_instruction"]
+            ):
+                logger.debug(
+                    f"System instruction changed: {llm_invocation_params['system_instruction']}"
+                )
+                self._system_instruction = llm_invocation_params["system_instruction"]
 
+            # TODO: test what happens when there are no tools
             tools = []
-            if context.tools:
-                tools = context.tools
+            if llm_invocation_params.get("tools"):
+                tools = llm_invocation_params["tools"]
             elif self._tools:
                 tools = self._tools
             tool_config = None
@@ -922,12 +344,12 @@ class GoogleLLMService(LLMService):
 
         context = None
 
-        if isinstance(frame, OpenAILLMContextFrame):
-            context = GoogleLLMContext.upgrade_to_google(frame.context)
+        if isinstance(frame, LLMContextFrame):
+            context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
-            context = GoogleLLMContext(frame.messages)
+            context = LLMContext(messages=frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
-            context = GoogleLLMContext()
+            context = LLMContext()
             context.add_image_frame_message(
                 format=frame.format, size=frame.size, image=frame.image, text=frame.text
             )
@@ -938,34 +360,3 @@ class GoogleLLMService(LLMService):
 
         if context:
             await self._process_context(context)
-
-    def create_context_aggregator(
-        self,
-        context: OpenAILLMContext,
-        *,
-        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
-        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> GoogleContextAggregatorPair:
-        """Create Google-specific context aggregators.
-
-        Creates a pair of context aggregators optimized for Google's message format,
-        including support for function calls, tool usage, and image handling.
-
-        Args:
-            context: The LLM context to create aggregators for.
-            user_params: Parameters for user message aggregation.
-            assistant_params: Parameters for assistant message aggregation.
-
-        Returns:
-            GoogleContextAggregatorPair: A pair of context aggregators, one for
-            the user and one for the assistant, encapsulated in an
-            GoogleContextAggregatorPair.
-
-        """
-        context.set_llm_adapter(self.get_llm_adapter())
-
-        if isinstance(context, OpenAILLMContext):
-            context = GoogleLLMContext.upgrade_to_google(context)
-        user = GoogleUserContextAggregator(context, params=user_params)
-        assistant = GoogleAssistantContextAggregator(context, params=assistant_params)
-        return GoogleContextAggregatorPair(_user=user, _assistant=assistant)
