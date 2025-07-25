@@ -59,21 +59,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 
-from pipecat.serializers.plivo import PlivoFrameSerializer
-from pipecat.serializers.telnyx import TelnyxFrameSerializer
-from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import (
-    FastAPIWebsocketParams,
-    FastAPIWebsocketTransport,
-)
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
 
 # Load environment variables
 load_dotenv(override=True)
+
+
+def get_install_command(transport: str) -> str:
+    """Get the pip install command for a specific transport.
+
+    Args:
+        transport: The transport name.
+
+    Returns:
+        The pip install command string.
+    """
+    install_map = {
+        "daily": "pip install pipecat-ai[daily]",
+        "livekit": "pip install pipecat-ai[livekit]",
+        "webrtc": "pip install pipecat-ai[webrtc]",
+        "twilio": "pip install pipecat-ai[websocket]",
+        "telnyx": "pip install pipecat-ai[websocket]",
+        "plivo": "pip install pipecat-ai[websocket]",
+    }
+    return install_map.get(transport, f"pip install pipecat-ai[{transport}]")
 
 
 def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
@@ -86,10 +95,23 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     Returns:
         Client identifier string, empty if transport not supported.
     """
-    if isinstance(transport, SmallWebRTCTransport):
-        return client.pc_id
-    elif isinstance(transport, DailyTransport):
-        return client["id"]
+    # Import conditionally to avoid dependency issues
+    try:
+        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+
+        if isinstance(transport, SmallWebRTCTransport):
+            return client.pc_id
+    except ImportError:
+        pass
+
+    try:
+        from pipecat.transports.services.daily import DailyTransport
+
+        if isinstance(transport, DailyTransport):
+            return client["id"]
+    except ImportError:
+        pass
+
     logger.warning(f"Unable to get client id from unsupported transport {type(transport)}")
     return ""
 
@@ -104,10 +126,15 @@ async def maybe_capture_participant_camera(
         client: Transport-specific client object.
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
-    if isinstance(transport, DailyTransport):
-        await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="camera"
-        )
+    try:
+        from pipecat.transports.services.daily import DailyTransport
+
+        if isinstance(transport, DailyTransport):
+            await transport.capture_participant_video(
+                client["id"], framerate=framerate, video_source="camera"
+            )
+    except ImportError:
+        pass
 
 
 async def maybe_capture_participant_screen(
@@ -120,10 +147,15 @@ async def maybe_capture_participant_screen(
         client: Transport-specific client object.
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
-    if isinstance(transport, DailyTransport):
-        await transport.capture_participant_video(
-            client["id"], framerate=framerate, video_source="screenVideo"
-        )
+    try:
+        from pipecat.transports.services.daily import DailyTransport
+
+        if isinstance(transport, DailyTransport):
+            await transport.capture_participant_video(
+                client["id"], framerate=framerate, video_source="screenVideo"
+            )
+    except ImportError:
+        pass
 
 
 def smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
@@ -191,9 +223,17 @@ def run_daily(
         args: Parsed command-line arguments.
         transport_params: Mapping of transport names to parameter factory functions.
     """
-    logger.info("Running with DailyTransport...")
+    try:
+        from pipecat.runner.daily_runner import configure
+        from pipecat.transports.services.daily import DailyParams, DailyTransport
+    except ImportError as e:
+        logger.error(
+            f"Daily transport dependencies not installed. Install with: {get_install_command('daily')}"
+        )
+        logger.debug(f"Import error: {e}")
+        return
 
-    from pipecat.runner.daily_runner import configure
+    logger.info("Running with DailyTransport...")
 
     async def run_daily_impl():
         async with aiohttp.ClientSession() as session:
@@ -219,9 +259,17 @@ def run_livekit(
         args: Parsed command-line arguments.
         transport_params: Mapping of transport names to parameter factory functions.
     """
-    logger.info("Running with LiveKitTransport...")
+    try:
+        from pipecat.runner.livekit_runner import configure
+        from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
+    except ImportError as e:
+        logger.error(
+            f"LiveKit transport dependencies not installed. Install with: {get_install_command('livekit')}"
+        )
+        logger.debug(f"Import error: {e}")
+        return
 
-    from pipecat.runner.livekit_runner import configure
+    logger.info("Running with LiveKitTransport...")
 
     async def run_livekit_impl():
         (url, token, room_name) = await configure()
@@ -246,9 +294,19 @@ def run_webrtc(
         args: Parsed command-line arguments.
         transport_params: Mapping of transport names to parameter factory functions.
     """
-    logger.info("Running with SmallWebRTCTransport...")
+    try:
+        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-    from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
+        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+        from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+    except ImportError as e:
+        logger.error(
+            f"WebRTC transport dependencies not installed. Install with: {get_install_command('webrtc')}"
+        )
+        logger.debug(f"Import error: {e}")
+        return
+
+    logger.info("Running with SmallWebRTCTransport...")
 
     app = FastAPI()
 
@@ -343,6 +401,19 @@ def run_twilio(
         args: Parsed command-line arguments.
         transport_params: Mapping of transport names to parameter factory functions.
     """
+    try:
+        from pipecat.serializers.twilio import TwilioFrameSerializer
+        from pipecat.transports.network.fastapi_websocket import (
+            FastAPIWebsocketParams,
+            FastAPIWebsocketTransport,
+        )
+    except ImportError as e:
+        logger.error(
+            f"Twilio transport dependencies not installed. Install with: {get_install_command('twilio')}"
+        )
+        logger.debug(f"Import error: {e}")
+        return
+
     logger.info("Running with FastAPIWebsocketTransport (Twilio)...")
 
     app = FastAPI()
@@ -420,6 +491,19 @@ def run_telnyx(
         args: Parsed command-line arguments.
         transport_params: Mapping of transport names to parameter factory functions.
     """
+    try:
+        from pipecat.serializers.telnyx import TelnyxFrameSerializer
+        from pipecat.transports.network.fastapi_websocket import (
+            FastAPIWebsocketParams,
+            FastAPIWebsocketTransport,
+        )
+    except ImportError as e:
+        logger.error(
+            f"Telnyx transport dependencies not installed. Install with: {get_install_command('telnyx')}"
+        )
+        logger.debug(f"Import error: {e}")
+        return
+
     logger.info("Running with FastAPIWebsocketTransport (Telnyx)...")
 
     app = FastAPI()
@@ -498,6 +582,19 @@ def run_plivo(
         args: Parsed command-line arguments.
         transport_params: Mapping of transport names to parameter factory functions.
     """
+    try:
+        from pipecat.serializers.plivo import PlivoFrameSerializer
+        from pipecat.transports.network.fastapi_websocket import (
+            FastAPIWebsocketParams,
+            FastAPIWebsocketTransport,
+        )
+    except ImportError as e:
+        logger.error(
+            f"Plivo transport dependencies not installed. Install with: {get_install_command('plivo')}"
+        )
+        logger.debug(f"Import error: {e}")
+        return
+
     logger.info("Running with FastAPIWebsocketTransport (Plivo)...")
 
     app = FastAPI()
@@ -582,6 +679,9 @@ def run_main(
     """
     if args.transport not in transport_params:
         logger.error(f"Transport '{args.transport}' not supported by this application.")
+        logger.info(
+            f"To add {args.transport} support, install with: {get_install_command(args.transport)}"
+        )
         return
 
     match args.transport:
