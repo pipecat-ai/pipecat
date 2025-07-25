@@ -170,7 +170,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             and getattr(msg.parts[0], "text", None)
             and not getattr(msg.parts[0], "function_call", None)
             and not getattr(msg.parts[0], "function_response", None)
-            for msg in self._messages
+            for msg in messages
         )
 
         # Add system instruction back as a user message if we only have function messages
