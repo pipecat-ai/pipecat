@@ -61,10 +61,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         tts = InworldTTSService(
             api_key=os.getenv("INWORLD_API_KEY", ""),
             aiohttp_session=session,
+            voice_id="Ashley",
+            model="inworld-tts-1",
             streaming=streaming,  # True: real-time chunks, False: complete audio then playback
             params=InworldTTSService.InputParams(
-                voice_id="Ashley",
-                model="inworld-tts-1",
                 temperature=0.8,
             ),
         )
