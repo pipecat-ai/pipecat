@@ -466,6 +466,7 @@ class InworldTTSService(TTSService):
                     # Inworld's response format: {"result": {"audioContent": "base64data"}}
                     if "result" in chunk_data and "audioContent" in chunk_data["result"]:
                         # Process the audio chunk
+                        await self.stop_ttfb_metrics()
                         async for frame in self._process_audio_chunk(
                             base64.b64decode(chunk_data["result"]["audioContent"])
                         ):
