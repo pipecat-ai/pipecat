@@ -24,6 +24,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Play delayed messages from `ElevenLabsTTSService` if they still belong to the
+  current context.
+
+- Dependency compatibility improvements: Relaxed version constraints for core
+  dependencies to support broader version ranges while maintaining stability:
+
+  - `aiohttp`, `Markdown`, `nltk`, `numpy`, `Pillow`, `pydantic`, `openai`,
+    `numba`: Now support up to the next major version (e.g. `numpy>=1.26.4,<3`)
+  - `pyht`: Relaxed to `>=0.1.6` to resolve `grpcio` conflicts with
+    `nvidia-riva-client`
+  - `fastapi`: Updated to support versions `>=0.115.6,<0.117.0`
+  - `torch`/`torchaudio`: Changed from exact pinning (`==2.5.0`) to compatible
+    range (`~=2.5.0`)
+  - `aws_sdk_bedrock_runtime`: Added Python 3.12+ constraint via environment
+    marker
+  - `numba`: Reduced minimum version to `0.60.0` for better compatibility
+
+- Changed `NeuphonicHttpTTSService` to use a POST based request instead of the
+  `pyneuphonic` package. This removes a package requirement, allowing Neuphonic
+  to work with more services.
+
+- Updated `ElevenLabsTTSService` to handle the case where
+  `allow_interruptions=False`. Now, when interruptions are disabled, the same
+  context ID will be used throughout the conversation.
+
 - Updated the `deepgram` optional dependency to 4.7.0, which downgrades the
   `tasks cancelled error` to a debug log. This removes the log from appearing
   in Pipecat logs upon leaving.
