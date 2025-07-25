@@ -184,7 +184,7 @@ class GoogleLLMService(LLMService):
                 f"{self}: Generating chat [{adapter.get_messages_for_logging(context)}]"
             )
 
-            messages = context.messages
+            messages = llm_invocation_params["messages"]
             if (
                 llm_invocation_params.get("system_instruction")
                 and self._system_instruction != llm_invocation_params["system_instruction"]
