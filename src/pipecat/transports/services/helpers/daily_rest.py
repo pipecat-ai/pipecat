@@ -71,6 +71,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         sip: SIP configuration parameters.
         sip_uri: SIP URI information returned by Daily.
         start_video_off: Whether video is off by default.
+        start_audio_off: Whether audio is off by default.
+        enable_screenshare: Whether screensharing is enabled.
     """
 
     exp: Optional[float] = None
@@ -86,6 +88,8 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
     start_video_off: bool = False
+    start_audio_off: bool = True
+    enable_screenshare: bool = False
 
     @property
     def sip_endpoint(self) -> str:
