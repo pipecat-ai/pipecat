@@ -1012,7 +1012,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             if not self._context:
                 self._context = context
                 if not self._receive_task:
-                    self._receive_task = self.create_task(self._receive_task_handler(self._context, "OpenAILLMContextFrame one"))
+                    self._receive_task = self.create_task(self._receive_task_handler(self._context, "$ $ $ OpenAILLMContextFrame one"))
                 if frame.context.tools:
                     self._tools = frame.context.tools
                 await self._create_initial_response()
@@ -1028,7 +1028,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             if frame.messages and frame.messages[-1] and frame.messages[-1].role == "system":
                 self._context.add_messages(frame.messages)
                 # self._context.set_messages(frame.messages)
-                self._receive_task = self.create_task(self._receive_task_handler(self._context, "LLMMessagesFrame two"))
+                self._receive_task = self.create_task(self._receive_task_handler(self._context, "$ $ $ LLMMessagesFrame two"))
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, InputAudioRawFrame):
@@ -1047,7 +1047,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             # self._context.add_messages(frame.messages)
             # await self._handle_user_stopped_speaking(frame)
             print(f"_____gemini_vertex.py * UserStoppedSpeakingFrame  self._context.messages: {self._context.messages}")
-            self._receive_task = self.create_task(self._receive_task_handler(self._context, "UserStoppedSpeakingFrame three"))
+            self._receive_task = self.create_task(self._receive_task_handler(self._context, "$ $ $ UserStoppedSpeakingFrame three"))
 
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
@@ -1090,6 +1090,11 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                     pass
 
                 async for message in session.receive():
+
+                #   TODO  # don't forget to Check for grounding metadata in server content
+                #     if evt.serverContent and evt.serverContent.groundingMetadata:
+                #         self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
+
                     if message.text:
                         print(f"_____gemini.py * message.text::::::: {message.text}")
 
@@ -1109,19 +1114,23 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                             and message.server_content.model_turn.parts
                         ):
                             audio_data = []
+
                             for part in message.server_content.model_turn.parts:
 
                                 if part.inline_data:
-                                    inline_data = part.inlineData
+                                    inline_data = part.inline_data
                                     if not inline_data:
                                         return
-                                    if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
-                                        logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
+                                    # if inline_data.mime_type != f"audio/pcm;rate={self._sample_rate}":
+                                    if inline_data.mime_type != f"audio/pcm":
+                                        logger.warning(f"Unrecognized server_content format {inline_data.mime_type}")
                                         return
 
                                     audio = base64.b64decode(inline_data.data)
                                     if not audio:
                                         return
+
+                                    print(f"_____gemini_vertex.py * self._sample_rate: {self._sample_rate}")
 
                                     if not self._bot_is_speaking:
                                         self._bot_is_speaking = True
@@ -1134,6 +1143,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                                         sample_rate=self._sample_rate,
                                         num_channels=1,
                                     )
+                                    print(f"_____gemini_vertex.py * frame: {frame}")
                                     await self.push_frame(frame)
 
 
@@ -1182,7 +1192,6 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
 
     async def _create_initial_response(self):
         """Create initial response based on context history."""
-        print(f"_____gemini.py * _create_initial_response:")
         if not self._api_session_ready:
             self._run_llm_when_api_session_ready = True
             return
@@ -1210,7 +1219,6 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
     async def _create_single_response(self, messages_list):
         """Create a single response from a list of messages."""
         # Refactor to combine this logic with same logic in GeminiMultimodalLiveContext
-        print(f"_____gemini.py * _create_single_response:")
         messages = []
         for item in messages_list:
             role = item.get("role")

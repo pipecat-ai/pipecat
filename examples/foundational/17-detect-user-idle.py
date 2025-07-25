@@ -110,8 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("GOOGLE_API_KEY"),
         params=GoogleVertexMultimodalLiveLLMService.InputParams(
             project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
-            # modalities="AUDIO", 
-            modalities="TEXT", 
+            # modalities="TEXT", 
             # modalities=GeminiMultimodalModalities.TEXT, #ug, figure out why this isn't a string later
         ),
         # model="models/gemini-2.0-flash-live-001"
@@ -161,11 +160,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
+            # stt,
             # user_idle,  # Idle user check-in
             context_aggregator.user(),
             llm,  # LLM
-            tts,  # TTS
+            # tts,  # TTS
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),
         ]
