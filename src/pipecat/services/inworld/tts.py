@@ -228,7 +228,7 @@ class InworldTTSService(TTSService):
         # Note: Language is automatically inferred from text by Inworld's models
         self._settings = {
             "voiceId": params.voice_id,  # Voice selection from params
-            "modelId": params.model or "inworld-tts-1",  # TTS model selection from params
+            "modelId": params.model,  # TTS model selection from params
             "audio_config": {  # Audio format configuration
                 "audio_encoding": encoding,  # Format: LINEAR16, MP3, etc.
                 "sample_rate_hertz": 0,  # Will be set in start() from parent service
