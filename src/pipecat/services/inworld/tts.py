@@ -164,7 +164,6 @@ class InworldTTSService(TTSService):
         api_key: str,
         aiohttp_session: aiohttp.ClientSession,
         streaming: bool = True,
-        base_url: Optional[str] = None,
         sample_rate: Optional[int] = None,
         encoding: str = "LINEAR16",
         params: Optional[InputParams] = None,
@@ -183,10 +182,9 @@ class InworldTTSService(TTSService):
             streaming: Whether to use streaming mode (True) or non-streaming mode (False).
                       - True: Real-time audio chunks as they're generated (lower latency)
                       - False: Complete audio file generated first, then chunked for playback (simpler)
-            base_url: Base URL for Inworld HTTP API. If None, automatically selected based on streaming mode:
-                     - Streaming: "https://api.inworld.ai/tts/v1/voice:stream"
-                     - Non-streaming: "https://api.inworld.ai/tts/v1/voice"
-                     Should normally not be changed unless using a different environment.
+                      The base URL is automatically selected based on this mode:
+                      - Streaming: "https://api.inworld.ai/tts/v1/voice:stream"
+                      - Non-streaming: "https://api.inworld.ai/tts/v1/voice"
             sample_rate: Audio sample rate in Hz. If None, uses default from StartFrame.
                         Common values: 48000 (high quality), 24000 (good quality), 16000 (basic)
             encoding: Audio encoding format. Supported options:
@@ -215,13 +213,11 @@ class InworldTTSService(TTSService):
         self._session = aiohttp_session  # HTTP session for requests
         self._streaming = streaming  # Streaming mode selection
 
-        # Set base URL based on streaming mode if not provided
-        if base_url is None:
-            if streaming:
-                base_url = "https://api.inworld.ai/tts/v1/voice:stream"  # Streaming endpoint
-            else:
-                base_url = "https://api.inworld.ai/tts/v1/voice"  # Non-streaming endpoint
-        self._base_url = base_url  # API endpoint URL
+        # Set base URL based on streaming mode
+        if streaming:
+            self._base_url = "https://api.inworld.ai/tts/v1/voice:stream"  # Streaming endpoint
+        else:
+            self._base_url = "https://api.inworld.ai/tts/v1/voice"  # Non-streaming endpoint
 
         # Build settings dictionary that matches Inworld's API expectations
         # This will be sent as JSON payload in each TTS request
