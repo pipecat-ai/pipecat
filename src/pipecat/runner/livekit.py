@@ -4,7 +4,29 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""LiveKit room configuration utilities for Pipecat applications."""
+"""LiveKit room and token configuration utilities.
+
+This module provides helper functions for creating and configuring LiveKit
+rooms and authentication tokens. It handles JWT token generation with
+appropriate grants for both regular participants and AI agents.
+
+The module supports creating tokens for development and testing, with
+automatic agent detection for proper room permissions.
+
+Required environment variables:
+
+- LIVEKIT_API_KEY - LiveKit API key
+- LIVEKIT_API_SECRET - LiveKit API secret
+- LIVEKIT_URL - LiveKit server URL
+- LIVEKIT_ROOM_NAME - Room name to join
+
+Example::
+
+    from pipecat.runner.livekit import configure
+
+    url, token, room_name = await configure()
+    # Use with LiveKitTransport
+"""
 
 import argparse
 import os

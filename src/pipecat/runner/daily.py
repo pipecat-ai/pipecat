@@ -4,7 +4,30 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Daily.co room configuration utilities for Pipecat examples."""
+"""Daily room and token configuration utilities.
+
+This module provides helper functions for creating and configuring Daily rooms
+and authentication tokens. It handles both command-line argument parsing and
+environment variable configuration.
+
+The module supports creating temporary rooms for development or using existing
+rooms specified via arguments or environment variables.
+
+Required environment variables:
+
+- DAILY_API_KEY - Daily API key for room/token creation
+- DAILY_SAMPLE_ROOM_URL (optional) - Existing room URL to use
+- DAILY_SAMPLE_ROOM_TOKEN (optional) - Existing token to use
+
+Example::
+
+    import aiohttp
+    from pipecat.runner.daily import configure
+
+    async with aiohttp.ClientSession() as session:
+        room_url, token = await configure(session)
+        # Use room_url and token with DailyTransport
+"""
 
 import argparse
 import os
@@ -16,7 +39,7 @@ from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
 
 
 async def configure(aiohttp_session: aiohttp.ClientSession):
-    """Configure Daily.co room URL and token from arguments or environment.
+    """Configure Daily room URL and token from arguments or environment.
 
     Args:
         aiohttp_session: HTTP session for making API requests.
@@ -34,7 +57,7 @@ async def configure(aiohttp_session: aiohttp.ClientSession):
 async def configure_with_args(
     aiohttp_session: aiohttp.ClientSession, parser: Optional[argparse.ArgumentParser] = None
 ):
-    """Configure Daily.co room with command-line argument parsing.
+    """Configure Daily room with command-line argument parsing.
 
     Args:
         aiohttp_session: HTTP session for making API requests.
