@@ -4,43 +4,33 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Cloud-compatible development server that uses subprocess to run bots."""
+"""Cloud-compatible development server - simplified without subprocesses."""
 
 import argparse
 import asyncio
 import os
-import subprocess
 import sys
+from contextlib import asynccontextmanager
 from typing import Dict
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
-from fastapi.concurrency import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from loguru import logger
 
 # Import the common transport utility functions
-from .transport_utilities import setup_webrtc_routes, setup_websocket_routes
+from .transport_utilities import setup_websocket_routes
 
 load_dotenv(override=True)
 os.environ["LOCAL_RUN"] = "1"
 
-# Track bot processes
-bot_procs = {}
-
-
-def cleanup():
-    """Cleanup function to terminate all bot processes."""
-    for entry in bot_procs.values():
-        proc = entry[0]
-        proc.terminate()
-        proc.wait()
-
 
 def get_bot_module():
     """Get the bot module from the calling script."""
+    import importlib.util
+
     # Get the main module (the file that was executed)
     main_module = sys.modules["__main__"]
 
@@ -54,49 +44,35 @@ def get_bot_module():
 
         return bot
     except ImportError:
-        raise ImportError(
-            "Could not find 'bot' function. Make sure your script has a 'bot' function or there's a 'bot.py' file in the current directory."
-        )
+        pass
+
+    # Look for any .py file in current directory that has a bot function
+    cwd = os.getcwd()
+    for filename in os.listdir(cwd):
+        if filename.endswith(".py") and filename != "server.py":
+            try:
+                module_name = filename[:-3]  # Remove .py extension
+                spec = importlib.util.spec_from_file_location(
+                    module_name, os.path.join(cwd, filename)
+                )
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+
+                if hasattr(module, "bot"):
+                    return module
+            except Exception:
+                continue
+
+    raise ImportError(
+        "Could not find 'bot' function. Make sure your bot file has a 'bot' function."
+    )
 
 
-async def run_subprocess_bot(transport_type: str, **kwargs):
-    """Run a bot via subprocess - used by transport handlers."""
-    if transport_type == "daily":
-        import aiohttp
-
-        from .daily_runner import configure
-
-        async with aiohttp.ClientSession() as session:
-            room_url, token = await configure(session)
-            proc = subprocess.Popen(
-                [
-                    f"LOCAL_RUN=1 python3 -m pipecat.runner.runner -u {room_url} -t {token} --transport daily"
-                ],
-                shell=True,
-                bufsize=1,
-                cwd=os.getcwd(),
-            )  # Run from current working directory
-            bot_procs[proc.pid] = (proc, room_url)
-            return room_url, token
-
-    elif transport_type == "livekit":
-        from .livekit_runner import configure
-
-        url, token, room_name = await configure()
-        proc = subprocess.Popen(
-            [
-                f"LOCAL_RUN=1 python3 -m pipecat.runner.runner --transport livekit --url {url} --token {token} --room {room_name}"
-            ],
-            shell=True,
-            bufsize=1,
-            cwd=os.getcwd(),
-        )  # Run from current working directory
-        bot_procs[proc.pid] = (proc, url)
-        return url, token, room_name
-
-    elif transport_type == "webrtc":
+async def run_bot_directly(transport_type: str, **kwargs):
+    """Run a bot directly in the same process - no subprocess needed."""
+    if transport_type == "webrtc":
         if "webrtc_connection" in kwargs:
-            # Direct connection mode - run bot directly
+            # Direct WebRTC connection
             bot_module = get_bot_module()
 
             class WebRTCSessionArgs:
@@ -108,19 +84,10 @@ async def run_subprocess_bot(transport_type: str, **kwargs):
 
             session_args = WebRTCSessionArgs(kwargs["webrtc_connection"])
             await bot_module.bot(session_args)
-        else:
-            # Subprocess mode (rarely used for WebRTC)
-            proc = subprocess.Popen(
-                [f"LOCAL_RUN=1 python3 -m pipecat.runner.runner --transport webrtc"],
-                shell=True,
-                bufsize=1,
-                cwd=os.getcwd(),
-            )  # Run from current working directory
-            bot_procs[proc.pid] = (proc, "webrtc")
 
     elif transport_type in ["twilio", "telnyx", "plivo"]:
         if "websocket" in kwargs:
-            # Direct WebSocket mode - run bot directly
+            # Direct WebSocket connection
             bot_module = get_bot_module()
 
             class WebSocketSessionArgs:
@@ -135,15 +102,6 @@ async def run_subprocess_bot(transport_type: str, **kwargs):
                 transport_type, kwargs["websocket"], kwargs["call_info"]
             )
             await bot_module.bot(session_args)
-        else:
-            # Subprocess mode (rarely used for telephony)
-            proc = subprocess.Popen(
-                [f"LOCAL_RUN=1 python3 -m pipecat.runner.runner --transport {transport_type}"],
-                shell=True,
-                bufsize=1,
-                cwd=os.getcwd(),
-            )  # Run from current working directory
-            bot_procs[proc.pid] = (proc, transport_type)
 
 
 def create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = None):
@@ -160,7 +118,7 @@ def create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = N
 
     # Add transport-specific routes
     if transport_type == "webrtc":
-        # Direct WebRTC setup (like the working run.py version)
+        # Direct WebRTC setup
         try:
             from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
@@ -203,9 +161,9 @@ def create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = N
                     logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
                     pcs_map.pop(webrtc_connection.pc_id, None)
 
-                # Run bot directly instead of through run_subprocess_bot
+                # Run bot directly
                 background_tasks.add_task(
-                    run_subprocess_bot, "webrtc", webrtc_connection=pipecat_connection
+                    run_bot_directly, "webrtc", webrtc_connection=pipecat_connection
                 )
 
             answer = pipecat_connection.get_answer()
@@ -231,7 +189,7 @@ def create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = N
         app.router.lifespan_context = lifespan
 
     elif transport_type in ["twilio", "telnyx", "plivo"]:
-        setup_websocket_routes(app, run_subprocess_bot, transport_type, proxy)
+        setup_websocket_routes(app, run_bot_directly, transport_type, proxy)
 
     # Add general routes
     @app.get("/")
@@ -240,18 +198,60 @@ def create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = N
         print(f"Starting bot with {transport_type} transport")
 
         if transport_type == "daily":
-            result = await run_subprocess_bot("daily")
-            room_url, token = result
-            return RedirectResponse(room_url)
+            # Create Daily room and start bot
+            import aiohttp
+
+            from .daily_runner import configure
+
+            async with aiohttp.ClientSession() as session:
+                room_url, token = await configure(session)
+
+                # Start the bot in the background to join the room
+                bot_module = get_bot_module()
+
+                class DailySessionArgs:
+                    def __init__(self, room_url, token):
+                        self.room_url = room_url
+                        self.token = token
+                        self.body = {}
+                        self.handle_sigint = False
+
+                session_args = DailySessionArgs(room_url, token)
+
+                # Run bot in background task
+                asyncio.create_task(bot_module.bot(session_args))
+
+                # Redirect user to the room
+                return RedirectResponse(room_url)
+
         elif transport_type == "livekit":
-            result = await run_subprocess_bot("livekit")
-            url, token, room_name = result
+            # Create LiveKit room and start bot
+            from .livekit_runner import configure
+
+            url, token, room_name = await configure()
+
+            # Start the bot in the background to join the room
+            bot_module = get_bot_module()
+
+            class LiveKitSessionArgs:
+                def __init__(self, url, token, room_name):
+                    self.url = url
+                    self.token = token
+                    self.room_name = room_name
+                    self.body = {}
+                    self.handle_sigint = False
+
+            session_args = LiveKitSessionArgs(url, token, room_name)
+
+            # Run bot in background task
+            asyncio.create_task(bot_module.bot(session_args))
+
+            # Redirect user to the room
             return RedirectResponse(url)
+
         elif transport_type == "webrtc":
-            await run_subprocess_bot("webrtc")
             return RedirectResponse("/client/")
         else:
-            await run_subprocess_bot(transport_type)
             return {"status": f"Bot started with {transport_type}"}
 
     @app.post("/connect")
@@ -260,11 +260,29 @@ def create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = N
         print(f"Starting bot with {transport_type} transport")
 
         if transport_type == "daily":
-            result = await run_subprocess_bot("daily")
-            room_url, token = result
-            return {"transport": "daily", "room_url": room_url, "token": token}
+            import aiohttp
+
+            from .daily_runner import configure
+
+            async with aiohttp.ClientSession() as session:
+                room_url, token = await configure(session)
+
+                # Start the bot in the background
+                bot_module = get_bot_module()
+
+                class DailySessionArgs:
+                    def __init__(self, room_url, token):
+                        self.room_url = room_url
+                        self.token = token
+                        self.body = {}
+                        self.handle_sigint = False
+
+                session_args = DailySessionArgs(room_url, token)
+                asyncio.create_task(bot_module.bot(session_args))
+
+                return {"transport": "daily", "room_url": room_url, "token": token}
+
         elif transport_type == "webrtc":
-            await run_subprocess_bot("webrtc")
             return {"transport": "webrtc", "client_url": "/client/"}
         else:
             # RTVI only supports Daily and WebRTC

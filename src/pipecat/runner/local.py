@@ -250,7 +250,7 @@ def run_daily(
 ):
     """Run using Daily.co transport."""
     try:
-        from pipecat.runner.daily_runner import configure
+        from pipecat.runner.daily import configure
         from pipecat.transports.services.daily import DailyParams, DailyTransport
     except ImportError as e:
         logger.error(f"Daily transport dependencies not installed.")
@@ -274,7 +274,7 @@ def run_livekit(
 ):
     """Run using LiveKit transport."""
     try:
-        from pipecat.runner.livekit_runner import configure
+        from pipecat.runner.livekit import configure
         from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
     except ImportError as e:
         logger.error(f"LiveKit transport dependencies not installed.")
