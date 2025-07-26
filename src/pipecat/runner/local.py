@@ -4,29 +4,60 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Direct execution runner for local-only examples."""
+"""Local-only development runner for simple Pipecat examples.
+
+This module provides a simplified runner for local development and testing.
+It supports direct function execution without requiring the structured `bot()`
+function pattern needed for cloud deployment.
+
+Supported transports:
+
+- Daily - Uses environment variables or arguments for room/token
+- LiveKit - Uses environment variables or arguments for connection
+- WebRTC - Provides local WebRTC interface with prebuilt UI
+- Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo
+
+This runner is ideal for quick prototypes, examples, and bots that will only
+run locally. For cloud-deployable bots, use `pipecat.runner.cloud` instead.
+
+Example::
+
+    async def run_bot(transport, args, handle_sigint):
+        # Your bot implementation
+        pass
+
+    if __name__ == "__main__":
+        from pipecat.runner.local import main
+
+        transport_params = {
+            "webrtc": lambda: TransportParams(...)
+        }
+
+        main(run_bot, transport_params=transport_params)
+
+Then run: `python bot.py -t webrtc`
+"""
 
 import argparse
 import asyncio
 import os
 import sys
+from contextlib import asynccontextmanager
 from typing import Callable, Dict, Mapping, Optional
 
 import aiohttp
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI
-from fastapi.concurrency import asynccontextmanager
 from fastapi.responses import RedirectResponse
 from loguru import logger
 
-# Import the common transport utility functions
-from .transport_utilities import setup_websocket_routes
+from pipecat.runner.utils import setup_websocket_routes
 
 load_dotenv(override=True)
 
 
-def run_webrtc(
+def _run_webrtc(
     run: Callable, args: argparse.Namespace, transport_params: Mapping[str, Callable] = {}
 ):
     """Run using WebRTC transport with FastAPI server."""
@@ -91,7 +122,7 @@ def run_webrtc(
         answer = pipecat_connection.get_answer()
 
         if args.esp32 and args.host:
-            from .transport_utilities import smallwebrtc_sdp_munging
+            from pipecat.runner.utils import smallwebrtc_sdp_munging
 
             answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], args.host)
 
@@ -112,16 +143,13 @@ def run_webrtc(
     uvicorn.run(app, host=args.host, port=args.port)
 
 
-def run_twilio(
+def _run_twilio(
     run: Callable, args: argparse.Namespace, transport_params: Mapping[str, Callable] = {}
 ):
     """Run using Twilio transport with FastAPI WebSocket server."""
     try:
         from pipecat.serializers.twilio import TwilioFrameSerializer
-        from pipecat.transports.network.fastapi_websocket import (
-            FastAPIWebsocketParams,
-            FastAPIWebsocketTransport,
-        )
+        from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport
     except ImportError as e:
         logger.error(f"Twilio transport dependencies not installed.")
         logger.debug(f"Import error: {e}")
@@ -157,16 +185,13 @@ def run_twilio(
     uvicorn.run(app, host=args.host, port=args.port)
 
 
-def run_telnyx(
+def _run_telnyx(
     run: Callable, args: argparse.Namespace, transport_params: Mapping[str, Callable] = {}
 ):
     """Run using Telnyx transport with FastAPI WebSocket server."""
     try:
         from pipecat.serializers.telnyx import TelnyxFrameSerializer
-        from pipecat.transports.network.fastapi_websocket import (
-            FastAPIWebsocketParams,
-            FastAPIWebsocketTransport,
-        )
+        from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport
     except ImportError as e:
         logger.error(f"Telnyx transport dependencies not installed.")
         logger.debug(f"Import error: {e}")
@@ -202,16 +227,13 @@ def run_telnyx(
     uvicorn.run(app, host=args.host, port=args.port)
 
 
-def run_plivo(
+def _run_plivo(
     run: Callable, args: argparse.Namespace, transport_params: Mapping[str, Callable] = {}
 ):
     """Run using Plivo transport with FastAPI WebSocket server."""
     try:
         from pipecat.serializers.plivo import PlivoFrameSerializer
-        from pipecat.transports.network.fastapi_websocket import (
-            FastAPIWebsocketParams,
-            FastAPIWebsocketTransport,
-        )
+        from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport
     except ImportError as e:
         logger.error(f"Plivo transport dependencies not installed.")
         logger.debug(f"Import error: {e}")
@@ -245,10 +267,10 @@ def run_plivo(
     uvicorn.run(app, host=args.host, port=args.port)
 
 
-def run_daily(
+def _run_daily(
     run: Callable, args: argparse.Namespace, transport_params: Mapping[str, Callable] = {}
 ):
-    """Run using Daily.co transport."""
+    """Run using Daily transport."""
     try:
         from pipecat.runner.daily import configure
         from pipecat.transports.services.daily import DailyParams, DailyTransport
@@ -269,7 +291,7 @@ def run_daily(
     asyncio.run(run_daily_impl())
 
 
-def run_livekit(
+def _run_livekit(
     run: Callable, args: argparse.Namespace, transport_params: Mapping[str, Callable] = {}
 ):
     """Run using LiveKit transport."""
@@ -292,7 +314,7 @@ def run_livekit(
     asyncio.run(run_livekit_impl())
 
 
-def run_main(
+def _run_main(
     run: Callable, args: argparse.Namespace, transport_params: Mapping[str, Callable] = {}
 ):
     """Run the application with the specified transport type."""
@@ -302,17 +324,17 @@ def run_main(
 
     match args.transport:
         case "daily":
-            run_daily(run, args, transport_params)
+            _run_daily(run, args, transport_params)
         case "livekit":
-            run_livekit(run, args, transport_params)
+            _run_livekit(run, args, transport_params)
         case "plivo":
-            run_plivo(run, args, transport_params)
+            _run_plivo(run, args, transport_params)
         case "telnyx":
-            run_telnyx(run, args, transport_params)
+            _run_telnyx(run, args, transport_params)
         case "twilio":
-            run_twilio(run, args, transport_params)
+            _run_twilio(run, args, transport_params)
         case "webrtc":
-            run_webrtc(run, args, transport_params)
+            _run_webrtc(run, args, transport_params)
 
 
 def main(
@@ -321,7 +343,26 @@ def main(
     parser: Optional[argparse.ArgumentParser] = None,
     transport_params: Mapping[str, Callable] = {},
 ):
-    """Main entry point for running Pipecat applications with transport selection."""
+    """Run a Pipecat bot with transport selection.
+
+    Args:
+        run: The bot function to execute. Must accept (transport, args, handle_sigint).
+        parser: Optional argument parser. If None, creates a default one.
+        transport_params: Mapping of transport names to parameter factory functions.
+            Each factory should return transport-specific parameters when called.
+
+    Command-line arguments:
+        --host: Server host address (default: localhost)
+        --port: Server port (default: 7860)
+        -t/--transport: Transport type (daily, livekit, webrtc, twilio, telnyx, plivo)
+        -x/--proxy: Public proxy hostname for telephony webhooks
+        --esp32: Enable SDP munging for ESP32 compatibility
+        -v/--verbose: Increase logging verbosity
+
+    The function handles argument parsing, transport setup, and bot execution.
+    Different transports may use FastAPI servers (WebRTC, telephony) or direct
+    execution (Daily, LiveKit).
+    """
     if not parser:
         parser = argparse.ArgumentParser(description="Pipecat Bot Runner")
 
@@ -359,4 +400,4 @@ def main(
     logger.remove(0)
     logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
 
-    run_main(run, args, transport_params)
+    _run_main(run, args, transport_params)

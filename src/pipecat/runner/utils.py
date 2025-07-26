@@ -4,10 +4,32 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Common transport utility functions shared between server.py and run.py."""
+"""Transport utility functions and FastAPI route setup helpers.
+
+This module provides common functionality for setting up transport-specific
+FastAPI routes and handling WebRTC/WebSocket connections. It includes SDP
+manipulation utilities for WebRTC compatibility and transport detection helpers.
+
+Key features:
+
+- WebRTC route setup with connection management
+- WebSocket route setup for telephony providers
+- SDP munging for ESP32 and other WebRTC compatibility
+- Transport client ID detection across different transport types
+- Video capture utilities for Daily transports
+
+The utilities are designed to be transport-agnostic where possible, with
+specific handlers for each transport type's unique requirements.
+
+Example::
+
+    from pipecat.runner.utils import setup_webrtc_routes
+
+    app = FastAPI()
+    setup_webrtc_routes(app, bot_runner_function, host="localhost")
+"""
 
 import json
-import os
 import re
 from typing import Any, Callable, Dict
 
