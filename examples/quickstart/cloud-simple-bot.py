@@ -21,7 +21,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 load_dotenv(override=True)
 
 
-async def run_bot_logic(transport, handle_sigint: bool = True):
+async def run_bot_logic(transport):
     """Main bot logic that works with any transport."""
     logger.info(f"Starting bot")
 
@@ -69,17 +69,14 @@ async def run_bot_logic(transport, handle_sigint: bool = True):
         logger.info("Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
 
 
 async def bot(session_args):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    # Get handle_sigint from session_args, default to True for Daily
-    handle_sigint = getattr(session_args, "handle_sigint", True)
-
-    if hasattr(session_args, "room_url") and hasattr(session_args, "token"):
+    if hasattr(session_args, "room_url"):
         # Daily session arguments (cloud or local)
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -108,61 +105,10 @@ async def bot(session_args):
             webrtc_connection=session_args.webrtc_connection,
         )
 
-    elif hasattr(session_args, "websocket"):
-        # WebSocket session arguments (for telephony providers)
-        from pipecat.transports.network.fastapi_websocket import (
-            FastAPIWebsocketParams,
-            FastAPIWebsocketTransport,
-        )
-
-        # Create appropriate serializer based on transport type
-        params = FastAPIWebsocketParams(
-            audio_in_enabled=True,
-            audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
-            add_wav_header=False,
-        )
-
-        if session_args.transport_type == "twilio":
-            from pipecat.serializers.twilio import TwilioFrameSerializer
-
-            call_info = session_args.call_info
-            params.serializer = TwilioFrameSerializer(
-                stream_sid=call_info["stream_sid"],
-                call_sid=call_info["call_sid"],
-                account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
-                auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
-            )
-        elif session_args.transport_type == "telnyx":
-            from pipecat.serializers.telnyx import TelnyxFrameSerializer
-
-            call_info = session_args.call_info
-            params.serializer = TelnyxFrameSerializer(
-                stream_id=call_info["stream_id"],
-                call_control_id=call_info["call_control_id"],
-                outbound_encoding=call_info["outbound_encoding"],
-                inbound_encoding="PCMU",
-            )
-        elif session_args.transport_type == "plivo":
-            from pipecat.serializers.plivo import PlivoFrameSerializer
-
-            call_info = session_args.call_info
-            params.serializer = PlivoFrameSerializer(
-                stream_id=call_info["stream_id"],
-                call_id=call_info["call_id"],
-            )
-        else:
-            raise ValueError(f"Unsupported WebSocket transport type: {session_args.transport_type}")
-
-        transport = FastAPIWebsocketTransport(websocket=session_args.websocket, params=params)
-
-    else:
-        raise ValueError(f"Unknown session arguments: {session_args}")
-
-    await run_bot_logic(transport, handle_sigint)
+    await run_bot_logic(transport)
 
 
 if __name__ == "__main__":
-    from pipecat.runner.server import main
+    from pipecat.runner.cloud import main
 
     main()
