@@ -38,7 +38,7 @@ async def run_bot(transport: BaseTransport, _: argparse.Namespace, handle_sigint
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a friendly AI assistant. Respond naturally and keep your answers conversational.",
         },
     ]
 
@@ -69,7 +69,7 @@ async def run_bot(transport: BaseTransport, _: argparse.Namespace, handle_sigint
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append({"role": "system", "content": "Say hello and briefly introduce yourself."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @transport.event_handler("on_client_disconnected")
@@ -83,7 +83,7 @@ async def run_bot(transport: BaseTransport, _: argparse.Namespace, handle_sigint
 
 
 if __name__ == "__main__":
-    from pipecat.runner.run import main
+    from pipecat.runner.local import main
 
     transport_params = {
         "webrtc": lambda: TransportParams(
