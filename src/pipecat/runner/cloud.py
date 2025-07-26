@@ -97,7 +97,7 @@ def _get_bot_module():
 
     # Try to import 'bot' module from current directory
     try:
-        import bot
+        import bot  # type: ignore[import-untyped]
 
         return bot
     except ImportError:
