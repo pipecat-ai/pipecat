@@ -348,38 +348,38 @@ class SpeechmaticsSTTService(STTService):
 
             language_code: Legacy language code for transcription. Defaults to None.
 
-                .. deprecated:: 0.0.76
+                .. deprecated:: 0.0.77
                     The language_code parameter is deprecated and will be removed in a future version.
                     Use language instead.
 
             output_locale_code: Legacy output language code for transcription. Defaults to None.
 
-                .. deprecated:: 0.0.76
+                .. deprecated:: 0.0.77
                     The output_locale_code parameter is deprecated and will be removed in a future version.
                     Use output_language instead.
 
             enable_speaker_diarization: Legacy enable speaker diarization. Defaults to None.
 
-                .. deprecated:: 0.0.76
+                .. deprecated:: 0.0.77
                     The enable_speaker_diarization parameter is deprecated and will be removed in a future version.
                     Use enable_diarization instead.
 
             text_format: Legacy text format for transcription. Defaults to None.
 
-                .. deprecated:: 0.0.76
+                .. deprecated:: 0.0.77
                     The text_format parameter is deprecated and will be removed in a future version.
                     Use speaker_active_format and speaker_passive_format instead.
 
             max_speakers: Legacy maximum number of speakers for diarization. Defaults to None.
 
-                .. deprecated:: 0.0.76
+                .. deprecated:: 0.0.77
                     The max_speakers parameter is deprecated and will be removed in a future version.
                     This parameter is no longer required.
 
             transcription_config: Legacy custom transcription configuration (other set parameters are merged).
                 Defaults to None.
 
-                .. deprecated:: 0.0.76
+                .. deprecated:: 0.0.77
                     The transcription_config parameter is deprecated and will be removed in a future version.
                     Use individual parameters instead.
 
