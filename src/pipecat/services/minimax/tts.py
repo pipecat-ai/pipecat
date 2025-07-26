@@ -109,7 +109,7 @@ class MiniMaxHttpTTSService(TTSService):
         language: Optional[Language] = Language.EN
         speed: Optional[float] = 1.0
         volume: Optional[float] = 1.0
-        pitch: Optional[float] = 0
+        pitch: Optional[int] = 0
         emotion: Optional[str] = None
         english_normalization: Optional[bool] = None
 
@@ -117,6 +117,7 @@ class MiniMaxHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
+        base_url: str = "https://api.minimax.io/v1/t2a_v2",
         group_id: str,
         model: str = "speech-02-turbo",
         voice_id: str = "Calm_Woman",
@@ -129,6 +130,9 @@ class MiniMaxHttpTTSService(TTSService):
 
         Args:
             api_key: MiniMax API key for authentication.
+            base_url: API base URL, defaults to MiniMax's T2A endpoint.
+                Global: https://api.minimax.io/v1/t2a_v2
+                Mainland China: https://api.minimaxi.chat/v1/t2a_v2
             group_id: MiniMax Group ID to identify project.
             model: TTS model name. Defaults to "speech-02-turbo". Options include
                 "speech-02-hd", "speech-02-turbo", "speech-01-hd", "speech-01-turbo".
@@ -144,7 +148,7 @@ class MiniMaxHttpTTSService(TTSService):
 
         self._api_key = api_key
         self._group_id = group_id
-        self._base_url = f"https://api.minimaxi.chat/v1/t2a_v2?GroupId={group_id}"
+        self._base_url = f"{base_url}?GroupId={group_id}"
         self._session = aiohttp_session
         self._model_name = model
         self._voice_id = voice_id

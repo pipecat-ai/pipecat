@@ -90,7 +90,7 @@ async def main(transport: DailyTransport):
         logger.info("Participant left: {}", participant)
         await task.cancel()
 
-    runner = PipelineRunner()
+    runner = PipelineRunner(handle_sigint=False, force_gc=True)
 
     await runner.run(task)
 

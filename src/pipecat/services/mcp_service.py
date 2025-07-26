@@ -13,6 +13,7 @@ from loguru import logger
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.utils.base_object import BaseObject
 
 try:
@@ -165,27 +166,24 @@ class MCPClient(BaseObject):
             A ToolsSchema containing all registered tools
         """
 
-        async def mcp_tool_wrapper(
-            function_name: str,
-            tool_call_id: str,
-            arguments: Dict[str, Any],
-            llm: any,
-            context: any,
-            result_callback: any,
-        ) -> None:
+        async def mcp_tool_wrapper(params: FunctionCallParams) -> None:
             """Wrapper for mcp tool calls to match Pipecat's function call interface."""
-            logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
-            logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
+            logger.debug(
+                f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}"
+            )
+            logger.trace(f"Tool arguments: {json.dumps(params.arguments, indent=2)}")
             try:
                 async with self._client(**self._server_params.model_dump()) as (read, write):
                     async with self._session(read, write) as session:
                         await session.initialize()
-                        await self._call_tool(session, function_name, arguments, result_callback)
+                        await self._call_tool(
+                            session, params.function_name, params.arguments, params.result_callback
+                        )
             except Exception as e:
-                error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
+                error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
                 logger.error(error_msg)
                 logger.exception("Full exception details:")
-                await result_callback(error_msg)
+                await params.result_callback(error_msg)
 
         logger.debug(f"SSE server parameters: {self._server_params}")
         logger.debug("Starting registration of mcp tools")
@@ -205,27 +203,24 @@ class MCPClient(BaseObject):
             A ToolsSchema containing all registered tools
         """
 
-        async def mcp_tool_wrapper(
-            function_name: str,
-            tool_call_id: str,
-            arguments: Dict[str, Any],
-            llm: any,
-            context: any,
-            result_callback: any,
-        ) -> None:
+        async def mcp_tool_wrapper(params: FunctionCallParams) -> None:
             """Wrapper for mcp tool calls to match Pipecat's function call interface."""
-            logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
-            logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
+            logger.debug(
+                f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}"
+            )
+            logger.trace(f"Tool arguments: {json.dumps(params.arguments, indent=2)}")
             try:
                 async with self._client(self._server_params) as streams:
                     async with self._session(streams[0], streams[1]) as session:
                         await session.initialize()
-                        await self._call_tool(session, function_name, arguments, result_callback)
+                        await self._call_tool(
+                            session, params.function_name, params.arguments, params.result_callback
+                        )
             except Exception as e:
-                error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
+                error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
                 logger.error(error_msg)
                 logger.exception("Full exception details:")
-                await result_callback(error_msg)
+                await params.result_callback(error_msg)
 
         logger.debug("Starting registration of mcp tools")
 
@@ -244,17 +239,12 @@ class MCPClient(BaseObject):
             A ToolsSchema containing all registered tools
         """
 
-        async def mcp_tool_wrapper(
-            function_name: str,
-            tool_call_id: str,
-            arguments: Dict[str, Any],
-            llm: any,
-            context: any,
-            result_callback: any,
-        ) -> None:
+        async def mcp_tool_wrapper(params: FunctionCallParams) -> None:
             """Wrapper for mcp tool calls to match Pipecat's function call interface."""
-            logger.debug(f"Executing tool '{function_name}' with call ID: {tool_call_id}")
-            logger.trace(f"Tool arguments: {json.dumps(arguments, indent=2)}")
+            logger.debug(
+                f"Executing tool '{params.function_name}' with call ID: {params.tool_call_id}"
+            )
+            logger.trace(f"Tool arguments: {json.dumps(params.arguments, indent=2)}")
             try:
                 async with self._client(**self._server_params.model_dump()) as (
                     read_stream,
@@ -263,12 +253,14 @@ class MCPClient(BaseObject):
                 ):
                     async with self._session(read_stream, write_stream) as session:
                         await session.initialize()
-                        await self._call_tool(session, function_name, arguments, result_callback)
+                        await self._call_tool(
+                            session, params.function_name, params.arguments, params.result_callback
+                        )
             except Exception as e:
-                error_msg = f"Error calling mcp tool {function_name}: {str(e)}"
+                error_msg = f"Error calling mcp tool {params.function_name}: {str(e)}"
                 logger.error(error_msg)
                 logger.exception("Full exception details:")
-                await result_callback(error_msg)
+                await params.result_callback(error_msg)
 
         logger.debug("Starting registration of mcp tools using streamable HTTP")
 

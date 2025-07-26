@@ -32,6 +32,8 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Soniox, you need to `pip install pipecat-ai[soniox]`.")
@@ -162,7 +164,7 @@ class SonioxSTTService(STTService):
         if self._websocket:
             return
 
-        self._websocket = await websockets.connect(self._url)
+        self._websocket = await websocket_connect(self._url)
 
         if not self._websocket:
             logger.error(f"Unable to connect to Soniox API at {self._url}")
@@ -244,7 +246,7 @@ class SonioxSTTService(STTService):
             Frame: None (transcription results come via WebSocket callbacks).
         """
         await self.start_processing_metrics()
-        if self._websocket and not self._websocket.closed:
+        if self._websocket and self._websocket.state is State.OPEN:
             await self._websocket.send(audio)
         await self.stop_processing_metrics()
 
@@ -268,13 +270,13 @@ class SonioxSTTService(STTService):
 
         if isinstance(frame, UserStoppedSpeakingFrame) and self._vad_force_turn_endpoint:
             # Send finalize message to Soniox so we get the final tokens asap.
-            if self._websocket and not self._websocket.closed:
+            if self._websocket and self._websocket.state is State.OPEN:
                 await self._websocket.send(FINALIZE_MESSAGE)
                 logger.debug(f"Triggered finalize event on: {frame.name=}, {direction=}")
 
     async def _send_stop_recording(self):
         """Send stop recording message to Soniox."""
-        if self._websocket and not self._websocket.closed:
+        if self._websocket and self._websocket.state is State.OPEN:
             # Send stop recording message
             await self._websocket.send("")
 
@@ -283,7 +285,7 @@ class SonioxSTTService(STTService):
         try:
             while True:
                 logger.debug("Sending keepalive message")
-                if self._websocket and not self._websocket.closed:
+                if self._websocket and self._websocket.state is State.OPEN:
                     await self._websocket.send(KEEPALIVE_MESSAGE)
                 else:
                     logger.debug("WebSocket connection closed.")

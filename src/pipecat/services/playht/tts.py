@@ -17,7 +17,6 @@ import uuid
 from typing import AsyncGenerator, Optional
 
 import aiohttp
-import websockets
 from loguru import logger
 from pydantic import BaseModel
 
@@ -41,6 +40,8 @@ try:
     from pyht.async_client import AsyncClient
     from pyht.client import Format, TTSOptions
     from pyht.client import Language as PlayHTLanguage
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use PlayHT, you need to `pip install pipecat-ai[playht]`.")
@@ -244,7 +245,7 @@ class PlayHTTTSService(InterruptibleTTSService):
     async def _connect_websocket(self):
         """Connect to PlayHT websocket."""
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             logger.debug("Connecting to PlayHT")
@@ -255,7 +256,7 @@ class PlayHTTTSService(InterruptibleTTSService):
             if not isinstance(self._websocket_url, str):
                 raise ValueError("WebSocket URL is not a string")
 
-            self._websocket = await websockets.connect(self._websocket_url)
+            self._websocket = await websocket_connect(self._websocket_url)
         except ValueError as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -362,7 +363,7 @@ class PlayHTTTSService(InterruptibleTTSService):
 
         try:
             # Reconnect if the websocket is closed
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             if not self._request_id:

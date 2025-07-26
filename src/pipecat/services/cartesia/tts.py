@@ -36,8 +36,9 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for Cartesia configuration needed
 try:
-    import websockets
     from cartesia import AsyncCartesia
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
@@ -288,10 +289,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Cartesia")
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
             )
         except Exception as e:
@@ -380,7 +381,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             if not self._context_id:
