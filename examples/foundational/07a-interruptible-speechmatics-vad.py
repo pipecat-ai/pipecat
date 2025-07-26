@@ -17,9 +17,10 @@ from pipecat.processors.aggregators.llm_response import (
     LLMUserAggregatorParams,
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.azure.llm import AzureLLMService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
-from pipecat.services.speechmatics.stt import DiarizationConfig, SpeechmaticsSTTService
+from pipecat.services.openai.base_llm import BaseOpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -49,6 +50,9 @@ transport_params = {
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     """Run example using Speechmatics STT.
 
+    This demo will only respond to the FIRST speaker (also known as `S1`). Words from other
+    speakers will be sent only when the first speaker says something.
+
     This example will use diarization within our STT service and output the words spoken by
     each individual speaker and wrap them with XML tags for the LLM to process. Note the
     instructions in the system context for the LLM. This greatly improves the conversation
@@ -75,14 +79,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
         enable_vad=True,
+        enable_diarization=True,
+        focus_speakers=["S1"],
         end_of_utterance_silence_trigger=0.5,
         speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
         speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
-        diarization_config=DiarizationConfig(
-            enable=True,
-            max_speakers=10,
-            focus_speakers=["S1"],
-        ),
     )
 
     tts = ElevenLabsTTSService(
@@ -91,10 +92,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         model="eleven_turbo_v2_5",
     )
 
-    llm = AzureLLMService(
-        api_key=os.getenv("AZURE_CHATGPT_API_KEY"),
-        endpoint=os.getenv("AZURE_CHATGPT_ENDPOINT"),
-        model=os.getenv("AZURE_CHATGPT_MODEL"),
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        params=BaseOpenAILLMService.InputParams(temperature=0.75),
     )
 
     messages = [
