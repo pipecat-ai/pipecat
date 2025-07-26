@@ -400,4 +400,11 @@ def main(
     logger.remove(0)
     logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
 
+    # Startup messages for browser-accessible transports
+    if args.transport == "webrtc":
+        print()
+        print(f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client")
+        print(f"   Open this URL in your browser to connect!")
+        print()
+
     _run_main(run, args, transport_params)
