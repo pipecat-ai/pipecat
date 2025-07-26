@@ -21,7 +21,7 @@ from pipecat.services.openai.llm import OpenAILLMService
 load_dotenv(override=True)
 
 
-async def run_bot_logic(transport, handle_sigint: bool = True):
+async def run_bot_logic(transport):
     """Main bot logic that works with any transport."""
     logger.info(f"Starting bot")
 
@@ -69,15 +69,12 @@ async def run_bot_logic(transport, handle_sigint: bool = True):
         logger.info("Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=False)
     await runner.run(task)
 
 
 async def bot(session_args):
     """Main bot entry point compatible with Pipecat Cloud."""
-
-    # Get handle_sigint from session_args, default to True for Daily
-    handle_sigint = getattr(session_args, "handle_sigint", True)
 
     if hasattr(session_args, "room_url"):
         # Daily session arguments (cloud or local)
@@ -108,7 +105,7 @@ async def bot(session_args):
             webrtc_connection=session_args.webrtc_connection,
         )
 
-    await run_bot_logic(transport, handle_sigint)
+    await run_bot_logic(transport)
 
 
 if __name__ == "__main__":
