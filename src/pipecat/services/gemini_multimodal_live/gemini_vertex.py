@@ -795,7 +795,8 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         self._bot_text_buffer = ""
         self._llm_output_buffer = ""
 
-        self._sample_rate = 24000
+        self._sample_rate = 16000
+        # self._sample_rate = 24000
 
         self._language = params.language
         self._language_code = (
@@ -895,7 +896,6 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         Args:
             modalities: The modalities to use for responses.
         """
-        print(f"_____gemini_vertex.py set_model_modalities * modalities: {modalities}")
         self._settings["modalities"] = modalities
 
     def set_language(self, language: Language):
@@ -959,13 +959,12 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
         await self.push_frame(LLMFullResponseEndFrame())
 
     async def _handle_user_started_speaking(self, frame):
-        #////
         self._user_is_speaking = True
         pass
 
     async def _handle_user_stopped_speaking(self, frame):
-        self._lcc.turn_complete = True
-
+        # print(f"_____gemini_vertex.py * UserStoppedSpeakingFrame  self._context.messages: {self._context.messages}")
+        # self._receive_task = self.create_task(self._receive_task_handler(self._context, "$ $ $ UserStoppedSpeakingFrame three"))            
         self._user_is_speaking = False
         self._user_audio_buffer = bytearray()
         await self.start_ttfb_metrics()
@@ -975,12 +974,8 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                 {"clientContent": {"turnComplete": True}}
             )
 
-
-            await self.send_client_event(evt)
-
     async def send_client_event(self, evt):
         pass
-        # print(f"_____gemini.py * send_client_event evt: {evt}")
 
     #
     # frame processing
@@ -1044,11 +1039,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             await self._handle_user_started_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStoppedSpeakingFrame):
-            # self._context.add_messages(frame.messages)
-            # await self._handle_user_stopped_speaking(frame)
-            print(f"_____gemini_vertex.py * UserStoppedSpeakingFrame  self._context.messages: {self._context.messages}")
-            self._receive_task = self.create_task(self._receive_task_handler(self._context, "$ $ $ UserStoppedSpeakingFrame three"))
-
+            await self._handle_user_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, BotStartedSpeakingFrame):
             # Ignore this frame. Use the serverContent API message instead
@@ -1083,7 +1074,8 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
 
                 elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
                     await session.send_realtime_input(
-                        audio=types.Blob(data=self._user_audio_buffer, mime_type="audio/pcm;rate=16000")
+                        media=types.Blob(data=self._user_audio_buffer, mime_type=f"audio/pcm;rate=16000")
+                        # audio=types.Blob(data=self._user_audio_buffer, mime_type=f"audio/pcm;rate={self._sample_rate}")
                     )
 
                 else:
@@ -1130,8 +1122,6 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                                     if not audio:
                                         return
 
-                                    print(f"_____gemini_vertex.py * self._sample_rate: {self._sample_rate}")
-
                                     if not self._bot_is_speaking:
                                         self._bot_is_speaking = True
                                         await self.push_frame(TTSStartedFrame())
@@ -1165,7 +1155,8 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             return
         # Send all audio to Gemini
         evt = events.AudioInputMessage.from_raw_audio(frame.audio, frame.sample_rate)
-        await self.send_client_event(evt)
+        # await self.send_client_event(evt)
+
         # Manage a buffer of audio to use for transcription
         audio = frame.audio
         if self._user_is_speaking:
@@ -1175,6 +1166,10 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             self._user_audio_buffer.extend(audio)
             length = int((frame.sample_rate * frame.num_channels * 2) * 0.5)
             self._user_audio_buffer = self._user_audio_buffer[-length:]
+
+        #### meh, how to send audio... I think I just need to keep the session open
+        # and handle all responses, including turns
+        # self._receive_task = self.create_task(self._receive_task_handler(self._context, "$ $ $ _send_user_audio four"))    
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""
