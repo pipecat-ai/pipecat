@@ -21,7 +21,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.base_llm import BaseOpenAILLMService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.speechmatics.stt import DiarizationConfig, SpeechmaticsSTTService
+from pipecat.services.speechmatics.stt import SpeechmaticsSTTService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -71,12 +71,9 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
+        enable_diarization=True,
         end_of_utterance_silence_trigger=0.5,
         speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
-        diarization_config=DiarizationConfig(
-            enable=True,
-            max_speakers=10,
-        ),
     )
 
     tts = ElevenLabsTTSService(
