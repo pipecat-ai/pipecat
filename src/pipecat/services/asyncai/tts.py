@@ -119,7 +119,7 @@ class AsyncAITTSService(AudioContextWordTTSService):
         #
         # We also don't want to automatically push LLM response text frames,
         # because the context aggregators will add them to the LLM context even
-        # if we're interrupted. 
+        # if we're interrupted.
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
@@ -142,7 +142,7 @@ class AsyncAITTSService(AudioContextWordTTSService):
             "language": self.language_to_service_language(params.language)
             if params.language
             else "en",
-        }
+        },
         
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -160,7 +160,6 @@ class AsyncAITTSService(AudioContextWordTTSService):
         """
         return True
 
-
     def language_to_service_language(self, language: Language) -> Optional[str]:
         """Convert a Language enum to Async language format.
 
@@ -173,8 +172,8 @@ class AsyncAITTSService(AudioContextWordTTSService):
         return language_to_async_language(language)
 
     def _build_msg(
-        self, text: str = "", force: bool = False 
-    ):
+        self, text: str = "", force: bool = False
+    ) -> str:
         msg = {
             "transcript": text,
             "force": force
@@ -240,7 +239,7 @@ class AsyncAITTSService(AudioContextWordTTSService):
                 "model_id": self._model_name,
                 "voice": {"mode": "id", "id": self._voice_id},
                 "output_format": self._settings["output_format"],
-                "language": self._settings["language"]
+                "language": self._settings["language"],
             }
 
             await self._get_websocket().send(json.dumps(init_msg))
@@ -302,7 +301,6 @@ class AsyncAITTSService(AudioContextWordTTSService):
                     num_channels=1,
                 )
                 await self.append_to_audio_context(context_id, frame)
-                
             elif msg.get("error_code"):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
@@ -364,12 +362,10 @@ class AsyncAITTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
-
-
 class AsyncAIHttpTTSService(TTSService):
     """HTTP-based Async TTS service.
 
-    Provides text-to-speech using Asyncs' HTTP streaming API for simpler,
+    Provides text-to-speech using Async's HTTP streaming API for simpler,
     non-WebSocket integration. Suitable for use cases where streaming WebSocket
     connection is not required or desired.
     """
@@ -462,7 +458,7 @@ class AsyncAIHttpTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text using Asyncs' HTTP streaming API.
+        """Generate speech from text using Async's HTTP streaming API.
 
         Args:
             text: The text to synthesize into speech.
