@@ -336,6 +336,18 @@ def main():
 
     args = parser.parse_args()
 
+    # Print startup message
+    if args.transport == "webrtc":
+        print()
+        print(f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client")
+        print(f"   Open this URL in your browser to connect!")
+        print()
+    elif args.transport == "daily":
+        print()
+        print(f"🚀 Daily server starting at http://{args.host}:{args.port}")
+        print(f"   Open this URL in your browser to start a session!")
+        print()
+
     # Create the app with transport-specific setup
     app = _create_server_app(args.transport, args.host, args.proxy)
 
