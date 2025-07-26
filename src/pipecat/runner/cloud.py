@@ -294,10 +294,10 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
 
                 session_args = DailySessionArgs(room_url, token)
                 asyncio.create_task(bot_module.bot(session_args))
-                return {"transport": "daily", "room_url": room_url, "token": token}
+                return {"room_url": room_url, "token": token}
 
         elif transport_type == "webrtc":
-            return {"transport": "webrtc", "client_url": "/client/"}
+            return {"client_url": "/client/"}
         else:
             return {
                 "error": f"RTVI connect not supported for {transport_type} transport. Use Daily or WebRTC."
