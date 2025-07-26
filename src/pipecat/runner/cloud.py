@@ -26,10 +26,13 @@ Bot function signature::
         # Create transport based on session_args attributes
         if hasattr(session_args, 'room_url'):
             # Daily transport setup
-            transport = DailyTransport(session_args.room_url, session_args.token, session_args.body)
+            from pipecat.transports.services.daily import DailyTransport, DailyParams
+            transport = DailyTransport(session_args.room_url, session_args.token, "Bot", DailyParams(...))
         elif hasattr(session_args, 'webrtc_connection'):
             # WebRTC transport setup
-            transport = SmallWebRTCTransport(..., webrtc_connection=session_args.webrtc_connection)
+            from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+            from pipecat.transports.base_transport import TransportParams
+            transport = SmallWebRTCTransport(TransportParams(...), webrtc_connection=session_args.webrtc_connection)
 
         # Run your bot logic
         await run_bot_logic(transport)
@@ -37,7 +40,6 @@ Bot function signature::
 Supported transports:
 
 - Daily - Creates rooms and tokens, runs bot as participant
-- LiveKit - Creates rooms and tokens, runs bot as agent
 - WebRTC - Provides local WebRTC interface with prebuilt UI
 - Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo
 
@@ -46,7 +48,7 @@ Example::
     async def bot(session_args):
         # Detect transport type from session_args
         if hasattr(session_args, "room_url"):
-            # Daily or LiveKit
+            # Daily
             transport = create_daily_transport(session_args)
         elif hasattr(session_args, "webrtc_connection"):
             # WebRTC
@@ -123,43 +125,23 @@ def _get_bot_module():
     )
 
 
-async def _run_bot_directly(transport_type: str, **kwargs):
-    """Run a bot directly in the same process - no subprocess needed."""
-    if transport_type == "webrtc":
-        if "webrtc_connection" in kwargs:
-            # Direct WebRTC connection
-            bot_module = _get_bot_module()
+async def _run_telephony_bot(transport_type: str, websocket, call_info):
+    """Run a bot for telephony transports."""
+    bot_module = _get_bot_module()
 
-            class WebRTCSessionArgs:
-                def __init__(self, webrtc_connection):
-                    self.transport_type = "webrtc"
-                    self.webrtc_connection = webrtc_connection
-                    self.body = {}
-                    self.handle_sigint = False
+    class WebSocketSessionArgs:
+        def __init__(self, transport_type, websocket, call_info):
+            self.transport_type = transport_type
+            self.websocket = websocket
+            self.call_info = call_info
+            self.body = {}
+            self.handle_sigint = False
 
-            session_args = WebRTCSessionArgs(kwargs["webrtc_connection"])
-            await bot_module.bot(session_args)
-
-    elif transport_type in ["twilio", "telnyx", "plivo"]:
-        if "websocket" in kwargs:
-            # Direct WebSocket connection
-            bot_module = _get_bot_module()
-
-            class WebSocketSessionArgs:
-                def __init__(self, transport_type, websocket, call_info):
-                    self.transport_type = transport_type
-                    self.websocket = websocket
-                    self.call_info = call_info
-                    self.body = {}
-                    self.handle_sigint = False
-
-            session_args = WebSocketSessionArgs(
-                transport_type, kwargs["websocket"], kwargs["call_info"]
-            )
-            await bot_module.bot(session_args)
+    session_args = WebSocketSessionArgs(transport_type, websocket, call_info)
+    await bot_module.bot(session_args)
 
 
-def _create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = None):
+def _create_server_app(transport_type: str, host: str = "localhost", proxy: str = None):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
 
@@ -173,7 +155,7 @@ def _create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = 
 
     # Add transport-specific routes
     if transport_type == "webrtc":
-        # Direct WebRTC setup
+        # WebRTC setup
         try:
             from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
@@ -217,20 +199,20 @@ def _create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = 
                     pcs_map.pop(webrtc_connection.pc_id, None)
 
                 # Run bot directly
-                background_tasks.add_task(
-                    _run_bot_directly, "webrtc", webrtc_connection=pipecat_connection
-                )
+                bot_module = _get_bot_module()
+
+                class WebRTCSessionArgs:
+                    def __init__(self, webrtc_connection):
+                        self.transport_type = "webrtc"
+                        self.webrtc_connection = webrtc_connection
+                        self.body = {}
+                        self.handle_sigint = False
+
+                session_args = WebRTCSessionArgs(pipecat_connection)
+                background_tasks.add_task(bot_module.bot, session_args)
 
             answer = pipecat_connection.get_answer()
-
-            if host and host != "0.0.0.0":
-                from pipecat.runner.utils import smallwebrtc_sdp_munging
-
-                answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], host)
-
-            # Updating the peer connection inside the map
             pcs_map[answer["pc_id"]] = pipecat_connection
-
             return answer
 
         @asynccontextmanager
@@ -244,7 +226,14 @@ def _create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = 
         app.router.lifespan_context = lifespan
 
     elif transport_type in ["twilio", "telnyx", "plivo"]:
-        setup_websocket_routes(app, _run_bot_directly, transport_type, proxy)
+        # Create a wrapper function for telephony
+        async def telephony_runner(transport_type_inner: str, **kwargs):
+            if "websocket" in kwargs and "call_info" in kwargs:
+                await _run_telephony_bot(
+                    transport_type_inner, kwargs["websocket"], kwargs["call_info"]
+                )
+
+        setup_websocket_routes(app, telephony_runner, transport_type, proxy)
 
     # Add general routes
     @app.get("/")
@@ -272,37 +261,8 @@ def _create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = 
                         self.handle_sigint = False
 
                 session_args = DailySessionArgs(room_url, token)
-
-                # Run bot in background task
                 asyncio.create_task(bot_module.bot(session_args))
-
-                # Redirect user to the room
                 return RedirectResponse(room_url)
-
-        elif transport_type == "livekit":
-            # Create LiveKit room and start bot
-            from pipecat.runner.livekit import configure
-
-            url, token, room_name = await configure()
-
-            # Start the bot in the background to join the room
-            bot_module = _get_bot_module()
-
-            class LiveKitSessionArgs:
-                def __init__(self, url, token, room_name):
-                    self.url = url
-                    self.token = token
-                    self.room_name = room_name
-                    self.body = {}
-                    self.handle_sigint = False
-
-            session_args = LiveKitSessionArgs(url, token, room_name)
-
-            # Run bot in background task
-            asyncio.create_task(bot_module.bot(session_args))
-
-            # Redirect user to the room
-            return RedirectResponse(url)
 
         elif transport_type == "webrtc":
             return RedirectResponse("/client/")
@@ -334,13 +294,11 @@ def _create_server_app(transport_type: str, host: str = "0.0.0.0", proxy: str = 
 
                 session_args = DailySessionArgs(room_url, token)
                 asyncio.create_task(bot_module.bot(session_args))
-
                 return {"transport": "daily", "room_url": room_url, "token": token}
 
         elif transport_type == "webrtc":
             return {"transport": "webrtc", "client_url": "/client/"}
         else:
-            # RTVI only supports Daily and WebRTC
             return {
                 "error": f"RTVI connect not supported for {transport_type} transport. Use Daily or WebRTC."
             }
@@ -356,21 +314,21 @@ def main():
     any bot() function found in the current directory.
 
     Command-line arguments:
-        --host: Server host address (default: 0.0.0.0)
+        --host: Server host address (default: localhost)
         --port: Server port (default: 7860)
-        -t/--transport: Transport type (daily, livekit, webrtc, twilio, telnyx, plivo)
+        -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo)
         -x/--proxy: Public proxy hostname for telephony webhooks
 
     The bot file must contain a `bot(session_args)` function as the entry point.
     """
     parser = argparse.ArgumentParser(description="Pipecat Cloud-Compatible Development Server")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
+    parser.add_argument("--host", type=str, default="localhost", help="Host address")
     parser.add_argument("--port", type=int, default=7860, help="Port number")
     parser.add_argument(
         "-t",
         "--transport",
         type=str,
-        choices=["daily", "livekit", "webrtc", "twilio", "telnyx", "plivo"],
+        choices=["daily", "webrtc", "twilio", "telnyx", "plivo"],
         default="webrtc",
         help="Transport type",
     )
