@@ -296,8 +296,12 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
                 asyncio.create_task(bot_module.bot(session_args))
                 return {"room_url": room_url, "token": token}
 
-        elif transport_type == "webrtc":
-            return {"client_url": "/client/"}
+        # TODO: Should the WebRTC client POST to /connect to start the bot?
+        # How should this initialization process work?
+        # Right now, the client connects to `/api/offer` and the bot is started
+        # automatically when the first offer is received. Do we want this?
+        # elif transport_type == "webrtc":
+        #     return {"client_url": "/client/"}
         else:
             return {
                 "error": f"RTVI connect not supported for {transport_type} transport. Use Daily or WebRTC."
