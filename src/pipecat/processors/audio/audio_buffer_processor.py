@@ -195,8 +195,6 @@ class AudioBufferProcessor(FrameProcessor):
 
         if self._recording:
             await self._process_recording(frame)
-            if self._enable_turn_audio:
-                await self._process_turn_recording(frame)
 
         if isinstance(frame, (CancelFrame, EndFrame)):
             await self.stop_recording()
@@ -210,6 +208,7 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _process_recording(self, frame: Frame):
         """Process audio frames for recording."""
+        resampled = None
         if isinstance(frame, InputAudioRawFrame):
             # Add silence if we need to.
             silence = self._compute_silence(self._last_user_frame_at)
@@ -232,7 +231,11 @@ class AudioBufferProcessor(FrameProcessor):
         if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
             await self._call_on_audio_data_handler()
 
-    async def _process_turn_recording(self, frame: Frame):
+        # Process turn recording with preprocessed data.
+        if self._enable_turn_audio:
+            await self._process_turn_recording(frame, resampled)
+
+    async def _process_turn_recording(self, frame: Frame, resampled_audio: Optional[bytes] = None):
         """Process frames for turn-based audio recording."""
         if isinstance(frame, UserStartedSpeakingFrame):
             self._user_speaking = True
@@ -251,9 +254,8 @@ class AudioBufferProcessor(FrameProcessor):
             self._bot_speaking = False
             self._bot_turn_audio_buffer = bytearray()
 
-        if isinstance(frame, InputAudioRawFrame):
-            resampled = await self._resample_input_audio(frame)
-            self._user_turn_audio_buffer += resampled
+        if isinstance(frame, InputAudioRawFrame) and resampled_audio:
+            self._user_turn_audio_buffer.extend(resampled_audio)
             # In the case of the user, we need to keep a short buffer of audio
             # since VAD notification of when the user starts speaking comes
             # later.
@@ -263,9 +265,8 @@ class AudioBufferProcessor(FrameProcessor):
             ):
                 discarded = len(self._user_turn_audio_buffer) - self._audio_buffer_size_1s
                 self._user_turn_audio_buffer = self._user_turn_audio_buffer[discarded:]
-        elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame):
-            resampled = await self._resample_output_audio(frame)
-            self._bot_turn_audio_buffer += resampled
+        elif self._bot_speaking and isinstance(frame, OutputAudioRawFrame) and resampled_audio:
+            self._bot_turn_audio_buffer.extend(resampled_audio)
 
     async def _call_on_audio_data_handler(self):
         """Call the audio data event handlers with buffered audio."""

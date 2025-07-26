@@ -36,6 +36,8 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
@@ -133,7 +135,7 @@ class AWSTranscribeSTTService(STTService):
         while retry_count < max_retries:
             try:
                 await self._connect()
-                if self._ws_client and self._ws_client.open:
+                if self._ws_client and self._ws_client.state is State.OPEN:
                     logger.info("Successfully established WebSocket connection")
                     return
                 logger.warning("WebSocket connection not established after connect")
@@ -174,7 +176,7 @@ class AWSTranscribeSTTService(STTService):
         """
         try:
             # Ensure WebSocket is connected
-            if not self._ws_client or not self._ws_client.open:
+            if not self._ws_client or self._ws_client.state is State.CLOSED:
                 logger.debug("WebSocket not connected, attempting to reconnect...")
                 try:
                     await self._connect()
@@ -208,7 +210,7 @@ class AWSTranscribeSTTService(STTService):
 
     async def _connect(self):
         """Connect to AWS Transcribe with connection state management."""
-        if self._ws_client and self._ws_client.open and self._receive_task:
+        if self._ws_client and self._ws_client.state is State.OPEN and self._receive_task:
             logger.debug(f"{self} Already connected")
             return
 
@@ -238,7 +240,7 @@ class AWSTranscribeSTTService(STTService):
                 )
 
                 # Add required headers
-                extra_headers = {
+                additional_headers = {
                     "Origin": "https://localhost",
                     "Sec-WebSocket-Key": websocket_key,
                     "Sec-WebSocket-Version": "13",
@@ -268,9 +270,9 @@ class AWSTranscribeSTTService(STTService):
                 logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
 
                 # Connect with the required headers and settings
-                self._ws_client = await websockets.connect(
+                self._ws_client = await websocket_connect(
                     presigned_url,
-                    extra_headers=extra_headers,
+                    additional_headers=additional_headers,
                     subprotocols=["mqtt"],
                     ping_interval=None,
                     ping_timeout=None,
@@ -299,7 +301,7 @@ class AWSTranscribeSTTService(STTService):
             self._receive_task = None
 
         try:
-            if self._ws_client and self._ws_client.open:
+            if self._ws_client and self._ws_client.state is State.OPEN:
                 # Send end-stream message
                 end_stream = {"message-type": "event", "event": "end"}
                 await self._ws_client.send(json.dumps(end_stream))
@@ -341,7 +343,7 @@ class AWSTranscribeSTTService(STTService):
     async def _receive_loop(self):
         """Background task to receive and process messages from AWS Transcribe."""
         while True:
-            if not self._ws_client or not self._ws_client.open:
+            if not self._ws_client or self._ws_client.state is State.CLOSED:
                 logger.warning(f"{self} WebSocket closed in receive loop")
                 break
 

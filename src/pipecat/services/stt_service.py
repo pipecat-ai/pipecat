@@ -56,6 +56,7 @@ class STTService(AIService):
         self._init_sample_rate = sample_rate
         self._sample_rate = 0
         self._settings: Dict[str, Any] = {}
+        self._tracing_enabled: bool = False
         self._muted: bool = False
         self._user_id: str = ""
 
@@ -116,6 +117,7 @@ class STTService(AIService):
         """
         await super().start(frame)
         self._sample_rate = self._init_sample_rate or frame.audio_in_sample_rate
+        self._tracing_enabled = frame.enable_tracing
 
     async def _update_settings(self, settings: Mapping[str, Any]):
         logger.info(f"Updating STT settings: {self._settings}")

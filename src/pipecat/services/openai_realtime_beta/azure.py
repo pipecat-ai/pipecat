@@ -11,7 +11,7 @@ from loguru import logger
 from .openai import OpenAIRealtimeBetaLLMService
 
 try:
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -55,9 +55,9 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
                 return
 
             logger.info(f"Connecting to {self.base_url}, api key: {self.api_key}")
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 uri=self.base_url,
-                extra_headers={
+                additional_headers={
                     "api-key": self.api_key,
                 },
             )
