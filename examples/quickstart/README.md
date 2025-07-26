@@ -1,4 +1,4 @@
-## Quickstart
+## Quickstart - TBD TBD TBD TBD
 
 ### Setup
 
@@ -31,3 +31,5 @@ CARTESIA_API_KEY=your_cartesia_api_key
 ```bash
 python bot.py
 ```
+
+Connect to your bot in a browser at http://localhost:7860
