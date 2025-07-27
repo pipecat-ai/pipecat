@@ -10,29 +10,42 @@ This module provides a FastAPI-based development server that can run bots
 structured for Pipecat Cloud deployment. It supports multiple transport types
 and handles room/token management automatically.
 
+It requires the pipecatcloud package for proper session argument types.
+
+Install with::
+
+    pip install pipecat-ai[pipecatcloud]
+
 All bots must implement a `bot(session_args)` async function as the entry point.
 The server automatically discovers and executes this function when connections
 are established.
 
 Bot function signature::
 
-    async def bot(session_args):
-        # session_args contains transport-specific connection information
+    async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments | WebSocketSessionArguments):
 
-        # For Daily: session_args.room_url, session_args.token, session_args.body
-        # For WebRTC: session_args.webrtc_connection
-        # For Telephony: session_args.websocket
-
-        # Create transport based on session_args attributes
-        if hasattr(session_args, 'room_url'):
-            # Daily transport setup
+        # Create transport based on session_args type
+        if isinstance(session_args, DailySessionArguments):
+            # Daily transport setup - guaranteed to have room_url, token
             from pipecat.transports.services.daily import DailyTransport, DailyParams
-            transport = DailyTransport(session_args.room_url, session_args.token, "Bot", DailyParams(...))
-        elif hasattr(session_args, 'webrtc_connection'):
-            # WebRTC transport setup
+            transport = DailyTransport(
+                session_args.room_url,
+                session_args.token,
+                "Bot",
+                DailyParams(...)
+            )
+        elif isinstance(session_args, SmallWebRTCSessionArguments):
+            # WebRTC transport setup - guaranteed to have webrtc_connection
             from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
             from pipecat.transports.base_transport import TransportParams
-            transport = SmallWebRTCTransport(TransportParams(...), webrtc_connection=session_args.webrtc_connection)
+            transport = SmallWebRTCTransport(
+                TransportParams(...),
+                webrtc_connection=session_args.webrtc_connection
+            )
+        elif isinstance(session_args, WebSocketSessionArguments):
+            # Telephony setup - guaranteed to have websocket
+            # Access call_info and transport_type via additional attributes
+            pass
 
         # Run your bot logic
         await run_bot_logic(transport)
@@ -45,12 +58,12 @@ Supported transports:
 
 Example::
 
-    async def bot(session_args):
+    async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments):
         # Detect transport type from session_args
-        if hasattr(session_args, "room_url"):
+        if isinstance(session_args, DailySessionArguments):
             # Daily
             transport = create_daily_transport(session_args)
-        elif hasattr(session_args, "webrtc_connection"):
+        elif isinstance(session_args, SmallWebRTCSessionArguments):
             # WebRTC
             transport = create_webrtc_transport(session_args)
 
@@ -69,16 +82,40 @@ import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Dict
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from loguru import logger
 
 from pipecat.runner.utils import setup_websocket_routes
+
+# Require pipecatcloud for cloud-compatible bots
+try:
+    from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
+except ImportError:
+    raise ImportError(
+        "pipecatcloud package is required for cloud-compatible bots. "
+        "Install with: pip install pipecat-ai[pipecatcloud]"
+    )
+
+
+# Define WebRTC type locally until it's added to pipecatcloud
+@dataclass
+class SmallWebRTCSessionArguments:
+    """Small WebRTC session arguments for local development.
+
+    This will be replaced by pipecatcloud.agent.SmallWebRTCSessionArguments
+    when WebRTC support is added to Pipecat Cloud.
+    """
+
+    webrtc_connection: Any
+    session_id: Optional[str] = None
+
 
 load_dotenv(override=True)
 os.environ["LOCAL_RUN"] = "1"
@@ -125,19 +162,18 @@ def _get_bot_module():
     )
 
 
-async def _run_telephony_bot(transport_type: str, websocket, call_info):
+async def _run_telephony_bot(transport_type: str, websocket: WebSocket, call_info):
     """Run a bot for telephony transports."""
     bot_module = _get_bot_module()
 
-    class WebSocketSessionArgs:
-        def __init__(self, transport_type, websocket, call_info):
-            self.transport_type = transport_type
-            self.websocket = websocket
-            self.call_info = call_info
-            self.body = {}
-            self.handle_sigint = False
+    session_args = WebSocketSessionArguments(
+        websocket=websocket,
+        session_id=None,
+    )
+    # Add transport-specific attributes
+    session_args.call_info = call_info
+    session_args.transport_type = transport_type
 
-    session_args = WebSocketSessionArgs(transport_type, websocket, call_info)
     await bot_module.bot(session_args)
 
 
@@ -198,17 +234,12 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
                     logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
                     pcs_map.pop(webrtc_connection.pc_id, None)
 
-                # Run bot directly
                 bot_module = _get_bot_module()
 
-                class WebRTCSessionArgs:
-                    def __init__(self, webrtc_connection):
-                        self.transport_type = "webrtc"
-                        self.webrtc_connection = webrtc_connection
-                        self.body = {}
-                        self.handle_sigint = False
-
-                session_args = WebRTCSessionArgs(pipecat_connection)
+                session_args = SmallWebRTCSessionArguments(
+                    webrtc_connection=pipecat_connection,
+                    session_id=None,
+                )
                 background_tasks.add_task(bot_module.bot, session_args)
 
             answer = pipecat_connection.get_answer()
@@ -252,15 +283,9 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
 
                 # Start the bot in the background to join the room
                 bot_module = _get_bot_module()
-
-                class DailySessionArgs:
-                    def __init__(self, room_url, token):
-                        self.room_url = room_url
-                        self.token = token
-                        self.body = {}
-                        self.handle_sigint = False
-
-                session_args = DailySessionArgs(room_url, token)
+                session_args = DailySessionArguments(
+                    room_url=room_url, token=token, body={}, session_id=None
+                )
                 asyncio.create_task(bot_module.bot(session_args))
                 return RedirectResponse(room_url)
 
@@ -284,15 +309,9 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
 
                 # Start the bot in the background
                 bot_module = _get_bot_module()
-
-                class DailySessionArgs:
-                    def __init__(self, room_url, token):
-                        self.room_url = room_url
-                        self.token = token
-                        self.body = {}
-                        self.handle_sigint = False
-
-                session_args = DailySessionArgs(room_url, token)
+                session_args = DailySessionArguments(
+                    room_url=room_url, token=token, body={}, session_id=None
+                )
                 asyncio.create_task(bot_module.bot(session_args))
                 return {"room_url": room_url, "token": token}
 
@@ -316,6 +335,7 @@ def main():
         --port: Server port (default: 7860)
         -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo)
         -x/--proxy: Public proxy hostname for telephony webhooks
+        -v/--verbose: Increase logging verbosity
 
     The bot file must contain a `bot(session_args)` function as the entry point.
     """
@@ -331,8 +351,15 @@ def main():
         help="Transport type",
     )
     parser.add_argument("--proxy", "-x", help="Public proxy host name")
+    parser.add_argument(
+        "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
+    )
 
     args = parser.parse_args()
+
+    # Log level
+    logger.remove()
+    logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
 
     # Print startup message
     if args.transport == "webrtc":

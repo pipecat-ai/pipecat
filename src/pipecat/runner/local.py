@@ -388,7 +388,9 @@ def main(
     parser.add_argument(
         "--esp32", action="store_true", default=False, help="Perform SDP munging for the ESP32"
     )
-    parser.add_argument("--verbose", "-v", action="count", default=0)
+    parser.add_argument(
+        "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
+    )
 
     args = parser.parse_args()
 
