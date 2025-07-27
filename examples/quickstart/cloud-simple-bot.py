@@ -12,16 +12,25 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.runner.cloud import SmallWebRTCSessionArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 
+try:
+    from pipecatcloud.agent import DailySessionArguments
+except ImportError:
+    raise ImportError(
+        "pipecatcloud package is required for cloud-compatible bots. "
+        "Install with: pip install pipecat-ai[[pipecatcloud]]"
+    )
+
 load_dotenv(override=True)
 
 
-async def run_bot_logic(transport):
+async def run_bot(transport):
     """Main bot logic that works with any transport."""
     logger.info(f"Starting bot")
 
@@ -56,7 +65,13 @@ async def run_bot_logic(transport):
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -73,11 +88,10 @@ async def run_bot_logic(transport):
     await runner.run(task)
 
 
-async def bot(session_args):
+async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    if hasattr(session_args, "room_url"):
-        # Daily session arguments (cloud or local)
+    if isinstance(session_args, DailySessionArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
         transport = DailyTransport(
@@ -91,8 +105,7 @@ async def bot(session_args):
             ),
         )
 
-    elif hasattr(session_args, "webrtc_connection"):
-        # WebRTC session arguments (local only, created by server.py)
+    elif isinstance(session_args, SmallWebRTCSessionArguments):
         from pipecat.transports.base_transport import TransportParams
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
@@ -105,7 +118,7 @@ async def bot(session_args):
             webrtc_connection=session_args.webrtc_connection,
         )
 
-    await run_bot_logic(transport)
+    await run_bot(transport)
 
 
 if __name__ == "__main__":
