@@ -14,6 +14,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.cloud import SmallWebRTCSessionArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -53,9 +54,12 @@ async def run_bot(transport):
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
+    rtvi = RTVIProcessor(config=RTVIConfig(config=[]))
+
     pipeline = Pipeline(
         [
             transport.input(),
+            rtvi,
             stt,
             context_aggregator.user(),
             llm,
@@ -71,6 +75,7 @@ async def run_bot(transport):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[RTVIObserver(rtvi)],
     )
 
     @transport.event_handler("on_client_connected")
