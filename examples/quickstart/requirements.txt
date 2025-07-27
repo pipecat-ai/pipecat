@@ -1,3 +1,3 @@
-pipecatcloud
-pipecat-ai[openai,daily,deepgram,cartesia,silero]
+pipecat-ai[webrtc,silero,deepgram,openai,cartesia]
+pipecat-ai-small-webrtc-prebuilt
 python-dotenv

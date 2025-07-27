@@ -1,0 +1,4 @@
+pipecatcloud
+pipecat-ai[openai,daily,deepgram,cartesia,silero]
+python-dotenv
+pipecat-ai-small-webrtc-prebuilt
