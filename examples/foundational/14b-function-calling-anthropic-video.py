@@ -14,11 +14,11 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_camera
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.runner.utils import get_transport_client_id, maybe_capture_participant_camera
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
@@ -200,6 +200,6 @@ If you need to use a tool, simply use the tool. Do not tell the user the tool yo
 
 
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.local import main
 
     main(run_example, transport_params=transport_params)

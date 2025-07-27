@@ -132,6 +132,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
 
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.local import main
 
     main(run_example, transport_params=transport_params)

@@ -250,7 +250,6 @@ def setup(app):
 
     excludes = [
         str(project_root / "src/pipecat/pipeline/to_be_updated"),
-        str(project_root / "src/pipecat/examples"),
         str(project_root / "src/pipecat/tests"),
         "**/test_*.py",
         "**/tests/*.py",

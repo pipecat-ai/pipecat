@@ -11,7 +11,6 @@ import tkinter as tk
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.examples.run import maybe_capture_participant_camera
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -23,6 +22,7 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.utils import maybe_capture_participant_camera
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 from pipecat.transports.services.daily import DailyParams
@@ -121,6 +121,6 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
 
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.local import main
 
     main(run_example, transport_params=transport_params)

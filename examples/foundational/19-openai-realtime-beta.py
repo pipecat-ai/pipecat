@@ -217,6 +217,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
 
 
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.local import main
 
     main(run_example, transport_params=transport_params)

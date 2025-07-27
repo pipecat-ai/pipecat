@@ -260,6 +260,6 @@ Your response will be turned into speech so use only simple words and punctuatio
 
 
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.local import main
 
     main(run_example, transport_params=transport_params)

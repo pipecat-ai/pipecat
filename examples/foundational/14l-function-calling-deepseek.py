@@ -148,6 +148,6 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
 
 
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.local import main
 
     main(run_example, transport_params=transport_params)
