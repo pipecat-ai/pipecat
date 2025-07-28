@@ -23,8 +23,8 @@ are established.
 Bot function signature::
 
     async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments | WebSocketSessionArguments):
+        # Type-safe access to session arguments
 
-        # Create transport based on session_args type
         if isinstance(session_args, DailySessionArguments):
             # Daily transport setup - guaranteed to have room_url, token
             from pipecat.transports.services.daily import DailyTransport, DailyParams
@@ -58,13 +58,11 @@ Supported transports:
 
 Example::
 
-    async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments):
-        # Detect transport type from session_args
+    async def bot(session_args):
+        # Type-safe transport detection
         if isinstance(session_args, DailySessionArguments):
-            # Daily
             transport = create_daily_transport(session_args)
         elif isinstance(session_args, SmallWebRTCSessionArguments):
-            # WebRTC
             transport = create_webrtc_transport(session_args)
 
         # Your bot implementation
@@ -89,10 +87,8 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
-
-from pipecat.runner.utils import setup_websocket_routes
 
 # Require pipecatcloud for cloud-compatible bots
 try:
@@ -162,17 +158,12 @@ def _get_bot_module():
     )
 
 
-async def _run_telephony_bot(transport_type: str, websocket: WebSocket, call_info):
+async def _run_telephony_bot(websocket: WebSocket):
     """Run a bot for telephony transports."""
     bot_module = _get_bot_module()
 
-    session_args = WebSocketSessionArguments(
-        websocket=websocket,
-        session_id=None,
-    )
-    # Add transport-specific attributes
-    session_args.call_info = call_info
-    session_args.transport_type = transport_type
+    # Just pass the WebSocket - let the bot handle parsing
+    session_args = WebSocketSessionArguments(websocket=websocket, session_id=None)
 
     await bot_module.bot(session_args)
 
@@ -257,14 +248,45 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
         app.router.lifespan_context = lifespan
 
     elif transport_type in ["twilio", "telnyx", "plivo"]:
-        # Create a wrapper function for telephony
-        async def telephony_runner(transport_type_inner: str, **kwargs):
-            if "websocket" in kwargs and "call_info" in kwargs:
-                await _run_telephony_bot(
-                    transport_type_inner, kwargs["websocket"], kwargs["call_info"]
-                )
+        # Direct telephony WebSocket handling (no utils dependency)
 
-        setup_websocket_routes(app, telephony_runner, transport_type, proxy)
+        @app.post("/")
+        async def start_call():
+            """Handle telephony webhook and return XML response."""
+            logger.debug(f"POST {transport_type.upper()} XML")
+
+            if transport_type == "twilio":
+                xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://{proxy}/ws"></Stream>
+  </Connect>
+  <Pause length="40"/>
+</Response>"""
+            elif transport_type == "telnyx":
+                xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://{proxy}/ws" bidirectionalMode="rtp"></Stream>
+  </Connect>
+  <Pause length="40"/>
+</Response>"""
+            elif transport_type == "plivo":
+                xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
+</Response>"""
+            else:
+                xml_content = "<Response></Response>"
+
+            return HTMLResponse(content=xml_content, media_type="application/xml")
+
+        @app.websocket("/ws")
+        async def websocket_endpoint(websocket: WebSocket):
+            """Handle WebSocket connections for telephony."""
+            await websocket.accept()
+            logger.debug("WebSocket connection accepted")
+            await _run_telephony_bot(websocket)
 
     # Add general routes
     @app.get("/")
