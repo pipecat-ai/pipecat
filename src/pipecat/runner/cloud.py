@@ -344,6 +344,8 @@ def main():
     any bot() function found in the current directory.
 
     Command-line arguments:
+
+    Args:
         --host: Server host address (default: localhost)
         --port: Server port (default: 7860)
         -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo)

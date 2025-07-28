@@ -179,6 +179,11 @@ autodoc_mock_imports = [
     "google.protobuf.runtime_version",
     "google.protobuf.symbol_database",
     "google.protobuf.internal.builder",
+    # Runner
+    "pipecat_ai_small_webrtc_prebuilt",
+    "pipecat_ai_small_webrtc_prebuilt.frontend",
+    "uvicorn",
+    "python_dotenv",
 ]
 
 # HTML output settings
@@ -202,6 +207,7 @@ def import_core_modules():
         "pipecat.clocks",
         "pipecat.metrics",
         "pipecat.observers",
+        "pipecat.runner",
         "pipecat.serializers",
         "pipecat.sync",
         "pipecat.transcriptions",
