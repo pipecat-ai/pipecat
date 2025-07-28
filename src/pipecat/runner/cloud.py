@@ -21,35 +21,36 @@ All bots must implement a `bot(session_args)` async function as the entry point.
 The server automatically discovers and executes this function when connections
 are established.
 
-Bot function signature::
+Single transport example::
 
-    async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments | WebSocketSessionArguments):
-        # Type-safe access to session arguments
-
+    async def bot(session_args):
         if isinstance(session_args, DailySessionArguments):
-            # Daily transport setup - guaranteed to have room_url, token
-            from pipecat.transports.services.daily import DailyTransport, DailyParams
             transport = DailyTransport(
                 session_args.room_url,
                 session_args.token,
                 "Bot",
                 DailyParams(...)
             )
-        elif isinstance(session_args, SmallWebRTCSessionArguments):
-            # WebRTC transport setup - guaranteed to have webrtc_connection
-            from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-            from pipecat.transports.base_transport import TransportParams
-            transport = SmallWebRTCTransport(
-                TransportParams(...),
-                webrtc_connection=session_args.webrtc_connection
-            )
-        elif isinstance(session_args, WebSocketSessionArguments):
-            # Telephony setup - guaranteed to have websocket
-            # Access call_info and transport_type via additional attributes
-            pass
+        # Your bot logic here
+        await run_pipeline(transport)
 
-        # Run your bot logic
-        await run_bot_logic(transport)
+    if __name__ == "__main__":
+        from pipecat.runner.cloud import main
+        main()
+
+Multiple transport example::
+
+    async def bot(session_args):
+        # Type-safe transport detection
+        if isinstance(session_args, DailySessionArguments):
+            transport = setup_daily_transport(session_args)  # Your application code
+        elif isinstance(session_args, SmallWebRTCSessionArguments):
+            transport = setup_webrtc_transport(session_args)  # Your application code
+        elif isinstance(session_args, WebSocketSessionArguments):
+            transport = setup_telephony_transport(session_args)  # Your application code
+
+        # Your bot implementation
+        await run_pipeline(transport)
 
 Supported transports:
 
@@ -57,29 +58,11 @@ Supported transports:
 - WebRTC - Provides local WebRTC interface with prebuilt UI
 - Telephony - Handles webhook and WebSocket connections for Twilio, Telnyx, Plivo
 
-Example::
-
-    async def bot(session_args):
-        # Type-safe transport detection
-        if isinstance(session_args, DailySessionArguments):
-            transport = create_daily_transport(session_args)
-        elif isinstance(session_args, SmallWebRTCSessionArguments):
-            transport = create_webrtc_transport(session_args)
-
-        # Your bot implementation
-        await run_pipeline(transport)
-
-    if __name__ == "__main__":
-        from pipecat.runner.cloud import main
-        main()
-
 To run locally:
 
 - Daily: `python bot.py -t daily`
 - WebRTC: `python bot.py -t webrtc`
-- Telephony: `python bot.py -t twilio -x your_username.ngork.io`
-- Telephony: `python bot.py -t telnyx -x your_username.ngork.io`
-- Telephony: `python bot.py -t plivo -x your_username.ngork
+- Telephony: `python bot.py -t twilio -x your_username.ngrok.io`
 """
 
 import argparse
