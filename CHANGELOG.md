@@ -145,7 +145,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user started early, while the bot was still working through
   `trigger_assistant_response()`.
 
-## [0.0.75] - 2025-07-08
+## [0.0.75] - 2025-07-08 [YANKED]
+
+**This release has been yanked due to resampling issues affecting audio output
+quality and critical bugs impacting `ParallelPipelines` functionality.**
+
+**Please upgrade to version 0.0.76 or later.**
 
 ### Added
 
@@ -206,7 +211,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove unncessary push task in each `FrameProcessor`.
 
-## [0.0.74] - 2025-07-03
+## [0.0.74] - 2025-07-03 [YANKED]
+
+**This release has been yanked due to resampling issues affecting audio output
+quality and critical bugs impacting `ParallelPipelines` functionality.**
+
+**Please upgrade to version 0.0.76 or later.**
 
 ### Added
 
