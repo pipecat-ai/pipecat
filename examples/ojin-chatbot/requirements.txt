@@ -1,4 +1,4 @@
-pipecat-ai[whisper, openai, elevenlabs, deepgram, ojin]
+pipecat-ai[whisper, openai, elevenlabs, deepgram, ojin, silero]
 textual==1.0.0
 pydantic-settings==2.7.1
 pyaudio==0.2.14

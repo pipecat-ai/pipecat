@@ -26,7 +26,9 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
+from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.services.ojin.video import OjinAvatarService, OjinAvatarSettings
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 import tkinter as tk
 
 load_dotenv(override=True)
@@ -117,8 +119,8 @@ async def main():
 
     tk_transport = TkLocalTransport(
         tk_root,
-        TkTransportParams(
-            audio_in_enabled=True,
+        TkTransportParams(         
+            audio_in_enabled=False,
             audio_out_enabled=True,
             video_out_enabled=True,
             video_out_is_live=True,
@@ -127,7 +129,13 @@ async def main():
         ),
     )
 
-    #audio_in_transport = LocalAudioInputTransport(self._pyaudio, self._params)
+    audio_transport = LocalAudioTransport(LocalAudioTransportParams(
+        audio_out_enabled=False,
+        audio_in_enabled=True,
+        vad_enabled=True,
+        vad_audio_passthrough=True,
+        vad_analyzer=SileroVADAnalyzer(),
+    ))
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -141,7 +149,7 @@ async def main():
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "Always answer the last question from the context no matter who was the role of the last question",
         },
     ]
 
@@ -155,8 +163,9 @@ async def main():
         avatar_config_id=os.getenv("OJIN_AVATAR_ID", ""),        
         image_size=(1280, 720),
         idle_to_speech_seconds=1.5,
-        idle_sequence_duration=30,
+        idle_sequence_duration=5,
         tts_audio_passthrough=False,
+        push_bot_stopped_speaking_frames=False,
     ))    
 
     # Create image format converter
@@ -164,14 +173,15 @@ async def main():
     
     pipeline = Pipeline(
         [
-            tk_transport.input(),  # Transport user input
+            audio_transport.input(),
             stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
             avatar,
             image_converter,  # Convert image format from BGR to PPM
-            tk_transport.output(),  # Transport bot output
+            tk_transport.output(),  # Transport video output
+            audio_transport.output(),  # Transport audio output            
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
@@ -181,7 +191,7 @@ async def main():
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
-            allow_interruptions=False
+            allow_interruptions=True
         ),
     )
 

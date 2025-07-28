@@ -143,7 +143,7 @@ class OjinAvatarFSM:
         await self.on_state_changed_callback(old_state, new_state)
 
     def get_transition_frame_idx(self) -> int:
-        logger.info(f"get_transition_frame_idx: {self._transition_time} frame {int(self._transition_time * 25)}")
+        logger.debug(f"get_transition_frame_idx: {self._transition_time} frame {int(self._transition_time * 25)}")
         return int(self._transition_time * 25)
 
     def get_state(self) -> AvatarState:
