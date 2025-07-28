@@ -17,16 +17,14 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyLogLevel
-
+from pipecat.transports.services.daily import DailyLogLevel, DailyParams, DailyTransport
 
 # Setup logging
 load_dotenv()
 logger.remove(0)
 logger.add(sys.stderr, level="DEBUG")
-logger.add(
-    f"tests/pipecat_quickstart/logs/server_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-)
+logger.add(f"tests/pipecat_quickstart/logs/server_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+
 
 async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None:
     """Run the voice bot with the given parameters.
@@ -128,9 +126,9 @@ async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None
 
         try:
             # Update the Twilio call with TwiML to forward to the Daily SIP endpoint
-            #twilio_client.calls(call_id).update(
+            # twilio_client.calls(call_id).update(
             #    twiml=f"<Response><Dial record='record-from-answer-dual'><Sip>{sip_uri}</Sip></Dial></Response>"
-            #)
+            # )
             logger.info("Call forwarded successfully")
             call_already_forwarded = True
         except Exception as e:
