@@ -179,11 +179,6 @@ autodoc_mock_imports = [
     "google.protobuf.runtime_version",
     "google.protobuf.symbol_database",
     "google.protobuf.internal.builder",
-    # Runner
-    "pipecat_ai_small_webrtc_prebuilt",
-    "pipecat_ai_small_webrtc_prebuilt.frontend",
-    "uvicorn",
-    "python_dotenv",
 ]
 
 # HTML output settings
