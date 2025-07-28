@@ -40,6 +40,7 @@ Then run: `python bot.py -t webrtc`
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -48,13 +49,110 @@ from typing import Callable, Dict, Mapping, Optional
 import aiohttp
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import BackgroundTasks, FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 
-from pipecat.runner.utils import setup_websocket_routes
-
 load_dotenv(override=True)
+
+
+def setup_websocket_routes(
+    app: FastAPI, transport_runner: Callable, transport_type: str, proxy: str = None
+):
+    """Set up WebSocket routes for telephony providers.
+
+    This is used by the local runner (pipecat.runner.local) only.
+    """
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    @app.post("/")
+    async def start_call():
+        """Handle telephony webhook and return XML response."""
+        logger.debug(f"POST {transport_type.upper()} XML")
+
+        if transport_type == "twilio":
+            xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://{proxy}/ws"></Stream>
+  </Connect>
+  <Pause length="40"/>
+</Response>"""
+        elif transport_type == "telnyx":
+            xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://{proxy}/ws" bidirectionalMode="rtp"></Stream>
+  </Connect>
+  <Pause length="40"/>
+</Response>"""
+        elif transport_type == "plivo":
+            xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
+</Response>"""
+        else:
+            xml_content = "<Response></Response>"
+
+        return HTMLResponse(content=xml_content, media_type="application/xml")
+
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """Handle WebSocket connections for telephony."""
+        await websocket.accept()
+        logger.debug("WebSocket connection accepted")
+
+        # Parse transport-specific data
+        start_data = websocket.iter_text()
+
+        if transport_type == "twilio":
+            await start_data.__anext__()
+            call_data = json.loads(await start_data.__anext__())
+            print(call_data, flush=True)
+            stream_sid = call_data["start"]["streamSid"]
+            call_sid = call_data["start"]["callSid"]
+            call_info = {"stream_sid": stream_sid, "call_sid": call_sid}
+
+        elif transport_type == "telnyx":
+            await start_data.__anext__()
+            call_data = json.loads(await start_data.__anext__())
+            print(call_data, flush=True)
+            stream_id = call_data["stream_id"]
+            call_control_id = call_data["start"]["call_control_id"]
+            outbound_encoding = call_data["start"]["media_format"]["encoding"]
+            call_info = {
+                "stream_id": stream_id,
+                "call_control_id": call_control_id,
+                "outbound_encoding": outbound_encoding,
+            }
+
+        elif transport_type == "plivo":
+            start_message = json.loads(await start_data.__anext__())
+            logger.debug(f"Received start message: {start_message}")
+
+            start_info = start_message.get("start", {})
+            stream_id = start_info.get("streamId")
+            call_id = start_info.get("callId")
+
+            if not stream_id:
+                logger.error("No streamId found in start message")
+                await websocket.close()
+                return
+
+            logger.info(f"WebSocket connection accepted for stream: {stream_id}, call: {call_id}")
+            call_info = {"stream_id": stream_id, "call_id": call_id}
+        else:
+            call_info = {}
+
+        # Run transport with the websocket connection
+        await transport_runner(transport_type, websocket=websocket, call_info=call_info)
 
 
 def _run_webrtc(

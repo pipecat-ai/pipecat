@@ -1,4 +1,4 @@
 pipecatcloud
-pipecat-ai[openai,daily,deepgram,cartesia,silero]
+pipecat-ai[openai,daily,deepgram,cartesia,silero,webrtc,websocket]
 python-dotenv
 pipecat-ai-small-webrtc-prebuilt

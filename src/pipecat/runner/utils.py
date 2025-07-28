@@ -34,15 +34,130 @@ import re
 from typing import Any, Callable, Dict
 
 from fastapi import BackgroundTasks, FastAPI, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from loguru import logger
 
 from pipecat.transports.base_transport import BaseTransport
 
 
+def detect_transport_type_from_message(message_data: dict) -> str:
+    """Attempt to auto-detect transport type from WebSocket message structure."""
+    logger.debug("=== Auto-Detection Analysis ===")
+
+    # Twilio detection
+    if (
+        message_data.get("event") == "start"
+        and "start" in message_data
+        and "streamSid" in message_data.get("start", {})
+        and "callSid" in message_data.get("start", {})
+    ):
+        logger.debug("Auto-detected: TWILIO")
+        return "twilio"
+
+    # Telnyx detection
+    if (
+        "stream_id" in message_data
+        and "start" in message_data
+        and "call_control_id" in message_data.get("start", {})
+    ):
+        logger.debug("Auto-detected: TELNYX")
+        return "telnyx"
+
+    # Plivo detection
+    if (
+        "start" in message_data
+        and "streamId" in message_data.get("start", {})
+        and "callId" in message_data.get("start", {})
+    ):
+        logger.debug("Auto-detected: PLIVO")
+        return "plivo"
+
+    logger.debug("Auto-detection failed - unknown format")
+    return "unknown"
+
+
+async def parse_telephony_websocket(websocket: WebSocket):
+    """Parse telephony WebSocket messages and return transport type and basic call data.
+
+    Returns:
+        tuple: (transport_type: str, stream_id: str, call_id: str)
+    """
+    logger.info("=== Parsing Telephony WebSocket ===")
+
+    # Read first two messages
+    start_data = websocket.iter_text()
+
+    try:
+        # First message
+        first_message_raw = await start_data.__anext__()
+        logger.debug(f"First message: {first_message_raw}")
+        try:
+            first_message = json.loads(first_message_raw)
+        except json.JSONDecodeError:
+            first_message = {}
+
+        # Second message
+        second_message_raw = await start_data.__anext__()
+        logger.debug(f"Second message: {second_message_raw}")
+        try:
+            second_message = json.loads(second_message_raw)
+        except json.JSONDecodeError:
+            second_message = {}
+
+        # Try auto-detection on both messages
+        detected_type_first = detect_transport_type_from_message(first_message)
+        detected_type_second = detect_transport_type_from_message(second_message)
+
+        # Use the successful detection
+        if detected_type_first != "unknown":
+            transport_type = detected_type_first
+            call_data = first_message
+            logger.info(f"Detected transport: {transport_type} (from first message)")
+        elif detected_type_second != "unknown":
+            transport_type = detected_type_second
+            call_data = second_message
+            logger.info(f"Detected transport: {transport_type} (from second message)")
+        else:
+            transport_type = "unknown"
+            call_data = second_message
+            logger.warning("Could not auto-detect transport type")
+
+        # Extract just the essential fields
+        if transport_type == "twilio":
+            start_data = call_data.get("start", {})
+            stream_id = start_data.get("streamSid")
+            call_id = start_data.get("callSid")
+
+        elif transport_type == "telnyx":
+            stream_id = call_data.get("stream_id")
+            call_id = call_data.get("start", {}).get("call_control_id")
+
+        elif transport_type == "plivo":
+            start_data = call_data.get("start", {})
+            stream_id = start_data.get("streamId")
+            call_id = start_data.get("callId")
+
+        else:
+            stream_id = None
+            call_id = None
+
+        logger.info(f"Parsed - Type: {transport_type}, StreamId: {stream_id}, CallId: {call_id}")
+        return transport_type, stream_id, call_id
+
+    except Exception as e:
+        logger.error(f"Error parsing telephony WebSocket: {e}")
+        raise
+
+
 def get_install_command(transport: str) -> str:
-    """Get the pip install command for a specific transport."""
+    """Get the pip install command for a specific transport.
+
+    Args:
+        transport: The transport name.
+
+    Returns:
+        The pip install command string.
+    """
     install_map = {
         "daily": "pip install pipecat-ai[daily]",
         "livekit": "pip install pipecat-ai[livekit]",
@@ -241,98 +356,3 @@ def setup_webrtc_routes(app: FastAPI, transport_runner: Callable, host: str = No
         pcs_map[answer["pc_id"]] = pipecat_connection
 
         return answer
-
-
-def setup_websocket_routes(
-    app: FastAPI, transport_runner: Callable, transport_type: str, proxy: str = None
-):
-    """Set up WebSocket routes for telephony providers."""
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    @app.post("/")
-    async def start_call():
-        """Handle telephony webhook and return XML response."""
-        logger.debug(f"POST {transport_type.upper()} XML")
-
-        if transport_type == "twilio":
-            xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <Stream url="wss://{proxy}/ws"></Stream>
-  </Connect>
-  <Pause length="40"/>
-</Response>"""
-        elif transport_type == "telnyx":
-            xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <Stream url="wss://{proxy}/ws" bidirectionalMode="rtp"></Stream>
-  </Connect>
-  <Pause length="40"/>
-</Response>"""
-        elif transport_type == "plivo":
-            xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
-</Response>"""
-        else:
-            xml_content = "<Response></Response>"
-
-        return HTMLResponse(content=xml_content, media_type="application/xml")
-
-    @app.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        """Handle WebSocket connections for telephony."""
-        await websocket.accept()
-        logger.debug("WebSocket connection accepted")
-
-        # Parse transport-specific data
-        start_data = websocket.iter_text()
-
-        if transport_type == "twilio":
-            await start_data.__anext__()
-            call_data = json.loads(await start_data.__anext__())
-            print(call_data, flush=True)
-            stream_sid = call_data["start"]["streamSid"]
-            call_sid = call_data["start"]["callSid"]
-            call_info = {"stream_sid": stream_sid, "call_sid": call_sid}
-
-        elif transport_type == "telnyx":
-            await start_data.__anext__()
-            call_data = json.loads(await start_data.__anext__())
-            print(call_data, flush=True)
-            stream_id = call_data["stream_id"]
-            call_control_id = call_data["start"]["call_control_id"]
-            outbound_encoding = call_data["start"]["media_format"]["encoding"]
-            call_info = {
-                "stream_id": stream_id,
-                "call_control_id": call_control_id,
-                "outbound_encoding": outbound_encoding,
-            }
-
-        elif transport_type == "plivo":
-            start_message = json.loads(await start_data.__anext__())
-            logger.debug(f"Received start message: {start_message}")
-
-            start_info = start_message.get("start", {})
-            stream_id = start_info.get("streamId")
-            call_id = start_info.get("callId")
-
-            if not stream_id:
-                logger.error("No streamId found in start message")
-                await websocket.close()
-                return
-
-            logger.info(f"WebSocket connection accepted for stream: {stream_id}, call: {call_id}")
-            call_info = {"stream_id": stream_id, "call_id": call_id}
-        else:
-            call_info = {}
-
-        # Run transport with the websocket connection
-        await transport_runner(transport_type, websocket=websocket, call_info=call_info)

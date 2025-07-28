@@ -4,6 +4,10 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+"""Pipecat Cloud-compatible bot example.
+
+Transports are Daily or SmallWebRTC."""
+
 import os
 from dataclasses import dataclass
 from typing import Any, Optional
