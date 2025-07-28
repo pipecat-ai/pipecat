@@ -492,6 +492,9 @@ class SpeechmaticsSTTService(STTService):
         if self._enable_diarization:
             self._register_event_handler("on_speakers_result")
 
+        # EndOfUtterance fallback timer
+        self._end_of_utterance_timer: Optional[asyncio.Task] = None
+
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
         await super().start(frame)
@@ -600,7 +603,7 @@ class SpeechmaticsSTTService(STTService):
             def _evt_on_end_of_utterance(message: dict[str, Any]):
                 logger.debug("End of utterance received from STT")
                 asyncio.run_coroutine_threadsafe(
-                    self._send_frames(finalized=True), self.get_event_loop()
+                    self._handle_end_of_utterance(), self.get_event_loop()
                 )
 
         # Speaker Result
@@ -708,6 +711,9 @@ class SpeechmaticsSTTService(STTService):
         if not has_changed:
             return
 
+        # Set a timer for the end of utterance
+        self._end_of_utterance_timer_start()
+
         # Send frames
         asyncio.run_coroutine_threadsafe(self._send_frames(), self.get_event_loop())
 
@@ -717,6 +723,46 @@ class SpeechmaticsSTTService(STTService):
     ):
         """Handle a transcription result with tracing."""
         pass
+
+    def _end_of_utterance_timer_start(self):
+        """Start the timer for the end of utterance.
+
+        This will use the STT's `end_of_utterance_silence_trigger` value and set
+        a timer to send the latest transcript to the pipeline. It is used as a
+        fallback from the EnfOfUtterance messages from the STT.
+
+        Note that the `end_of_utterance_silence_trigger` will be from when the
+        last updated speech was received and this will likely be longer in
+        real world time to that inside of the STT engine.
+        """
+        # Reset the end of utterance timer
+        if self._end_of_utterance_timer:
+            self._end_of_utterance_timer.cancel()
+
+        # Send after a delay
+        async def send_after_delay(delay: float):
+            await asyncio.sleep(delay)
+            logger.debug("Fallback EndOfUtterance triggered.")
+            asyncio.run_coroutine_threadsafe(self._handle_end_of_utterance(), self.get_event_loop())
+
+        # Start the timer
+        self._end_of_utterance_timer = asyncio.create_task(
+            send_after_delay(self._end_of_utterance_silence_trigger)
+        )
+
+    async def _handle_end_of_utterance(self):
+        """Handle the end of utterance event.
+
+        This will check for any running timers for end of utterance, reset them,
+        and then send a finalized frame to the pipeline.
+        """
+        # Send the frames
+        await self._send_frames(finalized=True)
+
+        # Reset the end of utterance timer
+        if self._end_of_utterance_timer:
+            self._end_of_utterance_timer.cancel()
+            self._end_of_utterance_timer = None
 
     async def _send_frames(self, finalized: bool = False) -> None:
         """Send frames to the pipeline.
