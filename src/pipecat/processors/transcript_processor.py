@@ -140,11 +140,13 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
                 Result: "Hello there how are you"
         """
         if self._current_text_parts and self._aggregation_start_time:
+            # Check specifically for space characters, previously isspace() was used
+            # but that includes all whitespace characters (e.g. \n), not just spaces.
             has_leading_spaces = any(
-                part and part[0].isspace() for part in self._current_text_parts[1:]
+                part and part[0] == " " for part in self._current_text_parts[1:]
             )
             has_trailing_spaces = any(
-                part and part[-1].isspace() for part in self._current_text_parts[:-1]
+                part and part[-1] == " " for part in self._current_text_parts[:-1]
             )
 
             # If there are embedded spaces in the fragments, use direct concatenation
