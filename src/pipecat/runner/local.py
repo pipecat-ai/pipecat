@@ -10,6 +10,10 @@ This module provides a simplified runner for local development and testing.
 It supports direct function execution without requiring the structured `bot()`
 function pattern needed for cloud deployment.
 
+Install dependencies with::
+
+    pip install pipecat-ai[runner]
+
 Supported transports:
 
 - Daily - Uses environment variables or arguments for room/token
@@ -46,13 +50,21 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Callable, Dict, Mapping, Optional
 
-import aiohttp
-import uvicorn
-from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
+
+try:
+    import aiohttp
+    import uvicorn
+    from dotenv import load_dotenv
+    from fastapi import BackgroundTasks, FastAPI, WebSocket
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import HTMLResponse, RedirectResponse
+except ImportError as e:
+    logger.error(f"Runner dependencies not available: {e}")
+    logger.error("To use Pipecat runners, install with: pip install pipecat-ai[runner]")
+    raise ImportError(
+        "Runner dependencies required. Install with: pip install pipecat-ai[runner]"
+    ) from e
 
 load_dotenv(override=True)
 

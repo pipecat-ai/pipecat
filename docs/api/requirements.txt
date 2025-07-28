@@ -41,10 +41,10 @@ pipecat-ai[noisereduce]
 pipecat-ai[openai]
 # pipecat-ai[openpipe]
 # pipecat-ai[playht] # Mocked due to grpcio conflict with riva
-pipecat-ai[pipecatcloud]
 pipecat-ai[qwen]
 pipecat-ai[remote-smart-turn]
 # pipecat-ai[riva] # Mocked
+pipecat-ai[runner]
 pipecat-ai[sambanova]
 pipecat-ai[silero]
 pipecat-ai[simli]

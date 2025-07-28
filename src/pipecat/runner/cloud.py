@@ -11,11 +11,9 @@ structured for Pipecat Cloud deployment. The runner enables you to run Pipecat
 bots locally or deployed without requiring any code changes. It supports
 multiple transport types and handles room/token management automatically.
 
-It requires the `pipecatcloud` package for proper session argument types.
-
 Install with::
 
-    pip install pipecat-ai[pipecatcloud]
+    pip install pipecat-ai[runner]
 
 All bots must implement a `bot(session_args)` async function as the entry point.
 The server automatically discovers and executes this function when connections
@@ -73,19 +71,27 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-import uvicorn
-from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
+
+try:
+    import uvicorn
+    from dotenv import load_dotenv
+    from fastapi import BackgroundTasks, FastAPI, WebSocket
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import HTMLResponse, RedirectResponse
+except ImportError as e:
+    logger.error(f"Runner dependencies not available: {e}")
+    logger.error("To use Pipecat runners, install with: pip install pipecat-ai[runner]")
+    raise ImportError(
+        "Runner dependencies required. Install with: pip install pipecat-ai[runner]"
+    ) from e
 
 try:
     from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
 except ImportError:
     raise ImportError(
         "pipecatcloud package is required for cloud-compatible bots. "
-        "Install with: pip install pipecat-ai[pipecatcloud]"
+        "Install with: pip install pipecat-ai[runner]"
     )
 
 
