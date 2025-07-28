@@ -23,24 +23,23 @@ specific handlers for each transport type's unique requirements.
 
 Example::
 
-    from pipecat.runner.utils import setup_webrtc_routes
+    from pipecat.runner.utils import parse_telephony_websocket
 
-    app = FastAPI()
-    setup_webrtc_routes(app, bot_runner_function, host="localhost")
+    async def telephony_websocket_handler(websocket: WebSocket):
+        transport_type, stream_id, call_id = await parse_telephony_websocket(websocket)
 """
 
 import json
 import re
-from typing import Any, Callable, Dict
+from typing import Any
 
-from fastapi import BackgroundTasks, FastAPI, WebSocket
-from fastapi.responses import RedirectResponse
+from fastapi import WebSocket
 from loguru import logger
 
 from pipecat.transports.base_transport import BaseTransport
 
 
-def detect_transport_type_from_message(message_data: dict) -> str:
+def _detect_transport_type_from_message(message_data: dict) -> str:
     """Attempt to auto-detect transport type from WebSocket message structure."""
     logger.trace("=== Auto-Detection Analysis ===")
 
@@ -81,6 +80,10 @@ async def parse_telephony_websocket(websocket: WebSocket):
 
     Returns:
         tuple: (transport_type: str, stream_id: str, call_id: str)
+
+    Example usage::
+
+        transport_type, stream_id, call_id = await parse_telephony_websocket(websocket)
     """
     # Read first two messages
     start_data = websocket.iter_text()
@@ -103,8 +106,8 @@ async def parse_telephony_websocket(websocket: WebSocket):
             second_message = {}
 
         # Try auto-detection on both messages
-        detected_type_first = detect_transport_type_from_message(first_message)
-        detected_type_second = detect_transport_type_from_message(second_message)
+        detected_type_first = _detect_transport_type_from_message(first_message)
+        detected_type_second = _detect_transport_type_from_message(second_message)
 
         # Use the successful detection
         if detected_type_first != "unknown":
@@ -120,7 +123,6 @@ async def parse_telephony_websocket(websocket: WebSocket):
             call_data = second_message
             logger.warning("Could not auto-detect transport type")
 
-        # Extract just the essential fields
         if transport_type == "twilio":
             start_data = call_data.get("start", {})
             stream_id = start_data.get("streamSid")
@@ -240,7 +242,7 @@ async def maybe_capture_participant_screen(
         pass
 
 
-def smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
+def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
     """Clean up ICE candidates in SDP text for SmallWebRTC.
 
     Args:
@@ -261,7 +263,7 @@ def smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
     return "\r\n".join(result)
 
 
-def smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
+def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
     """Remove unsupported fingerprint algorithms from SDP text.
 
     Args:
@@ -288,69 +290,6 @@ def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
     Returns:
         Modified SDP string with fingerprint and ICE candidate cleanup.
     """
-    sdp = smallwebrtc_sdp_cleanup_fingerprints(sdp)
-    sdp = smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
+    sdp = _smallwebrtc_sdp_cleanup_fingerprints(sdp)
+    sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
     return sdp
-
-
-def setup_webrtc_routes(app: FastAPI, transport_runner: Callable, host: str = None):
-    """Set up WebRTC routes for an app."""
-    try:
-        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
-
-        from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-    except ImportError as e:
-        logger.error(
-            f"WebRTC transport dependencies not installed. Install with: {get_install_command('webrtc')}"
-        )
-        logger.debug(f"Import error: {e}")
-        return
-
-    # Store connections by pc_id
-    pcs_map: Dict[str, SmallWebRTCConnection] = {}
-
-    # Mount the frontend at /
-    app.mount("/client", SmallWebRTCPrebuiltUI)
-
-    @app.get("/", include_in_schema=False)
-    async def root_redirect():
-        """Redirect root requests to client interface."""
-        return RedirectResponse(url="/client/")
-
-    @app.post("/api/offer")
-    async def offer(request: dict, background_tasks: BackgroundTasks):
-        """Handle WebRTC offer requests and manage peer connections."""
-        pc_id = request.get("pc_id")
-
-        if pc_id and pc_id in pcs_map:
-            pipecat_connection = pcs_map[pc_id]
-            logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-            await pipecat_connection.renegotiate(
-                sdp=request["sdp"],
-                type=request["type"],
-                restart_pc=request.get("restart_pc", False),
-            )
-        else:
-            pipecat_connection = SmallWebRTCConnection()
-            await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
-
-            @pipecat_connection.event_handler("closed")
-            async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
-                """Handle WebRTC connection closure and cleanup."""
-                logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
-                pcs_map.pop(webrtc_connection.pc_id, None)
-
-            # Run transport with the connection
-            background_tasks.add_task(
-                transport_runner, "webrtc", webrtc_connection=pipecat_connection
-            )
-
-        answer = pipecat_connection.get_answer()
-
-        if host:
-            answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], host)
-
-        # Updating the peer connection inside the map
-        pcs_map[answer["pc_id"]] = pipecat_connection
-
-        return answer
