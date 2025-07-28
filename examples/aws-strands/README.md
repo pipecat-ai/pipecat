@@ -41,8 +41,11 @@ An enhanced example where the Strands agent explains each step of its reasoning 
    ```bash
    pip install -r requirements.txt
    ```
+4. **Enable AWS Bedrock models:**
+   ⚠️ **Important:** AWS Strands uses Bedrock models by default. You must first activate the required models in your AWS Bedrock console before running these examples. Visit the [AWS Bedrock Model Access documentation](https://docs.aws.amazon.com/bedrock/latest/userguide/model-access-permissions.html) to enable model access permissions.
 
-4. **Configure environment variables:**
+
+5. **Configure environment variables:**
 
    Copy the provided `env.example` file to `.env` and fill in the necessary credentials:
 
@@ -51,10 +54,11 @@ An enhanced example where the Strands agent explains each step of its reasoning 
    # Then edit .env with your preferred editor
    ```
 
-5. **Run an example:**
+6. **Run an example:**
 
    ```bash
    python black-box.py
    # or
    python explain-thinking.py
+   # The transport is selected via the --transport or -t command line argument. Choices are daily webrtc and twilio.defaults to    #  webrtc
    ```

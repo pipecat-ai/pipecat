@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new TTS service, `InworldTTSService`. This service provides
+  low-latency, high-quality speech generation using Inworld's streaming API.
+
 - Added a new field `handle_sigterm` to `PipelineRunner`. It defaults to `False`.
   This field handles SIGTERM signals. The `handle_sigint` field still defaults
   to `True`, but now it handles only SIGINT signals.
@@ -45,6 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pyneuphonic` package. This removes a package requirement, allowing Neuphonic
   to work with more services.
 
+- Updated `ElevenLabsTTSService` to handle the case where
+  `allow_interruptions=False`. Now, when interruptions are disabled, the same
+  context ID will be used throughout the conversation.
+
 - Updated the `deepgram` optional dependency to 4.7.0, which downgrades the
   `tasks cancelled error` to a debug log. This removes the log from appearing
   in Pipecat logs upon leaving.
@@ -66,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recommended model.
 
 ### Fixed
+
+- Fixed an issue in `AudioBufferProcessor` when using `SmallWebRTCTransport` where, if
+  the microphone was muted, track timing was not respected.
+
+- Fixed an issue in `AudioBufferProcessor` that caused garbled audio when
+  `enable_turn_audio` was enabled and audio resampling was required.
 
 - Fixed a dependency issue for uv users where an `llvmlite` version required python 3.9.
 
