@@ -119,7 +119,7 @@ async def main():
 
     tk_transport = TkLocalTransport(
         tk_root,
-        TkTransportParams(         
+        TkTransportParams(
             audio_in_enabled=False,
             audio_out_enabled=True,
             video_out_enabled=True,

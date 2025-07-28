@@ -902,7 +902,7 @@ class OjinAvatarService(FrameProcessor):
             self._pending_interaction.audio_input_queue.put_nowait(
                 OjinAvatarInteractionInputMessage(
                     interaction_id=self._interaction.interaction_id,
-                    audio_int16_bytes=resampled_audio,                    
+                    audio_int16_bytes=resampled_audio,
                 )
             )
             self._pending_interaction.pending_first_input = False
