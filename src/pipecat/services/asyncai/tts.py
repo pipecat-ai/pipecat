@@ -28,13 +28,15 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
+from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Async, you need to `pip install pipecat-ai[asyncai]`.")
@@ -67,7 +69,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
     return result
 
 
-class AsyncAITTSService(AudioContextWordTTSService):
+class AsyncAITTSService(InterruptibleTTSService):
     """Async TTS service with WebSocket streaming.
 
     Provides text-to-speech using Async's streaming WebSocket API.
@@ -90,7 +92,7 @@ class AsyncAITTSService(AudioContextWordTTSService):
         version: str = "v1",
         url: str = "wss://api.async.ai/text_to_speech/websocket/ws",
         model: str = "asyncflow_v2.0",
-        sample_rate: int = 32000,
+        sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
@@ -112,18 +114,11 @@ class AsyncAITTSService(AudioContextWordTTSService):
             aggregate_sentences: Whether to aggregate sentences within the TTSService.
             **kwargs: Additional arguments passed to the parent service.
         """
-        # Aggregating sentences still gives cleaner-sounding results and fewer
-        # artifacts than streaming one word at a time. On average, waiting for a
-        # full sentence should only "cost" us 15ms or so with GPT-4o or a Llama
-        # 3 model, and it's worth it for the better audio quality.
-        #
-        # We also don't want to automatically push LLM response text frames,
-        # because the context aggregators will add them to the LLM context even
-        # if we're interrupted.
         super().__init__(
             aggregate_sentences=aggregate_sentences,
             push_text_frames=False,
             pause_frame_processing=True,
+            push_stop_frames=True,
             sample_rate=sample_rate,
             **kwargs,
         )
@@ -137,20 +132,19 @@ class AsyncAITTSService(AudioContextWordTTSService):
             "output_format": {
                 "container": container,
                 "encoding": encoding,
-                "sample_rate": sample_rate,
+                "sample_rate": 0,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
             else "en",
-        },
+        }
         
         self.set_model_name(model)
         self.set_voice(voice_id)
-        self._global_context_id = str(uuid.uuid4())
 
-        self._context_id = None
         self._receive_task = None
         self._keepalive_task = None
+        self._started = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -187,6 +181,7 @@ class AsyncAITTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+        self._settings["output_format"]["sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -229,10 +224,10 @@ class AsyncAITTSService(AudioContextWordTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Async")
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 f"{self._url}?api_key={self._api_key}&version={self._api_version}"
             )
             init_msg = {
@@ -258,41 +253,41 @@ class AsyncAITTSService(AudioContextWordTTSService):
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
         finally:
-            self._context_id = None
             self._websocket = None
+            self._started = False
 
     def _get_websocket(self):
         if self._websocket:
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        await self.stop_all_metrics()
-        if self._context_id:
-            self._context_id = None
-
     async def flush_audio(self):
-        """Flush any pending audio and finalize the current context."""
-        if not self._context_id or not self._websocket:
+        """Flush any pending audio."""
+        if not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
         msg = self._build_msg(text=" ", force=True)
         await self._websocket.send(msg)
-        self._context_id = None
+    
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with special handling for stop conditions.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+            self._started = False
 
     async def _receive_messages(self):
         async for message in WatchdogAsyncIterator(
             self._get_websocket(), manager=self.task_manager
         ):
             msg = json.loads(message)
-            context_id = self._global_context_id
             if not msg:
                 continue
 
-            if "final" in msg and msg["final"] is True:
-                await self.stop_ttfb_metrics()
-                await self.remove_audio_context(context_id)
             elif msg.get("audio"):
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
@@ -300,13 +295,12 @@ class AsyncAITTSService(AudioContextWordTTSService):
                     sample_rate=self.sample_rate,
                     num_channels=1,
                 )
-                await self.append_to_audio_context(context_id, frame)
+                await self.push_frame(frame)
             elif msg.get("error_code"):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
                 await self.stop_all_metrics()
                 await self.push_error(ErrorFrame(f"{self} error: {msg['message']}"))
-                self._context_id = None
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
 
@@ -317,7 +311,7 @@ class AsyncAITTSService(AudioContextWordTTSService):
             self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
-                if self._websocket and self._websocket.open:
+                if self._websocket and self._websocket.state is State.OPEN:
                     keepalive_message = {"transcript": " "}
                     logger.trace("Sending keepalive message")
                     await self._websocket.send(json.dumps(keepalive_message))
@@ -338,15 +332,14 @@ class AsyncAITTSService(AudioContextWordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self._context_id:
+            if not self._started:
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame()
-                self._context_id = self._global_context_id
-                await self.create_audio_context(self._context_id)
-
+                self._started = True
+                
             msg = self._build_msg(text=text)
 
             try:
@@ -387,7 +380,7 @@ class AsyncAIHttpTTSService(TTSService):
         model: str = "asyncflow_v2.0",
         url: str = "https://api.async.ai",
         version: str = "v1",
-        sample_rate: int = 32000,
+        sample_rate: Optional[int] = None,
         encoding: str = "pcm_s16le",
         container: str = "raw",
         params: Optional[InputParams] = None,
@@ -418,7 +411,7 @@ class AsyncAIHttpTTSService(TTSService):
             "output_format": {
                 "container": container,
                 "encoding": encoding,
-                "sample_rate": sample_rate,
+                "sample_rate": 0,
             },
             "language": self.language_to_service_language(params.language)
             if params.language
@@ -455,6 +448,7 @@ class AsyncAIHttpTTSService(TTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+        self._settings["output_format"]["sample_rate"] = self.sample_rate
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:

@@ -8,6 +8,7 @@ toml
 # Install all extras individually to ensure they're properly resolved
 pipecat-ai[anthropic]
 pipecat-ai[assemblyai]
+pipecat-ai[asyncai]
 pipecat-ai[aws]
 pipecat-ai[azure]
 pipecat-ai[cartesia]

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **async.ai TTS integration** (https://async.ai/)
+  - `AsyncAITTSService` – streaming / interruptible TTS over WebSocket.
+  - `AsyncAIHttpTTSService` – streaming TTS over HTTP.
+  - Example scripts:
+    - `examples/foundational/07ac-interruptible-asyncai.py` (WebSocket demo)
+    - `examples/foundational/07ac-interruptible-asyncai-http.py` (HTTP demo)
+
 - Added a new TTS service, `InworldTTSService`. This service provides
   low-latency, high-quality speech generation using Inworld's streaming API.
 
