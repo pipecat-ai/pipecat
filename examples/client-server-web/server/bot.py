@@ -4,23 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipecat Quickstart Example.
-
-The example runs a simple voice AI bot that you can connect to using your
-browser and speak with it.
-
-Required AI services:
-- Deepgram (Speech-to-Text)
-- OpenAI (LLM)
-- Cartesia (Text-to-Speech)
-
-The example connects between client and server using a P2P WebRTC connection.
-
-Run the bot using::
-
-    python bot.py
-"""
-
 import argparse
 import os
 

@@ -1,0 +1,7 @@
+@import "@pipecat-ai/voice-ui-kit/styles.css";
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
