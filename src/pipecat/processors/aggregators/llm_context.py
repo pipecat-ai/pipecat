@@ -124,8 +124,8 @@ class LLMContext:
         Args:
             tools: List of tools available to the LLM, a ToolsSchema, or NOT_GIVEN to disable tools.
         """
-        # TODO: convert empty ToolsSchema to NOT_GIVEN if needed
-        # TODO: maybe also convert non-ToolsSchema tools to ToolsSchema? See open_ai_adapter.py for related comment
+        # TODO: convert empty ToolsSchema to NOT_GIVEN if needed?
+        # TODO: maybe someday also convert provider-specific tools to ToolsSchema so it's always in a provider-neutral format here? See open_ai_adapter.py for related comment. Pipecat Flows is currently converting provider-specific tools to ToolsSchema...
         if isinstance(tools, list) and len(tools) == 0:
             tools = NOT_GIVEN
         self._tools = tools
