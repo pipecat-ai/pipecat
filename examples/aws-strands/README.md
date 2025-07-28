@@ -60,4 +60,5 @@ An enhanced example where the Strands agent explains each step of its reasoning 
    python black-box.py
    # or
    python explain-thinking.py
+   # The transport is selected via the --transport or -t command line argument. Choices are daily webrtc and twilio.defaults to    #  webrtc
    ```
