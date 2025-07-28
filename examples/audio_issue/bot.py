@@ -17,7 +17,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.daily import DailyParams, DailyTransport
+from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyLogLevel
 
 
 # Setup logging
@@ -55,6 +55,7 @@ async def run_bot(room_url: str, token: str, call_id: str, sip_uri: str) -> None
             vad_analyzer=SileroVADAnalyzer(),
         ),
     )
+    transport.set_log_level(DailyLogLevel.Debug)
 
     # Setup TTS service
     tts = CartesiaTTSService(
