@@ -7,10 +7,11 @@
 """Pipecat Cloud-compatible development server for running Pipecat bots.
 
 This module provides a FastAPI-based development server that can run bots
-structured for Pipecat Cloud deployment. It supports multiple transport types
-and handles room/token management automatically.
+structured for Pipecat Cloud deployment. The runner enables you to run Pipecat
+bots locally or deployed without requiring any code changes. It supports
+multiple transport types and handles room/token management automatically.
 
-It requires the pipecatcloud package for proper session argument types.
+It requires the `pipecatcloud` package for proper session argument types.
 
 Install with::
 
@@ -72,7 +73,13 @@ Example::
         from pipecat.runner.cloud import main
         main()
 
-Then run: `python bot.py -t daily` or `python bot.py -t webrtc`
+To run locally:
+
+- Daily: `python bot.py -t daily`
+- WebRTC: `python bot.py -t webrtc`
+- Telephony: `python bot.py -t twilio -x your_username.ngork.io`
+- Telephony: `python bot.py -t telnyx -x your_username.ngork.io`
+- Telephony: `python bot.py -t plivo -x your_username.ngork
 """
 
 import argparse
@@ -90,7 +97,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 
-# Require pipecatcloud for cloud-compatible bots
 try:
     from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
 except ImportError:
@@ -180,169 +186,171 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
         allow_headers=["*"],
     )
 
-    # Add transport-specific routes
+    # Set up transport-specific routes
     if transport_type == "webrtc":
-        # WebRTC setup
-        try:
-            from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
-
-            from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-        except ImportError as e:
-            logger.error(f"WebRTC transport dependencies not installed.")
-            return app
-
-        # Store connections by pc_id
-        pcs_map: Dict[str, SmallWebRTCConnection] = {}
-
-        # Mount the frontend at /
-        app.mount("/client", SmallWebRTCPrebuiltUI)
-
-        @app.get("/", include_in_schema=False)
-        async def root_redirect():
-            """Redirect root requests to client interface."""
-            return RedirectResponse(url="/client/")
-
-        @app.post("/api/offer")
-        async def offer(request: dict, background_tasks: BackgroundTasks):
-            """Handle WebRTC offer requests and manage peer connections."""
-            pc_id = request.get("pc_id")
-
-            if pc_id and pc_id in pcs_map:
-                pipecat_connection = pcs_map[pc_id]
-                logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-                await pipecat_connection.renegotiate(
-                    sdp=request["sdp"],
-                    type=request["type"],
-                    restart_pc=request.get("restart_pc", False),
-                )
-            else:
-                pipecat_connection = SmallWebRTCConnection()
-                await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
-
-                @pipecat_connection.event_handler("closed")
-                async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
-                    """Handle WebRTC connection closure and cleanup."""
-                    logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
-                    pcs_map.pop(webrtc_connection.pc_id, None)
-
-                bot_module = _get_bot_module()
-
-                session_args = SmallWebRTCSessionArguments(
-                    webrtc_connection=pipecat_connection,
-                    session_id=None,
-                )
-                background_tasks.add_task(bot_module.bot, session_args)
-
-            answer = pipecat_connection.get_answer()
-            pcs_map[answer["pc_id"]] = pipecat_connection
-            return answer
-
-        @asynccontextmanager
-        async def lifespan(app: FastAPI):
-            """Manage FastAPI application lifecycle and cleanup connections."""
-            yield  # Run app
-            coros = [pc.disconnect() for pc in pcs_map.values()]
-            await asyncio.gather(*coros)
-            pcs_map.clear()
-
-        app.router.lifespan_context = lifespan
-
+        _setup_webrtc_routes(app)
+    elif transport_type == "daily":
+        _setup_daily_routes(app)
     elif transport_type in ["twilio", "telnyx", "plivo"]:
-        # Direct telephony WebSocket handling (no utils dependency)
+        _setup_telephony_routes(app, transport_type, proxy)
+    else:
+        logger.warning(f"Unknown transport type: {transport_type}")
 
-        @app.post("/")
-        async def start_call():
-            """Handle telephony webhook and return XML response."""
-            logger.debug(f"POST {transport_type.upper()} XML")
+    return app
 
-            if transport_type == "twilio":
-                xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+
+def _setup_webrtc_routes(app: FastAPI):
+    """Set up WebRTC-specific routes."""
+    try:
+        from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
+
+        from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+    except ImportError as e:
+        logger.error(f"WebRTC transport dependencies not installed.")
+        return
+
+    # Store connections by pc_id
+    pcs_map: Dict[str, SmallWebRTCConnection] = {}
+
+    # Mount the frontend
+    app.mount("/client", SmallWebRTCPrebuiltUI)
+
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        """Redirect root requests to client interface."""
+        return RedirectResponse(url="/client/")
+
+    @app.post("/api/offer")
+    async def offer(request: dict, background_tasks: BackgroundTasks):
+        """Handle WebRTC offer requests and manage peer connections."""
+        pc_id = request.get("pc_id")
+
+        if pc_id and pc_id in pcs_map:
+            pipecat_connection = pcs_map[pc_id]
+            logger.info(f"Reusing existing connection for pc_id: {pc_id}")
+            await pipecat_connection.renegotiate(
+                sdp=request["sdp"],
+                type=request["type"],
+                restart_pc=request.get("restart_pc", False),
+            )
+        else:
+            pipecat_connection = SmallWebRTCConnection()
+            await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
+
+            @pipecat_connection.event_handler("closed")
+            async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
+                """Handle WebRTC connection closure and cleanup."""
+                logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
+                pcs_map.pop(webrtc_connection.pc_id, None)
+
+            bot_module = _get_bot_module()
+            session_args = SmallWebRTCSessionArguments(
+                webrtc_connection=pipecat_connection,
+                session_id=None,
+            )
+            background_tasks.add_task(bot_module.bot, session_args)
+
+        answer = pipecat_connection.get_answer()
+        pcs_map[answer["pc_id"]] = pipecat_connection
+        return answer
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Manage FastAPI application lifecycle and cleanup connections."""
+        yield
+        coros = [pc.disconnect() for pc in pcs_map.values()]
+        await asyncio.gather(*coros)
+        pcs_map.clear()
+
+    app.router.lifespan_context = lifespan
+
+
+def _setup_daily_routes(app: FastAPI):
+    """Set up Daily-specific routes."""
+
+    @app.get("/")
+    async def start_agent():
+        """Launch a Daily bot and redirect to room."""
+        print("Starting bot with Daily transport")
+
+        import aiohttp
+
+        from pipecat.runner.daily import configure
+
+        async with aiohttp.ClientSession() as session:
+            room_url, token = await configure(session)
+
+            # Start the bot in the background
+            bot_module = _get_bot_module()
+            session_args = DailySessionArguments(
+                room_url=room_url, token=token, body={}, session_id=None
+            )
+            asyncio.create_task(bot_module.bot(session_args))
+            return RedirectResponse(room_url)
+
+    @app.post("/connect")
+    async def rtvi_connect():
+        """Launch a Daily bot and return connection info for RTVI clients."""
+        print("Starting bot with Daily transport")
+
+        import aiohttp
+
+        from pipecat.runner.daily import configure
+
+        async with aiohttp.ClientSession() as session:
+            room_url, token = await configure(session)
+
+            # Start the bot in the background
+            bot_module = _get_bot_module()
+            session_args = DailySessionArguments(
+                room_url=room_url, token=token, body={}, session_id=None
+            )
+            asyncio.create_task(bot_module.bot(session_args))
+            return {"room_url": room_url, "token": token}
+
+
+def _setup_telephony_routes(app: FastAPI, transport_type: str, proxy: str):
+    """Set up telephony-specific routes."""
+    # XML response templates
+    XML_TEMPLATES = {
+        "twilio": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <Stream url="wss://{proxy}/ws"></Stream>
   </Connect>
   <Pause length="40"/>
-</Response>"""
-            elif transport_type == "telnyx":
-                xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+</Response>""",
+        "telnyx": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <Stream url="wss://{proxy}/ws" bidirectionalMode="rtp"></Stream>
   </Connect>
   <Pause length="40"/>
-</Response>"""
-            elif transport_type == "plivo":
-                xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+</Response>""",
+        "plivo": f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Stream bidirectional="true" keepCallAlive="true" contentType="audio/x-mulaw;rate=8000">wss://{proxy}/ws</Stream>
-</Response>"""
-            else:
-                xml_content = "<Response></Response>"
+</Response>""",
+    }
 
-            return HTMLResponse(content=xml_content, media_type="application/xml")
+    @app.post("/")
+    async def start_call():
+        """Handle telephony webhook and return XML response."""
+        logger.debug(f"POST {transport_type.upper()} XML")
+        xml_content = XML_TEMPLATES.get(transport_type, "<Response></Response>")
+        return HTMLResponse(content=xml_content, media_type="application/xml")
 
-        @app.websocket("/ws")
-        async def websocket_endpoint(websocket: WebSocket):
-            """Handle WebSocket connections for telephony."""
-            await websocket.accept()
-            logger.debug("WebSocket connection accepted")
-            await _run_telephony_bot(websocket)
+    @app.websocket("/ws")
+    async def websocket_endpoint(websocket: WebSocket):
+        """Handle WebSocket connections for telephony."""
+        await websocket.accept()
+        logger.debug("WebSocket connection accepted")
+        await _run_telephony_bot(websocket)
 
-    # Add general routes
     @app.get("/")
     async def start_agent():
-        """Launch a bot and redirect appropriately."""
-        print(f"Starting bot with {transport_type} transport")
-
-        if transport_type == "daily":
-            # Create Daily room and start bot
-            import aiohttp
-
-            from pipecat.runner.daily import configure
-
-            async with aiohttp.ClientSession() as session:
-                room_url, token = await configure(session)
-
-                # Start the bot in the background to join the room
-                bot_module = _get_bot_module()
-                session_args = DailySessionArguments(
-                    room_url=room_url, token=token, body={}, session_id=None
-                )
-                asyncio.create_task(bot_module.bot(session_args))
-                return RedirectResponse(room_url)
-
-        elif transport_type == "webrtc":
-            return RedirectResponse("/client/")
-        else:
-            return {"status": f"Bot started with {transport_type}"}
-
-    @app.post("/connect")
-    async def rtvi_connect():
-        """Launch a bot and return connection info for RTVI clients."""
-        print(f"Starting bot with {transport_type} transport")
-
-        if transport_type == "daily":
-            import aiohttp
-
-            from pipecat.runner.daily import configure
-
-            async with aiohttp.ClientSession() as session:
-                room_url, token = await configure(session)
-
-                # Start the bot in the background
-                bot_module = _get_bot_module()
-                session_args = DailySessionArguments(
-                    room_url=room_url, token=token, body={}, session_id=None
-                )
-                asyncio.create_task(bot_module.bot(session_args))
-                return {"room_url": room_url, "token": token}
-
-        else:
-            return {
-                "error": f"RTVI connect not supported for {transport_type} transport. Use Daily."
-            }
-
-    return app
+        """Simple status endpoint for telephony transports."""
+        return {"status": f"Bot started with {transport_type}"}
 
 
 def main():
