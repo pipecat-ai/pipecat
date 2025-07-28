@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new TTS service, `InworldTTSService`. This service provides
+  low-latency, high-quality speech generation using Inworld's streaming API.
+
 - Added a new field `handle_sigterm` to `PipelineRunner`. It defaults to `False`.
   This field handles SIGTERM signals. The `handle_sigint` field still defaults
   to `True`, but now it handles only SIGINT signals.
