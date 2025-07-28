@@ -137,9 +137,9 @@ class SmallWebRTCTrack:
         """Receive the next frame from the track.
 
         Returns:
-            The next frame if the track is enabled, None otherwise.
+            The next frame, except for video tracks, where it returns the frame only if the track is enabled, otherwise, returns None.
         """
-        if not self._enabled:
+        if not self._enabled and self._track.kind == "video":
             return None
         return await self._track.recv()
 

@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `AudioBufferProcessor` when using `SmallWebRTCTransport` where, if
+  the microphone was muted, track timing was not respected.
+
 - Fixed an issue in `AudioBufferProcessor` that caused garbled audio when
   `enable_turn_audio` was enabled and audio resampling was required.
 
