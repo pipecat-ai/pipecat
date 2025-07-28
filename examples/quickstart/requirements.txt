@@ -1,2 +1,0 @@
-pipecat-ai[webrtc,silero,deepgram,openai,cartesia,runner]
-pipecat-ai-small-webrtc-prebuilt
