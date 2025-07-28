@@ -22,6 +22,7 @@ from ojin.ojin_avatar_messages import (
 )
 from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
+    BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -68,6 +69,7 @@ class OjinAvatarSettings:
     idle_sequence_duration: int = field(default=30) # length of the idle sequence loop in seconds.
     idle_to_speech_seconds: float = field(default=0.75) # seconds to wait before starting speech, recommended not less than 0.75 to avoid missing frames. This ensures smooth transition between idle frames and speech frames
     tts_audio_passthrough: bool = field(default=False) # whether to pass through TTS audio to the output
+    push_bot_stopped_speaking_frames: bool = field(default=True) # whether to push bot stopped speaking frames to the output
 
 
 
@@ -141,7 +143,8 @@ class OjinAvatarFSM:
         await self.on_state_changed_callback(old_state, new_state)
 
     def get_transition_frame_idx(self) -> int:
-        return int(self._transition_time / 25)
+        logger.info(f"get_transition_frame_idx: {self._transition_time} frame {int(self._transition_time * 25)}")
+        return int(self._transition_time * 25)
 
     def get_state(self) -> AvatarState:
         """Get the current state of the avatar FSM.
@@ -347,7 +350,9 @@ class OjinAvatarFSM:
 
         match self._state:
             case AvatarState.IDLE | AvatarState.IDLE_TO_SPEECH:
-                logger.debug(f"Pushing idle frame: {self._last_frame_idx}")
+                if self._last_frame_idx % 25 == 0:
+                    logger.debug(f"Pushing idle frame: {self._last_frame_idx}")
+                    
                 idle_frame = self._playback_loop.get_current_frame()
                 image_frame = OutputImageRawFrame(
                     image=idle_frame.image,
@@ -383,9 +388,10 @@ class OjinAvatarFSM:
 
                 else:
                     self._last_frame = frame
-                    logger.debug(
-                        f"Pushing speech frame: {frame.pts} ==? {self._last_frame_idx}"
-                    )
+                    if frame.pts % 25 == 0:
+                        logger.debug(
+                            f"Pushing speech frame: {frame.pts} ==? {self._last_frame_idx}"
+                        )
                     self._num_frames_missed = 0
 
                 return frame
@@ -394,6 +400,10 @@ class OjinAvatarFSM:
 
 
 OJIN_AVATAR_SAMPLE_RATE=16000
+SPEECH_FILTER_AMOUNT = 0.0
+IDLE_FILTER_AMOUNT = 1.0
+IDLE_MOUTH_OPENING_SCALE = 0.0
+SPEECH_MOUTH_OPENING_SCALE = 1.0
 
 @dataclass
 class OjinAvatarInteraction:
@@ -411,9 +421,11 @@ class OjinAvatarInteraction:
     pending_first_input: bool = True
     start_frame_idx: int | None = None
     frame_idx: int = 0
+    filter_amount: float = 0.0
     mirrored_frame_idx: int = 0
     num_loop_frames: int = 0
     state: InteractionState = InteractionState.INACTIVE
+    mouth_opening_scale: float = 0.0
 
     def __post_init__(self):
         """Initialize queues after instance creation."""
@@ -540,7 +552,11 @@ class OjinAvatarService(FrameProcessor):
                     audio_int16_bytes=silence_audio,
                     interaction_id=self._interaction.interaction_id,
                     is_last_input=True,
-                    start_frame_idx=self._interaction.start_frame_idx,
+                    params={
+                        "start_frame_idx": self._interaction.start_frame_idx,
+                        "filter_amount": self._interaction.filter_amount,
+                        "mouth_opening_scale": self._interaction.mouth_opening_scale,
+                    },
                 )
             )
 
@@ -556,6 +572,8 @@ class OjinAvatarService(FrameProcessor):
             await self._start_pushing_audio_output()
 
         if new_state == AvatarState.IDLE and self._audio_output_task is not None:
+            if self._settings.push_bot_stopped_speaking_frames:
+                await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
             await self._stop_pushing_audio_output()
 
     async def _start(self):
@@ -736,10 +754,12 @@ class OjinAvatarService(FrameProcessor):
 
         # logger.debug(f"Processing frame: {type(frame)}")
         if isinstance(frame, StartFrame):
+            logger.debug("StartFrame")
             await self.push_frame(frame, direction)
             await self._start()
 
         elif isinstance(frame, TTSStoppedFrame):
+            logger.debug("TTSStoppedFrame")
             # TODO(@JM): Avoid ending interaction here since some TTS services continue to send audio frames
             if self._pending_interaction:
                 self._pending_interaction = None
@@ -748,6 +768,7 @@ class OjinAvatarService(FrameProcessor):
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, TTSAudioRawFrame):
+            logger.debug("TTSAudioRawFrame")
             # TODO(@JM): Check if speech interaction is already possible
             await self._handle_input_audio(frame)
             if self._settings.tts_audio_passthrough:
@@ -758,6 +779,7 @@ class OjinAvatarService(FrameProcessor):
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, StartInterruptionFrame):
+            logger.debug("StartInterruptionFrame")
             # only interrupt if we are allowed to send TTS input
             if self.is_tts_input_allowed():
                 await self._interrupt()
@@ -814,6 +836,8 @@ class OjinAvatarService(FrameProcessor):
         )  # 25 fps
         self._interaction.set_state(InteractionState.STARTING)
         if is_speech:
+            self._interaction.filter_amount = SPEECH_FILTER_AMOUNT
+            self._interaction.mouth_opening_scale = SPEECH_MOUTH_OPENING_SCALE
             if self._fsm is not None:
                 await self._fsm.on_conversation_signal(
                     ConversationSignal.SPEECH_AUDIO_STARTED_PROCESSING
@@ -821,7 +845,9 @@ class OjinAvatarService(FrameProcessor):
                 self._interaction.start_frame_idx = self._fsm.get_transition_frame_idx()
                 self._interaction.frame_idx = self._fsm.get_transition_frame_idx()
         else:
-            self._interaction.start_frame_idx = None
+            self._interaction.filter_amount = IDLE_FILTER_AMOUNT
+            self._interaction.mouth_opening_scale = IDLE_MOUTH_OPENING_SCALE            
+            self._interaction.start_frame_idx = 0
             self._interaction.frame_idx = 0
 
         await self.push_ojin_message(StartInteractionMessage())
@@ -861,7 +887,6 @@ class OjinAvatarService(FrameProcessor):
             frame.audio, frame.sample_rate, OJIN_AVATAR_SAMPLE_RATE
         )
 
-        # Convert to float32
         if not self.is_tts_input_allowed():
             if self._interaction is None or self._interaction.interaction_id is None:
                 logger.debug("No interaction is set")
@@ -877,7 +902,7 @@ class OjinAvatarService(FrameProcessor):
             self._pending_interaction.audio_input_queue.put_nowait(
                 OjinAvatarInteractionInputMessage(
                     interaction_id=self._interaction.interaction_id,
-                    audio_int16_bytes=resampled_audio,
+                    audio_int16_bytes=resampled_audio,                    
                 )
             )
             self._pending_interaction.pending_first_input = False
@@ -902,7 +927,11 @@ class OjinAvatarService(FrameProcessor):
                 OjinAvatarInteractionInputMessage(
                     interaction_id=self._interaction.interaction_id,
                     audio_int16_bytes=resampled_audio,
-                    start_frame_idx=start_frame_idx,
+                    params={
+                        "start_frame_idx": start_frame_idx,
+                        "filter_amount": self._interaction.filter_amount,
+                        "mouth_opening_scale": self._interaction.mouth_opening_scale,
+                    }
                 )
             )
             self._interaction.pending_first_input = False
@@ -936,13 +965,9 @@ class OjinAvatarService(FrameProcessor):
                 continue
 
             is_final_message = (
-                self._interaction.audio_input_queue.qsize() == 0
+                self._interaction.audio_input_queue.qsize() == 1
                 and self._interaction.state == InteractionState.ENDING
-            )
-            if is_final_message:
-                logger.warning(
-                    f"Final audio message!!!!! qsize: {self._interaction.audio_input_queue.qsize()}"
-                )
+            )           
 
             # while there is more audio coming we wait for it if we don't have any to process atm
             if self._interaction.audio_input_queue.empty() and not is_final_message:
@@ -951,9 +976,15 @@ class OjinAvatarService(FrameProcessor):
 
             # Get audio from the queue
             should_finish_task = False
-            message: OjinAvatarInteractionInputMessage = (
-                self._interaction.audio_input_queue.get_nowait()
-            )
+            try:
+                message: OjinAvatarInteractionInputMessage = (
+                    self._interaction.audio_input_queue.get_nowait()
+                )
+            except asyncio.QueueEmpty:
+                logger.error(f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}")
+                await asyncio.sleep(0.05)
+                continue
+
             should_finish_task = True 
             if is_final_message:
                 self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
