@@ -57,13 +57,10 @@ from loguru import logger
 load_dotenv(override=True)
 
 
-def setup_websocket_routes(
+def _setup_websocket_routes(
     app: FastAPI, transport_runner: Callable, transport_type: str, proxy: str = None
 ):
-    """Set up WebSocket routes for telephony providers.
-
-    This is used by the local runner (pipecat.runner.local) only.
-    """
+    """Set up WebSocket routes for telephony providers."""
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -279,7 +276,7 @@ def _run_twilio(
 
             await run(transport, MockArgs(), False)
 
-    setup_websocket_routes(app, twilio_runner, "twilio", args.proxy)
+    _setup_websocket_routes(app, twilio_runner, "twilio", args.proxy)
     uvicorn.run(app, host=args.host, port=args.port)
 
 
@@ -321,7 +318,7 @@ def _run_telnyx(
 
             await run(transport, MockArgs(), False)
 
-    setup_websocket_routes(app, telnyx_runner, "telnyx", args.proxy)
+    _setup_websocket_routes(app, telnyx_runner, "telnyx", args.proxy)
     uvicorn.run(app, host=args.host, port=args.port)
 
 
@@ -361,7 +358,7 @@ def _run_plivo(
 
             await run(transport, MockArgs(), False)
 
-    setup_websocket_routes(app, plivo_runner, "plivo", args.proxy)
+    _setup_websocket_routes(app, plivo_runner, "plivo", args.proxy)
     uvicorn.run(app, host=args.host, port=args.port)
 
 

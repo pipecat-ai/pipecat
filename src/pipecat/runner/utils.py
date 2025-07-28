@@ -42,7 +42,7 @@ from pipecat.transports.base_transport import BaseTransport
 
 def detect_transport_type_from_message(message_data: dict) -> str:
     """Attempt to auto-detect transport type from WebSocket message structure."""
-    logger.debug("=== Auto-Detection Analysis ===")
+    logger.trace("=== Auto-Detection Analysis ===")
 
     # Twilio detection
     if (
@@ -51,7 +51,7 @@ def detect_transport_type_from_message(message_data: dict) -> str:
         and "streamSid" in message_data.get("start", {})
         and "callSid" in message_data.get("start", {})
     ):
-        logger.debug("Auto-detected: TWILIO")
+        logger.trace("Auto-detected: TWILIO")
         return "twilio"
 
     # Telnyx detection
@@ -60,7 +60,7 @@ def detect_transport_type_from_message(message_data: dict) -> str:
         and "start" in message_data
         and "call_control_id" in message_data.get("start", {})
     ):
-        logger.debug("Auto-detected: TELNYX")
+        logger.trace("Auto-detected: TELNYX")
         return "telnyx"
 
     # Plivo detection
@@ -69,10 +69,10 @@ def detect_transport_type_from_message(message_data: dict) -> str:
         and "streamId" in message_data.get("start", {})
         and "callId" in message_data.get("start", {})
     ):
-        logger.debug("Auto-detected: PLIVO")
+        logger.trace("Auto-detected: PLIVO")
         return "plivo"
 
-    logger.debug("Auto-detection failed - unknown format")
+    logger.trace("Auto-detection failed - unknown format")
     return "unknown"
 
 
@@ -82,15 +82,13 @@ async def parse_telephony_websocket(websocket: WebSocket):
     Returns:
         tuple: (transport_type: str, stream_id: str, call_id: str)
     """
-    logger.info("=== Parsing Telephony WebSocket ===")
-
     # Read first two messages
     start_data = websocket.iter_text()
 
     try:
         # First message
         first_message_raw = await start_data.__anext__()
-        logger.debug(f"First message: {first_message_raw}")
+        logger.trace(f"First message: {first_message_raw}")
         try:
             first_message = json.loads(first_message_raw)
         except json.JSONDecodeError:
@@ -98,7 +96,7 @@ async def parse_telephony_websocket(websocket: WebSocket):
 
         # Second message
         second_message_raw = await start_data.__anext__()
-        logger.debug(f"Second message: {second_message_raw}")
+        logger.trace(f"Second message: {second_message_raw}")
         try:
             second_message = json.loads(second_message_raw)
         except json.JSONDecodeError:
@@ -112,11 +110,11 @@ async def parse_telephony_websocket(websocket: WebSocket):
         if detected_type_first != "unknown":
             transport_type = detected_type_first
             call_data = first_message
-            logger.info(f"Detected transport: {transport_type} (from first message)")
+            logger.debug(f"Detected transport: {transport_type} (from first message)")
         elif detected_type_second != "unknown":
             transport_type = detected_type_second
             call_data = second_message
-            logger.info(f"Detected transport: {transport_type} (from second message)")
+            logger.debug(f"Detected transport: {transport_type} (from second message)")
         else:
             transport_type = "unknown"
             call_data = second_message
@@ -141,7 +139,7 @@ async def parse_telephony_websocket(websocket: WebSocket):
             stream_id = None
             call_id = None
 
-        logger.info(f"Parsed - Type: {transport_type}, StreamId: {stream_id}, CallId: {call_id}")
+        logger.debug(f"Parsed - Type: {transport_type}, StreamId: {stream_id}, CallId: {call_id}")
         return transport_type, stream_id, call_id
 
     except Exception as e:
