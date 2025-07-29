@@ -52,6 +52,25 @@ class RecordingsBucketConfig(BaseModel):
     allow_api_access: bool = False
 
 
+class TranscriptionBucketConfig(BaseModel):
+    """Configuration for storing Daily transcription in a custom S3 bucket.
+
+    Refer to the Daily API documentation for more information:
+    https://docs.daily.co/guides/products/live-streaming-recording/storing-recordings-in-a-custom-s3-bucket
+
+    Parameters:
+        bucket_name: Name of the S3 bucket for storing transcription.
+        bucket_region: AWS region where the S3 bucket is located.
+        assume_role_arn: ARN of the IAM role to assume for S3 access.
+        allow_api_access: Whether to allow API access to the transcription.
+    """
+
+    bucket_name: str
+    bucket_region: str
+    assume_role_arn: str
+    allow_api_access: bool = False
+
+
 class DailyRoomProperties(BaseModel, extra="allow"):
     """Properties for configuring a Daily room.
 
@@ -65,9 +84,11 @@ class DailyRoomProperties(BaseModel, extra="allow"):
         eject_at_room_exp: Whether to remove participants when room expires.
         enable_dialout: Whether SIP dial-out is enabled.
         enable_recording: Recording settings ('cloud', 'local', 'raw-tracks').
+        enable_transcription_storage: Whether transcription storage is enabled.
         geo: Geographic region for room.
         max_participants: Maximum number of participants allowed in the room.
         recordings_bucket: Configuration for custom S3 bucket recordings.
+        transcription_bucket: Configuration for custom S3 bucket transcription.
         sip: SIP configuration parameters.
         sip_uri: SIP URI information returned by Daily.
         start_video_off: Whether video is off by default.
@@ -80,9 +101,11 @@ class DailyRoomProperties(BaseModel, extra="allow"):
     eject_at_room_exp: bool = False
     enable_dialout: Optional[bool] = None
     enable_recording: Optional[Literal["cloud", "local", "raw-tracks"]] = None
+    enable_transcription_storage: Optional[bool] = None
     geo: Optional[str] = None
     max_participants: Optional[int] = None
     recordings_bucket: Optional[RecordingsBucketConfig] = None
+    transcription_bucket: Optional[TranscriptionBucketConfig] = None
     sip: Optional[DailyRoomSipParams] = None
     sip_uri: Optional[dict] = None
     start_video_off: bool = False

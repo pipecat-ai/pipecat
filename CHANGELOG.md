@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `transcription_bucket` params support to the `DailyRESTHelper`.
+
 - Added a new TTS service, `InworldTTSService`. This service provides
   low-latency, high-quality speech generation using Inworld's streaming API.
 
