@@ -14,7 +14,7 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMRunFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, LLMRunFrame, TTSSpeakFrame, TTSAudioRawFrame, OutputAudioRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -33,7 +33,7 @@ from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.base_llm import LLMService
-from pipecat.transports.base_input import BaseInputTransport
+from pipecat.transports.base_output import BaseOutputTransport
 
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.google.llm_vertex import (
@@ -121,13 +121,13 @@ class CustomObserver(BaseObserver):
         if isinstance(src, LLMService):
             if isinstance(frame, TTSAudioRawFrame):
                 logger.info(
-                    f"<👾>> {frame}: {src} {arrow} {dst} at {time_sec:.2f}s"
+                    f"<👾>>>> {frame}: {src} {arrow} {dst} at {time_sec:.2f}s"
                 )
 
-        if isinstance(dst, BaseInputTransport):
-            if isinstance(frame, TTSAudioRawFrame):
+        if isinstance(src, BaseOutputTransport):
+            if isinstance(frame, OutputAudioRawFrame):
                 logger.info(
-                    f"<<👾> {frame}: {src} {arrow} {dst} at {time_sec:.2f}s"
+                    f"<📣>>>> {frame}: {src} {arrow} {dst} at {time_sec:.2f}s"
                 )      
 
 
