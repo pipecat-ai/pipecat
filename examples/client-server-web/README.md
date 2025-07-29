@@ -35,9 +35,7 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 > Using `uv`? Create your venv using: `uv venv && source .venv/bin/activate`.
 
-2. Install packages
-
-Then, install the requirements:
+2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -96,6 +94,8 @@ npm run dev
 ```
 
 4. **Open http://localhost:5173 in your browser** and click `Connect` to start talking to your bot.
+
+> 💡 **Tip**: Check your server terminal for debug logs showing Pipecat's internal workings.
 
 ## Troubleshooting
 
