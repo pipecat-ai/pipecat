@@ -98,10 +98,15 @@ except ImportError:
 # Define WebRTC type locally until it's added to pipecatcloud
 @dataclass
 class SmallWebRTCSessionArguments:
-    """Small WebRTC session arguments for local development.
+    """Small WebRTC session arguments.
 
-    This will be replaced by pipecatcloud.agent.SmallWebRTCSessionArguments
-    when WebRTC support is added to Pipecat Cloud.
+    .. deprecated:: 0.0.77
+        This will be replaced by pipecatcloud.agent.SmallWebRTCSessionArguments
+        once WebRTC support is added to the `pipecatcloud` package.
+
+    Parameters:
+        websocket: The WebSocket connection for the session.
+        session_id: Optional session ID for tracking.
     """
 
     webrtc_connection: Any
