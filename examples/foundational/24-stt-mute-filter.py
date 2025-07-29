@@ -112,7 +112,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         [
             transport.input(),  # Transport user input
             stt,  # STT
-            stt_mute_processor,  # Add the mute processor before STT
+            stt_mute_processor,  # Add the mute processor between STT and context aggregator
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
