@@ -12,7 +12,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, AsyncGenerator, List, Optional
+from typing import Any, AsyncGenerator
 from urllib.parse import urlencode
 
 from loguru import logger
@@ -77,7 +77,7 @@ class AdditionalVocabEntry:
     """
 
     content: str
-    sounds_like: List[str] = field(default_factory=list)
+    sounds_like: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -90,7 +90,7 @@ class DiarizationKnownSpeaker:
     """
 
     label: str
-    speaker_identifiers: List[str]
+    speaker_identifiers: list[str]
 
 
 @dataclass
@@ -121,9 +121,9 @@ class SpeechFragment:
     is_punctuation: bool = False
     attaches_to: str = ""
     content: str = ""
-    speaker: Optional[str] = None
+    speaker: str | None = None
     confidence: float = 1.0
-    result: Optional[Any] = None
+    result: Any | None = None
 
 
 @dataclass
@@ -138,17 +138,17 @@ class SpeakerFragments:
         fragments: The list of SpeechFragment items.
     """
 
-    speaker_id: Optional[str] = None
+    speaker_id: str | None = None
     is_active: bool = False
-    timestamp: Optional[str] = None
-    language: Optional[Language] = None
-    fragments: List[SpeechFragment] = field(default_factory=list)
+    timestamp: str | None = None
+    language: Language | None = None
+    fragments: list[SpeechFragment] = field(default_factory=list)
 
     def __str__(self):
         """Return a string representation of the object."""
         return f"SpeakerFragments(speaker_id: {self.speaker_id}, timestamp: {self.timestamp}, language: {self.language}, text: {self._format_text()})"
 
-    def _format_text(self, format: Optional[str] = None) -> str:
+    def _format_text(self, format: str | None = None) -> str:
         """Wrap text with speaker ID in an optional f-string format.
 
         Args:
@@ -173,7 +173,7 @@ class SpeakerFragments:
         return format.format(**{"speaker_id": self.speaker_id, "text": content})
 
     def _as_frame_attributes(
-        self, active_format: Optional[str] = None, passive_format: Optional[str] = None
+        self, active_format: str | None = None, passive_format: str | None = None
     ) -> dict[str, Any]:
         """Return a dictionary of attributes for a TranscriptionFrame.
 
@@ -206,36 +206,36 @@ class SpeechmaticsSTTService(STTService):
     def __init__(
         self,
         *,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         operating_point: OperatingPoint = OperatingPoint.ENHANCED,
-        domain: Optional[str] = None,
+        domain: str | None = None,
         language: Language | str = Language.EN,
-        output_locale: Optional[Language | str] = None,
+        output_locale: Language | str | None = None,
         enable_vad: bool = False,
         enable_partials: bool = True,
         enable_diarization: bool = False,
         max_delay: float = 1.0,
         end_of_utterance_silence_trigger: float = 0.5,
         end_of_utterance_mode: EndOfUtteranceMode = EndOfUtteranceMode.FIXED,
-        additional_vocab: List[AdditionalVocabEntry] = [],
+        additional_vocab: list[AdditionalVocabEntry] | None = None,
         diarization_sensitivity: float = 0.5,
         speaker_active_format: str = "{text}",
         speaker_passive_format: str = "{text}",
         prefer_current_speaker: bool = False,
-        focus_speakers: List[str] = [],
-        ignore_speakers: List[str] = [],
+        focus_speakers: list[str] | None = None,
+        ignore_speakers: list[str] | None = None,
         focus_mode: DiarizationFocusMode = DiarizationFocusMode.RETAIN,
-        known_speakers: List[DiarizationKnownSpeaker] = [],
+        known_speakers: list[DiarizationKnownSpeaker] | None = None,
         sample_rate: int = 16000,
         chunk_size: int = 160,
         audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
-        language_code: Optional[str] = None,  # DEPRECATED
-        output_locale_code: Optional[str] = None,  # DEPRECATED
-        enable_speaker_diarization: Optional[bool] = None,  # DEPRECATED
-        text_format: Optional[str] = None,  # DEPRECATED
-        max_speakers: Optional[int] = None,  # DEPRECATED
-        transcription_config: Optional[TranscriptionConfig] = None,  # DEPRECATED
+        language_code: str | None = None,  # DEPRECATED
+        output_locale_code: str | None = None,  # DEPRECATED
+        enable_speaker_diarization: bool | None = None,  # DEPRECATED
+        text_format: str | None = None,  # DEPRECATED
+        max_speakers: int | None = None,  # DEPRECATED
+        transcription_config: TranscriptionConfig | None = None,  # DEPRECATED
         **kwargs,
     ):
         """Initialize the Speechmatics STT service.
@@ -393,11 +393,11 @@ class SpeechmaticsSTTService(STTService):
             base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2"
         )
         self._operating_point: OperatingPoint = operating_point
-        self._domain: Optional[str] = domain
+        self._domain: str | None = domain
 
         # Language
-        self._language: Optional[Language | str] = language
-        self._output_locale: Optional[Language | str] = output_locale
+        self._language: Language | str | None = language
+        self._output_locale: Language | str | None = output_locale
 
         # Features
         self._enable_vad: bool = enable_vad
@@ -408,17 +408,17 @@ class SpeechmaticsSTTService(STTService):
         self._max_delay: float = max_delay
         self._end_of_utterance_silence_trigger: float = end_of_utterance_silence_trigger
         self._end_of_utterance_mode: EndOfUtteranceMode = end_of_utterance_mode
-        self._additional_vocab: List[AdditionalVocabEntry] = additional_vocab
+        self._additional_vocab: list[AdditionalVocabEntry] = additional_vocab or []
 
         # Diarization
         self._diarization_sensitivity: float = diarization_sensitivity
         self._speaker_active_format: str = speaker_active_format
         self._speaker_passive_format: str = speaker_passive_format
         self._prefer_current_speaker: bool = prefer_current_speaker
-        self._focus_speakers: List[str] = focus_speakers
-        self._ignore_speakers: List[str] = ignore_speakers
+        self._focus_speakers: list[str] = focus_speakers or []
+        self._ignore_speakers: list[str] = ignore_speakers or []
         self._focus_mode: DiarizationFocusMode = focus_mode
-        self._known_speakers: List[DiarizationKnownSpeaker] = known_speakers
+        self._known_speakers: list[DiarizationKnownSpeaker] = known_speakers or []
 
         # Audio settings
         self._sample_rate: int = sample_rate
@@ -432,7 +432,7 @@ class SpeechmaticsSTTService(STTService):
             raise ValueError("Missing Speechmatics base URL")
 
         # Show deprecation warnings
-        def _deprecation_warning(old: str, new: Optional[str] = None):
+        def _deprecation_warning(old: str, new: str | None = None):
             import warnings
 
             with warnings.catch_warnings():
@@ -476,24 +476,24 @@ class SpeechmaticsSTTService(STTService):
         self._process_config()
 
         # STT client
-        self._client: Optional[AsyncClient] = None
+        self._client: AsyncClient | None = None
 
         # Current utterance speech data
-        self._speech_fragments: List[SpeechFragment] = []
+        self._speech_fragments: list[SpeechFragment] = []
 
         # Speaking states
         self._is_speaking: bool = False
 
         # Timing info
-        self._start_time: Optional[datetime.datetime] = None
-        self._total_time: Optional[datetime.timedelta] = None
+        self._start_time: datetime.datetime | None = None
+        self._total_time: datetime.timedelta | None = None
 
         # Event handlers
         if self._enable_diarization:
             self._register_event_handler("on_speakers_result")
 
         # EndOfUtterance fallback timer
-        self._end_of_utterance_timer: Optional[asyncio.Task] = None
+        self._end_of_utterance_timer: asyncio.Task | None = None
 
     async def start(self, frame: StartFrame):
         """Called when the new session starts."""
@@ -520,9 +520,9 @@ class SpeechmaticsSTTService(STTService):
 
     def update_speakers(
         self,
-        focus_speakers: Optional[List[str]] = None,
-        ignore_speakers: Optional[List[str]] = None,
-        focus_mode: Optional[DiarizationFocusMode] = None,
+        focus_speakers: list[str] | None = None,
+        ignore_speakers: list[str] | None = None,
+        focus_mode: DiarizationFocusMode | None = None,
     ) -> None:
         """Updates the speaker configuration.
 
@@ -719,7 +719,7 @@ class SpeechmaticsSTTService(STTService):
 
     @traced_stt
     async def _handle_transcription(
-        self, transcript: str, is_final: bool, language: Optional[Language] = None
+        self, transcript: str, is_final: bool, language: Language | None = None
     ):
         """Handle a transcription result with tracing."""
         pass
@@ -736,7 +736,7 @@ class SpeechmaticsSTTService(STTService):
         real world time to that inside of the STT engine.
         """
         # Reset the end of utterance timer
-        if self._end_of_utterance_timer:
+        if self._end_of_utterance_timer != None:
             self._end_of_utterance_timer.cancel()
 
         # Send after a delay
@@ -747,7 +747,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Start the timer
         self._end_of_utterance_timer = asyncio.create_task(
-            send_after_delay(self._end_of_utterance_silence_trigger)
+            send_after_delay(self._end_of_utterance_silence_trigger * 2)
         )
 
     async def _handle_end_of_utterance(self):
@@ -787,8 +787,8 @@ class SpeechmaticsSTTService(STTService):
             return
 
         # Frames to send
-        upstream_frames: List[Frame] = []
-        downstream_frames: List[Frame] = []
+        upstream_frames: list[Frame] = []
+        downstream_frames: list[Frame] = []
 
         # If VAD is enabled, then send a speaking frame
         if self._enable_vad and not self._is_speaking:
@@ -851,7 +851,7 @@ class SpeechmaticsSTTService(STTService):
             bool: True if the speech data was updated, False otherwise.
         """
         # Parsed new speech data from the STT engine
-        fragments: List[SpeechFragment] = []
+        fragments: list[SpeechFragment] = []
 
         # Current length of the speech data
         current_length = len(self._speech_fragments)
@@ -900,7 +900,7 @@ class SpeechmaticsSTTService(STTService):
         # Data was updated
         return True
 
-    def _get_frames_from_fragments(self) -> List[SpeakerFragments]:
+    def _get_frames_from_fragments(self) -> list[SpeakerFragments]:
         """Get speech data objects for the current fragment list.
 
         Each speech fragments is grouped by contiguous speaker and then
@@ -914,7 +914,7 @@ class SpeechmaticsSTTService(STTService):
         """
         # Speaker groups
         current_speaker: str | None = None
-        speaker_groups: List[List[SpeechFragment]] = [[]]
+        speaker_groups: list[list[SpeechFragment]] = [[]]
 
         # Group by speakers
         for frag in self._speech_fragments:
@@ -925,7 +925,7 @@ class SpeechmaticsSTTService(STTService):
             speaker_groups[-1].append(frag)
 
         # Create SpeakerFragments objects
-        speaker_fragments: List[SpeakerFragments] = []
+        speaker_fragments: list[SpeakerFragments] = []
         for group in speaker_groups:
             sd = self._get_speaker_fragments_from_fragment_group(group)
             if sd:
@@ -936,7 +936,7 @@ class SpeechmaticsSTTService(STTService):
 
     def _get_speaker_fragments_from_fragment_group(
         self,
-        group: List[SpeechFragment],
+        group: list[SpeechFragment],
     ) -> SpeakerFragments | None:
         """Take a group of fragments and piece together into SpeakerFragments.
 
@@ -1082,7 +1082,7 @@ def _language_to_speechmatics_language(language: Language) -> str:
     return result
 
 
-def _locale_to_speechmatics_locale(language_code: str, locale: Language) -> Optional[str]:
+def _locale_to_speechmatics_locale(language_code: str, locale: Language) -> str | None:
     """Convert a Language enum to a Speechmatics language code.
 
     Args:
