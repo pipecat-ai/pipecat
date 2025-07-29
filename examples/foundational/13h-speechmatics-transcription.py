@@ -64,7 +64,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         language=Language.EN,
         enable_speaker_diarization=True,
-        text_format="<{speaker_id}>{text}</{speaker_id}>",
+        speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
     )
 
     tl = TranscriptionLogger()
