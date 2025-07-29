@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `STTMuteFilter` now pushes the `STTMuteFrame` upstream and downstream, to
+  allow for more flexible `STTMuteFilter` placement.
+
 - Play delayed messages from `ElevenLabsTTSService` if they still belong to the
   current context.
 
