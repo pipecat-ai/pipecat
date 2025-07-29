@@ -5,7 +5,6 @@
 #
 
 """server.py.
-
 Webhook server to handle webhook coming from Daily, create a Daily room and start the bot.
 """
 
@@ -29,10 +28,8 @@ load_dotenv()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Create aiohttp session to be used for Daily API calls
     app.state.session = aiohttp.ClientSession()
     yield
-    # Close session when shutting down
     await app.state.session.close()
 
 
