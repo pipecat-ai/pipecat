@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InputTextRawFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -733,8 +734,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
-        elif isinstance(frame, LLMTextFrame):
+        elif isinstance(frame, InputTextRawFrame):
             await self._send_user_text(frame.text)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
@@ -967,7 +969,19 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._user_audio_buffer = self._user_audio_buffer[-length:]
 
     async def _send_user_text(self, text: str):
-        """Send user text to Gemini Live API."""
+        """Send user text via Gemini Live API's realtime input stream.
+        
+        This method sends text through the realtimeInput stream (via TextInputMessage)
+        rather than the clientContent stream. This ensures text input is synchronized
+        with audio and video inputs, preventing temporal misalignment that can occur
+        when different modalities are processed through separate API pathways.
+        
+        After sending the text, we signal turn completion to trigger a model response
+        for text-only interactions.
+        
+        Args:
+            text: The text to send as user input.
+        """
         evt = events.TextInputMessage.from_text(text)
         await self.send_client_event(evt)
         # After sending text, we need to signal that the turn is complete.
