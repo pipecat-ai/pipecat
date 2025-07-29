@@ -1237,7 +1237,9 @@ class DailyTransportClient(EventHandler):
             stopped_by_error: Whether stopped due to error.
         """
         logger.debug("Transcription stopped")
-        self._call_event_callback(self._callbacks.on_transcription_stopped, stopped_by, stopped_by_error)
+        self._call_event_callback(
+            self._callbacks.on_transcription_stopped, stopped_by, stopped_by_error
+        )
 
     def on_transcription_error(self, message):
         """Handle transcription error events.
