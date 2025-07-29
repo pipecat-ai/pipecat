@@ -6,15 +6,14 @@
 
 """Async text-to-speech service implementations."""
 
+import asyncio
 import base64
 import json
-import uuid
 from typing import AsyncGenerator, Optional
 
+import aiohttp
 from loguru import logger
 from pydantic import BaseModel
-import asyncio
-import aiohttp
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -103,7 +102,8 @@ class AsyncAITTSService(InterruptibleTTSService):
 
         Args:
             api_key: Async API key.
-            voice_id: ID of the voice to use for synthesis.
+            voice_id: UUID of the voice to use for synthesis. See docs for a full list:
+                https://docs.async.ai/list-voices-16699698e0
             version: Async API version.
             url: WebSocket URL for Async TTS API.
             model: TTS model to use (e.g., "asyncflow_v2.0").
@@ -138,7 +138,7 @@ class AsyncAITTSService(InterruptibleTTSService):
             if params.language
             else "en",
         }
-        
+
         self.set_model_name(model)
         self.set_voice(voice_id)
 
@@ -165,15 +165,10 @@ class AsyncAITTSService(InterruptibleTTSService):
         """
         return language_to_async_language(language)
 
-    def _build_msg(
-        self, text: str = "", force: bool = False
-    ) -> str:
-        msg = {
-            "transcript": text,
-            "force": force
-        }
+    def _build_msg(self, text: str = "", force: bool = False) -> str:
+        msg = {"transcript": text, "force": force}
         return json.dumps(msg)
-    
+
     async def start(self, frame: StartFrame):
         """Start the Async TTS service.
 
@@ -203,7 +198,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         await self._disconnect()
 
     async def _connect(self):
-        await self._connect_websocket()    
+        await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
             self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
@@ -215,7 +210,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
-        
+
         if self._keepalive_task:
             await self.cancel_task(self._keepalive_task)
             self._keepalive_task = None
@@ -268,7 +263,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         logger.trace(f"{self}: flushing audio")
         msg = self._build_msg(text=" ", force=True)
         await self._websocket.send(msg)
-    
+
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame downstream with special handling for stop conditions.
 
@@ -339,7 +334,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame()
                 self._started = True
-                
+
             msg = self._build_msg(text=text)
 
             try:
@@ -355,6 +350,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
+
 class AsyncAIHttpTTSService(TTSService):
     """HTTP-based Async TTS service.
 
@@ -369,8 +365,9 @@ class AsyncAIHttpTTSService(TTSService):
         Parameters:
             language: Language to use for synthesis.
         """
+
         language: Optional[Language] = Language.EN
-    
+
     def __init__(
         self,
         *,
@@ -391,6 +388,7 @@ class AsyncAIHttpTTSService(TTSService):
         Args:
             api_key: Async API key.
             voice_id: ID of the voice to use for synthesis.
+            aiohttp_session: An aiohttp session for making HTTP requests.
             model: TTS model to use (e.g., "asyncflow_v2.0").
             url: Base URL for Async API.
             version: API version string for Async API.
