@@ -736,7 +736,7 @@ class SpeechmaticsSTTService(STTService):
         real world time to that inside of the STT engine.
         """
         # Reset the end of utterance timer
-        if self._end_of_utterance_timer != None:
+        if self._end_of_utterance_timer is not None:
             self._end_of_utterance_timer.cancel()
 
         # Send after a delay
@@ -878,6 +878,14 @@ class SpeechmaticsSTTService(STTService):
                 if fragment.speaker:
                     # Drop `__XX__` speakers
                     if re.match(r"^__[A-Z0-9_]{2,}__$", fragment.speaker):
+                        continue
+
+                    # Drop speakers not focussed on
+                    if (
+                        self._focus_mode == DiarizationFocusMode.IGNORE
+                        and self._focus_speakers
+                        and fragment.speaker not in self._focus_speakers
+                    ):
                         continue
 
                     # Drop ignored speakers
