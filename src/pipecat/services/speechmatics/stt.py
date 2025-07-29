@@ -56,6 +56,7 @@ except ModuleNotFoundError as e:
 class EndOfUtteranceMode(str, Enum):
     """End of turn delay options for transcription."""
 
+    NONE = "none"
     FIXED = "fixed"
     ADAPTIVE = "adaptive"
 
@@ -280,10 +281,11 @@ class SpeechmaticsSTTService(STTService):
                 word frames. The value must be lower than max_delay.
                 Defaults to 0.5.
 
-            end_of_utterance_mode: End of utterance delay mode. When adaptive is used, the delay
+            end_of_utterance_mode: End of utterance delay mode. When ADAPTIVE is used, the delay
                 can be adjusted on the content of what the most recent speaker has said, such as
-                rate of speech and whether they have any pauses or disfluencies. When fixed
-                is used, the delay is fixed to the value of `end_of_utterance_delay`.
+                rate of speech and whether they have any pauses or disfluencies. When FIXED is used,
+                the delay is fixed to the value of `end_of_utterance_delay`. Use of NONE disables
+                end of utterance detection and uses a fallback timer.
                 Defaults to `EndOfUtteranceMode.FIXED`.
 
             additional_vocab: List of additional vocabulary entries. If you supply a list of
