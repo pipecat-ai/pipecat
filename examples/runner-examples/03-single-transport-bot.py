@@ -6,7 +6,7 @@
 
 """Pipecat Cloud-compatible bot example.
 
-Transports are Twilio or SmallWebRTC."""
+Transports are Daily or SmallWebRTC."""
 
 import os
 
@@ -23,19 +23,10 @@ from pipecat.runner.run import SmallWebRTCSessionArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-
-try:
-    from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
-except ImportError:
-    raise ImportError(
-        "pipecatcloud package is required for cloud-compatible bots. "
-        "Install with: pip install pipecat-ai[pipecatcloud]"
-    )
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
 load_dotenv(override=True)
-
-# Check if we're running locally
-IS_LOCAL_RUN = os.environ.get("LOCAL_RUN", "0") == "1"
 
 
 async def run_bot(transport):
@@ -100,61 +91,17 @@ async def run_bot(transport):
     await runner.run(task)
 
 
-async def bot(
-    session_args: DailySessionArguments | SmallWebRTCSessionArguments | WebSocketSessionArguments,
-):
+async def bot(session_args: SmallWebRTCSessionArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    if isinstance(session_args, SmallWebRTCSessionArguments):
-        from pipecat.transports.base_transport import TransportParams
-        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
-
-        transport = SmallWebRTCTransport(
-            params=TransportParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                vad_analyzer=SileroVADAnalyzer(),
-            ),
-            webrtc_connection=session_args.webrtc_connection,
-        )
-
-    elif isinstance(session_args, WebSocketSessionArguments):
-        # Use the utility to parse WebSocket data
-        from pipecat.runner.utils import parse_telephony_websocket
-
-        transport_type, stream_id, call_id = await parse_telephony_websocket(session_args.websocket)
-        logger.info(f"Auto-detected transport: {transport_type}")
-
-        # Create transport based on detected type
-        if transport_type == "twilio":
-            from pipecat.serializers.twilio import TwilioFrameSerializer
-
-            serializer = TwilioFrameSerializer(
-                stream_sid=stream_id,
-                call_sid=call_id,
-                account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
-                auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
-            )
-
-        else:
-            raise ValueError(f"Unsupported WebSocket transport type: {transport_type}")
-
-        # Create the transport
-        from pipecat.transports.network.fastapi_websocket import (
-            FastAPIWebsocketParams,
-            FastAPIWebsocketTransport,
-        )
-
-        transport = FastAPIWebsocketTransport(
-            websocket=session_args.websocket,
-            params=FastAPIWebsocketParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-                add_wav_header=False,
-                vad_analyzer=SileroVADAnalyzer(),
-                serializer=serializer,
-            ),
-        )
+    transport = SmallWebRTCTransport(
+        params=TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+        webrtc_connection=session_args.webrtc_connection,
+    )
 
     await run_bot(transport)
 
