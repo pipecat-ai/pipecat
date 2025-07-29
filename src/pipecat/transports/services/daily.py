@@ -226,6 +226,7 @@ class DailyCallbacks(BaseModel):
         on_participant_left: Called when a participant leaves.
         on_participant_updated: Called when participant info is updated.
         on_transcription_message: Called when receiving transcription.
+        on_transcription_error: Called when transcription encounters an error.
         on_recording_started: Called when recording starts.
         on_recording_stopped: Called when recording stops.
         on_recording_error: Called when recording encounters an error.
@@ -253,6 +254,7 @@ class DailyCallbacks(BaseModel):
     on_participant_left: Callable[[Mapping[str, Any], str], Awaitable[None]]
     on_participant_updated: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_transcription_message: Callable[[Mapping[str, Any]], Awaitable[None]]
+    on_transcription_error: Callable[[str], Awaitable[None]]
     on_recording_started: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_recording_stopped: Callable[[str], Awaitable[None]]
     on_recording_error: Callable[[str, str], Awaitable[None]]
@@ -1241,6 +1243,7 @@ class DailyTransportClient(EventHandler):
             message: Error message.
         """
         logger.error(f"Transcription error: {message}")
+        self._call_event_callback(self._callbacks.on_transcription_error, message)
 
     def on_transcription_message(self, message):
         """Handle transcription message events.
