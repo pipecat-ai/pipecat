@@ -1837,6 +1837,7 @@ class DailyTransport(BaseTransport):
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
             on_transcription_message=self._on_transcription_message,
+            on_transcription_error=self._on_transcription_error,
             on_recording_started=self._on_recording_started,
             on_recording_stopped=self._on_recording_stopped,
             on_recording_error=self._on_recording_error,
@@ -2320,6 +2321,10 @@ class DailyTransport(BaseTransport):
 
         if self._input:
             await self._input.push_transcription_frame(frame)
+
+    async def _on_transcription_error(self, message):
+        """Handle transcription error events."""
+        await self._call_event_handler("on_transcription_error", message)
 
     async def _on_recording_started(self, status):
         """Handle recording started events."""
