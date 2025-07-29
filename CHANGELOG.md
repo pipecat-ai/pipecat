@@ -80,10 +80,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `AudioBufferProcessor` when using `SmallWebRTCTransport` where, if
   the microphone was muted, track timing was not respected.
 
+- Fixed an error that occurs when pushing an `LLMMessagesFrame`. Only some LLM
+  services, like Grok, are impacted by this issue. The fix is to remove the
+  optional `name` property that was being added to the message.
+
 - Fixed an issue in `AudioBufferProcessor` that caused garbled audio when
   `enable_turn_audio` was enabled and audio resampling was required.
 
-- Fixed a dependency issue for uv users where an `llvmlite` version required python 3.9.
+- Fixed a dependency issue for uv users where an `llvmlite` version required
+  python 3.9.
 
 - Fixed an issue in `MiniMaxHttpTTSService` where the `pitch` param was the
   incorrect type.
