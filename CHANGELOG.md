@@ -114,6 +114,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue in `LiveKitTransport` where the `on_audio_track_subscribed` was never emitted.
 
+### Other
+
+- Removed most of the examples from the pipecat repo. Examples can now be
+  found in: https://github.com/pipecat-ai/pipecat-examples.
+
 ## [0.0.76] - 2025-07-11
 
 ### Added
