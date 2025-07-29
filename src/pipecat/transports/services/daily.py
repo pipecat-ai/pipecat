@@ -1840,6 +1840,7 @@ class DailyTransport(BaseTransport):
             on_participant_left=self._on_participant_left,
             on_participant_updated=self._on_participant_updated,
             on_transcription_message=self._on_transcription_message,
+            on_transcription_stopped=self._on_transcription_stopped,
             on_transcription_error=self._on_transcription_error,
             on_recording_started=self._on_recording_started,
             on_recording_stopped=self._on_recording_stopped,
