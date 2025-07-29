@@ -63,7 +63,7 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
             get_result = await super().get()
 
         if isinstance(get_result, _WatchdogPriorityCancelSentinel):
-            logger.debug(
+            logger.trace(
                 "Received WatchdogPriorityCancelSentinel, throwing CancelledError to force cancelling"
             )
             raise asyncio.CancelledError("Cancelling watchdog queue get() call.")

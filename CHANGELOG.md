@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `examples/foundational/07ac-interruptible-asyncai.py` (WebSocket demo)
     - `examples/foundational/07ac-interruptible-asyncai-http.py` (HTTP demo)
 
+- Added `transcription_bucket` params support to the `DailyRESTHelper`.
+
 - Added a new TTS service, `InworldTTSService`. This service provides
   low-latency, high-quality speech generation using Inworld's streaming API.
 
@@ -31,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `set_log_level` to `DailyTransport`, allowing setting the logging level
   for Daily's internal logging system.
+
+- Added `on_transcription_stopped` and `on_transcription_error` to Daily callbacks.
 
 ### Changed
 
@@ -81,13 +85,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in the `TranscriptProcessor` where newline characters could
+  cause the transcript output to be corrupted (e.g. missing all spaces).
+
 - Fixed an issue in `AudioBufferProcessor` when using `SmallWebRTCTransport` where, if
   the microphone was muted, track timing was not respected.
+
+- Fixed an error that occurs when pushing an `LLMMessagesFrame`. Only some LLM
+  services, like Grok, are impacted by this issue. The fix is to remove the
+  optional `name` property that was being added to the message.
 
 - Fixed an issue in `AudioBufferProcessor` that caused garbled audio when
   `enable_turn_audio` was enabled and audio resampling was required.
 
-- Fixed a dependency issue for uv users where an `llvmlite` version required python 3.9.
+- Fixed a dependency issue for uv users where an `llvmlite` version required
+  python 3.9.
 
 - Fixed an issue in `MiniMaxHttpTTSService` where the `pitch` param was the
   incorrect type.
@@ -110,6 +122,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   messages in the context, to ensure that inference would run properly.
 
 - Fixed an issue in `LiveKitTransport` where the `on_audio_track_subscribed` was never emitted.
+
+### Other
+
+- Removed most of the examples from the pipecat repo. Examples can now be
+  found in: https://github.com/pipecat-ai/pipecat-examples.
 
 ## [0.0.76] - 2025-07-11
 
@@ -152,7 +169,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   user started early, while the bot was still working through
   `trigger_assistant_response()`.
 
-## [0.0.75] - 2025-07-08
+## [0.0.75] - 2025-07-08 [YANKED]
+
+**This release has been yanked due to resampling issues affecting audio output
+quality and critical bugs impacting `ParallelPipelines` functionality.**
+
+**Please upgrade to version 0.0.76 or later.**
 
 ### Added
 
@@ -213,7 +235,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove unncessary push task in each `FrameProcessor`.
 
-## [0.0.74] - 2025-07-03
+## [0.0.74] - 2025-07-03 [YANKED]
+
+**This release has been yanked due to resampling issues affecting audio output
+quality and critical bugs impacting `ParallelPipelines` functionality.**
+
+**Please upgrade to version 0.0.76 or later.**
 
 ### Added
 
