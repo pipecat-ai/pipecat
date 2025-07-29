@@ -4,12 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipecat Cloud-compatible development server for running Pipecat bots.
+"""Pipecat development runner.
 
-This module provides a FastAPI-based development server that can run bots
-structured for Pipecat Cloud deployment. The runner enables you to run Pipecat
-bots locally or deployed without requiring any code changes. It supports
-multiple transport types and handles room/token management automatically.
+This development runner executes Pipecat bots and provides the supporting
+infrastructure they need - creating Daily rooms and tokens, managing WebRTC
+connections, and setting up telephony webhook/WebSocket infrastructure. It
+supports multiple transport types with a unified interface.
 
 Install with::
 
@@ -21,14 +21,13 @@ are established.
 
 Single transport example::
 
-    async def bot(session_args):
-        if isinstance(session_args, DailySessionArguments):
-            transport = DailyTransport(
-                session_args.room_url,
-                session_args.token,
-                "Bot",
-                DailyParams(...)
-            )
+    async def bot(session_args: DailySessionArguments):
+        transport = DailyTransport(
+            session_args.room_url,
+            session_args.token,
+            "Bot",
+            DailyParams(...)
+        )
         # Your bot logic here
         await run_pipeline(transport)
 
@@ -58,8 +57,9 @@ Supported transports:
 
 To run locally:
 
-- Daily: `python bot.py -t daily`
 - WebRTC: `python bot.py -t webrtc`
+- ESP32: `python bot.py -t webrtc --esp32 --host 192.168.1.100`
+- Daily: `python bot.py -t daily`
 - Telephony: `python bot.py -t twilio -x your_username.ngrok.io`
 """
 
@@ -132,6 +132,7 @@ def _get_bot_module():
         pass
 
     # Look for any .py file in current directory that has a bot function
+    # (excluding server.py).
     cwd = os.getcwd()
     for filename in os.listdir(cwd):
         if filename.endswith(".py") and filename != "server.py":
@@ -163,7 +164,9 @@ async def _run_telephony_bot(websocket: WebSocket):
     await bot_module.bot(session_args)
 
 
-def _create_server_app(transport_type: str, host: str = "localhost", proxy: str = None):
+def _create_server_app(
+    transport_type: str, host: str = "localhost", proxy: str = None, esp32_mode: bool = False
+):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
 
@@ -177,7 +180,7 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
 
     # Set up transport-specific routes
     if transport_type == "webrtc":
-        _setup_webrtc_routes(app)
+        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host)
     elif transport_type == "daily":
         _setup_daily_routes(app)
     elif transport_type in ["twilio", "telnyx", "plivo"]:
@@ -188,7 +191,7 @@ def _create_server_app(transport_type: str, host: str = "localhost", proxy: str 
     return app
 
 
-def _setup_webrtc_routes(app: FastAPI):
+def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "localhost"):
     """Set up WebRTC-specific routes."""
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
@@ -240,6 +243,13 @@ def _setup_webrtc_routes(app: FastAPI):
             background_tasks.add_task(bot_module.bot, session_args)
 
         answer = pipecat_connection.get_answer()
+
+        # Apply ESP32 SDP munging if enabled
+        if esp32_mode and host != "localhost":
+            from pipecat.runner.utils import smallwebrtc_sdp_munging
+
+            answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], host)
+
         pcs_map[answer["pc_id"]] = pipecat_connection
         return answer
 
@@ -343,10 +353,10 @@ def _setup_telephony_routes(app: FastAPI, transport_type: str, proxy: str):
 
 
 def main():
-    """Start the cloud-compatible development server.
+    """Start the Pipecat development runner.
 
     Parses command-line arguments and starts a FastAPI server configured
-    for the specified transport type. The server will discover and run
+    for the specified transport type. The runner will discover and run
     any bot() function found in the current directory.
 
     Command-line arguments:
@@ -356,11 +366,12 @@ def main():
         --port: Server port (default: 7860)
         -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo)
         -x/--proxy: Public proxy hostname for telephony webhooks
+        --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
         -v/--verbose: Increase logging verbosity
 
     The bot file must contain a `bot(session_args)` function as the entry point.
     """
-    parser = argparse.ArgumentParser(description="Pipecat Cloud-Compatible Development Server")
+    parser = argparse.ArgumentParser(description="Pipecat Development Runner")
     parser.add_argument("--host", type=str, default="localhost", help="Host address")
     parser.add_argument("--port", type=int, default=7860, help="Port number")
     parser.add_argument(
@@ -373,10 +384,21 @@ def main():
     )
     parser.add_argument("--proxy", "-x", help="Public proxy host name")
     parser.add_argument(
+        "--esp32",
+        action="store_true",
+        default=False,
+        help="Enable SDP munging for ESP32 compatibility (requires --host with IP address)",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
     )
 
     args = parser.parse_args()
+
+    # Validate ESP32 requirements
+    if args.esp32 and args.host == "localhost":
+        logger.error("For ESP32, you need to specify `--host IP` so we can do SDP munging.")
+        return
 
     # Log level
     logger.remove()
@@ -385,7 +407,12 @@ def main():
     # Print startup message
     if args.transport == "webrtc":
         print()
-        print(f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client")
+        if args.esp32:
+            print(
+                f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client (ESP32 mode)"
+            )
+        else:
+            print(f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client")
         print(f"   Open this URL in your browser to connect!")
         print()
     elif args.transport == "daily":
@@ -395,7 +422,7 @@ def main():
         print()
 
     # Create the app with transport-specific setup
-    app = _create_server_app(args.transport, args.host, args.proxy)
+    app = _create_server_app(args.transport, args.host, args.proxy, args.esp32)
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)
