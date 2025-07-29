@@ -28,10 +28,9 @@ Have your API keys ready. We'll add them to your `.env` shortly.
 
 1. Set up a virtual environment
 
-From the root directory of the `pipecat` repo, run:
+From the `examples/quickstart` directory, run:
 
 ```bash
-cd examples/quickstart
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
@@ -74,7 +73,7 @@ python bot.py
 
 > Using `uv`? Run your bot using: `uv run bot.py`.
 
-Connect to your bot in a browser at http://localhost:7860.
+**Open http://localhost:7860 in your browser** and click `Connect` to start talking to your bot.
 
 > 💡 First run note: The initial startup may take ~10 seconds as Pipecat downloads required models, like the Silero VAD model.
 
