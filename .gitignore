@@ -31,9 +31,6 @@ MANIFEST
 fly.toml
 
 # Examples
-examples/telnyx-chatbot/templates/streams.xml
-examples/twilio-chatbot/templates/streams.xml
-examples/plivo-chatbot/templates/streams.xml
 examples/**/node_modules/
 examples/**/.expo/
 examples/**/dist/
