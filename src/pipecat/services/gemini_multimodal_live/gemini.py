@@ -970,15 +970,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _send_user_text(self, text: str):
         """Send user text via Gemini Live API's realtime input stream.
-        
+
         This method sends text through the realtimeInput stream (via TextInputMessage)
         rather than the clientContent stream. This ensures text input is synchronized
         with audio and video inputs, preventing temporal misalignment that can occur
         when different modalities are processed through separate API pathways.
-        
+
         After sending the text, we signal turn completion to trigger a model response
         for text-only interactions.
-        
+
         Args:
             text: The text to send as user input.
         """
