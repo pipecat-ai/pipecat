@@ -62,7 +62,7 @@ class WatchdogQueue(asyncio.Queue):
             get_result = await super().get()
 
         if isinstance(get_result, _WatchdogQueueCancelSentinel):
-            logger.debug(
+            logger.trace(
                 "Received WatchdogQueueCancelFrame, throwing CancelledError to force cancelling"
             )
             raise asyncio.CancelledError("Cancelling watchdog queue get() call.")
