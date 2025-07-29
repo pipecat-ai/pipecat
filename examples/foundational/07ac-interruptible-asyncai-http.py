@@ -16,8 +16,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.asyncai.tts import AsyncAIHttpTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -53,11 +53,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     # Create an HTTP session
     async with aiohttp.ClientSession() as session:
-        stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
+        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
         tts = AsyncAIHttpTTSService(
             api_key=os.getenv("ASYNCAI_API_KEY", ""),
-            voice_id=os.getenv("ASYNCAI_VOICE_ID", ""),
+            voice_id=os.getenv("ASYNCAI_VOICE_ID", "e0f39dc4-f691-4e78-bba5-5c636692cc04"),
             aiohttp_session=session,
         )
 
