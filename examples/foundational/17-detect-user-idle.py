@@ -30,6 +30,11 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
+from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.openai.base_llm import LLMService
+from pipecat.transports.base_input import BaseInputTransport
+
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.services.google.llm_vertex import (
     GoogleVertexLLMService,
@@ -69,6 +74,61 @@ transport_params = {
         turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
+
+
+class CustomObserver(BaseObserver):
+    """Observer to log agent / user turns, transcripts, and timing metrics for
+    each parallel pipeline and function calls.
+
+    See example metrics object shape here:
+    (update this to an external doc folks have access to and can edit)
+    https://gist.github.com/vipyne/4601636b71fcae1f3b295591fab1a37a
+
+    Args:
+        callee_phone_number: The callee phone number
+        pipecatcloud_session_id: Session ID to track Pipecat Cloud application logs
+
+    """
+
+    # TODO: add pipecatcloud_session_id (waiting on a PCC release
+    # where session id will be returned from /start endpoint)
+    def __init__(self):
+        super().__init__()
+
+    async def on_push_frame(self, data: FramePushed):
+        """Runs when any frame is pushed through pipeline.
+        Determines based on what type of frame and where it came from
+        what metrics to update.
+
+        Args:
+            data: the pushed frame
+        """
+        src = data.source
+        dst = data.destination
+        frame = data.frame
+        direction = data.direction
+        timestamp = data.timestamp
+
+        # Convert timestamp to seconds for readability
+        time_sec = timestamp / 1_000_000_000
+
+        # # only log downstream frames
+        # if direction == FrameDirection.UPSTREAM:
+        #     return
+        # Create direction arrow
+        arrow = "→" if direction == FrameDirection.DOWNSTREAM else "←"
+
+        if isinstance(src, LLMService):
+            if isinstance(frame, TTSAudioRawFrame):
+                logger.info(
+                    f"<👾>> {frame}: {src} {arrow} {dst} at {time_sec:.2f}s"
+                )
+
+        if isinstance(dst, BaseInputTransport):
+            if isinstance(frame, TTSAudioRawFrame):
+                logger.info(
+                    f"<<👾> {frame}: {src} {arrow} {dst} at {time_sec:.2f}s"
+                )      
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -177,6 +237,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        observers=[CustomObserver()]
     )
 
     @transport.event_handler("on_client_connected")
