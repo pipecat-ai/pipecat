@@ -33,7 +33,7 @@ Single transport example::
         await run_pipeline(transport)
 
     if __name__ == "__main__":
-        from pipecat.runner.cloud import main
+        from pipecat.runner.run import main
         main()
 
 Multiple transport example::

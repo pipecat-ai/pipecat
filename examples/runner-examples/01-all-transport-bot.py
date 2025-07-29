@@ -6,7 +6,14 @@
 
 """Pipecat Cloud-compatible bot example.
 
-Transports are Twilio or SmallWebRTC."""
+Transports are:
+
+- Daily
+- SmallWebRTC
+- Twilio
+- Telnyx
+- Plivo
+"""
 
 import os
 
@@ -19,7 +26,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
-from pipecat.runner.cloud import SmallWebRTCSessionArguments
+from pipecat.runner.run import SmallWebRTCSessionArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -105,7 +112,27 @@ async def bot(
 ):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    if isinstance(session_args, SmallWebRTCSessionArguments):
+    if isinstance(session_args, DailySessionArguments):
+        from pipecat.transports.services.daily import DailyParams, DailyTransport
+
+        if not IS_LOCAL_RUN:
+            from pipecat.audio.filters.krisp_filter import KrispFilter
+
+        transport = DailyTransport(
+            session_args.room_url,
+            session_args.token,
+            "Pipecat Bot",
+            params=DailyParams(
+                audio_in_enabled=True,
+                audio_in_filter=None
+                if IS_LOCAL_RUN
+                else KrispFilter(),  # Only use Krisp in production
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
+        )
+
+    elif isinstance(session_args, SmallWebRTCSessionArguments):
         from pipecat.transports.base_transport import TransportParams
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
@@ -136,8 +163,27 @@ async def bot(
                 auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
             )
 
+        elif transport_type == "telnyx":
+            from pipecat.serializers.telnyx import TelnyxFrameSerializer
+
+            serializer = TelnyxFrameSerializer(
+                stream_id=stream_id,
+                call_control_id=call_id,
+                outbound_encoding="PCMU",  # Set manually
+                inbound_encoding="PCMU",
+            )
+
+        elif transport_type == "plivo":
+            from pipecat.serializers.plivo import PlivoFrameSerializer
+
+            serializer = PlivoFrameSerializer(
+                stream_id=stream_id,
+                call_id=call_id,
+            )
+
         else:
-            raise ValueError(f"Unsupported WebSocket transport type: {transport_type}")
+            # Generic fallback
+            serializer = None
 
         # Create the transport
         from pipecat.transports.network.fastapi_websocket import (
@@ -160,6 +206,6 @@ async def bot(
 
 
 if __name__ == "__main__":
-    from pipecat.runner.cloud import main
+    from pipecat.runner.run import main
 
     main()

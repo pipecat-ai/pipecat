@@ -149,26 +149,6 @@ async def parse_telephony_websocket(websocket: WebSocket):
         raise
 
 
-def get_install_command(transport: str) -> str:
-    """Get the pip install command for a specific transport.
-
-    Args:
-        transport: The transport name.
-
-    Returns:
-        The pip install command string.
-    """
-    install_map = {
-        "daily": "pip install pipecat-ai[daily]",
-        "livekit": "pip install pipecat-ai[livekit]",
-        "webrtc": "pip install pipecat-ai[webrtc]",
-        "twilio": "pip install pipecat-ai[websocket]",
-        "telnyx": "pip install pipecat-ai[websocket]",
-        "plivo": "pip install pipecat-ai[websocket]",
-    }
-    return install_map.get(transport, f"pip install pipecat-ai[{transport}]")
-
-
 def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     """Get client identifier from transport-specific client object.
 
