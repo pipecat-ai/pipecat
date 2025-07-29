@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `set_log_level` to `DailyTransport`, allowing setting the logging level
   for Daily's internal logging system.
 
+- Added `on_transcription_stopped` and `on_transcription_error` to Daily callbacks.
+
 ### Changed
 
 - Play delayed messages from `ElevenLabsTTSService` if they still belong to the
