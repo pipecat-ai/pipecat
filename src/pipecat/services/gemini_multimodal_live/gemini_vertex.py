@@ -1064,15 +1064,16 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
     # https://github.com/google-gemini/cookbook/issues/781
     # https://github.com/google-gemini/cookbook/blob/cb04a04359ac7937c4b22e8b4c381451ba1e5d93/quickstarts/Get_started_LiveAPI.py
 
-    async def _receive_task_handler(self, context, blame):
-        print(f"_____gemini.py * _receive_task_handler:::: {blame}")
+    ### audio task handler
+    async def _receive_task_handler_audio(self, context, blame, frame_audio, frame_sample_rate):
+        # print(f"_____gemini.py * _receive_task_handler:::: {blame}")
 
         async with self._client.aio.live.connect(
             model=self._model_name,
             config=self._config,
         ) as session:
             try:
-                if GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
+                if not frame_audio or GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
                     print(
                         f"_____gemini_vertex.py * self._context.messages: {self._context.messages}"
                     )
@@ -1081,7 +1082,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                 elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
                     await session.send_realtime_input(
                         media=types.Blob(
-                            data=self._user_audio_buffer, mime_type=f"audio/pcm;rate=16000"
+                            data=frame_audio, mime_type=f"audio/pcm;rate={frame_sample_rate}"
                         )
                         # audio=types.Blob(data=self._user_audio_buffer, mime_type=f"audio/pcm;rate={self._sample_rate}")
                     )
@@ -1090,6 +1091,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                     pass
 
                 async for message in session.receive():
+                    print(f"_________________________________________________gemini_vertex.py * message: {message}")
                     #   TODO  # don't forget to Check for grounding metadata in server content
                     #     if evt.serverContent and evt.serverContent.groundingMetadata:
                     #         self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
@@ -1149,20 +1151,116 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
 
             await self.push_frame(LLMFullResponseEndFrame())
             self._bot_is_speaking = False
-            print(f"_____gemini_vertex.py * _receive_task_handler end:::::::")
+            print(f"::::::::::::_____gemini_vertex.py * _receive_task_handler end:::::::")
+
+    #### og
+    async def _receive_task_handler(self, context, blame):
+        print(f"_____gemini.py * _receive_task_handler:::: {blame}")
+
+        async with self._client.aio.live.connect(
+            model=self._model_name,
+            config=self._config,
+        ) as session:
+            try:
+                # force text usage for system message setting... how to output audio though :thinking:
+                if True:
+                # if GeminiMultimodalModalities.TEXT == self._settings["modalities"]:
+                    print(
+                        f"_____gemini_vertex.py * self._context.messages: {self._context.messages}"
+                    )
+                    await session.send_client_content(turns=self._context.messages)
+
+                elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
+                    await session.send_realtime_input(
+                        media=types.Blob(
+                            data=self._user_audio_buffer, mime_type=f"audio/pcm;rate=1600"
+                        )
+                        # audio=types.Blob(data=self._user_audio_buffer, mime_type=f"audio/pcm;rate={self._sample_rate}")
+                    )
+
+                else:
+                    pass
+
+                async for message in session.receive():
+                    print(f"_________________________________________________gemini_vertex.py * message: {message}")
+                    #   TODO  # don't forget to Check for grounding metadata in server content
+                    #     if evt.serverContent and evt.serverContent.groundingMetadata:
+                    #         self._accumulated_grounding_metadata = evt.serverContent.groundingMetadata
+
+                    if message.text:
+                        print(f"_____gemini.py * message.text::::::: {message.text}")
+
+                        if not self._bot_is_speaking:
+                            self._bot_is_speaking = True
+                            await self.push_frame(TTSStartedFrame())
+                            await self.push_frame(LLMFullResponseStartFrame())
+                        await self.push_frame(LLMTextFrame(message.text))
+                        # await self.push_frame(LLMTextFrame("something else."))
+
+                    ## WIP audio
+                    elif message.data:
+                        print(f"_____gemini_vertex.py * audio:::")
+                        # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api#:~:text=Vertex%20AI%20Studio.-,Context%20window,inputs%2C%20model%20outputs%2C%20etc.
+                        if (
+                            message.server_content.model_turn
+                            and message.server_content.model_turn.parts
+                        ):
+                            audio_data = []
+
+                            for part in message.server_content.model_turn.parts:
+                                if part.inline_data:
+                                    inline_data = part.inline_data
+                                    if not inline_data:
+                                        return
+                                    # if inline_data.mime_type != f"audio/pcm;rate={self._sample_rate}":
+                                    if inline_data.mime_type != f"audio/pcm":
+                                        logger.warning(
+                                            f"Unrecognized server_content format {inline_data.mime_type}"
+                                        )
+                                        return
+
+                                    audio = base64.b64decode(inline_data.data)
+                                    if not audio:
+                                        return
+
+                                    if not self._bot_is_speaking:
+                                        self._bot_is_speaking = True
+                                        await self.push_frame(TTSStartedFrame())
+                                        await self.push_frame(LLMFullResponseStartFrame())
+
+                                    self._bot_audio_buffer.extend(audio)
+                                    frame = TTSAudioRawFrame(
+                                        audio=audio,
+                                        sample_rate=self._sample_rate,
+                                        num_channels=1,
+                                    )
+                                    print(f"_____gemini_vertex.py * frame: {frame}")
+                                    await self.push_frame(frame)
+                                    await self.push_frame(frame)
+
+            except Exception as e:
+                print(f"_TODO throw exception?__eeee__gemini.py * e: {e}")
+
+            await self.push_frame(LLMFullResponseEndFrame())
+            self._bot_is_speaking = False
+            print(f"::::::::::::_____gemini_vertex.py * _receive_task_handler end:::::::")
 
     #
     #
     #
 
     async def _send_user_audio(self, frame):
-        # print(f"_____gemini_vertex.py * _send_user_audio:::::::")
         """Send user audio frame to Gemini Live API."""
         if self._audio_input_paused:
             return
-        # Send all audio to Gemini
-        evt = events.AudioInputMessage.from_raw_audio(frame.audio, frame.sample_rate)
-        # await self.send_client_event(evt)
+        
+        #### meh, how to send audio... I think I just need to keep the session open
+        # and handle all responses, including turns
+        self._receive_task = self.create_task(self._receive_task_handler_audio(self._context, "$ $ $ _send_user_audio four", frame.audio, frame.sample_rate))
+        
+        # # Send all audio to Gemini
+        # evt = events.AudioInputMessage.from_raw_audio(frame.audio, frame.sample_rate)
+        # # await self.send_client_event(evt)
 
         # Manage a buffer of audio to use for transcription
         audio = frame.audio
@@ -1174,9 +1272,6 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
             length = int((frame.sample_rate * frame.num_channels * 2) * 0.5)
             self._user_audio_buffer = self._user_audio_buffer[-length:]
 
-        #### meh, how to send audio... I think I just need to keep the session open
-        # and handle all responses, including turns
-        # self._receive_task = self.create_task(self._receive_task_handler(self._context, "$ $ $ _send_user_audio four"))
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""

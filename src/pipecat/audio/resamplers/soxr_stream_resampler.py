@@ -91,11 +91,27 @@ class SOXRStreamAudioResampler(BaseAudioResampler):
         Returns:
             Resampled audio data as raw bytes (16-bit signed integers).
         """
+
         if in_rate == out_rate:
             return audio
-
         self._maybe_initialize_sox_stream(in_rate, out_rate)
+
+        dividend = 16
+        is_buf_divisable = divmod(len(audio), dividend)
+        remainder = is_buf_divisable[1]
+        len_divisable = is_buf_divisable[0]
+        # print(f"_____resampy_resampler.py * 2: is_buf_divisable: {is_buf_divisable}")
+
+        if remainder:
+            desired_length = len(audio) + (dividend - remainder)
+            # print(f"_____soxr_stream_resampler.py * pad to : {desired_length}")
+            padding_byte = b"\x00"  # Null byte for padding
+            padded_bytes = audio.ljust(desired_length, padding_byte)
+            audio = padded_bytes
+            # print(f"_____soxr_stream_resampler.py * len(audio): {len(audio)}")
+
         audio_data = np.frombuffer(audio, dtype=np.int16)
+        # print(f"_____resampy_resampler.py * 3:")
         resampled_audio = self._soxr_stream.resample_chunk(audio_data)
         result = resampled_audio.astype(np.int16).tobytes()
         return result

@@ -50,7 +50,11 @@ class SOXRAudioResampler(BaseAudioResampler):
         """
         if in_rate == out_rate:
             return audio
+        print(f"_____resampy_resampler.py * 1:")   
         audio_data = np.frombuffer(audio, dtype=np.int16)
+        print(f"_____resampy_resampler.py * 2:")   
         resampled_audio = soxr.resample(audio_data, in_rate, out_rate, quality="VHQ")
+        print(f"_____resampy_resampler.py * 3:")   
         result = resampled_audio.astype(np.int16).tobytes()
+        print(f"_____resampy_resampler.py * 4:")   
         return result
