@@ -1078,6 +1078,13 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                         f"_____gemini_vertex.py * self._context.messages: {self._context.messages}"
                     )
                     await session.send_client_content(turns=self._context.messages)
+                    
+                    #### hmmm.....
+                    # await session.send_realtime_input(
+                    #     text=self._context.messages
+                    # )
+
+
 
                 elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
                     await session.send_realtime_input(
