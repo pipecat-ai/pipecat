@@ -9,8 +9,6 @@
 Transports are Daily or SmallWebRTC."""
 
 import os
-from dataclasses import dataclass
-from typing import Any, Optional
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -20,9 +18,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-
-# from pipecat.runner.cloud import SmallWebRTCSessionArguments # Need a release of Pipecat to use this
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.runner.cloud import SmallWebRTCSessionArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -36,22 +33,6 @@ except ImportError:
     )
 
 load_dotenv(override=True)
-
-
-# For now, we'll just define SmallWebRTCSessionArguments here directly since Pipecat
-# isn't released with the pipecat.runner.cloud module yet.
-# This saves us from having to build a Docker container from my branch or main to
-# deploy to PCC.
-@dataclass
-class SmallWebRTCSessionArguments:
-    """Small WebRTC session arguments for local development.
-
-    This will be replaced by pipecatcloud.agent.SmallWebRTCSessionArguments
-    when WebRTC support is added to Pipecat Cloud.
-    """
-
-    webrtc_connection: Any
-    session_id: Optional[str] = None
 
 
 # Check if we're running locally
