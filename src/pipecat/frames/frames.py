@@ -1074,12 +1074,12 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
         return f"{self.name}(pts: {pts}, source: {self.transport_source}, size: {self.size}, format: {self.format})"
 
 
-@dataclass  
+@dataclass
 class InputTextRawFrame(SystemFrame, TextFrame):
     """Raw text input frame from transport.
-    
+
     Text input usually coming from user typing or programmatic text injection
-    that should be sent to LLM services as input, similar to how InputAudioRawFrame 
+    that should be sent to LLM services as input, similar to how InputAudioRawFrame
     and InputImageRawFrame represent user audio and video input.
     """
 
