@@ -1180,7 +1180,7 @@ class GoogleVertexMultimodalLiveLLMService(LLMService):
                 elif GeminiMultimodalModalities.AUDIO == self._settings["modalities"]:
                     await session.send_realtime_input(
                         media=types.Blob(
-                            data=self._user_audio_buffer, mime_type=f"audio/pcm;rate=1600"
+                            data=self._user_audio_buffer, mime_type=f"audio/pcm;rate=16000"
                         )
                         # audio=types.Blob(data=self._user_audio_buffer, mime_type=f"audio/pcm;rate={self._sample_rate}")
                     )
