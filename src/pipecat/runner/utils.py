@@ -363,6 +363,7 @@ async def _create_telephony_transport(
             call_control_id=call_data["call_control_id"],
             outbound_encoding=call_data["outbound_encoding"],
             inbound_encoding="PCMU",  # Standard default
+            api_key=os.getenv("TELNYX_API_KEY", ""),
         )
     elif transport_type == "plivo":
         from pipecat.serializers.plivo import PlivoFrameSerializer
