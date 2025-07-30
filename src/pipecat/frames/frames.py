@@ -1197,6 +1197,16 @@ class StopFrame(ControlFrame):
 
 
 @dataclass
+class OutputTransportReadyFrame(ControlFrame):
+    """Frame indicating that the output transport is ready.
+
+    Indicates that the output transport is ready and able to receive frames.
+    """
+
+    pass
+
+
+@dataclass
 class HeartbeatFrame(ControlFrame):
     """Frame used by pipeline task to monitor pipeline health.
 
