@@ -84,21 +84,13 @@ class GoogleUserContextAggregator(OpenAIUserContextAggregator):
     Content and Part message format for user messages.
     """
 
-    async def push_aggregation(self):
-        """Push aggregated user text as a Google Content message."""
-        if len(self._aggregation) > 0:
-            self._context.add_message(Content(role="user", parts=[Part(text=self._aggregation)]))
+    async def handle_aggregation(self, aggregation: str):
+        """Add the aggregated user text to the context as a Google Content message.
 
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
-
-            # Push context frame
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
-
-            # Reset our accumulator state.
-            await self.reset()
+        Args:
+            aggregation: The aggregated user text to add as a user message.
+        """
+        self._context.add_message(Content(role="user", parts=[Part(text=aggregation)]))
 
 
 class GoogleAssistantContextAggregator(OpenAIAssistantContextAggregator):

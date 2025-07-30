@@ -95,6 +95,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `GoogleLLMService` where interruptions did not work when an
+  interruption strategy was used.
+
 - Fixed an issue in the `TranscriptProcessor` where newline characters could
   cause the transcript output to be corrupted (e.g. missing all spaces).
 
