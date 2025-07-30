@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
     OutputImageRawFrame,
+    OutputTransportReadyFrame,
     SpriteFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -173,6 +174,9 @@ class BaseOutputTransport(FrameProcessor):
                 params=self._params,
             )
             await self._media_senders[destination].start(frame)
+
+        # Sending a frame indicating that the output transport is ready and able to receive frames.
+        await self.push_frame(OutputTransportReadyFrame(), FrameDirection.UPSTREAM)
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         """Send a transport message.
