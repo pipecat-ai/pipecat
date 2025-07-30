@@ -13,7 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A video service that handles audio streaming and requests HeyGen to generate
   avatar video responses. (see https://www.heygen.com/)
 
+- Added the ability to switch voices to `RimeTTSService`.
+
 - Added Async.ai TTS integration (https://async.ai/)
+
   - `AsyncAITTSService` – WebSocket-based streaming TTS with interruption support
   - `AsyncAIHttpTTSService` – HTTP-based streaming TTS service
   - Example scripts:
