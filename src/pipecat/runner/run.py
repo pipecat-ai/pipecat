@@ -59,7 +59,8 @@ To run locally:
 
 - WebRTC: `python bot.py -t webrtc`
 - ESP32: `python bot.py -t webrtc --esp32 --host 192.168.1.100`
-- Daily: `python bot.py -t daily`
+- Daily (server): `python bot.py -t daily`
+- Daily (direct, testing only): `python bot.py -d`
 - Telephony: `python bot.py -t twilio -x your_username.ngrok.io`
 """
 
@@ -357,6 +358,38 @@ def _setup_telephony_routes(app: FastAPI, transport_type: str, proxy: str):
         return {"status": f"Bot started with {transport_type}"}
 
 
+async def _run_daily_direct():
+    """Run Daily bot with direct connection (no FastAPI server)."""
+    try:
+        import aiohttp
+
+        from pipecat.runner.daily import configure
+    except ImportError as e:
+        logger.error("Daily transport dependencies not installed.")
+        return
+
+    logger.info("Running with direct Daily connection...")
+
+    async with aiohttp.ClientSession() as session:
+        room_url, token = await configure(session)
+
+        # Create session args like the cloud runner would
+        from pipecatcloud.agent import DailySessionArguments
+
+        session_args = DailySessionArguments(
+            room_url=room_url, token=token, body={}, session_id=None
+        )
+
+        # Get the bot module and run it directly
+        bot_module = _get_bot_module()
+
+        print(f"📞 Joining Daily room: {room_url}")
+        print("   (Direct connection - no web server needed)")
+        print()
+
+        await bot_module.bot(session_args)
+
+
 def main():
     """Start the Pipecat development runner.
 
@@ -372,6 +405,7 @@ def main():
         -t/--transport: Transport type (daily, webrtc, twilio, telnyx, plivo)
         -x/--proxy: Public proxy hostname for telephony webhooks
         --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
+        -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
         -v/--verbose: Increase logging verbosity
 
     The bot file must contain a `bot(session_args)` function as the entry point.
@@ -395,10 +429,24 @@ def main():
         help="Enable SDP munging for ESP32 compatibility (requires --host with IP address)",
     )
     parser.add_argument(
+        "-d",
+        "--direct",
+        action="store_true",
+        default=False,
+        help="Connect directly to Daily room (automatically sets transport to daily)",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
     )
 
     args = parser.parse_args()
+
+    # Auto-set transport to daily if --direct is used without explicit transport
+    if args.direct and args.transport == "webrtc":  # webrtc is the default
+        args.transport = "daily"
+    elif args.direct and args.transport != "daily":
+        logger.error("--direct flag only works with Daily transport (-t daily)")
+        return
 
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
@@ -409,7 +457,17 @@ def main():
     logger.remove()
     logger.add(sys.stderr, level="TRACE" if args.verbose else "DEBUG")
 
-    # Print startup message
+    # Handle direct Daily connection (no FastAPI server)
+    if args.direct:
+        print()
+        print("🚀 Connecting directly to Daily room...")
+        print()
+
+        # Run direct Daily connection
+        asyncio.run(_run_daily_direct())
+        return
+
+    # Print startup message for server-based transports
     if args.transport == "webrtc":
         print()
         if args.esp32:
