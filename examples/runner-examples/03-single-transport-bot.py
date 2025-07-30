@@ -19,7 +19,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
-from pipecat.runner.run import SmallWebRTCSessionArguments
+from pipecat.runner.types import SmallWebRTCRunnerArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -91,7 +91,7 @@ async def run_bot(transport):
     await runner.run(task)
 
 
-async def bot(session_args: SmallWebRTCSessionArguments):
+async def bot(session_args: SmallWebRTCRunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
     transport = SmallWebRTCTransport(

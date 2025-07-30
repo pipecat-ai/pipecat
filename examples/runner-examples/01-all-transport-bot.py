@@ -26,18 +26,14 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
-from pipecat.runner.run import SmallWebRTCSessionArguments
+from pipecat.runner.types import (
+    DailyRunnerArguments,
+    SmallWebRTCRunnerArguments,
+    WebSocketRunnerArguments,
+)
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-
-try:
-    from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
-except ImportError:
-    raise ImportError(
-        "pipecatcloud package is required for cloud-compatible bots. "
-        "Install with: pip install pipecat-ai[pipecatcloud]"
-    )
 
 load_dotenv(override=True)
 
@@ -108,11 +104,11 @@ async def run_bot(transport):
 
 
 async def bot(
-    session_args: DailySessionArguments | SmallWebRTCSessionArguments | WebSocketSessionArguments,
+    session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
 ):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    if isinstance(session_args, DailySessionArguments):
+    if isinstance(session_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
         if not IS_LOCAL_RUN:
@@ -132,7 +128,7 @@ async def bot(
             ),
         )
 
-    elif isinstance(session_args, SmallWebRTCSessionArguments):
+    elif isinstance(session_args, SmallWebRTCRunnerArguments):
         from pipecat.transports.base_transport import TransportParams
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
@@ -145,7 +141,7 @@ async def bot(
             webrtc_connection=session_args.webrtc_connection,
         )
 
-    elif isinstance(session_args, WebSocketSessionArguments):
+    elif isinstance(session_args, WebSocketRunnerArguments):
         # Use the utility to parse WebSocket data
         from pipecat.runner.utils import parse_telephony_websocket
 
