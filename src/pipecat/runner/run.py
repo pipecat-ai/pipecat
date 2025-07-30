@@ -94,7 +94,6 @@ except ImportError as e:
 
 
 load_dotenv(override=True)
-os.environ["LOCAL_RUN"] = "1"
 
 
 def _get_bot_module():

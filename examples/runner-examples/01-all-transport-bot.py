@@ -30,15 +30,13 @@ from pipecat.runner.types import (
     DailyRunnerArguments,
     SmallWebRTCRunnerArguments,
     WebSocketRunnerArguments,
+    is_local_development,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 
 load_dotenv(override=True)
-
-# Check if we're running locally
-IS_LOCAL_RUN = os.environ.get("LOCAL_RUN", "0") == "1"
 
 
 async def run_bot(transport):
@@ -111,8 +109,14 @@ async def bot(
     if isinstance(session_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
-        if not IS_LOCAL_RUN:
+        is_local = is_local_development()
+
+        if not is_local:
             from pipecat.audio.filters.krisp_filter import KrispFilter
+
+            krisp_filter = KrispFilter()
+        else:
+            krisp_filter = None
 
         transport = DailyTransport(
             session_args.room_url,
@@ -120,9 +124,7 @@ async def bot(
             "Pipecat Bot",
             params=DailyParams(
                 audio_in_enabled=True,
-                audio_in_filter=None
-                if IS_LOCAL_RUN
-                else KrispFilter(),  # Only use Krisp in production
+                audio_in_filter=krisp_filter,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
