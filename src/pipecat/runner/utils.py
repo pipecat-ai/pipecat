@@ -30,8 +30,9 @@ Example::
 """
 
 import json
+import os
 import re
-from typing import Any
+from typing import Any, Callable, Dict, Optional
 
 from fastapi import WebSocket
 from loguru import logger
@@ -273,3 +274,199 @@ def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
     sdp = _smallwebrtc_sdp_cleanup_fingerprints(sdp)
     sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
     return sdp
+
+
+def _get_transport_params(transport_key: str, transport_params: Dict[str, Callable]) -> Any:
+    """Get transport parameters from factory function.
+
+    Args:
+        transport_key: The transport key to look up
+        transport_params: Dict mapping transport names to parameter factory functions
+
+    Returns:
+        Transport parameters from the factory function
+
+    Raises:
+        ValueError: If transport key is missing from transport_params
+    """
+    if transport_key not in transport_params:
+        raise ValueError(
+            f"Missing transport params for '{transport_key}'. "
+            f"Please add '{transport_key}' key to your transport_params dict."
+        )
+
+    params = transport_params[transport_key]()
+    logger.debug(f"Using transport params for {transport_key}")
+    return params
+
+
+async def _create_telephony_transport(
+    websocket: WebSocket,
+    params: Optional[Any] = None,
+    transport_type: str = None,
+    stream_id: str = None,
+    call_id: str = None,
+) -> BaseTransport:
+    """Create a telephony transport with pre-parsed WebSocket data.
+
+    Args:
+        websocket: FastAPI WebSocket connection from telephony provider
+        params: FastAPIWebsocketParams (required)
+        transport_type: Pre-detected provider type ("twilio", "telnyx", "plivo")
+        stream_id: Pre-parsed stream ID
+        call_id: Pre-parsed call ID
+
+    Returns:
+        Configured FastAPIWebsocketTransport ready for telephony use.
+    """
+    from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport
+
+    if params is None:
+        raise ValueError(
+            "FastAPIWebsocketParams must be provided. "
+            "The serializer and add_wav_header will be set automatically."
+        )
+
+    # Always set add_wav_header to False for telephony
+    params.add_wav_header = False
+
+    logger.info(f"Using pre-detected telephony provider: {transport_type}")
+
+    if transport_type == "twilio":
+        from pipecat.serializers.twilio import TwilioFrameSerializer
+
+        params.serializer = TwilioFrameSerializer(
+            stream_sid=stream_id,
+            call_sid=call_id,
+            account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
+            auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+        )
+    elif transport_type == "telnyx":
+        from pipecat.serializers.telnyx import TelnyxFrameSerializer
+
+        # Note: This would need additional parsing for telnyx-specific fields
+        raise NotImplementedError("Telnyx auto-detection not fully implemented yet")
+    elif transport_type == "plivo":
+        from pipecat.serializers.plivo import PlivoFrameSerializer
+
+        params.serializer = PlivoFrameSerializer(
+            stream_id=stream_id,
+            call_id=call_id,
+            auth_id=os.getenv("PLIVO_AUTH_ID", ""),
+            auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
+        )
+    else:
+        raise ValueError(
+            f"Unsupported telephony provider: {transport_type}. "
+            f"Supported providers: twilio, telnyx, plivo"
+        )
+
+    return FastAPIWebsocketTransport(websocket=websocket, params=params)
+
+
+async def create_transport(
+    session_args: Any, transport_params: Dict[str, Callable]
+) -> BaseTransport:
+    """Create a transport from session arguments using factory functions.
+
+    This function uses the clean transport_params factory pattern where users
+    define a dictionary mapping transport names to parameter factory functions.
+
+    Args:
+        session_args: Session arguments from the runner.
+        transport_params: Dict mapping transport names to parameter factory functions.
+            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo"
+            Values should be functions that return transport parameters when called.
+
+    Returns:
+        Configured transport instance.
+
+    Raises:
+        ValueError: If transport key is missing from transport_params or session args type is unsupported.
+        ImportError: If required dependencies are not installed.
+
+    Example::
+
+        transport_params = {
+            "daily": lambda: DailyParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
+            "webrtc": lambda: TransportParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+            ),
+            "twilio": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
+            "telnyx": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
+            "plivo": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
+        }
+
+        transport = await create_transport(session_args, transport_params)
+    """
+    # Import session types
+    try:
+        from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
+    except ImportError:
+        raise ImportError(
+            "pipecatcloud package required. Install with: pip install pipecat-ai[runner]"
+        )
+
+    try:
+        from pipecat.runner.run import SmallWebRTCSessionArguments
+    except ImportError:
+        raise ImportError(
+            "SmallWebRTCSessionArguments not found. Make sure you've installed pipecat-ai[runner]."
+        )
+
+    # Create transport based on session args type
+    if isinstance(session_args, DailySessionArguments):
+        params = _get_transport_params("daily", transport_params)
+
+        from pipecat.transports.services.daily import DailyTransport
+
+        return DailyTransport(
+            session_args.room_url,
+            session_args.token,
+            "Pipecat Bot",
+            params=params,
+        )
+
+    elif isinstance(session_args, SmallWebRTCSessionArguments):
+        params = _get_transport_params("webrtc", transport_params)
+
+        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+
+        return SmallWebRTCTransport(
+            params=params,
+            webrtc_connection=session_args.webrtc_connection,
+        )
+
+    elif isinstance(session_args, WebSocketSessionArguments):
+        # Parse once to determine the provider and get data
+        transport_type, stream_id, call_id = await parse_telephony_websocket(session_args.websocket)
+        params = _get_transport_params(transport_type, transport_params)
+
+        # Create telephony transport with pre-parsed data
+        return await _create_telephony_transport(
+            session_args.websocket, params, transport_type, stream_id, call_id
+        )
+
+    else:
+        raise ValueError(f"Unsupported session arguments type: {type(session_args)}")
