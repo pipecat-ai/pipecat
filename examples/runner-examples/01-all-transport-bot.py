@@ -149,7 +149,7 @@ async def bot(
         # Use the utility to parse WebSocket data
         from pipecat.runner.utils import parse_telephony_websocket
 
-        transport_type, stream_id, call_id = await parse_telephony_websocket(session_args.websocket)
+        transport_type, call_data = await parse_telephony_websocket(session_args.websocket)
         logger.info(f"Auto-detected transport: {transport_type}")
 
         # Create transport based on detected type
@@ -157,8 +157,8 @@ async def bot(
             from pipecat.serializers.twilio import TwilioFrameSerializer
 
             serializer = TwilioFrameSerializer(
-                stream_sid=stream_id,
-                call_sid=call_id,
+                stream_sid=call_data["stream_id"],
+                call_sid=call_data["call_id"],
                 account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
                 auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
             )
@@ -167,18 +167,18 @@ async def bot(
             from pipecat.serializers.telnyx import TelnyxFrameSerializer
 
             serializer = TelnyxFrameSerializer(
-                stream_id=stream_id,
-                call_control_id=call_id,
-                outbound_encoding="PCMU",  # Set manually
-                inbound_encoding="PCMU",
+                stream_id=call_data["stream_id"],
+                call_control_id=call_data["call_control_id"],
+                outbound_encoding=call_data["outbound_encoding"],
+                inbound_encoding="PCMU",  # Set manually
             )
 
         elif transport_type == "plivo":
             from pipecat.serializers.plivo import PlivoFrameSerializer
 
             serializer = PlivoFrameSerializer(
-                stream_id=stream_id,
-                call_id=call_id,
+                stream_id=call_data["stream_id"],
+                call_id=call_data["call_id"],
             )
 
         else:

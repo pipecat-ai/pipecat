@@ -26,7 +26,7 @@ Example::
     from pipecat.runner.utils import parse_telephony_websocket
 
     async def telephony_websocket_handler(websocket: WebSocket):
-        transport_type, stream_id, call_id = await parse_telephony_websocket(websocket)
+        transport_type, call_data = await parse_telephony_websocket(websocket)
 """
 
 import json
@@ -77,14 +77,21 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
 
 
 async def parse_telephony_websocket(websocket: WebSocket):
-    """Parse telephony WebSocket messages and return transport type and basic call data.
+    """Parse telephony WebSocket messages and return transport type and call data.
 
     Returns:
-        tuple: (transport_type: str, stream_id: str, call_id: str)
+        tuple: (transport_type: str, call_data: dict)
+
+        call_data contains provider-specific fields:
+        - Twilio: {"stream_id": str, "call_id": str}
+        - Telnyx: {"stream_id": str, "call_control_id": str, "outbound_encoding": str}
+        - Plivo: {"stream_id": str, "call_id": str}
 
     Example usage::
 
-        transport_type, stream_id, call_id = await parse_telephony_websocket(websocket)
+        transport_type, call_data = await parse_telephony_websocket(websocket)
+        if transport_type == "telnyx":
+            outbound_encoding = call_data["outbound_encoding"]
     """
     # Read first two messages
     start_data = websocket.iter_text()
@@ -113,37 +120,46 @@ async def parse_telephony_websocket(websocket: WebSocket):
         # Use the successful detection
         if detected_type_first != "unknown":
             transport_type = detected_type_first
-            call_data = first_message
+            call_data_raw = first_message
             logger.debug(f"Detected transport: {transport_type} (from first message)")
         elif detected_type_second != "unknown":
             transport_type = detected_type_second
-            call_data = second_message
+            call_data_raw = second_message
             logger.debug(f"Detected transport: {transport_type} (from second message)")
         else:
             transport_type = "unknown"
-            call_data = second_message
+            call_data_raw = second_message
             logger.warning("Could not auto-detect transport type")
 
+        # Extract provider-specific data
         if transport_type == "twilio":
-            start_data = call_data.get("start", {})
-            stream_id = start_data.get("streamSid")
-            call_id = start_data.get("callSid")
+            start_data = call_data_raw.get("start", {})
+            call_data = {
+                "stream_id": start_data.get("streamSid"),
+                "call_id": start_data.get("callSid"),
+            }
 
         elif transport_type == "telnyx":
-            stream_id = call_data.get("stream_id")
-            call_id = call_data.get("start", {}).get("call_control_id")
+            call_data = {
+                "stream_id": call_data_raw.get("stream_id"),
+                "call_control_id": call_data_raw.get("start", {}).get("call_control_id"),
+                "outbound_encoding": call_data_raw.get("start", {})
+                .get("media_format", {})
+                .get("encoding"),
+            }
 
         elif transport_type == "plivo":
-            start_data = call_data.get("start", {})
-            stream_id = start_data.get("streamId")
-            call_id = start_data.get("callId")
+            start_data = call_data_raw.get("start", {})
+            call_data = {
+                "stream_id": start_data.get("streamId"),
+                "call_id": start_data.get("callId"),
+            }
 
         else:
-            stream_id = None
-            call_id = None
+            call_data = {}
 
-        logger.debug(f"Parsed - Type: {transport_type}, StreamId: {stream_id}, CallId: {call_id}")
-        return transport_type, stream_id, call_id
+        logger.debug(f"Parsed - Type: {transport_type}, Data: {call_data}")
+        return transport_type, call_data
 
     except Exception as e:
         logger.error(f"Error parsing telephony WebSocket: {e}")
@@ -304,8 +320,7 @@ async def _create_telephony_transport(
     websocket: WebSocket,
     params: Optional[Any] = None,
     transport_type: str = None,
-    stream_id: str = None,
-    call_id: str = None,
+    call_data: dict = None,
 ) -> BaseTransport:
     """Create a telephony transport with pre-parsed WebSocket data.
 
@@ -313,8 +328,7 @@ async def _create_telephony_transport(
         websocket: FastAPI WebSocket connection from telephony provider
         params: FastAPIWebsocketParams (required)
         transport_type: Pre-detected provider type ("twilio", "telnyx", "plivo")
-        stream_id: Pre-parsed stream ID
-        call_id: Pre-parsed call ID
+        call_data: Pre-parsed call data dict with provider-specific fields
 
     Returns:
         Configured FastAPIWebsocketTransport ready for telephony use.
@@ -336,22 +350,26 @@ async def _create_telephony_transport(
         from pipecat.serializers.twilio import TwilioFrameSerializer
 
         params.serializer = TwilioFrameSerializer(
-            stream_sid=stream_id,
-            call_sid=call_id,
+            stream_sid=call_data["stream_id"],
+            call_sid=call_data["call_id"],
             account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
             auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
         )
     elif transport_type == "telnyx":
         from pipecat.serializers.telnyx import TelnyxFrameSerializer
 
-        # Note: This would need additional parsing for telnyx-specific fields
-        raise NotImplementedError("Telnyx auto-detection not fully implemented yet")
+        params.serializer = TelnyxFrameSerializer(
+            stream_id=call_data["stream_id"],
+            call_control_id=call_data["call_control_id"],
+            outbound_encoding=call_data["outbound_encoding"],
+            inbound_encoding="PCMU",  # Standard default
+        )
     elif transport_type == "plivo":
         from pipecat.serializers.plivo import PlivoFrameSerializer
 
         params.serializer = PlivoFrameSerializer(
-            stream_id=stream_id,
-            call_id=call_id,
+            stream_id=call_data["stream_id"],
+            call_id=call_data["call_id"],
             auth_id=os.getenv("PLIVO_AUTH_ID", ""),
             auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
         )
@@ -460,12 +478,12 @@ async def create_transport(
 
     elif isinstance(session_args, WebSocketSessionArguments):
         # Parse once to determine the provider and get data
-        transport_type, stream_id, call_id = await parse_telephony_websocket(session_args.websocket)
+        transport_type, call_data = await parse_telephony_websocket(session_args.websocket)
         params = _get_transport_params(transport_type, transport_params)
 
         # Create telephony transport with pre-parsed data
         return await _create_telephony_transport(
-            session_args.websocket, params, transport_type, stream_id, call_id
+            session_args.websocket, params, transport_type, call_data
         )
 
     else:
