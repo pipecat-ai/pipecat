@@ -21,7 +21,7 @@ are established.
 
 Single transport example::
 
-    async def bot(session_args: DailySessionArguments):
+    async def bot(session_args: DailyRunnerArguments):
         transport = DailyTransport(
             session_args.room_url,
             session_args.token,
@@ -39,11 +39,11 @@ Multiple transport example::
 
     async def bot(session_args):
         # Type-safe transport detection
-        if isinstance(session_args, DailySessionArguments):
+        if isinstance(session_args, DailyRunnerArguments):
             transport = setup_daily_transport(session_args)  # Your application code
-        elif isinstance(session_args, SmallWebRTCSessionArguments):
+        elif isinstance(session_args, SmallWebRTCRunnerArguments):
             transport = setup_webrtc_transport(session_args)  # Your application code
-        elif isinstance(session_args, WebSocketSessionArguments):
+        elif isinstance(session_args, WebSocketRunnerArguments):
             transport = setup_telephony_transport(session_args)  # Your application code
 
         # Your bot implementation
@@ -69,10 +69,15 @@ import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Dict
 
 from loguru import logger
+
+from pipecat.runner.types import (
+    DailyRunnerArguments,
+    SmallWebRTCRunnerArguments,
+    WebSocketRunnerArguments,
+)
 
 try:
     import uvicorn
@@ -86,32 +91,6 @@ except ImportError as e:
     raise ImportError(
         "Runner dependencies required. Install with: pip install pipecat-ai[runner]"
     ) from e
-
-try:
-    from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
-except ImportError:
-    raise ImportError(
-        "pipecatcloud package is required for cloud-compatible bots. "
-        "Install with: pip install pipecat-ai[runner]"
-    )
-
-
-# Define WebRTC type locally until it's added to pipecatcloud
-@dataclass
-class SmallWebRTCSessionArguments:
-    """Small WebRTC session arguments.
-
-    .. deprecated:: 0.0.77
-        This will be replaced by pipecatcloud.agent.SmallWebRTCSessionArguments
-        once WebRTC support is added to the `pipecatcloud` package.
-
-    Parameters:
-        websocket: The WebSocket connection for the session.
-        session_id: Optional session ID for tracking.
-    """
-
-    webrtc_connection: Any
-    session_id: Optional[str] = None
 
 
 load_dotenv(override=True)
@@ -165,7 +144,7 @@ async def _run_telephony_bot(websocket: WebSocket):
     bot_module = _get_bot_module()
 
     # Just pass the WebSocket - let the bot handle parsing
-    session_args = WebSocketSessionArguments(websocket=websocket, session_id=None)
+    session_args = WebSocketRunnerArguments(websocket=websocket)
 
     await bot_module.bot(session_args)
 
@@ -204,7 +183,7 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
 
         from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
     except ImportError as e:
-        logger.error(f"WebRTC transport dependencies not installed.")
+        logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
 
     # Store connections by pc_id
@@ -242,10 +221,7 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
                 pcs_map.pop(webrtc_connection.pc_id, None)
 
             bot_module = _get_bot_module()
-            session_args = SmallWebRTCSessionArguments(
-                webrtc_connection=pipecat_connection,
-                session_id=None,
-            )
+            session_args = SmallWebRTCRunnerArguments(webrtc_connection=pipecat_connection)
             background_tasks.add_task(bot_module.bot, session_args)
 
         answer = pipecat_connection.get_answer()
@@ -287,9 +263,7 @@ def _setup_daily_routes(app: FastAPI):
 
             # Start the bot in the background
             bot_module = _get_bot_module()
-            session_args = DailySessionArguments(
-                room_url=room_url, token=token, body={}, session_id=None
-            )
+            session_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
             asyncio.create_task(bot_module.bot(session_args))
             return RedirectResponse(room_url)
 
@@ -307,9 +281,7 @@ def _setup_daily_routes(app: FastAPI):
 
             # Start the bot in the background
             bot_module = _get_bot_module()
-            session_args = DailySessionArguments(
-                room_url=room_url, token=token, body={}, session_id=None
-            )
+            session_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
             asyncio.create_task(bot_module.bot(session_args))
             return {"room_url": room_url, "token": token}
 
@@ -373,12 +345,7 @@ async def _run_daily_direct():
     async with aiohttp.ClientSession() as session:
         room_url, token = await configure(session)
 
-        # Create session args like the cloud runner would
-        from pipecatcloud.agent import DailySessionArguments
-
-        session_args = DailySessionArguments(
-            room_url=room_url, token=token, body={}, session_id=None
-        )
+        session_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()

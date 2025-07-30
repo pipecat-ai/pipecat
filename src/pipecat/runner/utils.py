@@ -37,6 +37,11 @@ from typing import Any, Callable, Dict, Optional
 from fastapi import WebSocket
 from loguru import logger
 
+from pipecat.runner.types import (
+    DailyRunnerArguments,
+    SmallWebRTCRunnerArguments,
+    WebSocketRunnerArguments,
+)
 from pipecat.transports.base_transport import BaseTransport
 
 
@@ -439,23 +444,8 @@ async def create_transport(
 
         transport = await create_transport(session_args, transport_params)
     """
-    # Import session types
-    try:
-        from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
-    except ImportError:
-        raise ImportError(
-            "pipecatcloud package required. Install with: pip install pipecat-ai[runner]"
-        )
-
-    try:
-        from pipecat.runner.run import SmallWebRTCSessionArguments
-    except ImportError:
-        raise ImportError(
-            "SmallWebRTCSessionArguments not found. Make sure you've installed pipecat-ai[runner]."
-        )
-
     # Create transport based on session args type
-    if isinstance(session_args, DailySessionArguments):
+    if isinstance(session_args, DailyRunnerArguments):
         params = _get_transport_params("daily", transport_params)
 
         from pipecat.transports.services.daily import DailyTransport
@@ -467,7 +457,7 @@ async def create_transport(
             params=params,
         )
 
-    elif isinstance(session_args, SmallWebRTCSessionArguments):
+    elif isinstance(session_args, SmallWebRTCRunnerArguments):
         params = _get_transport_params("webrtc", transport_params)
 
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
@@ -477,7 +467,7 @@ async def create_transport(
             webrtc_connection=session_args.webrtc_connection,
         )
 
-    elif isinstance(session_args, WebSocketSessionArguments):
+    elif isinstance(session_args, WebSocketRunnerArguments):
         # Parse once to determine the provider and get data
         transport_type, call_data = await parse_telephony_websocket(session_args.websocket)
         params = _get_transport_params(transport_type, transport_params)

@@ -19,18 +19,13 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
-from pipecat.runner.run import SmallWebRTCSessionArguments
+from pipecat.runner.types import (
+    DailyRunnerArguments,
+    SmallWebRTCRunnerArguments,
+)
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-
-try:
-    from pipecatcloud.agent import DailySessionArguments
-except ImportError:
-    raise ImportError(
-        "pipecatcloud package is required for cloud-compatible bots. "
-        "Install with: pip install pipecat-ai[[pipecatcloud]]"
-    )
 
 load_dotenv(override=True)
 
@@ -101,10 +96,10 @@ async def run_bot(transport):
     await runner.run(task)
 
 
-async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments):
+async def bot(session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    if isinstance(session_args, DailySessionArguments):
+    if isinstance(session_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
         if not IS_LOCAL_RUN:
@@ -124,7 +119,7 @@ async def bot(session_args: DailySessionArguments | SmallWebRTCSessionArguments)
             ),
         )
 
-    elif isinstance(session_args, SmallWebRTCSessionArguments):
+    elif isinstance(session_args, SmallWebRTCRunnerArguments):
         from pipecat.transports.base_transport import TransportParams
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 

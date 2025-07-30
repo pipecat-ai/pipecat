@@ -26,20 +26,18 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.runner.types import (
+    DailyRunnerArguments,
+    SmallWebRTCRunnerArguments,
+    WebSocketRunnerArguments,
+)
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
-
-try:
-    from pipecatcloud.agent import DailySessionArguments, WebSocketSessionArguments
-
-    from pipecat.runner.run import SmallWebRTCSessionArguments
-    from pipecat.runner.utils import create_transport
-except ImportError:
-    raise ImportError("Install with: pip install pipecat-ai[runner]")
 
 load_dotenv(override=True)
 
@@ -139,7 +137,7 @@ async def run_bot(transport):
 
 
 async def bot(
-    session_args: DailySessionArguments | SmallWebRTCSessionArguments | WebSocketSessionArguments,
+    session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
 ):
     """Main bot entry point compatible with Pipecat Cloud."""
     transport = await create_transport(session_args, transport_params)
