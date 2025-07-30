@@ -4,7 +4,24 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
+"""Client-Server Web Example.
+
+This is the server-side bot implementation for the Pipecat client-server
+web example. It runs a simple voice AI bot that you can connect to using a
+web browser and speak with it.
+
+Required AI services:
+- Deepgram (Speech-to-Text)
+- OpenAI (LLM)
+- Cartesia (Text-to-Speech)
+
+The example connects between client and server using a P2P WebRTC connection.
+
+Run the bot using::
+
+    python bot.py
+"""
+
 import os
 
 from dotenv import load_dotenv
@@ -16,15 +33,17 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.runner.run import SmallWebRTCSessionArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
 load_dotenv(override=True)
 
 
-async def run_bot(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport):
     logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -82,21 +101,27 @@ async def run_bot(transport: BaseTransport, _: argparse.Namespace, handle_sigint
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.runner.local import main
+async def bot(session_args: SmallWebRTCSessionArguments):
+    """Main bot entry point for the bot starter."""
 
-    # SmallWebRTCTransport for a P2P WebRTC connection
-    transport_params = {
-        "webrtc": lambda: TransportParams(
+    transport = SmallWebRTCTransport(
+        params=TransportParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         ),
-    }
+        webrtc_connection=session_args.webrtc_connection,
+    )
 
-    main(run_bot, transport_params=transport_params)
+    await run_bot(transport)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

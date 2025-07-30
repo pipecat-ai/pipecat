@@ -19,14 +19,14 @@ connection.
 
 Run the bot using::
 
-    python bot.py -t twilio
+    python bot.py -t twilio -x your_ngrok.ngrok.io
 """
 
-import argparse
 import os
 
 from dotenv import load_dotenv
 from loguru import logger
+from pipecatcloud import WebSocketSessionArguments
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -34,16 +34,21 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.runner.utils import parse_telephony_websocket
+from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
+from pipecat.transports.network.fastapi_websocket import (
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
+)
 
 load_dotenv(override=True)
 
 
-async def run_bot(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport):
     logger.info(f"Starting bot")
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -101,21 +106,39 @@ async def run_bot(transport: BaseTransport, _: argparse.Namespace, handle_sigint
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.runner.local import main
+async def bot(session_args: WebSocketSessionArguments):
+    """Main bot entry point for the bot starter."""
 
-    # SmallWebRTCTransport for a P2P WebRTC connection
-    transport_params = {
-        "twilio": lambda: FastAPIWebsocketParams(
+    transport_type, call_data = await parse_telephony_websocket(session_args.websocket)
+    logger.info(f"Auto-detected transport: {transport_type}")
+
+    serializer = TwilioFrameSerializer(
+        stream_sid=call_data["stream_id"],
+        call_sid=call_data["call_id"],
+        account_sid=os.getenv("TWILIO_ACCOUNT_SID", ""),
+        auth_token=os.getenv("TWILIO_AUTH_TOKEN", ""),
+    )
+
+    transport = FastAPIWebsocketTransport(
+        websocket=session_args.websocket,
+        params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
+            serializer=serializer,
         ),
-    }
+    )
 
-    main(run_bot, transport_params=transport_params)
+    await run_bot(transport)
+
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()
