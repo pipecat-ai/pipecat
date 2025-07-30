@@ -378,7 +378,7 @@ class TranslationFrame(TextFrame):
 
 
 @dataclass
-class OpenAILLMContextAssistantTimestampFrame(DataFrame):
+class LLMContextAssistantTimestampFrame(DataFrame):
     """Timestamp information for assistant messages in LLM context.
 
     Parameters:
