@@ -220,6 +220,7 @@ class SpeechmaticsSTTService(STTService):
         end_of_utterance_silence_trigger: float = 0.5,
         end_of_utterance_mode: EndOfUtteranceMode = EndOfUtteranceMode.FIXED,
         additional_vocab: list[AdditionalVocabEntry] | None = None,
+        punctuation_overrides: dict | None = None,
         diarization_sensitivity: float = 0.5,
         speaker_active_format: str = "{text}",
         speaker_passive_format: str = "{text}",
@@ -292,6 +293,11 @@ class SpeechmaticsSTTService(STTService):
                 additional vocabulary entries, the this will increase the weight of the words in the
                 vocabulary and help the STT engine to better transcribe the words.
                 Defaults to [].
+
+            punctuation_overrides: Punctuation overrides. This allows you to override the punctuation
+                in the STT engine. This is useful for languages that use different punctuation
+                than English. See documentation for more information.
+                Defaults to None.
 
             diarization_sensitivity: Diarization sensitivity. A higher value increases the sensitivity
                 of diarization and helps when two or more speakers have similar voices.
@@ -394,38 +400,6 @@ class SpeechmaticsSTTService(STTService):
         self._base_url: str = (
             base_url or os.getenv("SPEECHMATICS_RT_URL") or "wss://eu2.rt.speechmatics.com/v2"
         )
-        self._operating_point: OperatingPoint = operating_point
-        self._domain: str | None = domain
-
-        # Language
-        self._language: Language | str | None = language
-        self._output_locale: Language | str | None = output_locale
-
-        # Features
-        self._enable_vad: bool = enable_vad
-        self._enable_partials: bool = enable_partials
-        self._enable_diarization: bool = enable_diarization
-
-        # STT parameters
-        self._max_delay: float = max_delay
-        self._end_of_utterance_silence_trigger: float = end_of_utterance_silence_trigger
-        self._end_of_utterance_mode: EndOfUtteranceMode = end_of_utterance_mode
-        self._additional_vocab: list[AdditionalVocabEntry] = additional_vocab or []
-
-        # Diarization
-        self._diarization_sensitivity: float = diarization_sensitivity
-        self._speaker_active_format: str = speaker_active_format
-        self._speaker_passive_format: str = speaker_passive_format
-        self._prefer_current_speaker: bool = prefer_current_speaker
-        self._focus_speakers: list[str] = focus_speakers or []
-        self._ignore_speakers: list[str] = ignore_speakers or []
-        self._focus_mode: DiarizationFocusMode = focus_mode
-        self._known_speakers: list[DiarizationKnownSpeaker] = known_speakers or []
-
-        # Audio settings
-        self._sample_rate: int = sample_rate
-        self._chunk_size: int = chunk_size
-        self._audio_encoding: AudioEncoding = audio_encoding
 
         # Check we have required attributes
         if not self._api_key:
@@ -445,23 +419,69 @@ class SpeechmaticsSTTService(STTService):
                     message = f"`{old}` is deprecated and will be removed in a future version"
                 warnings.warn(message, DeprecationWarning)
 
-        # Deprecation warnings
+        # Deprecation handling
         if language_code is not None:
             _deprecation_warning("language_code", "language")
-            self._language = language_code
+            language = language_code
         if output_locale_code is not None:
             _deprecation_warning("output_locale_code", "output_locale")
-            self._output_locale = output_locale_code
+            output_locale = output_locale_code
         if enable_speaker_diarization is not None:
             _deprecation_warning("enable_speaker_diarization", "enable_diarization")
-            self._enable_diarization = enable_speaker_diarization
+            enable_diarization = enable_speaker_diarization
         if text_format is not None:
             _deprecation_warning("text_format", "speaker_active_format")
-            self._speaker_active_format = text_format
+            speaker_active_format = text_format
         if max_speakers is not None:
             _deprecation_warning("max_speakers")
         if transcription_config is not None:
             _deprecation_warning("transcription_config")
+            language = language or transcription_config.language
+            output_locale = output_locale or transcription_config.output_locale
+            domain = domain or transcription_config.domain
+            operating_point = operating_point or transcription_config.operating_point
+            enable_diarization = enable_diarization or transcription_config.diarization == "speaker"
+            enable_partials = enable_partials or transcription_config.enable_partials
+            max_delay = max_delay or transcription_config.max_delay
+            additional_vocab = additional_vocab or transcription_config.additional_vocab
+            punctuation_overrides = (
+                punctuation_overrides or transcription_config.punctuation_overrides
+            )
+
+        # Configuration
+        self._operating_point: OperatingPoint = operating_point
+        self._domain: str | None = domain
+
+        # Language
+        self._language: Language | str | None = language
+        self._output_locale: Language | str | None = output_locale
+
+        # Features
+        self._enable_vad: bool = enable_vad
+        self._enable_partials: bool = enable_partials
+        self._enable_diarization: bool = enable_diarization
+
+        # STT parameters
+        self._max_delay: float = max_delay
+        self._end_of_utterance_silence_trigger: float = end_of_utterance_silence_trigger
+        self._end_of_utterance_mode: EndOfUtteranceMode = end_of_utterance_mode
+        self._additional_vocab: list[AdditionalVocabEntry] = additional_vocab or []
+        self._punctuation_overrides: dict | None = punctuation_overrides
+
+        # Diarization
+        self._diarization_sensitivity: float = diarization_sensitivity
+        self._speaker_active_format: str = speaker_active_format
+        self._speaker_passive_format: str = speaker_passive_format
+        self._prefer_current_speaker: bool = prefer_current_speaker
+        self._focus_speakers: list[str] = focus_speakers or []
+        self._ignore_speakers: list[str] = ignore_speakers or []
+        self._focus_mode: DiarizationFocusMode = focus_mode
+        self._known_speakers: list[DiarizationKnownSpeaker] = known_speakers or []
+
+        # Audio settings
+        self._sample_rate: int = sample_rate
+        self._chunk_size: int = chunk_size
+        self._audio_encoding: AudioEncoding = audio_encoding
 
         # Input language
         if isinstance(self._language, Language):
@@ -692,6 +712,10 @@ class SpeechmaticsSTTService(STTService):
             transcription_config.conversation_config = ConversationConfig(
                 end_of_utterance_silence_trigger=self._end_of_utterance_silence_trigger,
             )
+
+        # Punctuation overrides
+        if self._punctuation_overrides:
+            transcription_config.punctuation_overrides = self._punctuation_overrides
 
         # Set config
         self._transcription_config = transcription_config
