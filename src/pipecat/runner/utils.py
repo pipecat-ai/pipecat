@@ -32,6 +32,7 @@ Example::
 import json
 import os
 import re
+import sys
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import WebSocket
@@ -479,3 +480,13 @@ async def create_transport(
 
     else:
         raise ValueError(f"Unsupported session arguments type: {type(session_args)}")
+
+
+def is_local_development() -> bool:
+    """Detect if running in local development environment.
+
+    Returns True if the pipecat development runner is being used.
+    This works by detecting if pipecat.runner.run has been imported,
+    which only happens when running locally via the development runner.
+    """
+    return "pipecat.runner.run" in sys.modules
