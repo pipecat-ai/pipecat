@@ -97,6 +97,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a race condition in `FastAPIWebsocketClient` that occurred when attempting to
+  send a message while the client was disconnecting.
+
 - Fixed an issue in `GoogleLLMService` where interruptions did not work when an
   interruption strategy was used.
 
