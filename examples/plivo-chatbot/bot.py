@@ -16,19 +16,21 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.observers.loggers.llm_log_observer import LLMLogObserver
+from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.audio.filters.deepfilternet_filter import DeepFilterNetFilter
 from pipecat.serializers.plivo import PlivoFrameSerializer
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+#from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai import OpenAILLMService
+from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.network.fastapi_websocket import (
     FastAPIWebsocketParams,
     FastAPIWebsocketTransport,
 )
 
 load_dotenv()
-logger.remove(0)
-logger.add(sys.stderr, level="DEBUG")
 
 
 async def run_bot(websocket_client: WebSocket, stream_id: str, call_id: Optional[str]):
@@ -41,6 +43,12 @@ async def run_bot(websocket_client: WebSocket, stream_id: str, call_id: Optional
         auth_token=os.getenv("PLIVO_AUTH_TOKEN"),
     )
 
+    noise_canceller = DeepFilterNetFilter(
+        chunk_duration_ms=20,
+        max_buffer_duration_ms=200,
+        enable_postfilter=True,
+    )
+
     transport = FastAPIWebsocketTransport(
         websocket=websocket_client,
         params=FastAPIWebsocketParams(
@@ -49,17 +57,30 @@ async def run_bot(websocket_client: WebSocket, stream_id: str, call_id: Optional
             add_wav_header=False,
             vad_analyzer=SileroVADAnalyzer(),
             serializer=serializer,
+            audio_in_filter=noise_canceller,
         ),
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
     )
+
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        log_level="DEBUG"
+    )
+
+    tts = ElevenLabsTTSService(
+        api_key=os.getenv("ELEVENLABS_API_KEY"),
+        sample_rate=16000,
+        voice_id="Xb7hH8MSUJpSbSDYk0k2",
+        model="eleven_multilingual_v2"
+    )
+
+    #tts = CartesiaTTSService(
+    #    api_key=os.getenv("CARTESIA_API_KEY"),
+    #    voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    #)
 
     messages = [
         {
@@ -73,12 +94,12 @@ async def run_bot(websocket_client: WebSocket, stream_id: str, call_id: Optional
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Websocket input from client
-            stt,  # Speech-To-Text
+            transport.input(),
+            stt,
             context_aggregator.user(),
-            llm,  # LLM
-            tts,  # Text-To-Speech
-            transport.output(),  # Websocket output to client
+            llm,
+            tts,
+            transport.output(),
             context_aggregator.assistant(),
         ]
     )
@@ -91,6 +112,10 @@ async def run_bot(websocket_client: WebSocket, stream_id: str, call_id: Optional
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        observers=[
+            TranscriptionLogObserver(),
+            LLMLogObserver(),
+        ]
     )
 
     @transport.event_handler("on_client_connected")
