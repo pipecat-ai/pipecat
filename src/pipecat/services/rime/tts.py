@@ -13,7 +13,7 @@ using Rime's API for streaming and batch audio synthesis.
 import base64
 import json
 import uuid
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -180,6 +180,16 @@ class RimeTTSService(AudioContextWordTTSService):
         """
         self._model = model
         await super().set_model(model)
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Update service settings and reconnect if voice changed."""
+        prev_voice = self._voice_id
+        await super()._update_settings(settings)
+        if not prev_voice == self._voice_id:
+            self._settings["speaker"] = self._voice_id
+            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+            await self._disconnect()
+            await self._connect()
 
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Rime API."""
