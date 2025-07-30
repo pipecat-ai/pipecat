@@ -103,9 +103,9 @@ async def configure_with_args(
         aiohttp_session=aiohttp_session,
     )
 
-    # Create a meeting token for the given room with an expiration 1 hour in
+    # Create a meeting token for the given room with an expiration 2 hours in
     # the future.
-    expiry_time: float = 60 * 60
+    expiry_time: float = 2 * 60 * 60
 
     token = await daily_rest_helper.get_token(url, expiry_time)
 
