@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
+    TTSTextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
@@ -107,6 +108,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         language: Optional[Language] = Language.EN
         speed: Optional[Union[str, float]] = ""
         emotion: Optional[List[str]] = []
+        add_timestamps: Optional[bool] = True
 
     def __init__(
         self,
@@ -176,6 +178,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "speed": params.speed,
             "emotion": params.emotion,
         }
+        self._add_timestamps = params.add_timestamps
         self.set_model_name(model)
         self.set_voice(voice_id)
 
@@ -211,9 +214,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         """
         return language_to_cartesia_language(language)
 
-    def _build_msg(
-        self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
-    ):
+    def _build_msg(self, text: str = "", continue_transcript: bool = True):
         voice_config = {}
         voice_config["mode"] = "id"
         voice_config["id"] = self._voice_id
@@ -236,7 +237,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
             "voice": voice_config,
             "output_format": self._settings["output_format"],
             "language": self._settings["language"],
-            "add_timestamps": add_timestamps,
+            "add_timestamps": self._add_timestamps,
             "use_original_timestamps": False if self.model_name == "sonic" else True,
         }
 
@@ -346,9 +347,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
                 await self.remove_audio_context(msg["context_id"])
             elif msg["type"] == "timestamps":
-                await self.add_word_timestamps(
-                    list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
-                )
+                if self._add_timestamps:
+                    await self.add_word_timestamps(
+                        list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
+                    )
             elif msg["type"] == "chunk":
                 await self.stop_ttfb_metrics()
                 self.start_word_timestamps()
@@ -392,6 +394,8 @@ class CartesiaTTSService(AudioContextWordTTSService):
             msg = self._build_msg(text=text)
 
             try:
+                if not self._add_timestamps:
+                    await self.push_frame(TTSTextFrame(text))
                 await self._get_websocket().send(msg)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
