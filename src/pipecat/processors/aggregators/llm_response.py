@@ -1022,7 +1022,6 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
         await self.push_frame(frame)
 
 
-
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
     """Assistant response aggregator that outputs LLMMessagesFrame instead of context frames.
 
