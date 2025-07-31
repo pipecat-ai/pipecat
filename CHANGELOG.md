@@ -5,16 +5,16 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.77] - 2025-07-31
 
 ### Added
 
 - Added `InputTextRawFrame` frame type to handle user text input with Gemini
   Multimodal Live.
 
-- Added `HeyGenVideoService`. This is an integration for HeyGen Interactive Avatar.
-  A video service that handles audio streaming and requests HeyGen to generate
-  avatar video responses. (see https://www.heygen.com/)
+- Added `HeyGenVideoService`. This is an integration for HeyGen Interactive
+  Avatar. A video service that handles audio streaming and requests HeyGen to
+  generate avatar video responses. (see https://www.heygen.com/)
 
 - Added the ability to switch voices to `RimeTTSService`.
 
@@ -49,9 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a new TTS service, `InworldTTSService`. This service provides
   low-latency, high-quality speech generation using Inworld's streaming API.
 
-- Added a new field `handle_sigterm` to `PipelineRunner`. It defaults to `False`.
-  This field handles SIGTERM signals. The `handle_sigint` field still defaults
-  to `True`, but now it handles only SIGINT signals.
+- Added a new field `handle_sigterm` to `PipelineRunner`. It defaults to
+  `False`. This field handles SIGTERM signals. The `handle_sigint` field still
+  defaults to `True`, but now it handles only SIGINT signals.
 
 - Added foundational example `14u-function-calling-ollama.py` for Ollama
   function calling.
@@ -124,7 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `SpeechmaticsSTTService`:
   - Added support for additional diarization options.
-  - Added foundational example `07a-interruptible-speechmatics-vad.py`, which uses VAD detection provided by `SpeechmaticsSTTService`.
+  - Added foundational example `07a-interruptible-speechmatics-vad.py`, which
+    uses VAD detection provided by `SpeechmaticsSTTService`.
 
 ### Fixed
 
@@ -167,8 +168,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `ElevenLabsTTSService` where the word/timestamp pairs were
   calculating word boundaries incorrectly.
 
-- Fixed an issue where, in some edge cases, the `EmulateUserStartedSpeakingFrame`
-  could be created even if we didn't have a transcription.
+- Fixed an issue where, in some edge cases, the
+  `EmulateUserStartedSpeakingFrame` could be created even if we didn't have a
+  transcription.
 
 - Fixed an issue in `GoogleLLMContext` where it would inject the
   `system_message` as a "user" message into cases where it was not meant to;
