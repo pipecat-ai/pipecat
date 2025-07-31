@@ -48,31 +48,37 @@ transport_params = {
 
 
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
-    """Run example using Speechmatics STT.
+    """Speechmatics STT Service Example
+    
+    This example demonstrates using Speechmatics Speech-to-Text service with speaker diarization and intelligent speaker management. Key features:
+    
+    1. Speaker Diarization
+       - Automatically identifies and distinguishes between different speakers
+       - First speaker is identified as 'S1', others get subsequent IDs
+       - Uses `enable_diarization` parameter to manage speaker detection
+    
+    2. Smart Speaker Control
+       - `focus_speakers` parameter lets you target specific speakers (e.g. ["S1"])
+       - Other speakers will be wrapped in PASSIVE tags
+       - Only processes speech from focused speakers
+       - Words from all speakers are wrapped with XML tags for clear speaker identification
+       - Other speakers' speech only sent when focused speaker is active
+    
+    3. Voice Activity Detection
+       - Built-in VAD using `enable_vad` parameter
+       - Remove `vad_analyzer` from `transport` config to use module's VAD
+       - Emits speaker started/stopped events
+    
+    4. Configuration Options
+       - `operating_point` parameter defaults to `ENHANCED` for optimal accuracy
+       - Configurable `end_of_utterance_silence_trigger` (default 0.5s)
+       - Customizable speaker formatting
+       - Additional diarization settings available
+    
+    For detailed information about operating points and configuration:
+    https://docs.speechmatics.com/rt-api-ref
+    """
 
-    This demo will only respond to the FIRST speaker (also known as `S1`). Words from other
-    speakers will be sent only when the first speaker says something.
-
-    This example will use diarization within our STT service and output the words spoken by
-    each individual speaker and wrap them with XML tags for the LLM to process. Note the
-    instructions in the system context for the LLM. This greatly improves the conversation
-    experience by allowing the LLM to understand who is speaking in a multi-party call.
-
-    Using the `enable_vad` parameter will use the detection of speakers to emit speaker
-    started and stopped frames. This is useful when only wanting to listen to the first
-    speaker. Using `focus_speakers` will result in only words from those speakers being
-    processed as part of the conversation. Other speakers will be wrapped in PASSIVE tags
-    and not trigger any responses from the LLM until words from a focussed speaker have
-    been transcribed.
-
-    To use the module's VAD, you must remove `vad_analyzer` from the transport config.
-
-    By default, this example will use our ENHANCED operating point, which is optimized for
-    high accuracy. You can change this by setting the `operating_point` parameter to a different
-    value.
-
-    For more information on operating points, see the Speechmatics documentation:
-    https://docs.speechmatics.com/rt-api-ref"""
     logger.info(f"Starting bot")
 
     stt = SpeechmaticsSTTService(
