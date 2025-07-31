@@ -229,11 +229,6 @@ class SpeechmaticsSTTService(STTService):
                 emit partial word frames - useful for the visualisation of real-time transcription.
                 Defaults to True.
 
-            enable_diarization: Enable speaker diarization. When enabled, the STT engine will
-                determine and attribute words to unique speakers. The speaker_sensitivity
-                parameter can be used to adjust the sensitivity of diarization.
-                Defaults to False.
-
             max_delay: Maximum delay in seconds for transcription. This forces the STT engine to
                 speed up the processing of transcribed words and reduces the interval between partial
                 and final results. Lower values can have an impact on accuracy. Defaults to 1.0.
@@ -259,6 +254,11 @@ class SpeechmaticsSTTService(STTService):
                 in the STT engine. This is useful for languages that use different punctuation
                 than English. See documentation for more information.
                 Defaults to None.
+
+            enable_diarization: Enable speaker diarization. When enabled, the STT engine will
+                determine and attribute words to unique speakers. The speaker_sensitivity
+                parameter can be used to adjust the sensitivity of diarization.
+                Defaults to False.
 
             speaker_sensitivity: Diarization sensitivity. A higher value increases the sensitivity
                 of diarization and helps when two or more speakers have similar voices.
@@ -328,16 +328,16 @@ class SpeechmaticsSTTService(STTService):
         # Features
         enable_vad: bool = False
         enable_partials: bool = True
-        enable_diarization: bool = False
         max_delay: float = 1.0
         end_of_utterance_silence_trigger: float = 0.5
         end_of_utterance_mode: EndOfUtteranceMode = EndOfUtteranceMode.FIXED
         additional_vocab: list[AdditionalVocabEntry] = []
         punctuation_overrides: dict | None = None
-        speaker_sensitivity: float = 0.5
-        max_speakers: int | None = None
 
         # Diarization
+        enable_diarization: bool = False
+        speaker_sensitivity: float = 0.5
+        max_speakers: int | None = None
         speaker_active_format: str = "{text}"
         speaker_passive_format: str = "{text}"
         prefer_current_speaker: bool = False
