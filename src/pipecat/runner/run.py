@@ -21,7 +21,7 @@ are established.
 
 Single transport example::
 
-    async def bot(runner_args: DailyRunnerArguments):
+    async def bot(runner_args: RunnerArguments):
         transport = DailyTransport(
             runner_args.room_url,
             runner_args.token,
@@ -37,7 +37,7 @@ Single transport example::
 
 Multiple transport example::
 
-    async def bot(runner_args):
+    async def bot(runner_args: RunnerArguments):
         # Type-safe transport detection
         if isinstance(runner_args, DailyRunnerArguments):
             transport = setup_daily_transport(runner_args)  # Your application code

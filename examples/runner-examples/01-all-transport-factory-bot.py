@@ -26,16 +26,12 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
-from pipecat.runner.types import (
-    DailyRunnerArguments,
-    SmallWebRTCRunnerArguments,
-    WebSocketRunnerArguments,
-)
+from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
@@ -74,7 +70,7 @@ transport_params = {
 }
 
 
-async def run_bot(transport):
+async def run_bot(transport: BaseTransport):
     """Main bot logic that works with any transport."""
     logger.info("Starting bot")
 
@@ -136,9 +132,7 @@ async def run_bot(transport):
     await runner.run(task)
 
 
-async def bot(
-    runner_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
-):
+async def bot(runner_args: RunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
     transport = await create_transport(runner_args, transport_params)
     await run_bot(transport)
