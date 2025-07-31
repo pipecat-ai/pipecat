@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `InputTextRawFrame` frame type to handle user text input with Gemini Multimodal Live.
+- Added `InputTextRawFrame` frame type to handle user text input with Gemini
+  Multimodal Live.
 
 - Added `HeyGenVideoService`. This is an integration for HeyGen Interactive Avatar.
   A video service that handles audio streaming and requests HeyGen to generate
@@ -17,12 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the ability to switch voices to `RimeTTSService`.
 
-- Added unified development runner for building voice AI bots across multiple transports
+- Added unified development runner for building voice AI bots across multiple
+  transports
 
-  - `pipecat.runner.run` – FastAPI-based development server with automatic bot discovery
-  - `pipecat.runner.types` – Runner session argument types (`DailyRunnerArguments`, `SmallWebRTCRunnerArguments`, `WebSocketRunnerArguments`)
-  - `pipecat.runner.utils.create_transport()` – Factory function for creating transports from session arguments
-  - `pipecat.runner.daily` and `pipecat.runner.livekit` – Configuration utilities for Daily and LiveKit setups
+  - `pipecat.runner.run` – FastAPI-based development server with automatic bot
+    discovery
+  - `pipecat.runner.types` – Runner session argument types
+    (`DailyRunnerArguments`, `SmallWebRTCRunnerArguments`,
+    `WebSocketRunnerArguments`)
+  - `pipecat.runner.utils.create_transport()` – Factory function for creating
+    transports from session arguments
+  - `pipecat.runner.daily` and `pipecat.runner.livekit` – Configuration
+    utilities for Daily and LiveKit setups
   - Support for all transport types: Daily, WebRTC, Twilio, Telnyx, Plivo
   - Automatic telephony provider detection and serializer configuration
   - ESP32 WebRTC compatibility with SDP munging
@@ -30,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added Async.ai TTS integration (https://async.ai/)
 
-  - `AsyncAITTSService` – WebSocket-based streaming TTS with interruption support
+  - `AsyncAITTSService` – WebSocket-based streaming TTS with interruption
+    support
   - `AsyncAIHttpTTSService` – HTTP-based streaming TTS service
   - Example scripts:
     - `examples/foundational/07ac-interruptible-asyncai.py` (WebSocket demo)
@@ -54,7 +62,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `set_log_level` to `DailyTransport`, allowing setting the logging level
   for Daily's internal logging system.
 
-- Added `on_transcription_stopped` and `on_transcription_error` to Daily callbacks.
+- Added `on_transcription_stopped` and `on_transcription_error` to Daily
+  callbacks.
 
 ### Changed
 
@@ -120,8 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed `PiperTTSService` to work with newer Piper GPL.
 
-- Fixed a race condition in `FastAPIWebsocketClient` that occurred when attempting to
-  send a message while the client was disconnecting.
+- Fixed a race condition in `FastAPIWebsocketClient` that occurred when
+  attempting to send a message while the client was disconnecting.
 
 - Fixed an issue in `GoogleLLMService` where interruptions did not work when an
   interruption strategy was used.
@@ -129,8 +138,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in the `TranscriptProcessor` where newline characters could
   cause the transcript output to be corrupted (e.g. missing all spaces).
 
-- Fixed an issue in `AudioBufferProcessor` when using `SmallWebRTCTransport` where, if
-  the microphone was muted, track timing was not respected.
+- Fixed an issue in `AudioBufferProcessor` when using `SmallWebRTCTransport`
+  where, if the microphone was muted, track timing was not respected.
 
 - Fixed an error that occurs when pushing an `LLMMessagesFrame`. Only some LLM
   services, like Grok, are impacted by this issue. The fix is to remove the
@@ -162,7 +171,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it was only meant to do that when there were no "regular" (non-function-call)
   messages in the context, to ensure that inference would run properly.
 
-- Fixed an issue in `LiveKitTransport` where the `on_audio_track_subscribed` was never emitted.
+- Fixed an issue in `LiveKitTransport` where the `on_audio_track_subscribed` was
+  never emitted.
 
 ### Other
 
