@@ -42,7 +42,6 @@ try:
         ConversationConfig,
         OperatingPoint,
         ServerMessageType,
-        SpeakerDiarizationConfig,
         TranscriptionConfig,
         __version__,
     )
