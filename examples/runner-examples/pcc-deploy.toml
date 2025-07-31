@@ -1,7 +1,7 @@
-agent_name = "cloud-simple-bot"
-image = "your_dockerhub_username/cloud-simple-bot:0.1"
+agent_name = "two-transport-bot"
+image = "your_dockerhub_username/two-transport-bot:0.1"
 image_credentials = "dockerhub-access"
-secret_set = "cloud-simple-bot-secrets"
+secret_set = "two-transport-bot-secrets"
 enable_krisp = true
 
 [scaling]
