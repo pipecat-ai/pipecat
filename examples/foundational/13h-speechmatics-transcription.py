@@ -62,9 +62,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        language=Language.EN,
-        enable_speaker_diarization=True,
-        text_format="<{speaker_id}>{text}</{speaker_id}>",
+        params=SpeechmaticsSTTService.InputParams(
+            language=Language.EN,
+            enable_diarization=True,
+            speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+        ),
     )
 
     tl = TranscriptionLogger()

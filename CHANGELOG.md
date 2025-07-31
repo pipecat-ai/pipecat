@@ -122,6 +122,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - For `LmntTTSService`, changed the default `model` to `blizzard`, LMNT's
   recommended model.
 
+- Updated `SpeechmaticsSTTService`:
+  - Added support for additional diarization options.
+  - Added foundational example `07a-interruptible-speechmatics-vad.py`, which uses VAD detection provided by `SpeechmaticsSTTService`.
+
 ### Fixed
 
 - Fixed a `LLMUserResponseAggregator` issue where interruptions were not being
