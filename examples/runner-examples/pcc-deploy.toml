@@ -1,8 +1,0 @@
-agent_name = "two-transport-bot"
-image = "your_dockerhub_username/two-transport-bot:0.1"
-image_credentials = "dockerhub-access"
-secret_set = "two-transport-bot-secrets"
-enable_krisp = true
-
-[scaling]
-	min_agents = 0
