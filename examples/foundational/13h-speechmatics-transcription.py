@@ -48,7 +48,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     This example will use diarization within our STT service and output the words spoken by
     each individual speaker and wrap them with XML tags.
 
-    If you do not wish to use diarization, then set the `enable_speaker_diarization` parameter
+    If you do not wish to use diarization, then set the `enable_diarization` parameter
     to `False` or omit it altogether. The `text_format` will only be used if diarization is enabled.
 
     By default, this example will use our ENHANCED operating point, which is optimized for
