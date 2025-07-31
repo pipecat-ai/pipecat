@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `SpeechmaticsSTTService`:
   - Added support for additional diarization options.
-  - Added example of VAD detection within the `SpeechmaticsSTTService`.
+  - Added foundational example `07a-interruptible-speechmatics-vad.py`, which uses VAD detection provided by `SpeechmaticsSTTService`.
 
 ### Fixed
 
