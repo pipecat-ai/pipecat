@@ -37,9 +37,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 
 load_dotenv(override=True)
 
-# Check if we're running locally
-IS_LOCAL_RUN = os.environ.get("LOCAL_RUN", "0") == "1"
-
 
 async def run_bot(transport):
     """Main bot logic that works with any transport."""
@@ -111,8 +108,12 @@ async def bot(
     if isinstance(session_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
-        if not IS_LOCAL_RUN:
+        if os.environ.get("ENV") != "local":
             from pipecat.audio.filters.krisp_filter import KrispFilter
+
+            krisp_filter = KrispFilter()
+        else:
+            krisp_filter = None
 
         transport = DailyTransport(
             session_args.room_url,
@@ -120,9 +121,7 @@ async def bot(
             "Pipecat Bot",
             params=DailyParams(
                 audio_in_enabled=True,
-                audio_in_filter=None
-                if IS_LOCAL_RUN
-                else KrispFilter(),  # Only use Krisp in production
+                audio_in_filter=krisp_filter,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
@@ -167,6 +166,7 @@ async def bot(
                 call_control_id=call_data["call_control_id"],
                 outbound_encoding=call_data["outbound_encoding"],
                 inbound_encoding="PCMU",  # Set manually
+                api_key=os.getenv("TELNYX_API_KEY", ""),
             )
 
         elif transport_type == "plivo":
@@ -175,6 +175,8 @@ async def bot(
             serializer = PlivoFrameSerializer(
                 stream_id=call_data["stream_id"],
                 call_id=call_data["call_id"],
+                auth_id=os.getenv("PLIVO_AUTH_ID", ""),
+                auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
             )
 
         else:

@@ -30,10 +30,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 load_dotenv(override=True)
 
 
-# Check if we're running locally
-IS_LOCAL_RUN = os.environ.get("LOCAL_RUN", "0") == "1"
-
-
 async def run_bot(transport):
     """Main bot logic that works with any transport."""
     logger.info(f"Starting bot")
@@ -102,8 +98,12 @@ async def bot(session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
     if isinstance(session_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
-        if not IS_LOCAL_RUN:
+        if os.environ.get("ENV") != "local":
             from pipecat.audio.filters.krisp_filter import KrispFilter
+
+            krisp_filter = KrispFilter()
+        else:
+            krisp_filter = None
 
         transport = DailyTransport(
             session_args.room_url,
@@ -111,9 +111,7 @@ async def bot(session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
             "Pipecat Bot",
             params=DailyParams(
                 audio_in_enabled=True,
-                audio_in_filter=None
-                if IS_LOCAL_RUN
-                else KrispFilter(),  # Only use Krisp in production
+                audio_in_filter=krisp_filter,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
