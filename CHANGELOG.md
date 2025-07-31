@@ -154,6 +154,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Added new quickstart demos:
+
+  - examples/quickstart: voice AI bot quickstart
+  - examples/client-server-web: client/server starter example
+  - examples/phone-bot-twilio: twilio starter example
+
 - Removed most of the examples from the pipecat repo. Examples can now be
   found in: https://github.com/pipecat-ai/pipecat-examples.
 
