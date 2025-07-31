@@ -1116,6 +1116,7 @@ def _check_deprecated_args(kwargs: dict, params: SpeechmaticsSTTService.InputPar
         ("chunk_size", "chunk_size"),
         ("audio_encoding", "audio_encoding"),
         ("end_of_utterance_silence_trigger", "end_of_utterance_silence_trigger"),
+        {"enable_speaker_diarization", "enable_diarization"},
         ("text_format", "speaker_active_format"),
         ("max_speakers", "max_speakers"),
         ("transcription_config", None),
