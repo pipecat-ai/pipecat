@@ -3,7 +3,7 @@ set -e
 
 VERSION="0.1"
 DOCKER_USERNAME="your_docker_username"
-AGENT_NAME="cloud-simple-bot"
+AGENT_NAME="two-transport-bot"
 
 # Build the Docker image with the correct context
 echo "Building Docker image..."
