@@ -42,6 +42,7 @@ try:
         ConversationConfig,
         OperatingPoint,
         ServerMessageType,
+        SpeakerDiarizationConfig,
         TranscriptionConfig,
         __version__,
     )
@@ -534,9 +535,6 @@ class SpeechmaticsSTTService(STTService):
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Adds audio to the audio buffer and yields None."""
-        # TODO - calculate bytes sent
-
-        # Send audio to client
         await self._client.send_audio(audio)
         yield None
 
@@ -694,13 +692,13 @@ class SpeechmaticsSTTService(STTService):
 
         # Diarization
         if self._enable_diarization:
-            dz_cfg = {}
+            dz_cfg = SpeakerDiarizationConfig()
             if self._diarization_sensitivity is not None:
-                dz_cfg["speaker_sensitivity"] = self._diarization_sensitivity
+                dz_cfg.speaker_sensitivity = self._diarization_sensitivity
             if self._prefer_current_speaker is not None:
-                dz_cfg["prefer_current_speaker"] = self._prefer_current_speaker
+                dz_cfg.prefer_current_speaker = self._prefer_current_speaker
             if self._known_speakers:
-                dz_cfg["speakers"] = {s.label: s.speaker_identifiers for s in self._known_speakers}
+                dz_cfg.speakers = {s.label: s.speaker_identifiers for s in self._known_speakers}
             if dz_cfg:
                 transcription_config.speaker_diarization_config = dz_cfg
 
@@ -818,6 +816,7 @@ class SpeechmaticsSTTService(STTService):
 
         # If VAD is enabled, then send a speaking frame
         if self._enable_vad and not self._is_speaking:
+            logger.debug("User started speaking")
             self._is_speaking = True
             upstream_frames += [BotInterruptionFrame()]
             downstream_frames += [UserStartedSpeakingFrame()]
@@ -848,6 +847,7 @@ class SpeechmaticsSTTService(STTService):
 
         # If VAD is enabled, then send a speaking frame
         if self._enable_vad and self._is_speaking and finalized:
+            logger.debug("User stopped speaking")
             self._is_speaking = False
             downstream_frames += [UserStoppedSpeakingFrame()]
 
