@@ -10,7 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -36,45 +35,62 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
 
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
-    """Run example using Speechmatics STT.
+    """Speechmatics STT Service Example
 
-    This example will use diarization within our STT service and output the words spoken by
-    each individual speaker and wrap them with XML tags for the LLM to process. Note the
-    instructions in the system context for the LLM. This greatly improves the conversation
-    experience by allowing the LLM to understand who is speaking in a multi-party call.
+    This example demonstrates using Speechmatics Speech-to-Text service with speaker diarization and intelligent speaker management. Key features:
 
-    By default, this example will use our ENHANCED operating point, which is optimized for
-    high accuracy. You can change this by setting the `operating_point` parameter to a different
-    value.
+    1. Speaker Diarization
+       - Automatically identifies and distinguishes between different speakers
+       - First speaker is identified as 'S1', others get subsequent IDs
+       - Uses `enable_diarization` parameter to manage speaker detection
 
-    For more information on operating points, see the Speechmatics documentation:
+    2. Smart Speaker Control
+       - `focus_speakers` parameter lets you target specific speakers (e.g. ["S1"])
+       - Other speakers will be wrapped in PASSIVE tags
+       - Only processes speech from focused speakers
+       - Words from all speakers are wrapped with XML tags for clear speaker identification
+       - Other speakers' speech only sent when focused speaker is active
+
+    3. Voice Activity Detection
+       - Built-in VAD using `enable_vad` parameter
+       - Remove `vad_analyzer` from `transport` config to use module's VAD
+       - Emits speaker started/stopped events
+
+    4. Configuration Options
+       - `operating_point` parameter defaults to `ENHANCED` for optimal accuracy
+       - Configurable `end_of_utterance_silence_trigger` (default 0.5s)
+       - Customizable speaker formatting
+       - Additional diarization settings available
+
+    For detailed information about operating points and configuration:
     https://docs.speechmatics.com/rt-api-ref
     """
+
     logger.info(f"Starting bot")
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
         params=SpeechmaticsSTTService.InputParams(
             language=Language.EN,
+            enable_vad=True,
             enable_diarization=True,
+            focus_speakers=["S1"],
             end_of_utterance_silence_trigger=0.5,
             speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+            speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
         ),
     )
 
@@ -99,7 +115,8 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 "Always include punctuation in your responses. "
                 "Give very short replies - do not give longer replies unless strictly necessary. "
                 "Respond to what the user said in a concise, funny, creative and helpful way. "
-                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies."
+                "Use `<Sn/>` tags to identify different speakers - do not use tags in your replies. "
+                "Do not respond to speakers within `<PASSIVE/>` tags unless explicitly asked to. "
             ),
         },
     ]
@@ -113,7 +130,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
+            stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
