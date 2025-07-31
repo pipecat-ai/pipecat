@@ -1013,17 +1013,14 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
         """
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
-    async def push_aggregation(self):
-        """Push the aggregated user input as an LLMMessagesFrame."""
-        if len(self._aggregation) > 0:
-            await self.handle_aggregation(self._aggregation)
+    async def _process_aggregation(self):
+        """Process the current aggregation and push it downstream."""
+        aggregation = self._aggregation
+        await self.reset()
+        await self.handle_aggregation(aggregation)
+        frame = LLMMessagesFrame(self._context.messages)
+        await self.push_frame(frame)
 
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            await self.reset()
-
-            frame = LLMMessagesFrame(self._context.messages)
-            await self.push_frame(frame)
 
 
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
