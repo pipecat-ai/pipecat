@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `InputTextRawFrame` frame type to handle user text input with Gemini Multimodal Live.
+
 - Added `HeyGenVideoService`. This is an integration for HeyGen Interactive Avatar.
   A video service that handles audio streaming and requests HeyGen to generate
   avatar video responses. (see https://www.heygen.com/)
