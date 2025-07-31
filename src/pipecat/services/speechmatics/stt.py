@@ -10,12 +10,14 @@ import asyncio
 import datetime
 import os
 import re
+import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator
 from urllib.parse import urlencode
 
 from loguru import logger
+from pydantic import BaseModel
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
@@ -204,51 +206,10 @@ class SpeechmaticsSTTService(STTService):
     and speaker diarization.
     """
 
-    def __init__(
-        self,
-        *,
-        api_key: str | None = None,
-        base_url: str | None = None,
-        operating_point: OperatingPoint = OperatingPoint.ENHANCED,
-        domain: str | None = None,
-        language: Language | str = Language.EN,
-        output_locale: Language | str | None = None,
-        enable_vad: bool = False,
-        enable_partials: bool = True,
-        enable_diarization: bool = False,
-        max_delay: float = 1.0,
-        end_of_utterance_silence_trigger: float = 0.5,
-        end_of_utterance_mode: EndOfUtteranceMode = EndOfUtteranceMode.FIXED,
-        additional_vocab: list[AdditionalVocabEntry] | None = None,
-        punctuation_overrides: dict | None = None,
-        diarization_sensitivity: float = 0.5,
-        speaker_active_format: str = "{text}",
-        speaker_passive_format: str = "{text}",
-        prefer_current_speaker: bool = False,
-        focus_speakers: list[str] | None = None,
-        ignore_speakers: list[str] | None = None,
-        focus_mode: DiarizationFocusMode = DiarizationFocusMode.RETAIN,
-        known_speakers: list[DiarizationKnownSpeaker] | None = None,
-        sample_rate: int = 16000,
-        chunk_size: int = 160,
-        audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE,
-        language_code: str | None = None,  # DEPRECATED
-        output_locale_code: str | None = None,  # DEPRECATED
-        enable_speaker_diarization: bool | None = None,  # DEPRECATED
-        text_format: str | None = None,  # DEPRECATED
-        max_speakers: int | None = None,  # DEPRECATED
-        transcription_config: TranscriptionConfig | None = None,  # DEPRECATED
-        **kwargs,
-    ):
-        """Initialize the Speechmatics STT service.
+    class InputParams(BaseModel):
+        """Configuration parameters for Speechmatics STT service.
 
-        Args:
-            api_key: Speechmatics API key for authentication. Uses environment variable
-                `SPEECHMATICS_API_KEY` if not provided.
-
-            base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
-                or defaults to `wss://eu2.rt.speechmatics.com/v2`.
-
+        Parameters:
             operating_point: Operating point for transcription accuracy vs. latency tradeoff. It is
                 recommended to use OperatingPoint.ENHANCED for most use cases. Defaults to
                 OperatingPoint.ENHANCED.
@@ -269,7 +230,7 @@ class SpeechmaticsSTTService(STTService):
                 Defaults to True.
 
             enable_diarization: Enable speaker diarization. When enabled, the STT engine will
-                determine and attribute words to unique speakers. The diarization_sensitivity
+                determine and attribute words to unique speakers. The speaker_sensitivity
                 parameter can be used to adjust the sensitivity of diarization.
                 Defaults to False.
 
@@ -299,21 +260,26 @@ class SpeechmaticsSTTService(STTService):
                 than English. See documentation for more information.
                 Defaults to None.
 
-            diarization_sensitivity: Diarization sensitivity. A higher value increases the sensitivity
+            speaker_sensitivity: Diarization sensitivity. A higher value increases the sensitivity
                 of diarization and helps when two or more speakers have similar voices.
                 Defaults to 0.5.
+
+            max_speakers: Maximum number of speakers to detect. This forces the STT engine to cluster
+                words into a fixed number of speakers. It should not be used to limit the number of
+                speakers, unless it is clear that there will only be a known number of speakers.
+                Defaults to None.
 
             speaker_active_format: Formatter for active speaker ID. This formatter is used to format
                 the text output for individual speakers and ensures that the context is clear for
                 language models further down the pipeline. The attributes `text` and `speaker_id` are
                 available. The system instructions for the language model may need to include any
                 necessary instructions to handle the formatting.
-                Example: `<{speaker_id}>{text}</{speaker_id}>`.
+                Example: `@{speaker_id}: {text}`.
                 Defaults to transcription output.
 
             speaker_passive_format: Formatter for passive speaker ID. As with the
                 speaker_active_format, the attributes `text` and `speaker_id` are available.
-                Example: `<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>`.
+                Example: `@{speaker_id} [background]: {text}`.
                 Defaults to transcription output.
 
             prefer_current_speaker: Prefer current speaker ID. When set to true, groups of words close
@@ -349,48 +315,91 @@ class SpeechmaticsSTTService(STTService):
                 Refer to our examples on the format of the known_speakers parameter.
                 Defaults to [].
 
-
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
             chunk_size: Audio chunk size for streaming. Defaults to 160.
             audio_encoding: Audio encoding format. Defaults to AudioEncoding.PCM_S16LE.
+        """
 
-            language_code: Legacy language code for transcription. Defaults to None.
+        # Service configuration
+        operating_point: OperatingPoint = OperatingPoint.ENHANCED
+        domain: str | None = None
+        language: Language | str = Language.EN
+        output_locale: Language | str | None = None
 
-                .. deprecated:: 0.0.77
-                    The language_code parameter is deprecated and will be removed in a future version.
-                    Use language instead.
+        # Features
+        enable_vad: bool = False
+        enable_partials: bool = True
+        enable_diarization: bool = False
+        max_delay: float = 1.0
+        end_of_utterance_silence_trigger: float = 0.5
+        end_of_utterance_mode: EndOfUtteranceMode = EndOfUtteranceMode.FIXED
+        additional_vocab: list[AdditionalVocabEntry] = []
+        punctuation_overrides: dict | None = None
+        speaker_sensitivity: float = 0.5
+        max_speakers: int | None = None
 
-            output_locale_code: Legacy output language code for transcription. Defaults to None.
+        # Diarization
+        speaker_active_format: str = "{text}"
+        speaker_passive_format: str = "{text}"
+        prefer_current_speaker: bool = False
+        focus_speakers: list[str] = []
+        ignore_speakers: list[str] = []
+        focus_mode: DiarizationFocusMode = DiarizationFocusMode.RETAIN
+        known_speakers: list[DiarizationKnownSpeaker] = []
 
-                .. deprecated:: 0.0.77
-                    The output_locale_code parameter is deprecated and will be removed in a future version.
-                    Use output_language instead.
+        # Audio
+        chunk_size: int = 160
+        audio_encoding: AudioEncoding = AudioEncoding.PCM_S16LE
 
-            enable_speaker_diarization: Legacy enable speaker diarization. Defaults to None.
+    class UpdateParams(BaseModel):
+        """Update parameters for Speechmatics STT service.
 
-                .. deprecated:: 0.0.77
-                    The enable_speaker_diarization parameter is deprecated and will be removed in a future version.
-                    Use enable_diarization instead.
+        These are the only parameters that can be changed once a session has started. If you need to
+        change the language, etc., then you must create a new instance of the service.
 
-            text_format: Legacy text format for transcription. Defaults to None.
+        Parameters:
+            focus_speakers: List of speaker IDs to focus on. When enabled, only these speakers are
+                emitted as finalized frames and other speakers are considered passive. Words from
+                other speakers are still processed, but only emitted when a focussed speaker has
+                also said new words. A list of labels (e.g. `S1`, `S2`) or identifiers of known
+                speakers (e.g. `speaker_1`, `speaker_2`) can be used.
+                Defaults to [].
 
-                .. deprecated:: 0.0.77
-                    The text_format parameter is deprecated and will be removed in a future version.
-                    Use speaker_active_format and speaker_passive_format instead.
+            ignore_speakers: List of speaker IDs to ignore. When enabled, these speakers are
+                excluded from the transcription and their words are not processed. Their speech
+                will not trigger any VAD or end of utterance detection. By default, any speaker
+                with a label starting and ending with double underscores will be excluded (e.g.
+                `__ASSISTANT__`).
+                Defaults to [].
 
-            max_speakers: Legacy maximum number of speakers for diarization. Defaults to None.
+            focus_mode: Speaker focus mode for diarization. When set to `DiarizationFocusMode.RETAIN`,
+                the STT engine will retain words spoken by other speakers (not listed in `ignore_speakers`)
+                and process them as passive speaker frames. When set to `DiarizationFocusMode.IGNORE`,
+                the STT engine will ignore words spoken by other speakers and they will not be processed.
+                Defaults to `DiarizationFocusMode.RETAIN`.
+        """
 
-                .. deprecated:: 0.0.77
-                    The max_speakers parameter is deprecated and will be removed in a future version.
-                    This parameter is no longer required.
+        focus_speakers: list[str] = []
+        ignore_speakers: list[str] = []
+        focus_mode: DiarizationFocusMode = DiarizationFocusMode.RETAIN
 
-            transcription_config: Legacy custom transcription configuration (other set parameters are merged).
-                Defaults to None.
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        sample_rate: int = 16000,
+        params: InputParams | None = None,
+        **kwargs,
+    ):
+        """Initialize the Speechmatics STT service.
 
-                .. deprecated:: 0.0.77
-                    The transcription_config parameter is deprecated and will be removed in a future version.
-                    Use individual parameters instead.
-
+        Args:
+            api_key: Speechmatics API key for authentication. Uses environment variable
+                `SPEECHMATICS_API_KEY` if not provided.
+            base_url: Base URL for Speechmatics API. Uses environment variable `SPEECHMATICS_RT_URL`
+                or defaults to `wss://eu2.rt.speechmatics.com/v2`.
+            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            params: Optional[InputParams]: Input parameters for the service.
             **kwargs: Additional arguments passed to STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -407,91 +416,11 @@ class SpeechmaticsSTTService(STTService):
         if not self._base_url:
             raise ValueError("Missing Speechmatics base URL")
 
-        # Show deprecation warnings
-        def _deprecation_warning(old: str, new: str | None = None):
-            import warnings
+        # Default parameters
+        self._params = params or SpeechmaticsSTTService.InputParams()
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("always")
-                if new:
-                    message = f"`{old}` is deprecated and will be removed in a future version, use `{new}` instead"
-                else:
-                    message = f"`{old}` is deprecated and will be removed in a future version"
-                warnings.warn(message, DeprecationWarning)
-
-        # Deprecation handling
-        if language_code is not None:
-            _deprecation_warning("language_code", "language")
-            language = language_code
-        if output_locale_code is not None:
-            _deprecation_warning("output_locale_code", "output_locale")
-            output_locale = output_locale_code
-        if enable_speaker_diarization is not None:
-            _deprecation_warning("enable_speaker_diarization", "enable_diarization")
-            enable_diarization = enable_speaker_diarization
-        if text_format is not None:
-            _deprecation_warning("text_format", "speaker_active_format")
-            speaker_active_format = text_format
-        if max_speakers is not None:
-            _deprecation_warning("max_speakers")
-        if transcription_config is not None:
-            _deprecation_warning("transcription_config")
-            language = language or transcription_config.language
-            output_locale = output_locale or transcription_config.output_locale
-            domain = domain or transcription_config.domain
-            operating_point = operating_point or transcription_config.operating_point
-            enable_diarization = enable_diarization or transcription_config.diarization == "speaker"
-            enable_partials = enable_partials or transcription_config.enable_partials
-            max_delay = max_delay or transcription_config.max_delay
-            additional_vocab = additional_vocab or transcription_config.additional_vocab
-            punctuation_overrides = (
-                punctuation_overrides or transcription_config.punctuation_overrides
-            )
-
-        # Configuration
-        self._operating_point: OperatingPoint = operating_point
-        self._domain: str | None = domain
-
-        # Language
-        self._language: Language | str | None = language
-        self._output_locale: Language | str | None = output_locale
-
-        # Features
-        self._enable_vad: bool = enable_vad
-        self._enable_partials: bool = enable_partials
-        self._enable_diarization: bool = enable_diarization
-
-        # STT parameters
-        self._max_delay: float = max_delay
-        self._end_of_utterance_silence_trigger: float = end_of_utterance_silence_trigger
-        self._end_of_utterance_mode: EndOfUtteranceMode = end_of_utterance_mode
-        self._additional_vocab: list[AdditionalVocabEntry] = additional_vocab or []
-        self._punctuation_overrides: dict | None = punctuation_overrides
-
-        # Diarization
-        self._diarization_sensitivity: float = diarization_sensitivity
-        self._speaker_active_format: str = speaker_active_format
-        self._speaker_passive_format: str = speaker_passive_format
-        self._prefer_current_speaker: bool = prefer_current_speaker
-        self._focus_speakers: list[str] = focus_speakers or []
-        self._ignore_speakers: list[str] = ignore_speakers or []
-        self._focus_mode: DiarizationFocusMode = focus_mode
-        self._known_speakers: list[DiarizationKnownSpeaker] = known_speakers or []
-
-        # Audio settings
-        self._sample_rate: int = sample_rate
-        self._chunk_size: int = chunk_size
-        self._audio_encoding: AudioEncoding = audio_encoding
-
-        # Input language
-        if isinstance(self._language, Language):
-            self._language = _language_to_speechmatics_language(self._language)
-
-        # Output language
-        if self._output_locale and isinstance(self._output_locale, Language):
-            self._output_locale = _locale_to_speechmatics_locale(
-                self._language, self._output_locale
-            )
+        # Deprecation check
+        _check_deprecated_args(kwargs, self._params)
 
         # Complete configuration objects
         self._transcription_config: TranscriptionConfig = None
@@ -511,7 +440,7 @@ class SpeechmaticsSTTService(STTService):
         self._total_time: datetime.timedelta | None = None
 
         # Event handlers
-        if self._enable_diarization:
+        if self._params.enable_diarization:
             self._register_event_handler("on_speakers_result")
 
         # EndOfUtterance fallback timer
@@ -537,11 +466,9 @@ class SpeechmaticsSTTService(STTService):
         await self._client.send_audio(audio)
         yield None
 
-    def update_speakers(
+    def update_params(
         self,
-        focus_speakers: list[str] | None = None,
-        ignore_speakers: list[str] | None = None,
-        focus_mode: DiarizationFocusMode | None = None,
+        params: UpdateParams,
     ) -> None:
         """Updates the speaker configuration.
 
@@ -549,21 +476,19 @@ class SpeechmaticsSTTService(STTService):
         transcription. Only available if diarization is enabled.
 
         Args:
-            focus_speakers: List of speakers to focus on.
-            ignore_speakers: List of speakers to ignore.
-            focus_mode: Focus mode to use.
+            params: Update parameters for the service.
         """
         # Check possible
-        if not self._enable_diarization:
+        if not self._params.enable_diarization:
             raise ValueError("Diarization is not enabled")
 
         # Update the diarization configuration
-        if focus_speakers is not None:
-            self._focus_speakers = focus_speakers
-        if ignore_speakers is not None:
-            self._ignore_speakers = ignore_speakers
-        if focus_mode is not None:
-            self._focus_mode = focus_mode
+        if params.focus_speakers is not None:
+            self._params.focus_speakers = params.focus_speakers
+        if params.ignore_speakers is not None:
+            self._params.ignore_speakers = params.ignore_speakers
+        if params.focus_mode is not None:
+            self._params.focus_mode = params.focus_mode
 
     async def send_message(self, message: ClientMessageType | str, **kwargs: Any) -> None:
         """Send a message to the STT service.
@@ -604,7 +529,7 @@ class SpeechmaticsSTTService(STTService):
             self._start_time = datetime.datetime.now(datetime.timezone.utc)
 
         # Partial transcript event
-        if self._enable_partials:
+        if self._params.enable_partials:
 
             @self._client.on(ServerMessageType.ADD_PARTIAL_TRANSCRIPT)
             def _evt_on_partial_transcript(message: dict[str, Any]):
@@ -616,7 +541,7 @@ class SpeechmaticsSTTService(STTService):
             self._handle_transcript(message, is_final=True)
 
         # End of Utterance
-        if self._end_of_utterance_mode == EndOfUtteranceMode.FIXED:
+        if self._params.end_of_utterance_mode == EndOfUtteranceMode.FIXED:
 
             @self._client.on(ServerMessageType.END_OF_UTTERANCE)
             def _evt_on_end_of_utterance(message: dict[str, Any]):
@@ -626,7 +551,7 @@ class SpeechmaticsSTTService(STTService):
                 )
 
         # Speaker Result
-        if self._enable_diarization:
+        if self._params.enable_diarization:
 
             @self._client.on(ServerMessageType.SPEAKERS_RESULT)
             def _evt_on_speakers_result(message: dict[str, Any]):
@@ -640,9 +565,9 @@ class SpeechmaticsSTTService(STTService):
         await self._client.start_session(
             transcription_config=self._transcription_config,
             audio_format=AudioFormat(
-                encoding=self._audio_encoding,
+                encoding=self._params.audio_encoding,
                 sample_rate=self.sample_rate,
-                chunk_size=self._chunk_size,
+                chunk_size=self._params.chunk_size,
             ),
         )
 
@@ -670,49 +595,53 @@ class SpeechmaticsSTTService(STTService):
         """
         # Transcription config
         transcription_config = TranscriptionConfig(
-            language=self._language,
-            domain=self._domain,
-            output_locale=self._output_locale,
-            operating_point=self._operating_point,
-            diarization="speaker" if self._enable_diarization else None,
-            enable_partials=self._enable_partials,
-            max_delay=self._max_delay,
+            language=self._params.language,
+            domain=self._params.domain,
+            output_locale=self._params.output_locale,
+            operating_point=self._params.operating_point,
+            diarization="speaker" if self._params.enable_diarization else None,
+            enable_partials=self._params.enable_partials,
+            max_delay=self._params.max_delay,
         )
 
         # Additional vocab
-        if self._additional_vocab:
+        if self._params.additional_vocab:
             transcription_config.additional_vocab = [
                 {
                     "content": e.content,
                     "sounds_like": e.sounds_like,
                 }
-                for e in self._additional_vocab
+                for e in self._params.additional_vocab
             ]
 
         # Diarization
-        if self._enable_diarization:
+        if self._params.enable_diarization:
             dz_cfg = {}
-            if self._diarization_sensitivity is not None:
-                dz_cfg["speaker_sensitivity"] = self._diarization_sensitivity
-            if self._prefer_current_speaker is not None:
-                dz_cfg["prefer_current_speaker"] = self._prefer_current_speaker
-            if self._known_speakers:
-                dz_cfg["speakers"] = {s.label: s.speaker_identifiers for s in self._known_speakers}
+            if self._params.speaker_sensitivity is not None:
+                dz_cfg["speaker_sensitivity"] = self._params.speaker_sensitivity
+            if self._params.prefer_current_speaker is not None:
+                dz_cfg["prefer_current_speaker"] = self._params.prefer_current_speaker
+            if self._params.known_speakers:
+                dz_cfg["speakers"] = {
+                    s.label: s.speaker_identifiers for s in self._params.known_speakers
+                }
+            if self._params.max_speakers is not None:
+                dz_cfg["max_speakers"] = self._params.max_speakers
             if dz_cfg:
                 transcription_config.speaker_diarization_config = dz_cfg
 
         # End of Utterance (for fixed)
         if (
-            self._end_of_utterance_silence_trigger
-            and self._end_of_utterance_mode == EndOfUtteranceMode.FIXED
+            self._params.end_of_utterance_silence_trigger
+            and self._params.end_of_utterance_mode == EndOfUtteranceMode.FIXED
         ):
             transcription_config.conversation_config = ConversationConfig(
-                end_of_utterance_silence_trigger=self._end_of_utterance_silence_trigger,
+                end_of_utterance_silence_trigger=self._params.end_of_utterance_silence_trigger,
             )
 
         # Punctuation overrides
-        if self._punctuation_overrides:
-            transcription_config.punctuation_overrides = self._punctuation_overrides
+        if self._params.punctuation_overrides:
+            transcription_config.punctuation_overrides = self._params.punctuation_overrides
 
         # Set config
         self._transcription_config = transcription_config
@@ -770,7 +699,7 @@ class SpeechmaticsSTTService(STTService):
 
         # Start the timer
         self._end_of_utterance_timer = asyncio.create_task(
-            send_after_delay(self._end_of_utterance_silence_trigger * 2)
+            send_after_delay(self._params.end_of_utterance_silence_trigger * 2)
         )
 
     async def _handle_end_of_utterance(self):
@@ -814,7 +743,7 @@ class SpeechmaticsSTTService(STTService):
         downstream_frames: list[Frame] = []
 
         # If VAD is enabled, then send a speaking frame
-        if self._enable_vad and not self._is_speaking:
+        if self._params.enable_vad and not self._is_speaking:
             logger.debug("User started speaking")
             self._is_speaking = True
             upstream_frames += [BotInterruptionFrame()]
@@ -829,7 +758,7 @@ class SpeechmaticsSTTService(STTService):
             downstream_frames += [
                 TranscriptionFrame(
                     **frame._as_frame_attributes(
-                        self._speaker_active_format, self._speaker_passive_format
+                        self._params.speaker_active_format, self._params.speaker_passive_format
                     )
                 )
                 for frame in speech_frames
@@ -841,11 +770,16 @@ class SpeechmaticsSTTService(STTService):
         # Return as interim results (unformatted)
         else:
             downstream_frames += [
-                InterimTranscriptionFrame(**frame._as_frame_attributes()) for frame in speech_frames
+                InterimTranscriptionFrame(
+                    **frame._as_frame_attributes(
+                        self._params.speaker_active_format, self._params.speaker_passive_format
+                    )
+                )
+                for frame in speech_frames
             ]
 
         # If VAD is enabled, then send a speaking frame
-        if self._enable_vad and self._is_speaking and finalized:
+        if self._params.enable_vad and self._is_speaking and finalized:
             logger.debug("User stopped speaking")
             self._is_speaking = False
             downstream_frames += [UserStoppedSpeakingFrame()]
@@ -907,14 +841,17 @@ class SpeechmaticsSTTService(STTService):
 
                     # Drop speakers not focussed on
                     if (
-                        self._focus_mode == DiarizationFocusMode.IGNORE
-                        and self._focus_speakers
-                        and fragment.speaker not in self._focus_speakers
+                        self._params.focus_mode == DiarizationFocusMode.IGNORE
+                        and self._params.focus_speakers
+                        and fragment.speaker not in self._params.focus_speakers
                     ):
                         continue
 
                     # Drop ignored speakers
-                    if self._ignore_speakers and fragment.speaker in self._ignore_speakers:
+                    if (
+                        self._params.ignore_speakers
+                        and fragment.speaker in self._params.ignore_speakers
+                    ):
                         continue
 
                 # Add the fragment
@@ -1008,8 +945,8 @@ class SpeechmaticsSTTService(STTService):
 
         # Determine if the speaker is considered active
         is_active = True
-        if self._enable_diarization and self._focus_speakers:
-            is_active = group[0].speaker in self._focus_speakers
+        if self._params.enable_diarization and self._params.focus_speakers:
+            is_active = group[0].speaker in self._params.focus_speakers
 
         # Return the SpeakerFragments object
         return SpeakerFragments(
@@ -1143,3 +1080,50 @@ def _locale_to_speechmatics_locale(language_code: str, locale: Language) -> str 
 
     # Return the locale code
     return result
+
+
+def _check_deprecated_args(kwargs: dict, params: SpeechmaticsSTTService.InputParams) -> None:
+    """Check arguments for deprecation and update params if necessary.
+
+    This function will show deprecation warnings for deprecated arguments and
+    migrate them to the new location in the params object. If the new location
+    is None, the argument is not used.
+
+    Args:
+        kwargs: Keyword arguments passed to the constructor.
+        params: Input parameters for the service.
+    """
+
+    # Show deprecation warnings
+    def _deprecation_warning(old: str, new: str | None = None):
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            if new:
+                message = f"`{old}` is deprecated, use `InputParams.{new}`"
+            else:
+                message = f"`{old}` is deprecated and not used"
+            warnings.warn(message, DeprecationWarning)
+
+    # List of deprecated arguments and their new location
+    deprecated_args = [
+        ("language", "language"),
+        ("language_code", "language"),
+        ("domain", "domain"),
+        ("output_locale", "output_locale"),
+        ("output_locale_code", "output_locale"),
+        ("enable_partials", "enable_partials"),
+        ("max_delay", "max_delay"),
+        ("chunk_size", "chunk_size"),
+        ("audio_encoding", "audio_encoding"),
+        ("end_of_utterance_silence_trigger", "end_of_utterance_silence_trigger"),
+        ("text_format", "speaker_active_format"),
+        ("max_speakers", "max_speakers"),
+        ("transcription_config", None),
+    ]
+
+    # Show warnings + migrate the arguments
+    for old, new in deprecated_args:
+        if old in kwargs:
+            _deprecation_warning(old, new)
+            if kwargs.get(old, None) is not None:
+                params.__setattr__(new, kwargs[old])

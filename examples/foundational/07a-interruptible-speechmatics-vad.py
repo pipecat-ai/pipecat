@@ -49,32 +49,32 @@ transport_params = {
 
 async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
     """Speechmatics STT Service Example
-    
+
     This example demonstrates using Speechmatics Speech-to-Text service with speaker diarization and intelligent speaker management. Key features:
-    
+
     1. Speaker Diarization
        - Automatically identifies and distinguishes between different speakers
        - First speaker is identified as 'S1', others get subsequent IDs
        - Uses `enable_diarization` parameter to manage speaker detection
-    
+
     2. Smart Speaker Control
        - `focus_speakers` parameter lets you target specific speakers (e.g. ["S1"])
        - Other speakers will be wrapped in PASSIVE tags
        - Only processes speech from focused speakers
        - Words from all speakers are wrapped with XML tags for clear speaker identification
        - Other speakers' speech only sent when focused speaker is active
-    
+
     3. Voice Activity Detection
        - Built-in VAD using `enable_vad` parameter
        - Remove `vad_analyzer` from `transport` config to use module's VAD
        - Emits speaker started/stopped events
-    
+
     4. Configuration Options
        - `operating_point` parameter defaults to `ENHANCED` for optimal accuracy
        - Configurable `end_of_utterance_silence_trigger` (default 0.5s)
        - Customizable speaker formatting
        - Additional diarization settings available
-    
+
     For detailed information about operating points and configuration:
     https://docs.speechmatics.com/rt-api-ref
     """
@@ -83,13 +83,15 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     stt = SpeechmaticsSTTService(
         api_key=os.getenv("SPEECHMATICS_API_KEY"),
-        language=Language.EN,
-        enable_vad=True,
-        enable_diarization=True,
-        focus_speakers=["S1"],
-        end_of_utterance_silence_trigger=0.5,
-        speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
-        speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
+        params=SpeechmaticsSTTService.InputParams(
+            language=Language.EN,
+            enable_vad=True,
+            enable_diarization=True,
+            focus_speakers=["S1"],
+            end_of_utterance_silence_trigger=0.5,
+            speaker_active_format="<{speaker_id}>{text}</{speaker_id}>",
+            speaker_passive_format="<PASSIVE><{speaker_id}>{text}</{speaker_id}></PASSIVE>",
+        ),
     )
 
     tts = ElevenLabsTTSService(
