@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Changed the default `url` for `NeuphonicTTSService` to
+  `wss://api.neuphonic.com` as it provides better global performance. You can
+  set the URL to other URLs, such as the previous default:
+  `wss://eu-west-1.api.neuphonic.com`.
+
 - Update `daily-python` to 0.19.5.
 
 - `STTMuteFilter` now pushes the `STTMuteFrame` upstream and downstream, to

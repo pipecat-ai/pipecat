@@ -107,7 +107,7 @@ class NeuphonicTTSService(InterruptibleTTSService):
         *,
         api_key: str,
         voice_id: Optional[str] = None,
-        url: str = "wss://eu-west-1.api.neuphonic.com",
+        url: str = "wss://api.neuphonic.com",
         sample_rate: Optional[int] = 22050,
         encoding: str = "pcm_linear",
         params: Optional[InputParams] = None,
