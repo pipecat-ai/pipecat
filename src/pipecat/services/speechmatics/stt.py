@@ -692,13 +692,13 @@ class SpeechmaticsSTTService(STTService):
 
         # Diarization
         if self._enable_diarization:
-            dz_cfg = SpeakerDiarizationConfig()
+            dz_cfg = {}
             if self._diarization_sensitivity is not None:
-                dz_cfg.speaker_sensitivity = self._diarization_sensitivity
+                dz_cfg["speaker_sensitivity"] = self._diarization_sensitivity
             if self._prefer_current_speaker is not None:
-                dz_cfg.prefer_current_speaker = self._prefer_current_speaker
+                dz_cfg["prefer_current_speaker"] = self._prefer_current_speaker
             if self._known_speakers:
-                dz_cfg.speakers = {s.label: s.speaker_identifiers for s in self._known_speakers}
+                dz_cfg["speakers"] = {s.label: s.speaker_identifiers for s in self._known_speakers}
             if dz_cfg:
                 transcription_config.speaker_diarization_config = dz_cfg
 
