@@ -97,6 +97,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `LLMUserResponseAggregator` issue where interruptions were not being
+  handled properly.
+
+- Fixed `PiperTTSService` to work with newer Piper GPL.
+
 - Fixed a race condition in `FastAPIWebsocketClient` that occurred when attempting to
   send a message while the client was disconnecting.
 
