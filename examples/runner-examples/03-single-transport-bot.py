@@ -4,9 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Pipecat Cloud-compatible bot example.
+"""Pipecat development runner example.
 
-Transports are Daily or SmallWebRTC."""
+This example has a single transport—SmallWebRTCTransport.
+
+Run it with::
+
+    python 03-single-transport-bot.py
+"""
 
 import os
 

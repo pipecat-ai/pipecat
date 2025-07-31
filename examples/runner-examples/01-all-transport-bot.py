@@ -105,6 +105,8 @@ async def run_bot(transport: BaseTransport):
 async def bot(runner_args: RunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
+    transport = None
+
     if isinstance(runner_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
@@ -199,6 +201,13 @@ async def bot(runner_args: RunnerArguments):
                 serializer=serializer,
             ),
         )
+    else:
+        logger.error(f"Unsupported runner arguments type: {type(runner_args)}")
+        return
+
+    if transport is None:
+        logger.error("Failed to create transport")
+        return
 
     await run_bot(transport)
 
