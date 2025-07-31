@@ -1077,6 +1077,20 @@ class InputImageRawFrame(SystemFrame, ImageRawFrame):
 
 
 @dataclass
+class InputTextRawFrame(SystemFrame, TextFrame):
+    """Raw text input frame from transport.
+
+    Text input usually coming from user typing or programmatic text injection
+    that should be sent to LLM services as input, similar to how InputAudioRawFrame
+    and InputImageRawFrame represent user audio and video input.
+    """
+
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, source: {self.transport_source}, text: [{self.text}])"
+
+
+@dataclass
 class UserAudioRawFrame(InputAudioRawFrame):
     """Raw audio input frame associated with a specific user.
 
@@ -1191,6 +1205,16 @@ class StopFrame(ControlFrame):
     Indicates that a pipeline should be stopped but that the pipeline
     processors should be kept in a running state. This is normally queued from
     the pipeline task.
+    """
+
+    pass
+
+
+@dataclass
+class OutputTransportReadyFrame(ControlFrame):
+    """Frame indicating that the output transport is ready.
+
+    Indicates that the output transport is ready and able to receive frames.
     """
 
     pass
