@@ -26,7 +26,6 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from pipecatcloud import WebSocketSessionArguments
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
@@ -34,6 +33,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
+from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -111,10 +111,10 @@ async def run_bot(transport: BaseTransport):
     await runner.run(task)
 
 
-async def bot(session_args: WebSocketSessionArguments):
+async def bot(runner_args: RunnerArguments):
     """Main bot entry point for the bot starter."""
 
-    transport_type, call_data = await parse_telephony_websocket(session_args.websocket)
+    transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
     logger.info(f"Auto-detected transport: {transport_type}")
 
     serializer = TwilioFrameSerializer(
@@ -125,7 +125,7 @@ async def bot(session_args: WebSocketSessionArguments):
     )
 
     transport = FastAPIWebsocketTransport(
-        websocket=session_args.websocket,
+        websocket=runner_args.websocket,
         params=FastAPIWebsocketParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
