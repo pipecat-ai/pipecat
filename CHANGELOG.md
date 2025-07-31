@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the ability to switch voices to `RimeTTSService`.
 
+- Added unified development runner for building voice AI bots across multiple transports
+
+  - `pipecat.runner.run` – FastAPI-based development server with automatic bot discovery
+  - `pipecat.runner.types` – Runner session argument types (`DailyRunnerArguments`, `SmallWebRTCRunnerArguments`, `WebSocketRunnerArguments`)
+  - `pipecat.runner.utils.create_transport()` – Factory function for creating transports from session arguments
+  - `pipecat.runner.daily` and `pipecat.runner.livekit` – Configuration utilities for Daily and LiveKit setups
+  - Support for all transport types: Daily, WebRTC, Twilio, Telnyx, Plivo
+  - Automatic telephony provider detection and serializer configuration
+  - ESP32 WebRTC compatibility with SDP munging
+  - Environment detection (`ENV=local`) for conditional features
+
 - Added Async.ai TTS integration (https://async.ai/)
 
   - `AsyncAITTSService` – WebSocket-based streaming TTS with interruption support
