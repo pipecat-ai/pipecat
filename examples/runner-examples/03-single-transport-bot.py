@@ -91,7 +91,7 @@ async def run_bot(transport):
     await runner.run(task)
 
 
-async def bot(session_args: SmallWebRTCRunnerArguments):
+async def bot(runner_args: SmallWebRTCRunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
     transport = SmallWebRTCTransport(
@@ -100,7 +100,7 @@ async def bot(session_args: SmallWebRTCRunnerArguments):
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         ),
-        webrtc_connection=session_args.webrtc_connection,
+        webrtc_connection=runner_args.webrtc_connection,
     )
 
     await run_bot(transport)

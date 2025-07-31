@@ -101,11 +101,11 @@ async def run_bot(transport):
 
 
 async def bot(
-    session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
+    runner_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
 ):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    if isinstance(session_args, DailyRunnerArguments):
+    if isinstance(runner_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
         if os.environ.get("ENV") != "local":
@@ -116,8 +116,8 @@ async def bot(
             krisp_filter = None
 
         transport = DailyTransport(
-            session_args.room_url,
-            session_args.token,
+            runner_args.room_url,
+            runner_args.token,
             "Pipecat Bot",
             params=DailyParams(
                 audio_in_enabled=True,
@@ -127,7 +127,7 @@ async def bot(
             ),
         )
 
-    elif isinstance(session_args, SmallWebRTCRunnerArguments):
+    elif isinstance(runner_args, SmallWebRTCRunnerArguments):
         from pipecat.transports.base_transport import TransportParams
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
@@ -137,14 +137,14 @@ async def bot(
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
-            webrtc_connection=session_args.webrtc_connection,
+            webrtc_connection=runner_args.webrtc_connection,
         )
 
-    elif isinstance(session_args, WebSocketRunnerArguments):
+    elif isinstance(runner_args, WebSocketRunnerArguments):
         # Use the utility to parse WebSocket data
         from pipecat.runner.utils import parse_telephony_websocket
 
-        transport_type, call_data = await parse_telephony_websocket(session_args.websocket)
+        transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
         logger.info(f"Auto-detected transport: {transport_type}")
 
         # Create transport based on detected type
@@ -190,7 +190,7 @@ async def bot(
         )
 
         transport = FastAPIWebsocketTransport(
-            websocket=session_args.websocket,
+            websocket=runner_args.websocket,
             params=FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,

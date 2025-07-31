@@ -137,10 +137,10 @@ async def run_bot(transport):
 
 
 async def bot(
-    session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
+    runner_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
 ):
     """Main bot entry point compatible with Pipecat Cloud."""
-    transport = await create_transport(session_args, transport_params)
+    transport = await create_transport(runner_args, transport_params)
     await run_bot(transport)
 
 

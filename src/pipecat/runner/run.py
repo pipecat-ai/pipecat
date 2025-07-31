@@ -15,16 +15,16 @@ Install with::
 
     pip install pipecat-ai[runner]
 
-All bots must implement a `bot(session_args)` async function as the entry point.
+All bots must implement a `bot(runner_args)` async function as the entry point.
 The server automatically discovers and executes this function when connections
 are established.
 
 Single transport example::
 
-    async def bot(session_args: DailyRunnerArguments):
+    async def bot(runner_args: DailyRunnerArguments):
         transport = DailyTransport(
-            session_args.room_url,
-            session_args.token,
+            runner_args.room_url,
+            runner_args.token,
             "Bot",
             DailyParams(...)
         )
@@ -37,14 +37,14 @@ Single transport example::
 
 Multiple transport example::
 
-    async def bot(session_args):
+    async def bot(runner_args):
         # Type-safe transport detection
-        if isinstance(session_args, DailyRunnerArguments):
-            transport = setup_daily_transport(session_args)  # Your application code
-        elif isinstance(session_args, SmallWebRTCRunnerArguments):
-            transport = setup_webrtc_transport(session_args)  # Your application code
-        elif isinstance(session_args, WebSocketRunnerArguments):
-            transport = setup_telephony_transport(session_args)  # Your application code
+        if isinstance(runner_args, DailyRunnerArguments):
+            transport = setup_daily_transport(runner_args)  # Your application code
+        elif isinstance(runner_args, SmallWebRTCRunnerArguments):
+            transport = setup_webrtc_transport(runner_args)  # Your application code
+        elif isinstance(runner_args, WebSocketRunnerArguments):
+            transport = setup_telephony_transport(runner_args)  # Your application code
 
         # Your bot implementation
         await run_pipeline(transport)
@@ -144,9 +144,9 @@ async def _run_telephony_bot(websocket: WebSocket):
     bot_module = _get_bot_module()
 
     # Just pass the WebSocket - let the bot handle parsing
-    session_args = WebSocketRunnerArguments(websocket=websocket)
+    runner_args = WebSocketRunnerArguments(websocket=websocket)
 
-    await bot_module.bot(session_args)
+    await bot_module.bot(runner_args)
 
 
 def _create_server_app(
@@ -221,8 +221,8 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
                 pcs_map.pop(webrtc_connection.pc_id, None)
 
             bot_module = _get_bot_module()
-            session_args = SmallWebRTCRunnerArguments(webrtc_connection=pipecat_connection)
-            background_tasks.add_task(bot_module.bot, session_args)
+            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=pipecat_connection)
+            background_tasks.add_task(bot_module.bot, runner_args)
 
         answer = pipecat_connection.get_answer()
 
@@ -263,8 +263,8 @@ def _setup_daily_routes(app: FastAPI):
 
             # Start the bot in the background
             bot_module = _get_bot_module()
-            session_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
-            asyncio.create_task(bot_module.bot(session_args))
+            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+            asyncio.create_task(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
     @app.post("/connect")
@@ -281,8 +281,8 @@ def _setup_daily_routes(app: FastAPI):
 
             # Start the bot in the background
             bot_module = _get_bot_module()
-            session_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
-            asyncio.create_task(bot_module.bot(session_args))
+            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+            asyncio.create_task(bot_module.bot(runner_args))
             return {"room_url": room_url, "token": token}
 
 
@@ -345,7 +345,7 @@ async def _run_daily_direct():
     async with aiohttp.ClientSession() as session:
         room_url, token = await configure(session)
 
-        session_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+        runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()
@@ -354,7 +354,7 @@ async def _run_daily_direct():
         print("   (Direct connection - no web server needed)")
         print()
 
-        await bot_module.bot(session_args)
+        await bot_module.bot(runner_args)
 
 
 def main():
@@ -375,7 +375,7 @@ def main():
         -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
         -v/--verbose: Increase logging verbosity
 
-    The bot file must contain a `bot(session_args)` function as the entry point.
+    The bot file must contain a `bot(runner_args)` function as the entry point.
     """
     parser = argparse.ArgumentParser(description="Pipecat Development Runner")
     parser.add_argument("--host", type=str, default="localhost", help="Host address")
