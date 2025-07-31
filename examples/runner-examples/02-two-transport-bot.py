@@ -92,10 +92,10 @@ async def run_bot(transport):
     await runner.run(task)
 
 
-async def bot(session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
+async def bot(runner_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
-    if isinstance(session_args, DailyRunnerArguments):
+    if isinstance(runner_args, DailyRunnerArguments):
         from pipecat.transports.services.daily import DailyParams, DailyTransport
 
         if os.environ.get("ENV") != "local":
@@ -106,8 +106,8 @@ async def bot(session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
             krisp_filter = None
 
         transport = DailyTransport(
-            session_args.room_url,
-            session_args.token,
+            runner_args.room_url,
+            runner_args.token,
             "Pipecat Bot",
             params=DailyParams(
                 audio_in_enabled=True,
@@ -117,7 +117,7 @@ async def bot(session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
             ),
         )
 
-    elif isinstance(session_args, SmallWebRTCRunnerArguments):
+    elif isinstance(runner_args, SmallWebRTCRunnerArguments):
         from pipecat.transports.base_transport import TransportParams
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
@@ -127,7 +127,7 @@ async def bot(session_args: DailyRunnerArguments | SmallWebRTCRunnerArguments):
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
             ),
-            webrtc_connection=session_args.webrtc_connection,
+            webrtc_connection=runner_args.webrtc_connection,
         )
 
     await run_bot(transport)

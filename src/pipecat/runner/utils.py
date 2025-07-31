@@ -389,15 +389,15 @@ async def _create_telephony_transport(
 
 
 async def create_transport(
-    session_args: Any, transport_params: Dict[str, Callable]
+    runner_args: Any, transport_params: Dict[str, Callable]
 ) -> BaseTransport:
-    """Create a transport from session arguments using factory functions.
+    """Create a transport from runner arguments using factory functions.
 
     This function uses the clean transport_params factory pattern where users
     define a dictionary mapping transport names to parameter factory functions.
 
     Args:
-        session_args: Session arguments from the runner.
+        runner_args: Arguments from the runner.
         transport_params: Dict mapping transport names to parameter factory functions.
             Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo"
             Values should be functions that return transport parameters when called.
@@ -406,7 +406,7 @@ async def create_transport(
         Configured transport instance.
 
     Raises:
-        ValueError: If transport key is missing from transport_params or session args type is unsupported.
+        ValueError: If transport key is missing from transport_params or runner_args type is unsupported.
         ImportError: If required dependencies are not installed.
 
     Example::
@@ -442,40 +442,40 @@ async def create_transport(
             ),
         }
 
-        transport = await create_transport(session_args, transport_params)
+        transport = await create_transport(runner_args, transport_params)
     """
-    # Create transport based on session args type
-    if isinstance(session_args, DailyRunnerArguments):
+    # Create transport based on runner args type
+    if isinstance(runner_args, DailyRunnerArguments):
         params = _get_transport_params("daily", transport_params)
 
         from pipecat.transports.services.daily import DailyTransport
 
         return DailyTransport(
-            session_args.room_url,
-            session_args.token,
+            runner_args.room_url,
+            runner_args.token,
             "Pipecat Bot",
             params=params,
         )
 
-    elif isinstance(session_args, SmallWebRTCRunnerArguments):
+    elif isinstance(runner_args, SmallWebRTCRunnerArguments):
         params = _get_transport_params("webrtc", transport_params)
 
         from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
 
         return SmallWebRTCTransport(
             params=params,
-            webrtc_connection=session_args.webrtc_connection,
+            webrtc_connection=runner_args.webrtc_connection,
         )
 
-    elif isinstance(session_args, WebSocketRunnerArguments):
+    elif isinstance(runner_args, WebSocketRunnerArguments):
         # Parse once to determine the provider and get data
-        transport_type, call_data = await parse_telephony_websocket(session_args.websocket)
+        transport_type, call_data = await parse_telephony_websocket(runner_args.websocket)
         params = _get_transport_params(transport_type, transport_params)
 
         # Create telephony transport with pre-parsed data
         return await _create_telephony_transport(
-            session_args.websocket, params, transport_type, call_data
+            runner_args.websocket, params, transport_type, call_data
         )
 
     else:
-        raise ValueError(f"Unsupported session arguments type: {type(session_args)}")
+        raise ValueError(f"Unsupported runner arguments type: {type(runner_args)}")
