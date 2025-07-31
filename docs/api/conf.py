@@ -202,6 +202,7 @@ def import_core_modules():
         "pipecat.clocks",
         "pipecat.metrics",
         "pipecat.observers",
+        "pipecat.runner",
         "pipecat.serializers",
         "pipecat.sync",
         "pipecat.transcriptions",

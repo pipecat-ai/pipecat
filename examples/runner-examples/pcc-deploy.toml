@@ -1,0 +1,8 @@
+agent_name = "cloud-simple-bot"
+image = "your_dockerhub_username/cloud-simple-bot:0.1"
+image_credentials = "dockerhub-access"
+secret_set = "cloud-simple-bot-secrets"
+enable_krisp = true
+
+[scaling]
+	min_agents = 0
