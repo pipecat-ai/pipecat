@@ -28,17 +28,19 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    RunnerArguments,
     SmallWebRTCRunnerArguments,
     WebSocketRunnerArguments,
 )
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_transport import BaseTransport
 
 load_dotenv(override=True)
 
 
-async def run_bot(transport):
+async def run_bot(transport: BaseTransport):
     """Main bot logic that works with any transport."""
     logger.info(f"Starting bot")
 
@@ -100,9 +102,7 @@ async def run_bot(transport):
     await runner.run(task)
 
 
-async def bot(
-    runner_args: DailyRunnerArguments | SmallWebRTCRunnerArguments | WebSocketRunnerArguments,
-):
+async def bot(runner_args: RunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
 
     if isinstance(runner_args, DailyRunnerArguments):
