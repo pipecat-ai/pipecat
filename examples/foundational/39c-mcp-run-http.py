@@ -128,6 +128,14 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
 
 if __name__ == "__main__":
+    if not os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
+        logger.error(
+            f"Please set GITHUB_PERSONAL_ACCESS_TOKEN environment variable for this example."
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.examples.run import main
 
     main(run_example, transport_params=transport_params)
