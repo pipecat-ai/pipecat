@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue in `LiveKitTransport` where empty `AudioRawFrame`s were pushed
   down the pipeline. This resulted in warnings by the STT processor.
 
+- Added `source` field to `ErrorFrame` to indicate `FrameProcessor` that generated the error.
+
 ## [0.0.77] - 2025-07-31
 
 ### Added
@@ -71,8 +73,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `on_transcription_stopped` and `on_transcription_error` to Daily
   callbacks.
-
-- Added `source` field to `ErrorFrame` to indicate `FrameProcessor` that generated the error.
 
 ### Changed
 
