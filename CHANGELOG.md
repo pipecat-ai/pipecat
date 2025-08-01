@@ -65,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `on_transcription_stopped` and `on_transcription_error` to Daily
   callbacks.
 
+- Added `source` field to `ErrorFrame` to indicate `FrameProcessor` that generated the error.
+
 ### Changed
 
 - Changed the default `url` for `NeuphonicTTSService` to
