@@ -321,16 +321,233 @@ class AWSTranscribeSTTService(STTService):
             AWS Transcribe compatible language code, or None if unsupported.
         """
         language_map = {
+            # English variants (all supported by AWS Transcribe)
             Language.EN: "en-US",
+            Language.EN_AU: "en-AU",
+            Language.EN_GB: "en-GB",
+            Language.EN_IN: "en-IN",
+            Language.EN_IE: "en-IE",
+            Language.EN_NZ: "en-NZ",
+            Language.EN_ZA: "en-ZA",
+            
+            # Spanish variants (all supported by AWS Transcribe)
             Language.ES: "es-US",
+            Language.ES_ES: "es-ES",
+            Language.ES_MX: "es-MX",
+            Language.ES_AR: "es-AR",
+            Language.ES_BO: "es-BO",
+            Language.ES_CL: "es-CL",
+            Language.ES_CO: "es-CO",
+            Language.ES_CR: "es-CR",
+            Language.ES_CU: "es-CU",
+            Language.ES_DO: "es-DO",
+            Language.ES_EC: "es-EC",
+            Language.ES_GQ: "es-GQ",
+            Language.ES_GT: "es-GT",
+            Language.ES_HN: "es-HN",
+            Language.ES_NI: "es-NI",
+            Language.ES_PA: "es-PA",
+            Language.ES_PE: "es-PE",
+            Language.ES_PR: "es-PR",
+            Language.ES_PY: "es-PY",
+            Language.ES_SV: "es-SV",
+            Language.ES_UY: "es-UY",
+            Language.ES_VE: "es-VE",
+            
+            # French variants (all supported by AWS Transcribe)
             Language.FR: "fr-FR",
+            Language.FR_CA: "fr-CA",
+            Language.FR_BE: "fr-BE",
+            Language.FR_CH: "fr-CH",
+            
+            # German variants (all supported by AWS Transcribe)
             Language.DE: "de-DE",
+            Language.DE_AT: "de-AT",
+            Language.DE_CH: "de-CH",
+            
+            # Italian variants (all supported by AWS Transcribe)
             Language.IT: "it-IT",
+            Language.IT_CH: "it-CH",
+            
+            # Portuguese variants (all supported by AWS Transcribe)
             Language.PT: "pt-BR",
+            Language.PT_PT: "pt-PT",
+            
+            # Japanese (supported by AWS Transcribe)
             Language.JA: "ja-JP",
+            Language.JA_JP: "ja-JP",
+            
+            # Korean (supported by AWS Transcribe)
             Language.KO: "ko-KR",
+            Language.KO_KR: "ko-KR",
+            
+            # Chinese variants (supported by AWS Transcribe)
             Language.ZH: "zh-CN",
+            Language.ZH_CN: "zh-CN",
+            Language.ZH_TW: "zh-TW",
+            Language.ZH_HK: "zh-HK",
+            
+            # Polish (supported by AWS Transcribe)
             Language.PL: "pl-PL",
+            Language.PL_PL: "pl-PL",
+            
+            # Other languages supported by AWS Transcribe
+            Language.AF: "af-ZA",
+            Language.AF_ZA: "af-ZA",
+            
+            Language.AR: "ar-SA",  # Modern Standard Arabic
+            Language.AR_AE: "ar-AE",  # Gulf Arabic
+            Language.AR_SA: "ar-SA",
+            
+            Language.AZ: "az-AZ",
+            Language.AZ_AZ: "az-AZ",
+            
+            Language.BG: "bg-BG",
+            Language.BG_BG: "bg-BG",
+            
+            Language.BS: "bs-BA",
+            Language.BS_BA: "bs-BA",
+            
+            Language.CA: "ca-ES",
+            Language.CA_ES: "ca-ES",
+            
+            Language.CS: "cs-CZ",
+            Language.CS_CZ: "cs-CZ",
+            
+            Language.DA: "da-DK",
+            Language.DA_DK: "da-DK",
+            
+            Language.EL: "el-GR",
+            Language.EL_GR: "el-GR",
+            
+            Language.ET: "et-EE",
+            Language.ET_EE: "et-EE",
+            
+            Language.EU: "eu-ES",
+            Language.EU_ES: "eu-ES",
+            
+            Language.FI: "fi-FI",
+            Language.FI_FI: "fi-FI",
+            
+            Language.HR: "hr-HR",
+            Language.HR_HR: "hr-HR",
+            
+            Language.HU: "hu-HU",
+            Language.HU_HU: "hu-HU",
+            
+            Language.HY: "hy-AM",
+            Language.HY_AM: "hy-AM",
+            
+            Language.ID: "id-ID",
+            Language.ID_ID: "id-ID",
+            
+            Language.IS: "is-IS",
+            Language.IS_IS: "is-IS",
+            
+            Language.KK: "kk-KZ",
+            Language.KK_KZ: "kk-KZ",
+            
+            Language.KN: "kn-IN",
+            Language.KN_IN: "kn-IN",
+            
+            Language.LT: "lt-LT",
+            Language.LT_LT: "lt-LT",
+            
+            Language.LV: "lv-LV",
+            Language.LV_LV: "lv-LV",
+            
+            Language.MK: "mk-MK",
+            Language.MK_MK: "mk-MK",
+            
+            Language.ML: "ml-IN",
+            Language.ML_IN: "ml-IN",
+            
+            Language.MN: "mn-MN",
+            Language.MN_MN: "mn-MN",
+            
+            Language.MR: "mr-IN",
+            Language.MR_IN: "mr-IN",
+            
+            Language.MT: "mt-MT",
+            Language.MT_MT: "mt-MT",
+            
+            Language.NB: "nb-NO",
+            Language.NB_NO: "nb-NO",
+            Language.NO: "nb-NO",
+            
+            Language.NL: "nl-NL",
+            Language.NL_NL: "nl-NL",
+            Language.NL_BE: "nl-BE",
+            
+            Language.OR: "or-IN",
+            Language.OR_IN: "or-IN",
+            
+            Language.PA: "pa-IN",
+            Language.PA_IN: "pa-IN",
+            
+            Language.PS: "ps-AF",
+            Language.PS_AF: "ps-AF",
+            
+            Language.RO: "ro-RO",
+            Language.RO_RO: "ro-RO",
+            
+            Language.RU: "ru-RU",
+            Language.RU_RU: "ru-RU",
+            
+            Language.SI: "si-LK",
+            Language.SI_LK: "si-LK",
+            
+            Language.SK: "sk-SK",
+            Language.SK_SK: "sk-SK",
+            
+            Language.SL: "sl-SI",
+            Language.SL_SI: "sl-SI",
+            
+            Language.SO: "so-SO",
+            Language.SO_SO: "so-SO",
+            
+            Language.SR: "sr-RS",
+            Language.SR_RS: "sr-RS",
+            Language.SR_LATN: "sr-Latn-RS",
+            Language.SR_LATN_RS: "sr-Latn-RS",
+            
+            Language.SU: "su-ID",
+            Language.SU_ID: "su-ID",
+            
+            Language.SV: "sv-SE",
+            Language.SV_SE: "sv-SE",
+            
+            Language.SW: "sw-KE",
+            Language.SW_KE: "sw-KE",
+            Language.SW_TZ: "sw-TZ",
+            
+            Language.TA: "ta-IN",
+            Language.TA_IN: "ta-IN",
+            
+            Language.TE: "te-IN",
+            Language.TE_IN: "te-IN",
+            
+            Language.TH: "th-TH",
+            Language.TH_TH: "th-TH",
+            
+            Language.TL: "tl-PH",
+            Language.FIL: "tl-PH",
+            Language.FIL_PH: "tl-PH",
+            
+            Language.TR: "tr-TR",
+            Language.TR_TR: "tr-TR",
+            
+            Language.UK: "uk-UA",
+            Language.UK_UA: "uk-UA",
+            
+            Language.UZ: "uz-UZ",
+            Language.UZ_UZ: "uz-UZ",
+            
+            Language.VI: "vi-VN",
+            Language.VI_VN: "vi-VN",
+            
+            Language.ZU: "zu-ZA",
+            Language.ZU_ZA: "zu-ZA",
         }
         return language_map.get(language)
 
