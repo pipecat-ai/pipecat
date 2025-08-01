@@ -1,4 +1,1 @@
-uvicorn
-python-dotenv
-pipecat-ai[webrtc,websocket,daily,deepgram,cartesia,silero]
-pipecat-ai-small-webrtc-prebuilt
+pipecat-ai[webrtc,websocket,daily,deepgram,cartesia,silero,runner]>=0.0.77
