@@ -104,6 +104,7 @@ webrtc = [ "aiortc~=1.11.0", "opencv-python~=4.11.0.86" ]
 websocket = [ "websockets>=13.1,<15.0", "fastapi>=0.115.6,<0.117.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
 
+[dependency-groups]
 dev = [
     "build~=1.2.2",
     "coverage~=7.9.1",
