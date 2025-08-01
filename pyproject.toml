@@ -104,6 +104,23 @@ webrtc = [ "aiortc~=1.11.0", "opencv-python~=4.11.0.86" ]
 websocket = [ "websockets>=13.1,<15.0", "fastapi>=0.115.6,<0.117.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
 
+[dependency-groups]
+dev = [
+    "build~=1.2.2",
+    "coverage~=7.9.1",
+    "grpcio-tools~=1.67.1",
+    "pip-tools~=7.4.1",
+    "pre-commit~=4.2.0",
+    "pyright~=1.1.402",
+    "pytest~=8.4.1",
+    "pytest-asyncio~=1.0.0",
+    "pytest-aiohttp==1.1.0",
+    "ruff~=0.12.1",
+    "setuptools~=78.1.1",
+    "setuptools_scm~=8.3.1",
+    "python-dotenv~=1.1.1",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

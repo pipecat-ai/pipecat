@@ -1,0 +1,42 @@
+name: Update lockfile
+
+on:
+  push:
+    paths:
+      - 'pyproject.toml'
+    branches:
+      - main
+  workflow_dispatch: # Allows manual triggering from GitHub UI
+
+jobs:
+  update-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # This gives the workflow permission to push back to the repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v1
+
+      - name: Update lockfile
+        run: uv lock
+
+      - name: Check for changes
+        id: verify-changed-files
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit lockfile
+        if: steps.verify-changed-files.outputs.changed == 'true'
+        run: |
+          git config --local user.email "action@github.com"  
+          git config --local user.name "GitHub Action"
+          git add uv.lock
+          git commit -m "chore: update uv.lock after dependency changes"
+          git push
