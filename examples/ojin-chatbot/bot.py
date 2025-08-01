@@ -5,31 +5,31 @@
 #
 
 import asyncio
+import io
 import os
 import sys
-import io
+import tkinter as tk
 from typing import Awaitable
 
-from dotenv import load_dotenv
-from loguru import logger
 import cv2
 import numpy as np
+from dotenv import load_dotenv
+from loguru import logger
 from PIL import Image
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, ImageRawFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
-from pipecat.services.ojin.video import OjinAvatarService, OjinAvatarSettings
-from pipecat.audio.vad.silero import SileroVADAnalyzer
-import tkinter as tk
+from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 load_dotenv(override=True)
 
@@ -91,7 +91,7 @@ class ImageFormatConverter(FrameProcessor):
 
 async def main():    
     tk_root = tk.Tk()
-    tk_root.title("Ojin Avatar Chatbot")
+    tk_root.title("Ojin Persona Chatbot")
     
     # Configure window to be visible on Windows
     tk_root.geometry("1280x720")
@@ -157,10 +157,10 @@ async def main():
     context_aggregator = llm.create_context_aggregator(context)
 
     # DITTO_SERVER_URL: str = "wss://eu-central-1.models.ojin.foo/realtime"
-    avatar = OjinAvatarService(OjinAvatarSettings(
+    persona = OjinPersonaService(OjinPersonaSettings(
         ws_url=os.getenv("OJIN_PROXY_URL", ""),
         api_key=os.getenv("OJIN_API_KEY", ""),
-        avatar_config_id=os.getenv("OJIN_AVATAR_ID", ""),        
+        persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),        
         image_size=(1280, 720),
         idle_to_speech_seconds=1.5,
         idle_sequence_duration=5,
@@ -178,7 +178,7 @@ async def main():
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS
-            avatar,
+            persona,
             image_converter,  # Convert image format from BGR to PPM
             tk_transport.output(),  # Transport video output
             audio_transport.output(),  # Transport audio output            
