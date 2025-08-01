@@ -4,12 +4,12 @@ import os
 from typing import Tuple
 
 import aiohttp
-from daily_runner import configure
 from dotenv import load_dotenv
 
 from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators import SentenceAggregator
+from pipecat.runner.daily import configure
 from pipecat.services.azure import AzureLLMService, AzureTTSService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
