@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
 import tempfile
 
@@ -17,6 +16,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.gemini_multimodal_live.gemini import (
     GeminiMultimodalLiveLLMService,
 )
@@ -87,7 +88,7 @@ async def create_sample_file():
             return f.name
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport):
     logger.info(f"Starting File API bot")
 
     # Create a sample file to upload
@@ -218,8 +219,14 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         logger.error(f"Error removing temporary file: {e}")
 
 
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport)
+
+
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.run import main
 
     upload_example_file = input("""
 
@@ -235,4 +242,4 @@ if __name__ == "__main__":
     else:
         print(f"Using default file")
 
-    main(run_example, transport_params=transport_params)
+    main()
