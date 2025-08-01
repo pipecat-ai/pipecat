@@ -494,6 +494,8 @@ class FrameProcessor(BaseObject):
         Args:
             error: The error frame to push.
         """
+        if not error.source:
+            error.source = self
         await self.push_frame(error, FrameDirection.UPSTREAM)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
