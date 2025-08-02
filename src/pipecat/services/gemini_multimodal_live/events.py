@@ -195,7 +195,7 @@ class VideoInputMessage(BaseModel):
 class TextInputMessage(BaseModel):
     """Message containing text input data."""
 
-    realtimeInput: RealtimeInput
+    text: str
 
     @classmethod
     def from_text(cls, text: str) -> "TextInputMessage":
@@ -207,7 +207,7 @@ class TextInputMessage(BaseModel):
         Returns:
             A TextInputMessage instance.
         """
-        return cls(realtimeInput=RealtimeInput(text=text))
+        return cls(text=text)
 
 
 class ClientContentMessage(BaseModel):
