@@ -9,11 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The development runner how handles custom `body` data for `DailyTransport`.
+  The `body` data is passed to the Pipecat client. You can POST to the `/start`
+  endpoint with a request body of:
+
+  ```
+  {
+      "createDailyRoom": true,
+      "dailyRoomProperties": { "start_video_off": true },
+      "body": { "custom_data": "value" }
+  }
+  ```
+
+  The `body` information is parsed and used in the application. The
+  `dailyRoomProperties` are currently not handled.
+
 - Added detailed latency logging to `UserBotLatencyLogObserver`, capturing
   average response time between user stop and bot start, as well as minimum and
   maximum response latency.
 
 ### Changed
+
+- The development runners `/connect` and `/start` endpoint now both return
+  `dailyRoom` and `dailyToken` in place of the previous `room_url` and `token`.
 
 - Updated the `pipecat.runner.daily` utility to only a take `DAILY_API_URL` and
   `DAILY_SAMPLE_ROOM_URL` environment variables instead of argparsing `-u` and
@@ -49,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - In the `pipecat.runner.daily`, the `configure_with_args()` function is
   deprecated. Use the `configure()` function instead.
+
+- The development runner's `/connect` endpoint is deprecated and will be
+  removed in a future version. Use the `/start` endpoint in its place. In the
+  meantime, both endpoints work and deliver equivalent functionality.
 
 ## [0.0.77] - 2025-07-31
 
