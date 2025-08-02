@@ -61,6 +61,7 @@ To run locally:
 - ESP32: `python bot.py -t webrtc --esp32 --host 192.168.1.100`
 - Daily (server): `python bot.py -t daily`
 - Daily (direct, testing only): `python bot.py -d`
+- Daily with body data: `python bot.py -d --body '{"foo": "bar"}'`
 - Telephony: `python bot.py -t twilio -x your_username.ngrok.io`
 """
 
@@ -150,7 +151,11 @@ async def _run_telephony_bot(websocket: WebSocket):
 
 
 def _create_server_app(
-    transport_type: str, host: str = "localhost", proxy: str = None, esp32_mode: bool = False
+    transport_type: str,
+    host: str = "localhost",
+    proxy: str = None,
+    esp32_mode: bool = False,
+    body: dict = None,
 ):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
@@ -167,7 +172,7 @@ def _create_server_app(
     if transport_type == "webrtc":
         _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host)
     elif transport_type == "daily":
-        _setup_daily_routes(app)
+        _setup_daily_routes(app, body)
     elif transport_type in ["twilio", "telnyx", "plivo"]:
         _setup_telephony_routes(app, transport_type, proxy)
     else:
@@ -246,7 +251,7 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
     app.router.lifespan_context = lifespan
 
 
-def _setup_daily_routes(app: FastAPI):
+def _setup_daily_routes(app: FastAPI, body: dict = None):
     """Set up Daily-specific routes."""
 
     @app.get("/")
@@ -261,9 +266,9 @@ def _setup_daily_routes(app: FastAPI):
         async with aiohttp.ClientSession() as session:
             room_url, token = await configure(session)
 
-            # Start the bot in the background
+            # Start the bot in the background with provided body
             bot_module = _get_bot_module()
-            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=body or {})
             asyncio.create_task(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
@@ -279,9 +284,9 @@ def _setup_daily_routes(app: FastAPI):
         async with aiohttp.ClientSession() as session:
             room_url, token = await configure(session)
 
-            # Start the bot in the background
+            # Start the bot in the background with provided body
             bot_module = _get_bot_module()
-            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=body or {})
             asyncio.create_task(bot_module.bot(runner_args))
             return {"room_url": room_url, "token": token}
 
@@ -330,7 +335,7 @@ def _setup_telephony_routes(app: FastAPI, transport_type: str, proxy: str):
         return {"status": f"Bot started with {transport_type}"}
 
 
-async def _run_daily_direct():
+async def _run_daily_direct(body: dict = None):
     """Run Daily bot with direct connection (no FastAPI server)."""
     try:
         import aiohttp
@@ -345,13 +350,16 @@ async def _run_daily_direct():
     async with aiohttp.ClientSession() as session:
         room_url, token = await configure(session)
 
-        runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+        # Use provided body or default to empty dict
+        runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=body or {})
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()
 
         print(f"📞 Joining Daily room: {room_url}")
         print("   (Direct connection - no web server needed)")
+        if body:
+            print(f"   Body data: {body}")
         print()
 
         await bot_module.bot(runner_args)
@@ -373,6 +381,7 @@ def main():
         -x/--proxy: Public proxy hostname for telephony webhooks
         --esp32: Enable SDP munging for ESP32 compatibility (requires --host with IP address)
         -d/--direct: Connect directly to Daily room (automatically sets transport to daily)
+        -b/--body: JSON body data to pass to Daily bot (only valid with Daily transport)
         -v/--verbose: Increase logging verbosity
 
     The bot file must contain a `bot(runner_args)` function as the entry point.
@@ -403,6 +412,12 @@ def main():
         help="Connect directly to Daily room (automatically sets transport to daily)",
     )
     parser.add_argument(
+        "-b",
+        "--body",
+        type=str,
+        help="JSON body data to pass to Daily bot (only valid with Daily transport)",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="count", default=0, help="Increase logging verbosity"
     )
 
@@ -414,6 +429,22 @@ def main():
     elif args.direct and args.transport != "daily":
         logger.error("--direct flag only works with Daily transport (-t daily)")
         return
+
+    # Validate body argument is only used with Daily transport
+    if args.body and args.transport != "daily":
+        logger.error("--body/-b flag only works with Daily transport (-t daily)")
+        return
+
+    # Parse and validate JSON body if provided
+    parsed_body = {}
+    if args.body:
+        try:
+            import json
+
+            parsed_body = json.loads(args.body)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in --body argument: {e}")
+            return
 
     # Validate ESP32 requirements
     if args.esp32 and args.host == "localhost":
@@ -430,8 +461,8 @@ def main():
         print("🚀 Connecting directly to Daily room...")
         print()
 
-        # Run direct Daily connection
-        asyncio.run(_run_daily_direct())
+        # Run direct Daily connection with parsed body
+        asyncio.run(_run_daily_direct(parsed_body))
         return
 
     # Print startup message for server-based transports
@@ -452,7 +483,7 @@ def main():
         print()
 
     # Create the app with transport-specific setup
-    app = _create_server_app(args.transport, args.host, args.proxy, args.esp32)
+    app = _create_server_app(args.transport, args.host, args.proxy, args.esp32, parsed_body)
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)

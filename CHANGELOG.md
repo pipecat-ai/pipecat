@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added the ability to pass `body` properties to the development runner using
+  the `--body`/`-b` command. The `body` accepts an object provided using valid
+  JSON format. Currently, the `body` is only accepted when using
+  `DailyTransport`.
+
 ### Fixed
 
 - Fixed an issue in `LiveKitTransport` where empty `AudioRawFrame`s were pushed
