@@ -242,6 +242,10 @@ class TavusTransportClient:
                 on_transcription_message=partial(
                     self._on_handle_callback, "on_transcription_message"
                 ),
+                on_transcription_stopped=partial(
+                    self._on_handle_callback, "on_transcription_stopped"
+                ),
+                on_transcription_error=partial(self._on_handle_callback, "on_transcription_error"),
                 on_recording_started=partial(self._on_handle_callback, "on_recording_started"),
                 on_recording_stopped=partial(self._on_handle_callback, "on_recording_stopped"),
                 on_recording_error=partial(self._on_handle_callback, "on_recording_error"),
