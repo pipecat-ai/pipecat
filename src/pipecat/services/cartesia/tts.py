@@ -34,6 +34,10 @@ from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
+# Suppress regex warnings from pydub (used by cartesia)
+warnings.filterwarnings("ignore", message="invalid escape sequence", category=SyntaxWarning)
+
+
 # See .env.example for Cartesia configuration needed
 try:
     from cartesia import AsyncCartesia
