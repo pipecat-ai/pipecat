@@ -245,6 +245,8 @@ class TavusTransportClient:
                 on_recording_started=partial(self._on_handle_callback, "on_recording_started"),
                 on_recording_stopped=partial(self._on_handle_callback, "on_recording_stopped"),
                 on_recording_error=partial(self._on_handle_callback, "on_recording_error"),
+                on_transcription_stopped=self._on_transcription_stopped,
+                on_transcription_error=self._on_transcription_error,
             )
             self._client = DailyTransportClient(
                 room_url, None, "Pipecat", self._params, daily_callbacks, self._bot_name
@@ -273,6 +275,20 @@ class TavusTransportClient:
     async def _on_handle_callback(self, event_name, *args, **kwargs):
         """Handle generic callback events."""
         logger.trace(f"[Callback] {event_name} called with args={args}, kwargs={kwargs}")
+
+    async def _on_transcription_stopped(self, stopped_by: str, stopped_by_error: bool):
+        """
+        Placeholder for transcription stopped callback.
+        Required by DailyCallbacks in Pipecat 0.0.77+ but not used by Tavus.
+        """
+        pass
+
+    async def _on_transcription_error(self, message: str):
+        """
+        Placeholder for transcription error callback.
+        Required by DailyCallbacks in Pipecat 0.0.77+ but not used by Tavus.
+        """
+        pass
 
     async def get_persona_name(self) -> str:
         """Get the persona name from the API.
