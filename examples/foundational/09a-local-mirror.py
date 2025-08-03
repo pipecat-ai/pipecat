@@ -4,14 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import asyncio
 import tkinter as tk
 
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.examples.run import maybe_capture_participant_camera
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -23,6 +21,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport, maybe_capture_participant_camera
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 from pipecat.transports.services.daily import DailyParams
@@ -75,7 +75,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport):
     logger.info(f"Starting bot")
 
     tk_root = tk.Tk()
@@ -115,12 +115,18 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=False)
 
     await asyncio.gather(runner.run(task), run_tk())
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

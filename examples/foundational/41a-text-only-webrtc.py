@@ -4,10 +4,8 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
 
-import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -27,10 +25,11 @@ from pipecat.processors.frameworks.rtvi import (
     RTVIProcessor,
     RTVIServerMessageFrame,
 )
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.openai import OpenAIContextAggregatorPair
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
@@ -79,7 +78,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport):
     logger.info(f"Starting bot")
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -151,7 +150,13 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()
