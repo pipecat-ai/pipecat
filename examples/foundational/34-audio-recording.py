@@ -4,6 +4,13 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,deepgram,openai,cartesia]>=0.0.77",
+#   "aiofiles",
+# ]
+# ///
+
 """Audio Recording Example with Pipecat.
 
 This example demonstrates how to record audio from a conversation between a user and an AI assistant,

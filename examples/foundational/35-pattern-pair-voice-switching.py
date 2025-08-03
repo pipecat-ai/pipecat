@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,deepgram,openai,cartesia]>=0.0.77",
+# ]
+# ///
+
 """Pattern Pair Voice Switching Example with Pipecat.
 
 This example demonstrates how to use the PatternPairAggregator to dynamically switch

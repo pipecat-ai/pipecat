@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,deepgram,openai,elevenlabs,mem0]>=0.0.77",
+# ]
+# ///
+
 """Mem0 Personalized Voice Agent Example with Pipecat.
 
 This example demonstrates how to create a conversational AI assistant with memory capabilities

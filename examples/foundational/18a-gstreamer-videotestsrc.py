@@ -4,6 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,runner,gstreamer]>=0.0.77",
+# ]
+# ///
 
 from dotenv import load_dotenv
 from loguru import logger

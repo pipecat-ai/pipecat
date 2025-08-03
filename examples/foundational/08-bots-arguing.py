@@ -1,3 +1,15 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,azure,elevenlabs,fal]>=0.0.77",
+# ]
+# ///
+
 import asyncio
 import logging
 import os

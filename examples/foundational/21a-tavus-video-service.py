@@ -4,6 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,runner,silero,deepgram,openai,cartesia,tavus]>=0.0.77",
+# ]
+# ///
 
 import os
 

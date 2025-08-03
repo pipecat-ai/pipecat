@@ -3,6 +3,13 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,deepgram,google,cartesia]>=0.0.77",
+# ]
+# ///
+
 """CrossFit Games 2025 Rulebook RAG Demo.
 
 This example demonstrates a Model-Assisted Generation (MAG) chatbot using Google's Gemini model.

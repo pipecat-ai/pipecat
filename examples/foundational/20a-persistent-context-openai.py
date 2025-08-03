@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,deepgram,openai,cartesia]>=0.0.77",
+# ]
+# ///
+
 import glob
 import json
 import os
@@ -191,6 +197,8 @@ async def run_bot(transport: BaseTransport):
     logger.info(f"Starting bot")
 
     global tts
+
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),

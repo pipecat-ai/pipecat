@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[livekit,silero,deepgram,openai,cartesia]>=0.0.77",
+# ]
+# ///
+
 import asyncio
 import json
 import os

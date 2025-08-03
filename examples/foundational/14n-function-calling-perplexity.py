@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,deepgram,perplexity,cartesia]>=0.0.77",
+# ]
+# ///
+
 """This example demonstrates using the Perplexity API as a drop-in replacement for OpenAI.
 
 Note that while this file is in the function-calling examples, Perplexity's API does not

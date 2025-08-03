@@ -4,6 +4,12 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# dependencies = [
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,openai]>=0.0.77",
+# ]
+# ///
+
 import asyncio
 import glob
 import json
@@ -22,7 +28,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
@@ -178,8 +183,6 @@ transport_params = {
 async def run_bot(transport: BaseTransport):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
     session_properties = SessionProperties(
         input_audio_transcription=InputAudioTranscription(),
         # Set openai TurnDetection parameters. Not setting this at all will turn it
@@ -223,7 +226,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,  # STT
             context_aggregator.user(),
             llm,  # LLM
             transport.output(),  # Transport bot output
