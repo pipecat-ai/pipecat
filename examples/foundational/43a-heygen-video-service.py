@@ -4,6 +4,18 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "pipecat-ai>=0.0.77",
+#   "deepgram-sdk",
+#   "cartesia",
+#   "google-generativeai",
+#   "aiohttp",
+#   "python-dotenv",
+#   "loguru",
+# ]
+# ///
 
 import os
 
