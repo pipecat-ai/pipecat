@@ -121,13 +121,18 @@ async def run_bot(transport: BaseTransport):
     file_info = None
     try:
         file_info = await llm.file_api.upload_file(
-            sample_file_path, display_name="Sample Test Document"
+            sample_file_path
         )
-        logger.info(f"File uploaded successfully: {file_info['file']['name']}")
+        logger.info(f"File uploaded successfully: {file_info.name}")
 
         # Get file URI and mime type
-        file_uri = file_info["file"]["uri"]
-        mime_type = "text/plain"
+        file_uri = file_info.uri
+        mime_type = file_info.mime_type
+
+        check_file = await llm.file_api.get_file(file_info.name)
+        print(f"_____26f-gemini-multimodal-live-files-api.py * check_file: {check_file}")
+        list_files = await llm.file_api.list_files()
+        print(f"_____26f-gemini-multimodal-live-files-api.py * list_files: {list_files}")
 
         # Create context with file reference
         context = OpenAILLMContext(
