@@ -5,15 +5,8 @@
 #
 
 # /// script
-# requires-python = ">=3.11"
 # dependencies = [
-#   "pipecat-ai>=0.0.77",
-#   "deepgram-sdk",
-#   "cartesia",
-#   "google-generativeai",
-#   "aiohttp",
-#   "python-dotenv",
-#   "loguru",
+#   "pipecat-ai[daily,webrtc,websocket,runner,silero,deepgram,google,cartesia,heygen]>=0.0.77",
 # ]
 # ///
 
