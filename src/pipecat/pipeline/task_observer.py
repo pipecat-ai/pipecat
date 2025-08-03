@@ -153,22 +153,23 @@ class TaskObserver(BaseObserver):
 
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):
         """Handle frame processing for a single observer."""
-        warning_reported = False
+        on_push_frame_deprecated = False
+        signature = inspect.signature(observer.on_push_frame)
+        if len(signature.parameters) > 1:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Observer `on_push_frame(source, destination, frame, direction, timestamp)` is deprecated, us `on_push_frame(data: FramePushed)` instead.",
+                    DeprecationWarning,
+                )
+
+            on_push_frame_deprecated = True
+
         while True:
             data = await queue.get()
-
-            signature = inspect.signature(observer.on_push_frame)
-            if len(signature.parameters) > 1:
-                if not warning_reported:
-                    import warnings
-
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("always")
-                        warnings.warn(
-                            "Observer `on_push_frame(source, destination, frame, direction, timestamp)` is deprecated, us `on_push_frame(data: FramePushed)` instead.",
-                            DeprecationWarning,
-                        )
-                    warning_reported = True
+            if on_push_frame_deprecated:
                 await observer.on_push_frame(
                     data.src, data.dst, data.frame, data.direction, data.timestamp
                 )

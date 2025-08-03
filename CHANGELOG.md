@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue with the `TavusVideoService` where an error was thrown due to
   missing transcription callbacks.
 
+### Performance
+
+- Fixed an issue in `TaskObserver` (a proxy to all observers) that was degrading
+  global performance.
+
 ## [0.0.77] - 2025-07-31
 
 ### Added
