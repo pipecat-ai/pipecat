@@ -11,8 +11,8 @@ import numpy as np
 
 # Will use numpy when implementing persona-specific processing
 from loguru import logger
-from ojin_client.ojin_persona_client import OjinPersonaClient
-from ojin_client.ojin_persona_messages import (
+from ojin.ojin_persona_client import OjinPersonaClient
+from ojin.ojin_persona_messages import (
     IOjinPersonaClient,
     OjinPersonaCancelInteractionMessage,
     OjinPersonaInteractionInputMessage,
