@@ -26,7 +26,14 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+print("🚀 Starting Pipecat bot...")
+print("⏳ Loading AI models (30-40 seconds first run, <2 seconds after)\n")
+
+logger.info("Loading Silero VAD model...")
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+
+logger.info("✅ Silero VAD model loaded")
+logger.info("Loading pipeline components...")
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -37,7 +44,13 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+
+logger.info("✅ Pipeline components loaded")
+
+logger.info("Loading WebRTC transport...")
 from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+
+logger.info("✅ All components loaded successfully!")
 
 load_dotenv(override=True)
 
