@@ -7,17 +7,14 @@
 """Daily room and token configuration utilities.
 
 This module provides helper functions for creating and configuring Daily rooms
-and authentication tokens. It handles both command-line argument parsing and
-environment variable configuration.
+and authentication tokens. It automatically creates temporary rooms for
+development or uses existing rooms specified via environment variables.
 
-The module supports creating temporary rooms for development or using existing
-rooms specified via arguments or environment variables.
+Environment variables:
 
-Required environment variables:
-
-- DAILY_API_KEY - Daily API key for room/token creation
-- DAILY_SAMPLE_ROOM_URL (optional) - Existing room URL to use
-- DAILY_SAMPLE_ROOM_TOKEN (optional) - Existing token to use
+- DAILY_API_KEY - Daily API key for room/token creation (required)
+- DAILY_SAMPLE_ROOM_URL (optional) - Existing room URL to use. If not provided,
+  a temporary room will be created automatically.
 
 Example::
 
@@ -29,17 +26,26 @@ Example::
         # Use room_url and token with DailyTransport
 """
 
-import argparse
 import os
-from typing import Optional
+import time
+import uuid
+from typing import Tuple
 
 import aiohttp
 
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
+from pipecat.transports.services.helpers.daily_rest import (
+    DailyRESTHelper,
+    DailyRoomParams,
+    DailyRoomProperties,
+)
 
 
-async def configure(aiohttp_session: aiohttp.ClientSession):
-    """Configure Daily room URL and token from arguments or environment.
+async def configure(aiohttp_session: aiohttp.ClientSession) -> Tuple[str, str]:
+    """Configure Daily room URL and token from environment variables.
+
+    This function will either:
+    1. Use an existing room URL from DAILY_SAMPLE_ROOM_URL environment variable
+    2. Create a new temporary room automatically if no URL is provided
 
     Args:
         aiohttp_session: HTTP session for making API requests.
@@ -48,65 +54,79 @@ async def configure(aiohttp_session: aiohttp.ClientSession):
         Tuple containing the room URL and authentication token.
 
     Raises:
-        Exception: If room URL or API key are not provided.
+        Exception: If DAILY_API_KEY is not provided in environment variables.
     """
-    (url, token, _) = await configure_with_args(aiohttp_session)
-    return (url, token)
-
-
-async def configure_with_args(
-    aiohttp_session: aiohttp.ClientSession, parser: Optional[argparse.ArgumentParser] = None
-):
-    """Configure Daily room with command-line argument parsing.
-
-    Args:
-        aiohttp_session: HTTP session for making API requests.
-        parser: Optional argument parser. If None, creates a default one.
-
-    Returns:
-        Tuple containing room URL, authentication token, and parsed arguments.
-
-    Raises:
-        Exception: If room URL or API key are not provided via arguments or environment.
-    """
-    if not parser:
-        parser = argparse.ArgumentParser(description="Daily AI SDK Bot Sample")
-    parser.add_argument(
-        "-u", "--url", type=str, required=False, help="URL of the Daily room to join"
-    )
-    parser.add_argument(
-        "-k",
-        "--apikey",
-        type=str,
-        required=False,
-        help="Daily API Key (needed to create an owner token for the room)",
-    )
-
-    args, unknown = parser.parse_known_args()
-
-    url = args.url or os.getenv("DAILY_SAMPLE_ROOM_URL")
-    key = args.apikey or os.getenv("DAILY_API_KEY")
-
-    if not url:
+    # Check for required API key
+    api_key = os.getenv("DAILY_API_KEY")
+    if not api_key:
         raise Exception(
-            "No Daily room specified. use the -u/--url option from the command line, or set DAILY_SAMPLE_ROOM_URL in your environment to specify a Daily room URL."
+            "DAILY_API_KEY environment variable is required. "
+            "Get your API key from https://dashboard.daily.co/developers"
         )
 
-    if not key:
-        raise Exception(
-            "No Daily API key specified. use the -k/--apikey option from the command line, or set DAILY_API_KEY in your environment to specify a Daily API key, available from https://dashboard.daily.co/developers."
-        )
+    # Check for existing room URL
+    existing_room_url = os.getenv("DAILY_SAMPLE_ROOM_URL")
 
     daily_rest_helper = DailyRESTHelper(
-        daily_api_key=key,
+        daily_api_key=api_key,
         daily_api_url=os.getenv("DAILY_API_URL", "https://api.daily.co/v1"),
         aiohttp_session=aiohttp_session,
     )
 
-    # Create a meeting token for the given room with an expiration 2 hours in
-    # the future.
+    if existing_room_url:
+        # Use existing room
+        print(f"Using existing Daily room: {existing_room_url}")
+        room_url = existing_room_url
+    else:
+        # Create a new temporary room
+        room_name = f"pipecat-{uuid.uuid4().hex[:8]}"
+        print(f"Creating new Daily room: {room_name}")
+
+        # Calculate expiration time: current time + 2 hours
+        expiration_time = time.time() + (2 * 60 * 60)  # 2 hours from now
+
+        # Create room properties with absolute timestamp
+        room_properties = DailyRoomProperties(
+            exp=expiration_time,  # Absolute Unix timestamp
+            eject_at_room_exp=True,
+        )
+
+        # Create room parameters
+        room_params = DailyRoomParams(name=room_name, properties=room_properties)
+
+        room_response = await daily_rest_helper.create_room(room_params)
+        room_url = room_response.url
+        print(f"Created Daily room: {room_url}")
+
+    # Create a meeting token for the room with an expiration 2 hours in the future
     expiry_time: float = 2 * 60 * 60
+    token = await daily_rest_helper.get_token(room_url, expiry_time)
 
-    token = await daily_rest_helper.get_token(url, expiry_time)
+    return (room_url, token)
 
-    return (url, token, args)
+
+# Keep this for backwards compatibility, but mark as deprecated
+async def configure_with_args(aiohttp_session: aiohttp.ClientSession, parser=None):
+    """Configure Daily room with command-line argument parsing.
+
+    .. deprecated:: 0.0.78
+        This function is deprecated. Use configure() instead which uses
+        environment variables only.
+
+    Args:
+        aiohttp_session: HTTP session for making API requests.
+        parser: Ignored. Kept for backwards compatibility.
+
+    Returns:
+        Tuple containing room URL, authentication token, and None (for args).
+    """
+    import warnings
+
+    warnings.warn(
+        "configure_with_args is deprecated. Use configure() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    room_url, token = await configure(aiohttp_session)
+    return (room_url, token, None)
