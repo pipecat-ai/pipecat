@@ -1,7 +1,6 @@
 import asyncio
 from pipecat.frames.frames import Frame, OutputAudioRawFrame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor  # ✅ fixed import
-
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 class ChunkedAudioSenderProcessor(FrameProcessor):
     """Processor to split and delay OutputAudioRawFrames to simulate streaming."""

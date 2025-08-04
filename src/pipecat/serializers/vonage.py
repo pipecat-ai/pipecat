@@ -1,5 +1,4 @@
 import io
-import wave
 from loguru import logger
 from pydub import AudioSegment
 from pipecat.audio.utils import create_stream_resampler
@@ -56,16 +55,15 @@ class VonageFrameSerializer(FrameSerializer):
                 self.sample_width,
                 self._sample_rate
             )
-            return resampled_data  # ✅ This must be `bytes`
+            return resampled_data  # This must be `bytes`
 
         elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
             logger.info("VonageFrameSerializer does not support TransportFrame")
-            return b""  # ✅ Should be bytes, not None
+            return None
 
         else:
             logger.info(f"VonageFrameSerializer does not support frame type: {type(frame).__name__}")
-            return b""  # ✅ Always return something safe
-
+            return None
 
     async def deserialize(self, data: str | bytes) -> Frame | None:
         if isinstance(data, str):
