@@ -191,7 +191,7 @@ class SpeakerFragments:
             passive_format = active_format
         return {
             "text": self._format_text(active_format if self.is_active else passive_format),
-            "user_id": self.speaker_id,
+            "user_id": self.speaker_id or "",
             "timestamp": self.timestamp,
             "language": self.language,
             "result": [frag.result for frag in self.fragments],

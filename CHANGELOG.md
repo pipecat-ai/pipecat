@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue with the `TavusVideoService` where an error was thrown due to
   missing transcription callbacks.
 
+- Fixed an issue in `SpeechmaticsSTTService` where the `user_id` was set to
+  `None` when diarization is not enabled.
+
 ### Performance
 
 - Fixed an issue in `TaskObserver` (a proxy to all observers) that was degrading
