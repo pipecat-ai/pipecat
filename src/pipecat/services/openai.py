@@ -521,8 +521,9 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         await super().process_frame(frame, direction)
         # See note above about not calling push_frame() here.
         if isinstance(frame, StartInterruptionFrame):
-            self._function_calls_in_progress.clear()
-            self._function_call_finished = None
+            # EDITED: we don't want to clear the function calls in progress when we interrupt
+            # self._function_calls_in_progress.clear()
+            # self._function_call_finished = None
         elif isinstance(frame, FunctionCallInProgressFrame):
             logger.debug(f"FunctionCallInProgressFrame: {frame}")
             self._function_calls_in_progress[frame.tool_call_id] = frame
