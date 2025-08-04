@@ -463,17 +463,16 @@ def main():
     if args.transport == "webrtc":
         print()
         if args.esp32:
-            print(
-                f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client (ESP32 mode)"
-            )
+            print(f"🚀 Bot ready! (ESP32 mode)")
+            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
         else:
-            print(f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client")
-        print(f"   Open this URL in your browser to connect!")
+            print(f"🚀 Bot ready!")
+            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
         print()
     elif args.transport == "daily":
         print()
-        print(f"🚀 Daily server starting at http://{args.host}:{args.port}")
-        print(f"   Open this URL in your browser to start a session!")
+        print(f"🚀 Bot ready!")
+        print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
         print()
 
     # Create the app with transport-specific setup
