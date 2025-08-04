@@ -119,22 +119,16 @@ You can get started with Pipecat running on your local machine, then move your a
    cd pipecat
    ```
 
-2. Install development dependencies:
+2. Install development and testing dependencies:
 
    ```bash
-   uv sync --group dev
+   uv sync --group dev --all-extras --no-extra krisp
    ```
 
 3. Install the git pre-commit hooks:
 
    ```bash
    uv run pre-commit install
-   ```
-
-4. Install all extras so you can run any example:
-
-   ```bash
-   uv sync --all-extras --no-extra krisp
    ```
 
 ### Running tests
