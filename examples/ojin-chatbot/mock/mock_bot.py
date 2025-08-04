@@ -18,11 +18,12 @@ from loguru import logger
 from PIL import Image
 
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.frames.frames import Frame, ImageRawFrame, OutputImageRawFrame
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
-from mock.mock_tts import MockTTSProcessor
+from mock_tts import MockTTSProcessor
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
 
 load_dotenv(override=True)
@@ -87,12 +88,15 @@ async def main():
 
     input = MockTTSProcessor(
         {
-            "audio_sequence": [
-                ("./assets/long_audio_16k.wav", 17),
+            "audio_sequence": [                
+                ("./mock/assets/long_audio_16k.wav", 20),
+                ("./mock/assets/long_audio_16k.wav", 23),
             ],
-            "event_sequence": [
-                ("user_started_speaking", 15),
-                ("user_stopped_speaking", 16),
+            "event_sequence": [                
+                ("user_started_speaking", 18),
+                ("user_stopped_speaking", 19),
+                ("user_started_speaking", 21),
+                ("user_stopped_speaking", 22),
             ],
             "chunk_size": 600000,
             "chunk_delay": 0.2,
