@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue in `LiveKitTransport` where empty `AudioRawFrame`s were pushed
   down the pipeline. This resulted in warnings by the STT processor.
+- Fixed `PiperTTSService` to send text as a JSON object in the request body,
+  resolving compatibility with Piper's HTTP API.
 
 - Fixed an issue with the `TavusVideoService` where an error was thrown due to
   missing transcription callbacks.
