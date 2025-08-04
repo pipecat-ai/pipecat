@@ -983,16 +983,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
         with audio and video inputs, preventing temporal misalignment that can occur
         when different modalities are processed through separate API pathways.
 
-        After sending the text, we signal turn completion to trigger a model response
-        for text-only interactions.
+        For realtimeInput, turn completion is automatically inferred by the API based
+        on user activity, so no explicit turnComplete signal is needed.
 
         Args:
             text: The text to send as user input.
         """
         evt = events.TextInputMessage.from_text(text)
-        await self.send_client_event(evt)
-        # After sending text, we need to signal that the turn is complete.
-        evt = events.ClientContentMessage.model_validate({"clientContent": {"turnComplete": True}})
         await self.send_client_event(evt)
 
     async def _send_user_video(self, frame):
