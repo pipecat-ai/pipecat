@@ -18,7 +18,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.sarvam.tts import SarvamTTSService
+from pipecat.services.sarvam.tts import SarvamWebsocketTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -56,10 +56,11 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     async with aiohttp.ClientSession() as session:
         stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        tts = SarvamTTSService(
+        tts = SarvamWebsocketTTSService(
             api_key=os.getenv("SARVAM_API_KEY"),
-            aiohttp_session=session,
-            params=SarvamTTSService.InputParams(language=Language.EN),
+            model="bulbul:v2",
+            target_language_code="en-IN",
+            speaker="manisha",
         )
 
         llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
