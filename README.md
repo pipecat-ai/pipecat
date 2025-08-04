@@ -69,80 +69,80 @@ You can connect to Pipecat from any platform using our official SDKs:
 
 ## ⚡ Getting started
 
-You can get started with Pipecat running on your local machine, then move your agent processes to the cloud when you’re ready.
+You can get started with Pipecat running on your local machine, then move your agent processes to the cloud when you're ready.
 
-```shell
-# Install the module
-pip install pipecat-ai
+1. Install uv
 
-# Set up your environment
-cp dot-env.template .env
-```
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
 
-To keep things lightweight, only the core framework is included by default. If you need support for third-party AI services, you can add the necessary dependencies with:
+   > **Need help?** Refer to the [uv install documentation](https://docs.astral.sh/uv/getting-started/installation/).
 
-```shell
-pip install "pipecat-ai[option,...]"
-```
+2. Install the module
+
+   ```bash
+   # For new projects
+   uv init my-pipecat-app
+   cd my-pipecat-app
+   uv add pipecat-ai
+
+   # Or for existing projects
+   uv add pipecat-ai
+   ```
+
+3. Set up your environment
+
+   ```bash
+   cp env.example .env
+   ```
+
+4. To keep things lightweight, only the core framework is included by default. If you need support for third-party AI services, you can add the necessary dependencies with:
+
+   ```bash
+   uv add "pipecat-ai[option,...]"
+   ```
+
+> **Using pip?** You can still use `pip install pipecat-ai` and `pip install "pipecat-ai[option,...]"` to get set up.
 
 ## 🧪 Code examples
 
 - [Foundational](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational) — small snippets that build on each other, introducing one or two concepts at a time
 - [Example apps](https://github.com/pipecat-ai/pipecat-examples) — complete applications that you can use as starting points for development
 
-## 🛠️ Hacking on the framework itself
+## 🛠️ Contributing to the framework
 
-1. Set up a virtual environment before following these instructions. From the root of the repo:
+1. Clone the repository and navigate to it:
 
-   ```shell
-   python3 -m venv venv
-   source venv/bin/activate
+   ```bash
+   git clone https://github.com/pipecat-ai/pipecat.git
+   cd pipecat
    ```
 
-2. Install the development dependencies:
+2. Install development and testing dependencies:
 
-   ```shell
-   pip install -r dev-requirements.txt
+   ```bash
+   uv sync --group dev --all-extras --no-extra krisp
    ```
 
-3. Install the git pre-commit hooks (these help ensure your code follows project rules):
+3. Install the git pre-commit hooks:
 
-   ```shell
-   pre-commit install
-   ```
-
-4. Install the `pipecat-ai` package locally in editable mode:
-
-   ```shell
-   pip install -e .
-   ```
-
-   > The `-e` or `--editable` option allows you to modify the code without reinstalling.
-
-5. Include optional dependencies as needed. For example:
-
-   ```shell
-   pip install -e ".[daily,deepgram,cartesia,openai,silero]"
-   ```
-
-6. (Optional) If you want to use this package from another directory:
-
-   ```shell
-   pip install "path_to_this_repo[option,...]"
+   ```bash
+   uv run pre-commit install
    ```
 
 ### Running tests
 
-Install the test dependencies:
+To run all tests, from the root directory:
 
-```shell
-pip install -r test-requirements.txt
+```bash
+uv run pytest
 ```
 
-From the root directory, run:
+Run a specific test suite:
 
-```shell
-pytest
+```bash
+uv run pytest tests/test_name.py
 ```
 
 ### Setting up your editor
