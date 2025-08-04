@@ -15,6 +15,7 @@ import audioop
 
 import numpy as np
 import pyloudnorm as pyln
+from scipy.signal import resample_poly
 
 from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.resamplers.soxr_resampler import SOXRAudioResampler
@@ -275,3 +276,26 @@ async def pcm_to_alaw(pcm_bytes: bytes, in_rate: int, out_rate: int, resampler: 
     out_alaw_bytes = audioop.lin2alaw(in_pcm_bytes, 2)
 
     return out_alaw_bytes
+
+
+async def infobip_resampler(audio_bytes: bytes, in_rate: int, out_rate: int) -> bytes:
+    """Resample 16-bit PCM mono audio bytes from in_rate to out_rate using polyphase filtering.
+
+    This function uses the scipy.signal.resample_poly function to perform high-quality resampling
+    of raw PCM audio data. The input and output are both expected to be mono, 16-bit signed integer PCM.
+
+    Args:
+        audio_bytes: Input audio data as raw bytes (16-bit signed integers).
+        in_rate: Original sample rate of the input audio in Hz.
+        out_rate: Desired output sample rate in Hz.
+
+    Returns:
+        Resampled audio data as raw bytes (16-bit signed integers) at the specified output rate.
+    """
+    audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+    gcd = np.gcd(in_rate, out_rate)
+    up = out_rate // gcd
+    down = in_rate // gcd
+    resampled = resample_poly(audio_np, up, down)
+    resampled = np.clip(resampled, -32768, 32767).astype(np.int16)
+    return resampled.tobytes()
