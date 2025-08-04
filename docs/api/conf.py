@@ -73,6 +73,7 @@ autodoc_mock_imports = [
     "krisp",
     "langchain",
     "lmnt",
+    "murf",
     "noisereduce",
     "openpipe",
     "simli",
