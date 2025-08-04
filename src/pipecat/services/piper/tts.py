@@ -84,7 +84,9 @@ class PiperTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            async with self._session.post(self._base_url, json=text, headers=headers) as response:
+            async with self._session.post(
+                self._base_url, json={"text": text}, headers=headers
+            ) as response:
                 if response.status != 200:
                     error = await response.text()
                     logger.error(
