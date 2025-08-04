@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changed `TavusVideoService` to send audio or video frames only after the
   transport is ready, preventing warning messages at startup.
 
+- The development runner now strips any provided protocol (e.g. https://) from
+  the proxy address and issues a warning. It also strips trailing `/`.
+
 ### Fixed
 
 - Fixed an issue in `LiveKitTransport` where empty `AudioRawFrame`s were pushed
