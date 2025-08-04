@@ -11,8 +11,8 @@ import numpy as np
 
 # Will use numpy when implementing persona-specific processing
 from loguru import logger
-from ojin_client.ojin_persona_client import OjinPersonaClient
-from ojin_client.ojin_persona_messages import (
+from ojin.ojin_persona_client import OjinPersonaClient
+from ojin.ojin_persona_messages import (
     IOjinPersonaClient,
     OjinPersonaCancelInteractionMessage,
     OjinPersonaInteractionInputMessage,
@@ -403,8 +403,8 @@ class OjinPersonaFSM:
 
 
 OJIN_PERSONA_SAMPLE_RATE=16000
-SPEECH_FILTER_AMOUNT = 0.0
-IDLE_FILTER_AMOUNT = 1.0
+SPEECH_FILTER_AMOUNT = 1000.0
+IDLE_FILTER_AMOUNT = 1000.0
 IDLE_MOUTH_OPENING_SCALE = 0.0
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 
