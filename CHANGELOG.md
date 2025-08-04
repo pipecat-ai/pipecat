@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `daily-python` to 0.19.6.
 
+- Changed `TavusVideoService` to send audio or video frames only after the
+  transport is ready, preventing warning messages at startup.
+
 ### Fixed
 
 - Fixed an issue in `LiveKitTransport` where empty `AudioRawFrame`s were pushed
