@@ -18,6 +18,8 @@ from pipecat.frames.frames import (
     OutputImageRawFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSStoppedFrame,
+    UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, StartFrame
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
@@ -45,24 +47,39 @@ class SimliVideoService(FrameProcessor):
         simli_config: SimliConfig,
         use_turn_server: bool = False,
         latency_interval: int = 0,
+        simli_url: str = "https://api.simli.ai",
+        is_trinity_avatar: bool = False,
     ):
         """Initialize the Simli video service.
 
         Args:
             simli_config: Configuration object for Simli client settings.
             use_turn_server: Whether to use TURN server for connection. Defaults to False.
-            latency_interval: Latency interval setting for video processing. Defaults to 0.
+            latency_interval: Latency interval setting for sending health checks to check the latency to Simli Servers. Defaults to 0.
+            simli_url: URL of the simli servers. Can be changed for custom deployments of enterprise users.
+            is_trinity_avatar: boolean to tell simli client that this is a Trinity avatar which reduces latency when using Trinity.
+
         """
         super().__init__()
-        self._simli_client = SimliClient(simli_config, use_turn_server, latency_interval)
+        self._initialized = False
+        simli_config.maxIdleTime += 5
+        simli_config.maxSessionLength += 5
+        self._simli_client = SimliClient(
+            simli_config,
+            use_turn_server,
+            latency_interval,
+            simliURL=simli_url,
+        )
 
-        self._pipecat_resampler_event = asyncio.Event()
         self._pipecat_resampler: AudioResampler = None
+        self._pipecat_resampler_event = asyncio.Event()
         self._simli_resampler = AudioResampler("s16", "mono", 16000)
 
-        self._initialized = False
         self._audio_task: asyncio.Task = None
         self._video_task: asyncio.Task = None
+        self._is_trinity_avatar = is_trinity_avatar
+        self._previously_interrupted = is_trinity_avatar
+        self._audio_buffer = bytearray()
 
     async def _start_connection(self):
         """Start the connection to Simli service and begin processing tasks."""
@@ -71,11 +88,9 @@ class SimliVideoService(FrameProcessor):
             self._initialized = True
 
         # Create task to consume and process audio and video
-        if not self._audio_task:
-            self._audio_task = self.create_task(self._consume_and_process_audio())
-
-        if not self._video_task:
-            self._video_task = self.create_task(self._consume_and_process_video())
+        await self._simli_client.sendSilence()
+        self._audio_task = self.create_task(self._consume_and_process_audio())
+        self._video_task = self.create_task(self._consume_and_process_video())
 
     async def _consume_and_process_audio(self):
         """Consume audio frames from Simli and push them downstream."""
@@ -118,7 +133,6 @@ class SimliVideoService(FrameProcessor):
         """
         await super().process_frame(frame, direction)
         if isinstance(frame, StartFrame):
-            await self.push_frame(frame, direction)
             await self._start_connection()
         elif isinstance(frame, TTSAudioRawFrame):
             # Send audio frame to Simli
@@ -137,19 +151,41 @@ class SimliVideoService(FrameProcessor):
 
                 resampled_frames = self._simli_resampler.resample(old_frame)
                 for resampled_frame in resampled_frames:
-                    await self._simli_client.send(
-                        resampled_frame.to_ndarray().astype(np.int16).tobytes()
-                    )
+                    audioBytes = resampled_frame.to_ndarray().astype(np.int16).tobytes()
+                    if self._previously_interrupted:
+                        self._audio_buffer.extend(audioBytes)
+                        if len(self._audio_buffer) >= 128000:
+                            try:
+                                for flushFrame in self._simli_resampler.resample(None):
+                                    self._audio_buffer.extend(
+                                        flushFrame.to_ndarray().astype(np.int16).tobytes()
+                                    )
+                            finally:
+                                await self._simli_client.playImmediate(self._audio_buffer)
+                                self._previously_interrupted = False
+                                self._audio_buffer = bytearray()
+                    else:
+                        await self._simli_client.send(audioBytes)
+                return
             except Exception as e:
                 logger.exception(f"{self} exception: {e}")
+        elif isinstance(frame, TTSStoppedFrame):
+            try:
+                if self._previously_interrupted and len(self._audio_buffer) > 0:
+                    await self._simli_client.playImmediate(self._audio_buffer)
+                    self._previously_interrupted = False
+                    self._audio_buffer = bytearray()
+            except Exception as e:
+                logger.exception(f"{self} exception: {e}")
+            return
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
-            await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame):
-            await self._simli_client.clearBuffer()
-            await self.push_frame(frame, direction)
-        else:
-            await self.push_frame(frame, direction)
+        elif isinstance(frame, (StartInterruptionFrame, UserStartedSpeakingFrame)):
+            if not self._previously_interrupted:
+                await self._simli_client.clearBuffer()
+            self._previously_interrupted = self._is_trinity_avatar
+
+        await self.push_frame(frame, direction)
 
     async def _stop(self):
         """Stop the Simli client and cancel processing tasks."""
