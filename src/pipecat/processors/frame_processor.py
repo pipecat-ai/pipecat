@@ -556,7 +556,7 @@ class FrameProcessor(BaseObject):
     #
 
     async def _start_interruption(self):
-        """Start handling an interruption by canceling current tasks."""
+        """Start handling an interruption by cancelling current tasks."""
         try:
             # Cancel the input task. This will stop processing queued frames.
             await self.__cancel_input_task()
