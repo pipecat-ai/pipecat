@@ -11,7 +11,7 @@ information to bot functions.
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import WebSocket
 
@@ -39,7 +39,7 @@ class DailyRunnerArguments(RunnerArguments):
     """
 
     room_url: str
-    token: str
+    token: Optional[str]
     body: Any
 
 
