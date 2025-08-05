@@ -145,6 +145,7 @@ async def _run_telephony_bot(websocket: WebSocket):
 
     # Just pass the WebSocket - let the bot handle parsing
     runner_args = WebSocketRunnerArguments(websocket=websocket)
+    runner_args.handle_sigint = False
 
     await bot_module.bot(runner_args)
 
@@ -222,6 +223,7 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
 
             bot_module = _get_bot_module()
             runner_args = SmallWebRTCRunnerArguments(webrtc_connection=pipecat_connection)
+            runner_args.handle_sigint = False
             background_tasks.add_task(bot_module.bot, runner_args)
 
         answer = pipecat_connection.get_answer()
@@ -264,6 +266,7 @@ def _setup_daily_routes(app: FastAPI):
             # Start the bot in the background with empty body for GET requests
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+            runner_args.handle_sigint = False
             asyncio.create_task(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
@@ -308,6 +311,7 @@ def _setup_daily_routes(app: FastAPI):
             # Start the bot in the background with extracted body data
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=bot_body)
+            runner_args.handle_sigint = False
             asyncio.create_task(bot_module.bot(runner_args))
             # Match PCC /start endpoint response format:
             return {"dailyRoom": room_url, "dailyToken": token}
