@@ -67,7 +67,7 @@ async def run_bot(transport: BaseTransport):
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", ""),
     )
 
-    llm = GoogleLLMOpenAIBetaService(api_key=os.getenv("GEMINI_API_KEY"))
+    llm = GoogleLLMOpenAIBetaService(api_key=os.getenv("GOOGLE_API_KEY"))
     # You can aslo register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)

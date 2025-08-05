@@ -68,9 +68,9 @@ async def run_bot(transport: BaseTransport):
     )
 
     llm = GoogleVertexLLMService(
-        credentials=os.getenv("GOOGLE_TEST_CREDENTIALS"),
+        credentials=os.getenv("GOOGLE_VERTEX_TEST_CREDENTIALS"),
         params=GoogleVertexLLMService.InputParams(
-            project_id="<google-project-id>",
+            project_id=os.getenv("GOOGLE_CLOUD_PROJECT_ID"),
         ),
     )
     # You can aslo register a function_name of None to get all functions
