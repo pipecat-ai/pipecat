@@ -334,6 +334,7 @@ class OpenAILLMService(BaseOpenAILLMService):
         **kwargs,
     ):
         super().__init__(model=model, params=params, **kwargs)
+        logger.info(f"USING local pipecat code")
 
     @staticmethod
     def create_context_aggregator(
@@ -524,6 +525,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
             # EDITED: we don't want to clear the function calls in progress when we interrupt
             # self._function_calls_in_progress.clear()
             # self._function_call_finished = None
+            pass
         elif isinstance(frame, FunctionCallInProgressFrame):
             logger.debug(f"FunctionCallInProgressFrame: {frame}")
             self._function_calls_in_progress[frame.tool_call_id] = frame
