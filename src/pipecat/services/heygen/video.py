@@ -183,7 +183,7 @@ class HeyGenVideoService(AIService):
     async def stop(self, frame: EndFrame):
         """Stop the HeyGen video service gracefully.
 
-        Performs cleanup by ending the conversation and canceling ongoing tasks
+        Performs cleanup by ending the conversation and cancelling ongoing tasks
         in a controlled manner.
 
         Args:
@@ -241,7 +241,7 @@ class HeyGenVideoService(AIService):
         Manages the interruption flow by:
         1. Setting the interruption flag
         2. Signaling the client to interrupt current speech
-        3. Canceling ongoing audio sending tasks
+        3. Cancelling ongoing audio sending tasks
         4. Creating a new send task
         5. Activating the avatar's listening animation
         """
