@@ -135,7 +135,7 @@ async def main():
         tk_root,
         TkTransportParams(
             audio_in_enabled=False,
-            audio_out_enabled=True,
+            audio_out_enabled=False,
             video_out_enabled=True,
             video_out_is_live=True,
             video_out_width=1280,
