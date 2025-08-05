@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportReadyFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -154,7 +155,7 @@ class TavusVideoService(AIService):
         self, participant_id: str, audio: AudioData, audio_source: str
     ):
         """Handle incoming audio data from participants."""
-        frame = OutputAudioRawFrame(
+        frame = SpeechOutputAudioRawFrame(
             audio=audio.audio_frames,
             sample_rate=audio.sample_rate,
             num_channels=audio.num_channels,
