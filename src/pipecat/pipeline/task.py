@@ -459,20 +459,10 @@ class PipelineTask(BasePipelineTask):
             # awaiting a task.
             pass
         finally:
-            # We only cancel things cleanly if we know we are the ones
-            # cancelling. It's possibe that we get an asyncio.CancelledError
-            # from the outside, in which case it is very likely other tasks have
-            # been already cancelled (e.g. when python is shutting down) so we
-            # can't assume things are being cancelled nicely.
-            if self._cancelled:
-                await self._cancel_tasks()
-                await self._cleanup(cleanup_pipeline)
-                if self._check_dangling_tasks:
-                    self._print_dangling_tasks()
-            else:
-                logger.warning(
-                    f"Pipeline task {self} is not being cancelled properly (use cancel() method)"
-                )
+            await self._cancel_tasks()
+            await self._cleanup(cleanup_pipeline)
+            if self._check_dangling_tasks:
+                self._print_dangling_tasks()
             self._finished = True
 
     async def queue_frame(self, frame: Frame):
