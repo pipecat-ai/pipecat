@@ -1,6 +1,7 @@
 """Ojin Persona implementation for Pipecat."""
 
 import asyncio
+from code import interact
 import math
 import time
 from dataclasses import dataclass, field
@@ -428,6 +429,8 @@ class OjinPersonaInteraction:
     mirrored_frame_idx: int = 0
     num_loop_frames: int = 0
     state: InteractionState = InteractionState.INACTIVE
+    ending_extra_time:float = 1.0
+    ending_timestamp:float = 0.0
     mouth_opening_scale: float = 0.0
 
     def __post_init__(self):
@@ -651,6 +654,7 @@ class OjinPersonaService(FrameProcessor):
             assert self._client is not None
             message = await self._client.receive_message()
             await self._handle_ojin_message(message)
+            await asyncio.sleep(0.001)
 
     async def push_ojin_message(self, message: BaseModel):
         """Send a message to the proxy.
@@ -672,16 +676,19 @@ class OjinPersonaService(FrameProcessor):
         Args:
             message: The message received from the proxy
 
-        """
+        """       
+
         if isinstance(message, OjinPersonaInteractionResponseMessage):
-            # logger.debug(f"Video frame received: {self._interaction.frame_idx}")
+            if self._interaction is None:
+                logger.warning("No interaction in progress when receiving video frame")
+                return
+            logger.debug(f"Video frame received: {self._interaction.frame_idx} isFinal: {message.is_final_response}")
             # Create and push the image frame
             image_frame = OutputImageRawFrame(
                 image=message.video_frame_bytes,
                 size=self._settings.image_size,
                 format="BGR",
-            )
-            assert self._interaction is not None
+            )            
             image_frame.pts = self._interaction.mirrored_frame_idx
             # Push the image frame to the FSM if it exists for advanced processing or directly to the output to outsource the processing to the client
             if self._fsm is not None:
@@ -798,12 +805,14 @@ class OjinPersonaService(FrameProcessor):
 
         Sends a cancel message to the backend, updates the FSM state, and
         cleans up the current interaction.
-        """
+        """        
         if self._interaction is None or self._interaction.interaction_id is None:
+            logger.debug("Trying to interrupt an interaction but none is active")
             return
-
-        if self._interaction.state == InteractionState.ACTIVE:
-            logger.debug("Interrupting interaction")
+        
+        logger.debug(f"Try interrupt interaction in state {self._interaction.state}")
+        if self._interaction.state != InteractionState.INACTIVE:
+            logger.debug("Sending CancelInteractionMessage")
             await self.push_ojin_message(
                 OjinPersonaCancelInteractionMessage(
                     interaction_id=self._interaction.interaction_id,
@@ -853,6 +862,7 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.start_frame_idx = 0
             self._interaction.frame_idx = 0
 
+        logger.debug("Sending StartInteractionMessage")
         await self.push_ojin_message(StartInteractionMessage())
 
         # immediately receive the ready message for now
@@ -868,8 +878,10 @@ class OjinPersonaService(FrameProcessor):
         """
         # TODO Handle possible race conditions i.e. when _interaction.state == STARTING
         if self._interaction is None:
+            logger.error("_end_interaction but no interaction is set")
             return
 
+        self._interaction.ending_timestamp = time.perf_counter()
         self._interaction.set_state(InteractionState.ENDING)
 
     async def _handle_input_audio(self, frame: TTSAudioRawFrame):
@@ -947,6 +959,7 @@ class OjinPersonaService(FrameProcessor):
 
         Clears the interaction queue and resets the interaction state.
         """
+        logger.debug("Closing interaction")
         # Clear the interaction queue if it exists
         if self._interaction is not None:
             self._interaction.close()
@@ -967,10 +980,13 @@ class OjinPersonaService(FrameProcessor):
                 await asyncio.sleep(0.001)
                 continue
 
-            is_final_message = (
-                self._interaction.audio_input_queue.qsize() == 1
-                and self._interaction.state == InteractionState.ENDING
-            )           
+            #logger.debug(f"Processing audio queue. Queue size: {self._interaction.audio_input_queue.qsize()} state: {self._interaction.state}")            
+            is_final_message = False
+            if self._interaction.state == InteractionState.ENDING:
+                if self._interaction.ending_timestamp + self._interaction.ending_extra_time >= time.perf_counter():
+                    is_final_message = self._interaction.audio_input_queue.qsize() <= 1
+                else:
+                    is_final_message = False
 
             # while there is more audio coming we wait for it if we don't have any to process atm
             if self._interaction.audio_input_queue.empty() and not is_final_message:
@@ -983,12 +999,21 @@ class OjinPersonaService(FrameProcessor):
                 message: OjinPersonaInteractionInputMessage = (
                     self._interaction.audio_input_queue.get_nowait()
                 )
+                should_finish_task = True
             except asyncio.QueueEmpty:
-                logger.error(f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}")
-                await asyncio.sleep(0.05)
-                continue
+                should_finish_task = False
+                if is_final_message:                    
+                    logger.warning(f"Pushing final message with empty audio")
+                    silence_duration = 0.1
+                    num_samples = int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
+                    silence_audio = b"\x00\x00" * num_samples
+                    message = OjinPersonaInteractionInputMessage(
+                        interaction_id=self._interaction.interaction_id,
+                        audio_int16_bytes=silence_audio,
+                    )
+                else:
+                    logger.error(f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}")
 
-            should_finish_task = True 
             if is_final_message:
                 self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
                 message.is_last_input = True
