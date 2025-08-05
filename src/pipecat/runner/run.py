@@ -265,7 +265,7 @@ def _setup_daily_routes(app: FastAPI):
 
             # Start the bot in the background with empty body for GET requests
             bot_module = _get_bot_module()
-            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+            runner_args = DailyRunnerArguments(room_url=room_url, token=token)
             runner_args.handle_sigint = False
             asyncio.create_task(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
@@ -395,7 +395,7 @@ async def _run_daily_direct():
         room_url, token = await configure(session)
 
         # Direct connections have no request body, so use empty dict
-        runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+        runner_args = DailyRunnerArguments(room_url=room_url, token=token)
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()

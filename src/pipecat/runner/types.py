@@ -39,8 +39,8 @@ class DailyRunnerArguments(RunnerArguments):
     """
 
     room_url: str
-    token: Optional[str]
-    body: Any
+    token: Optional[str] = None
+    body: Optional[Any] = {}
 
 
 @dataclass
