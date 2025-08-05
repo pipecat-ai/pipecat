@@ -500,6 +500,8 @@ class PipelineTask(BasePipelineTask):
             # out-of-band from the main streaming task which is what we want since
             # we want to cancel right away.
             await self._source.push_frame(CancelFrame())
+            # Wait for CancelFrame to make it throught the pipeline.
+            await self._wait_for_pipeline_end()
             # Only cancel the push task. Everything else will be cancelled in run().
             if self._process_push_task:
                 await self._task_manager.cancel_task(self._process_push_task)
@@ -654,7 +656,7 @@ class PipelineTask(BasePipelineTask):
         while running:
             frame = await self._push_queue.get()
             await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
-            if isinstance(frame, (EndFrame, StopFrame)):
+            if isinstance(frame, (CancelFrame, EndFrame, StopFrame)):
                 await self._wait_for_pipeline_end()
             running = not isinstance(frame, (CancelFrame, EndFrame, StopFrame))
             cleanup_pipeline = not isinstance(frame, StopFrame)
@@ -727,6 +729,7 @@ class PipelineTask(BasePipelineTask):
                 self._pipeline_end_event.set()
             elif isinstance(frame, CancelFrame):
                 await self._call_event_handler("on_pipeline_cancelled", frame)
+                self._pipeline_end_event.set()
             elif isinstance(frame, HeartbeatFrame):
                 await self._heartbeat_queue.put(frame)
             self._down_queue.task_done()
