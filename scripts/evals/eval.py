@@ -37,6 +37,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.runner.types import RunnerArguments
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
@@ -176,7 +177,7 @@ async def run_example_pipeline(script_path: Path):
         ),
     )
 
-    await module.run_bot(transport)
+    await module.run_bot(transport, RunnerArguments())
 
 
 async def run_eval_pipeline(
