@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `handle_sigint` and `handle_sigterm` to `RunnerArguments`. This
+  allows applications to know what settings they should use for the environment
+  they are running on.
+
 - Added `processor` field to `ErrorFrame` to indicate `FrameProcessor` that
   generated the error.
 
