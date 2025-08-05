@@ -459,15 +459,20 @@ class PipelineTask(BasePipelineTask):
             # awaiting a task.
             pass
         finally:
-            # It's possibe that we get an asyncio.CancelledError from the
-            # outside, if so we need to make sure everything gets cancelled
-            # properly.
-            if cleanup_pipeline:
-                await self._cancel()
-            await self._cancel_tasks()
-            await self._cleanup(cleanup_pipeline)
-            if self._check_dangling_tasks:
-                self._print_dangling_tasks()
+            # We only cancel things cleanly if we know we are the ones
+            # cancelling. It's possibe that we get an asyncio.CancelledError
+            # from the outside, in which case it is very likely other tasks have
+            # been already cancelled (e.g. when python is shutting down) so we
+            # can't assume things are being cancelled nicely.
+            if self._cancelled:
+                await self._cancel_tasks()
+                await self._cleanup(cleanup_pipeline)
+                if self._check_dangling_tasks:
+                    self._print_dangling_tasks()
+            else:
+                logger.warning(
+                    f"Pipeline task {self} is not being cancelled properly (use cancel() method)"
+                )
             self._finished = True
 
     async def queue_frame(self, frame: Frame):
@@ -494,7 +499,7 @@ class PipelineTask(BasePipelineTask):
     async def _cancel(self):
         """Internal cancellation logic for the pipeline task."""
         if not self._cancelled:
-            logger.debug(f"Canceling pipeline task {self}")
+            logger.debug(f"Cancelling pipeline task {self}")
             self._cancelled = True
             # Make sure everything is cleaned up downstream. This is sent
             # out-of-band from the main streaming task which is what we want since
@@ -502,7 +507,9 @@ class PipelineTask(BasePipelineTask):
             await self._source.push_frame(CancelFrame())
             # Wait for CancelFrame to make it throught the pipeline.
             await self._wait_for_pipeline_end()
-            # Only cancel the push task. Everything else will be cancelled in run().
+            # Only cancel the push task, we don't want to be able to process any
+            # other frame after cancel. Everything else will be cancelled in
+            # run().
             if self._process_push_task:
                 await self._task_manager.cancel_task(self._process_push_task)
                 self._process_push_task = None
@@ -543,6 +550,10 @@ class PipelineTask(BasePipelineTask):
     async def _cancel_tasks(self):
         """Cancel all running pipeline tasks."""
         await self._observer.stop()
+
+        if self._process_push_task:
+            await self._task_manager.cancel_task(self._process_push_task)
+            self._process_push_task = None
 
         if self._process_up_task:
             await self._task_manager.cancel_task(self._process_up_task)
