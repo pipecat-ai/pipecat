@@ -9,9 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `processor` field to `ErrorFrame` to indicate `FrameProcessor` that
+  generated the error.
+
 - Added new language support for `AWSTranscribeSTTService`. All languages
   supporting streaming data input are now supported:
   https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
+
+- Added support for Simli Trinity Avatars. A new `is_trinity_avatar` parameter
+  has been introduced to specify whether the provided `faceId` corresponds to a
+  Trinity avatar, which is required for optimal Trinity avatar performance.
 
 - The development runner how handles custom `body` data for `DailyTransport`.
   The `body` data is passed to the Pipecat client. You can POST to the `/start`
@@ -61,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Fixed an issue where `BotStartedSpeakingFrame` and `BotStoppedSpeakingFrame` 
+- Fixed an issue where `BotStartedSpeakingFrame` and `BotStoppedSpeakingFrame`
   were not emitted when using `TavusVideoService` or `HeyGenVideoService`.
 
 - Fixed an issue in `LiveKitTransport` where empty `AudioRawFrame`s were pushed
@@ -88,8 +95,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The development runner's `/connect` endpoint is deprecated and will be
   removed in a future version. Use the `/start` endpoint in its place. In the
   meantime, both endpoints work and deliver equivalent functionality.
-
-- Added `processor` field to `ErrorFrame` to indicate `FrameProcessor` that generated the error.
 
 ## [0.0.77] - 2025-07-31
 
@@ -285,10 +290,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   downstream processors of the VAD and Turn analyzer params. This frame is
   pushed by the `BaseInputTransport` at Start and any time a
   `VADParamsUpdateFrame` is received.
-
-- Added support for Simli Trinity Avatars. A new `is_trinity_avatar` parameter
-  has been introduced to specify whether the provided `faceId` corresponds to a
-  Trinity avatar, which is required for optimal Trinity avatar performance.
 
 ### Changed
 
