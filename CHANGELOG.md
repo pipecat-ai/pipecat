@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed in a future version. Use the `/start` endpoint in its place. In the
   meantime, both endpoints work and deliver equivalent functionality.
 
-- Added `source` field to `ErrorFrame` to indicate `FrameProcessor` that generated the error.
+- Added `processor` field to `ErrorFrame` to indicate `FrameProcessor` that generated the error.
 
 ## [0.0.77] - 2025-07-31
 
