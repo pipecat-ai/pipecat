@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
 
 from dotenv import load_dotenv
@@ -15,6 +14,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.gladia.config import (
     GladiaInputParams,
     LanguageConfig,

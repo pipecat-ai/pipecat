@@ -82,7 +82,7 @@ from pipecat.runner.types import (
 try:
     import uvicorn
     from dotenv import load_dotenv
-    from fastapi import BackgroundTasks, FastAPI, WebSocket
+    from fastapi import BackgroundTasks, FastAPI, Request, WebSocket
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse, RedirectResponse
 except ImportError as e:
@@ -261,16 +261,42 @@ def _setup_daily_routes(app: FastAPI):
         async with aiohttp.ClientSession() as session:
             room_url, token = await configure(session)
 
-            # Start the bot in the background
+            # Start the bot in the background with empty body for GET requests
             bot_module = _get_bot_module()
             runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
             asyncio.create_task(bot_module.bot(runner_args))
             return RedirectResponse(room_url)
 
-    @app.post("/connect")
-    async def rtvi_connect():
-        """Launch a Daily bot and return connection info for RTVI clients."""
+    async def _handle_rtvi_request(request: Request):
+        """Common handler for both /start and /connect endpoints.
+
+        Expects POST body like::
+
+            {
+                "createDailyRoom": true,
+                "dailyRoomProperties": { "start_video_off": true },
+                "body": { "custom_data": "value" }
+            }
+        """
         print("Starting bot with Daily transport")
+
+        # Parse the request body
+        try:
+            request_data = await request.json()
+            logger.debug(f"Received request: {request_data}")
+        except Exception as e:
+            logger.error(f"Failed to parse request body: {e}")
+            request_data = {}
+
+        # Extract the body data that should be passed to the bot
+        # This mimics Pipecat Cloud's behavior
+        bot_body = request_data.get("body", {})
+
+        # Log the extracted body data for debugging
+        if bot_body:
+            logger.info(f"Extracted body data for bot: {bot_body}")
+        else:
+            logger.debug("No body data provided in request")
 
         import aiohttp
 
@@ -279,11 +305,30 @@ def _setup_daily_routes(app: FastAPI):
         async with aiohttp.ClientSession() as session:
             room_url, token = await configure(session)
 
-            # Start the bot in the background
+            # Start the bot in the background with extracted body data
             bot_module = _get_bot_module()
-            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
+            runner_args = DailyRunnerArguments(room_url=room_url, token=token, body=bot_body)
             asyncio.create_task(bot_module.bot(runner_args))
-            return {"room_url": room_url, "token": token}
+            # Match PCC /start endpoint response format:
+            return {"dailyRoom": room_url, "dailyToken": token}
+
+    @app.post("/start")
+    async def rtvi_start(request: Request):
+        """Launch a Daily bot and return connection info for RTVI clients."""
+        return await _handle_rtvi_request(request)
+
+    @app.post("/connect")
+    async def rtvi_connect(request: Request):
+        """Launch a Daily bot and return connection info for RTVI clients.
+
+        .. deprecated:: 0.0.78
+            Use /start instead. This endpoint will be removed in a future version.
+        """
+        logger.warning(
+            "DEPRECATED: /connect endpoint is deprecated. Please use /start instead. "
+            "This endpoint will be removed in a future version."
+        )
+        return await _handle_rtvi_request(request)
 
 
 def _setup_telephony_routes(app: FastAPI, transport_type: str, proxy: str):
@@ -345,6 +390,7 @@ async def _run_daily_direct():
     async with aiohttp.ClientSession() as session:
         room_url, token = await configure(session)
 
+        # Direct connections have no request body, so use empty dict
         runner_args = DailyRunnerArguments(room_url=room_url, token=token, body={})
 
         # Get the bot module and run it directly
@@ -355,6 +401,27 @@ async def _run_daily_direct():
         print()
 
         await bot_module.bot(runner_args)
+
+
+def _validate_and_clean_proxy(proxy: str) -> str:
+    """Validate and clean proxy hostname, removing protocol if present."""
+    if not proxy:
+        return proxy
+
+    original_proxy = proxy
+
+    # Strip common protocols
+    if proxy.startswith(("http://", "https://")):
+        proxy = proxy.split("://", 1)[1]
+        logger.warning(
+            f"Removed protocol from proxy URL. Using '{proxy}' instead of '{original_proxy}'. "
+            f"The --proxy argument expects only the hostname (e.g., 'mybot.ngrok.io')."
+        )
+
+    # Remove trailing slashes
+    proxy = proxy.rstrip("/")
+
+    return proxy
 
 
 def main():
@@ -408,6 +475,10 @@ def main():
 
     args = parser.parse_args()
 
+    # Validate and clean proxy hostname
+    if args.proxy:
+        args.proxy = _validate_and_clean_proxy(args.proxy)
+
     # Auto-set transport to daily if --direct is used without explicit transport
     if args.direct and args.transport == "webrtc":  # webrtc is the default
         args.transport = "daily"
@@ -438,17 +509,16 @@ def main():
     if args.transport == "webrtc":
         print()
         if args.esp32:
-            print(
-                f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client (ESP32 mode)"
-            )
+            print(f"🚀 Bot ready! (ESP32 mode)")
+            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
         else:
-            print(f"🚀 WebRTC server starting at http://{args.host}:{args.port}/client")
-        print(f"   Open this URL in your browser to connect!")
+            print(f"🚀 Bot ready!")
+            print(f"   → Open http://{args.host}:{args.port}/client in your browser")
         print()
     elif args.transport == "daily":
         print()
-        print(f"🚀 Daily server starting at http://{args.host}:{args.port}")
-        print(f"   Open this URL in your browser to start a session!")
+        print(f"🚀 Bot ready!")
+        print(f"   → Open http://{args.host}:{args.port} in your browser to start a session")
         print()
 
     # Create the app with transport-specific setup

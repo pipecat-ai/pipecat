@@ -245,6 +245,10 @@ class TavusTransportClient:
                 on_recording_started=partial(self._on_handle_callback, "on_recording_started"),
                 on_recording_stopped=partial(self._on_handle_callback, "on_recording_stopped"),
                 on_recording_error=partial(self._on_handle_callback, "on_recording_error"),
+                on_transcription_stopped=partial(
+                    self._on_handle_callback, "on_transcription_stopped"
+                ),
+                on_transcription_error=partial(self._on_handle_callback, "on_transcription_error"),
             )
             self._client = DailyTransportClient(
                 room_url, None, "Pipecat", self._params, daily_callbacks, self._bot_name
