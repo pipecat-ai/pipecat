@@ -176,7 +176,7 @@ async def run_example_pipeline(script_path: Path):
         ),
     )
 
-    await module.run_example(transport, argparse.Namespace(), True)
+    await module.run_bot(transport)
 
 
 async def run_eval_pipeline(
