@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     Frame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    OutputTransportReadyFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -81,6 +82,7 @@ class TavusVideoService(AIService):
         self._send_task: Optional[asyncio.Task] = None
         # This is the custom track destination expected by Tavus
         self._transport_destination: Optional[str] = "stream"
+        self._transport_ready = False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the Tavus video service.
@@ -145,7 +147,8 @@ class TavusVideoService(AIService):
             format=video_frame.color_format,
         )
         frame.transport_source = video_source
-        await self.push_frame(frame)
+        if self._transport_ready:
+            await self.push_frame(frame)
 
     async def _on_participant_audio_data(
         self, participant_id: str, audio: AudioData, audio_source: str
@@ -157,7 +160,8 @@ class TavusVideoService(AIService):
             num_channels=audio.num_channels,
         )
         frame.transport_source = audio_source
-        await self.push_frame(frame)
+        if self._transport_ready:
+            await self.push_frame(frame)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -221,6 +225,9 @@ class TavusVideoService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
             await self._handle_audio_frame(frame)
+        elif isinstance(frame, OutputTransportReadyFrame):
+            self._transport_ready = True
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 

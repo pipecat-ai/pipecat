@@ -102,6 +102,10 @@ TESTS_19 = [
     ("19a-azure-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER),
 ]
 
+TESTS_21 = [
+    ("21a-tavus-video-service.py", PROMPT_SIMPLE_MATH, None),
+]
+
 TESTS_26 = [
     ("26-gemini-multimodal-live.py", PROMPT_SIMPLE_MATH, None),
     ("26a-gemini-multimodal-live-transcription.py", PROMPT_SIMPLE_MATH, None),
@@ -112,16 +116,27 @@ TESTS_26 = [
     # ("26d-gemini-multimodal-live-text.py", PROMPT_SIMPLE_MATH, None),
 ]
 
+TESTS_27 = [
+    ("27-simli-layer.py", PROMPT_SIMPLE_MATH, None),
+]
+
 TESTS_40 = [
     ("40-aws-nova-sonic.py", PROMPT_SIMPLE_MATH, None),
+]
+
+TESTS_43 = [
+    ("43a-heygen-video-service.py", PROMPT_SIMPLE_MATH, None),
 ]
 
 TESTS = [
     *TESTS_07,
     *TESTS_14,
     *TESTS_19,
+    *TESTS_21,
     *TESTS_26,
+    *TESTS_27,
     *TESTS_40,
+    *TESTS_43,
 ]
 
 

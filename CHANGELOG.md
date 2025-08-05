@@ -7,10 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The development runner how handles custom `body` data for `DailyTransport`.
+  The `body` data is passed to the Pipecat client. You can POST to the `/start`
+  endpoint with a request body of:
+
+  ```
+  {
+      "createDailyRoom": true,
+      "dailyRoomProperties": { "start_video_off": true },
+      "body": { "custom_data": "value" }
+  }
+  ```
+
+  The `body` information is parsed and used in the application. The
+  `dailyRoomProperties` are currently not handled.
+
+- Added detailed latency logging to `UserBotLatencyLogObserver`, capturing
+  average response time between user stop and bot start, as well as minimum and
+  maximum response latency.
+
+### Changed
+
+- The development runners `/connect` and `/start` endpoint now both return
+  `dailyRoom` and `dailyToken` in place of the previous `room_url` and `token`.
+
+- Updated the `pipecat.runner.daily` utility to only a take `DAILY_API_URL` and
+  `DAILY_SAMPLE_ROOM_URL` environment variables instead of argparsing `-u` and
+  `-k`, respectively.
+
+- Updated `daily-python` to 0.19.6.
+
+- Changed `TavusVideoService` to send audio or video frames only after the
+  transport is ready, preventing warning messages at startup.
+
+- The development runner now strips any provided protocol (e.g. https://) from
+  the proxy address and issues a warning. It also strips trailing `/`.
+
 ### Fixed
 
 - Fixed an issue in `LiveKitTransport` where empty `AudioRawFrame`s were pushed
   down the pipeline. This resulted in warnings by the STT processor.
+- Fixed `PiperTTSService` to send text as a JSON object in the request body,
+  resolving compatibility with Piper's HTTP API.
+
+- Fixed an issue with the `TavusVideoService` where an error was thrown due to
+  missing transcription callbacks.
+
+- Fixed an issue in `SpeechmaticsSTTService` where the `user_id` was set to
+  `None` when diarization is not enabled.
+
+### Performance
+
+- Fixed an issue in `TaskObserver` (a proxy to all observers) that was degrading
+  global performance.
+
+### Deprecated
+
+- In the `pipecat.runner.daily`, the `configure_with_args()` function is
+  deprecated. Use the `configure()` function instead.
+
+- The development runner's `/connect` endpoint is deprecated and will be
+  removed in a future version. Use the `/start` endpoint in its place. In the
+  meantime, both endpoints work and deliver equivalent functionality.
 
 - Added `source` field to `ErrorFrame` to indicate `FrameProcessor` that generated the error.
 
@@ -208,6 +268,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   downstream processors of the VAD and Turn analyzer params. This frame is
   pushed by the `BaseInputTransport` at Start and any time a
   `VADParamsUpdateFrame` is received.
+
+- Added support for Simli Trinity Avatars. A new `is_trinity_avatar` parameter
+  has been introduced to specify whether the provided `faceId` corresponds to a
+  Trinity avatar, which is required for optimal Trinity avatar performance.
 
 ### Changed
 

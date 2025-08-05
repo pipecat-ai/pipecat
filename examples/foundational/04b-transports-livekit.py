@@ -9,7 +9,6 @@ import json
 import os
 import sys
 
-from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -51,12 +50,7 @@ async def main():
         ),
     )
 
-    stt = DeepgramSTTService(
-        api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(
-            vad_events=True,
-        ),
-    )
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -78,20 +72,20 @@ async def main():
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    runner = PipelineRunner()
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
+        ]
+    )
 
     task = PipelineTask(
-        Pipeline(
-            [
-                transport.input(),
-                stt,
-                context_aggregator.user(),
-                llm,
-                tts,
-                transport.output(),
-                context_aggregator.assistant(),
-            ],
-        ),
+        pipeline,
         params=PipelineParams(
             enable_metrics=True,
             enable_usage_metrics=True,
@@ -131,6 +125,8 @@ async def main():
                 UserStoppedSpeakingFrame(),
             ],
         )
+
+    runner = PipelineRunner()
 
     await runner.run(task)
 
