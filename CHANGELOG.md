@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- System frames are now queued. Before, system frames could be generated from
+  any task and would not guarantee any order which was causing undesired
+  behavior. Also, it was possible to get into some rare recursion issues because
+  of the way system frames were executed (they were executed in-place, meaning
+  calling `push_frame()` would finish after the system frame traversed all the
+  pipeline). This makes system frames more deterministic.
+
 - Changed the default model for both `ElevenLabsTTSService` and
   `ElevenLabsHttpTTSService` to `eleven_turbo_v2_5`. The rationale for this
   change is that the Turbo v2.5 model exhibits the most stable voice quality
