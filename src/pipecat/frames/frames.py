@@ -664,10 +664,12 @@ class ErrorFrame(SystemFrame):
     Parameters:
         error: Description of the error that occurred.
         fatal: Whether the error is fatal and requires bot shutdown.
+        source: The frame processor that generated the error.
     """
 
     error: str
     fatal: bool = False
+    processor: Optional["FrameProcessor"] = None
 
     def __str__(self):
         return f"{self.name}(error: {self.error}, fatal: {self.fatal})"
