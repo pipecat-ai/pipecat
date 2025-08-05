@@ -267,6 +267,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pushed by the `BaseInputTransport` at Start and any time a
   `VADParamsUpdateFrame` is received.
 
+- Added support for Simli Trinity Avatars. A new `is_trinity_avatar` parameter
+  has been introduced to specify whether the provided `faceId` corresponds to a
+  Trinity avatar, which is required for optimal Trinity avatar performance.
+
 ### Changed
 
 - Two package dependencies have been updated:
