@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   average response time between user stop and bot start, as well as minimum and
   maximum response latency.
 
+- Added Chinese, Japanese, Korean word timestamp support to
+  `CartesiaTTSService`.
+
 ### Changed
 
 - Changed the default model for both `ElevenLabsTTSService` and
