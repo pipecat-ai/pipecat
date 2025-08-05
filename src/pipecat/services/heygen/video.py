@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputImageRawFrame,
     OutputTransportReadyFrame,
+    SpeechOutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
     UserStartedSpeakingFrame,
@@ -157,7 +158,7 @@ class HeyGenVideoService(AIService):
 
     async def _on_participant_audio_data(self, audio_frame: AudioRawFrame):
         """Handle incoming audio data from participants."""
-        frame = OutputAudioRawFrame(
+        frame = SpeechOutputAudioRawFrame(
             audio=audio_frame.audio,
             sample_rate=audio_frame.sample_rate,
             num_channels=audio_frame.num_channels,
