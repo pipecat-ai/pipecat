@@ -88,7 +88,7 @@ async def create_sample_file():
             return f.name
 
 
-async def run_bot(transport: BaseTransport):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting File API bot")
 
     # Create a sample file to upload
@@ -97,13 +97,13 @@ async def run_bot(transport: BaseTransport):
 
     system_instruction = """
     You are a helpful AI assistant with access to a document that has been uploaded for analysis.
-    
+
     The document contains test information.
     You should be able to:
     - Reference and discuss the contents of the uploaded document
     - Answer questions about what's in the document
     - Use the information from the document in our conversation
-    
+
     Your output will be converted to audio so don't include special characters in your answers.
     Be friendly and demonstrate your ability to work with the uploaded file.
     """
@@ -200,7 +200,7 @@ async def run_bot(transport: BaseTransport):
         await task.cancel()
 
     # Run the pipeline
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
 
     # Clean up: delete the uploaded file and temporary file
@@ -222,7 +222,7 @@ async def run_bot(transport: BaseTransport):
 async def bot(runner_args: RunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
     transport = await create_transport(runner_args, transport_params)
-    await run_bot(transport)
+    await run_bot(transport, runner_args)
 
 
 if __name__ == "__main__":
