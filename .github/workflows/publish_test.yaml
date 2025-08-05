@@ -12,23 +12,16 @@ jobs:
         with:
           fetch-tags: true
           fetch-depth: 100
-      - name: Set up Python
-        id: setup_python
-        uses: actions/setup-python@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: '3.10'
-      - name: Setup virtual environment
-        run: |
-          python -m venv .venv
-      - name: Install basic Python dependencies
-        run: |
-          source .venv/bin/activate
-          python -m pip install --upgrade pip
-          pip install -r dev-requirements.txt
+          version: "latest"
+      - name: Set up Python
+        run: uv python install 3.10
+      - name: Install development dependencies
+        run: uv sync --group dev
       - name: Build project
-        run: |
-          source .venv/bin/activate
-          python -m build
+        run: uv build
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
@@ -38,7 +31,7 @@ jobs:
   publish-to-test-pypi:
     name: "Publish to Test PyPI"
     runs-on: ubuntu-latest
-    needs: [ build ]
+    needs: [build]
     environment:
       name: testpypi
       url: https://pypi.org/p/pipecat-ai
