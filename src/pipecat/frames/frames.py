@@ -239,6 +239,18 @@ class TTSAudioRawFrame(OutputAudioRawFrame):
 
 
 @dataclass
+class SpeechOutputAudioRawFrame(OutputAudioRawFrame):
+    """An audio frame part of a speech audio stream.
+
+    This frame is part of a continuous stream of audio frames containing speech.
+    The audio stream might also contain silence frames, so a process to distinguish
+    between speech and silence might be needed.
+    """
+
+    pass
+
+
+@dataclass
 class URLImageRawFrame(OutputImageRawFrame):
     """Image frame with an associated URL.
 
