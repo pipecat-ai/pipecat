@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new language support for `AWSTranscribeSTTService`. All languages
+  supporting streaming data input are now supported:
+  https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
+
 - The development runner how handles custom `body` data for `DailyTransport`.
   The `body` data is passed to the Pipecat client. You can POST to the `/start`
   endpoint with a request body of:
