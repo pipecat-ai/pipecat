@@ -40,7 +40,7 @@ class DailyRunnerArguments(RunnerArguments):
 
     room_url: str
     token: Optional[str] = None
-    body: Optional[Any] = {}
+    body: Optional[Any] = field(default_factory=dict)
 
 
 @dataclass
