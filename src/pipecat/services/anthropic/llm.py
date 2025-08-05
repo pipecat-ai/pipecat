@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -346,6 +347,7 @@ class AnthropicLLMService(LLMService):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(f"{e}"))
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
