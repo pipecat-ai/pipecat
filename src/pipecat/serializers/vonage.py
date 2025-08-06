@@ -1,10 +1,12 @@
 import io
 import wave
 import json
+import base64
 from loguru import logger
 from pydub import AudioSegment
 from pydantic import BaseModel
 from typing import Optional
+from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
@@ -47,6 +49,7 @@ class VonageFrameSerializer(FrameSerializer):
         """Initialize the VonageFrameSerializer."""
         self._sample_rate = VONAGE_SAMPLE_RATE
         self._input_resampler = create_stream_resampler()
+        self._output_resampler = create_stream_resampler()
         self.chunk_duration_ms = 20
         self.sample_width = 2
         self.channels = 1
@@ -66,45 +69,6 @@ class VonageFrameSerializer(FrameSerializer):
 
     async def setup(self, frame: StartFrame):
         self._sample_rate = VONAGE_SAMPLE_RATE
-
-    async def resample_audio(
-        self,
-        data: bytes,
-        current_rate,
-        num_channels,
-        sample_width,
-        target_rate=VONAGE_SAMPLE_RATE,
-    ) -> bytes:
-        """
-        Resample audio data to 16kHz mono PCM 16-bit.
-
-        Args:
-            data: Raw WAV byte data.
-            current_rate: Original sample rate.
-            num_channels: Original channel count.
-            sample_width: Sample width in bytes.
-            target_rate: Target sample rate (default: 16000).
-
-        Returns:
-            bytes: Resampled raw audio data.
-        """
-        wf = wave.open(io.BytesIO(data), "rb")
-        num_frames = wf.getnframes()
-        pcm_data = wf.readframes(num_frames)
-
-        audio = AudioSegment.from_raw(
-            io.BytesIO(pcm_data),
-            sample_width=sample_width,
-            frame_rate=current_rate,
-            channels=num_channels,
-        )
-
-        resampled_audio = (
-            audio.set_channels(num_channels)
-            .set_sample_width(sample_width)
-            .set_frame_rate(target_rate)
-        )
-        return resampled_audio.raw_data
 
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """
@@ -130,23 +94,7 @@ class VonageFrameSerializer(FrameSerializer):
             return json.dumps(answer)
 
         elif isinstance(frame, OutputAudioRawFrame):
-            resampled_data = await self.resample_audio(
-                frame.audio,
-                frame.sample_rate,
-                self.channels,
-                self.sample_width,
-                self._sample_rate,
-            )
-
-            self.chunk_frames = int(self._sample_rate * self.chunk_duration_ms / 1000)
-            self.chunk_size = self.chunk_frames * self.channels * self.sample_width
-
-            chunks = []
-            for i in range(0, len(resampled_data), self.chunk_size):
-                chunk = resampled_data[i : i + self.chunk_size]
-                chunks.append(chunk)
-
-            return chunks
+            return frame.audio
 
         elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
             logger.info(

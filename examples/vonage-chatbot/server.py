@@ -19,6 +19,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.serializers.vonage import VonageFrameSerializer
+from pipecat.processors.chunked_audio_sender import ChunkedAudioSenderProcessor
 from pipecat.services.openai import OpenAISTTService, OpenAITTSService, OpenAILLMService
 from pipecat.transports.network.websocket_server import (
     WebsocketServerParams,
@@ -84,6 +85,7 @@ async def run_bot_websocket_server():
         context_aggregator.user(),
         llm,
         tts,
+        ChunkedAudioSenderProcessor(),
         ws_transport.output(),
     ])
 
