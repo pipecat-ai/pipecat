@@ -23,11 +23,6 @@ The PatternPairAggregator:
     - Processes patterns that may span across multiple text chunks
     - Returns processed text at sentence boundaries
 
-Example usage (run from pipecat root directory):
-    $ pip install "pipecat-ai[daily,openai,cartesia,silero]"
-    $ pip install -r dev-requirements.txt
-    $ python examples/foundational/35-pattern-pair-voice-switching.py
-
 Requirements:
     - OpenAI API key (for GPT-4o)
     - Cartesia API key (for text-to-speech)
