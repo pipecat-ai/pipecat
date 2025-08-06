@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +29,7 @@ extensions = [
 
 suppress_warnings = [
     "autodoc.mocked_object",
+    "toc.not_included",
 ]
 
 # Napoleon settings
@@ -45,85 +47,40 @@ autodoc_default_options = {
 
 # Mock imports for optional dependencies
 autodoc_mock_imports = [
-    "riva",
-    "livekit",
-    "pyht",  # Base PlayHT package
-    "pyht.async_client",  # PlayHT specific imports
-    "pyht.client",
-    "pyht.protos",
-    "pyht.protos.api_pb2",
-    "pipecat_ai_playht",  # PlayHT wrapper
-    "aiortc",
-    "aiortc.mediastreams",
-    "cv2",
-    "av",
-    "pyneuphonic",
-    "mem0",
-    "mlx_whisper",
-    "anthropic",
-    "assemblyai",
-    "boto3",
-    "azure",
-    "cartesia",
-    "deepgram",
-    "elevenlabs",
-    "fal",
-    "gladia",
-    "google",
-    "krisp",
-    "langchain",
-    "lmnt",
-    "noisereduce",
-    "openpipe",
-    "simli",
-    "soundfile",
-    "soniox",
+    # Krisp - has build issues on some platforms
     "pipecat_ai_krisp",
-    "pyaudio",
+    "krisp",
+    # System-specific GUI libraries
     "_tkinter",
     "tkinter",
-    "daily",
-    "daily_python",
-    # Moondream dependencies
-    "torch",
-    "transformers",
-    "intel_extension_for_pytorch",
-    # Ultravox dependencies
-    "huggingface_hub",
+    # Platform-specific audio libraries (if needed)
+    "gi",
+    "gi.require_version",
+    "gi.repository",
+    # OpenCV - sometimes has import issues during docs build
+    "cv2",
+    # Heavy ML packages excluded from ReadTheDocs
+    # ultravox dependencies
     "vllm",
     "vllm.engine.arg_utils",
+    # local-smart-turn dependencies
+    "coremltools",
+    "coremltools.models",
+    "coremltools.models.MLModel",
+    "torch",
+    "torch.nn",
+    "torch.nn.functional",
+    "torchaudio",
+    # moondream dependencies
+    "transformers",
     "transformers.AutoTokenizer",
-    # Langchain dependencies
-    "langchain_core",
-    "langchain_core.messages",
-    "langchain_core.runnables",
-    "langchain_core.messages.AIMessageChunk",
-    "langchain_core.runnables.Runnable",
-    # LiveKit dependencies
-    "livekit",
-    "livekit.rtc",
-    "livekit_api",
-    "livekit_protocol",
-    "tenacity",
-    "tenacity.retry",
-    "tenacity.stop_after_attempt",
-    "tenacity.wait_exponential",
-    "rtc",
-    "rtc.Room",
-    "rtc.RoomOptions",
-    "rtc.AudioSource",
-    "rtc.LocalAudioTrack",
-    "rtc.TrackPublishOptions",
-    "rtc.TrackSource",
-    "rtc.AudioStream",
-    "rtc.AudioFrameEvent",
-    "rtc.AudioFrame",
-    "rtc.Track",
-    "rtc.TrackKind",
-    "rtc.RemoteParticipant",
-    "rtc.RemoteTrackPublication",
-    "rtc.DataPacket",
-    # Riva dependencies
+    "transformers.AutoFeatureExtractor",
+    "AutoFeatureExtractor",
+    "timm",
+    "einops",
+    "intel_extension_for_pytorch",
+    "huggingface_hub",
+    # riva dependencies
     "riva",
     "riva.client",
     "riva.client.Auth",
@@ -133,57 +90,14 @@ autodoc_mock_imports = [
     "riva.client.AudioEncoding",
     "riva.client.proto.riva_tts_pb2",
     "riva.client.SpeechSynthesisService",
-    # Local CoreML Smart Turn dependencies
-    "coremltools",
-    "coremltools.models",
-    "coremltools.models.MLModel",
-    "torch",
-    "torch.nn",
-    "torch.nn.functional",
-    "transformers",
-    "transformers.AutoFeatureExtractor",
-    # Also add specific classes that are imported
-    "AutoFeatureExtractor",
-    # Sentry dependencies
-    "sentry_sdk",
-    # AWS Nova Sonic dependencies
-    "aws_sdk_bedrock_runtime",
-    "aws_sdk_bedrock_runtime.client",
-    "aws_sdk_bedrock_runtime.config",
-    "aws_sdk_bedrock_runtime.models",
-    "smithy_aws_core",
-    "smithy_aws_core.credentials_resolvers",
-    "smithy_aws_core.credentials_resolvers.static",
-    "smithy_aws_core.identity",
-    "smithy_core",
-    "smithy_core.aio",
-    "smithy_core.aio.eventstream",
-    # MCP dependencies (you may already have these)
-    "mcp",
-    "mcp.client",
-    "mcp.client.session_group",
-    "mcp.client.sse",
-    "mcp.client.stdio",
-    "mcp.ClientSession",
-    "mcp.StdioServerParameters",
-    # gstreamer
-    "gi",
-    "gi.require_version",
-    "gi.repository",
-    # Protobuf mocks
-    "pipecat.frames.protobufs.frames_pb2",
-    "pipecat.serializers.protobuf",
-    "google.protobuf",
-    "google.protobuf.descriptor",
-    "google.protobuf.descriptor_pool",
-    "google.protobuf.runtime_version",
-    "google.protobuf.symbol_database",
-    "google.protobuf.internal.builder",
+    # MLX dependencies (Apple Silicon specific)
+    "mlx",
+    "mlx_whisper",  # Note: might need underscore format too
 ]
 
 # HTML output settings
 html_theme = "sphinx_rtd_theme"
-html_static_path = ["_static"]
+html_static_path = ["_static"] if os.path.exists("_static") else []
 autodoc_typehints = "signature"  # Show type hints in the signature only, not in the docstring
 html_show_sphinx = False
 
