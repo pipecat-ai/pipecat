@@ -353,8 +353,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             frame: The output audio frame to write.
         """
         if not self._websocket:
-            # Simulate audio playback with a sleep.
-            await self._write_audio_sleep()
             return
 
         frame = OutputAudioRawFrame(
