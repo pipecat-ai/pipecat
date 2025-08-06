@@ -46,6 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Chinese, Japanese, Korean word timestamp support to
   `CartesiaTTSService`.
 
+- Added `region` parameter to `GladiaSTTService`. Accepted values: eu-west (default), us-west.
+
 ### Changed
 
 - System frames are now queued. Before, system frames could be generated from
