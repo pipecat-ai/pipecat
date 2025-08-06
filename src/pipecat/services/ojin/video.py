@@ -577,10 +577,14 @@ class OjinPersonaService(FrameProcessor):
         if new_state == PersonaState.SPEECH and self._audio_output_task is None:
             await self._start_pushing_audio_output()
 
-        if new_state == PersonaState.IDLE and self._audio_output_task is not None:
-            if self._settings.push_bot_stopped_speaking_frames:
-                await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
-            await self._stop_pushing_audio_output()
+        if new_state == PersonaState.IDLE:
+            logger.debug("PersonaState.IDLE reached - closing interaction")
+            self._close_interaction()
+            if self._audio_output_task is not None:
+                logger.debug("Stopping audio output")
+                await self._stop_pushing_audio_output()
+                if self._settings.push_bot_stopped_speaking_frames:
+                    await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
     async def _start(self):
         """Initialize the persona service and start processing.
@@ -704,8 +708,7 @@ class OjinPersonaService(FrameProcessor):
 
             self._interaction.next_frame()
             if message.is_final_response:
-                logger.debug("No more video frames expected")
-                self._close_interaction()
+                logger.debug("No more video frames expected")                
                 if self._fsm is not None:
                     await self._fsm.on_conversation_signal(
                         ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
