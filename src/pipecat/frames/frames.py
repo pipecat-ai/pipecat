@@ -478,6 +478,12 @@ class TranscriptionUpdateFrame(DataFrame):
 class LLMMessagesFrame(DataFrame):
     """Frame containing LLM messages for chat completion.
 
+    .. deprecated:: 0.0.78
+        This class is deprecated and will be removed in a future version.
+        Instead, use either:
+        - `LLMMessagesUpdateFrame` with `run_llm=True`
+        - `OpenAILLMContextFrame` with desired messages in a new context
+
     A frame containing a list of LLM messages. Used to signal that an LLM
     service should run a chat completion and emit an LLMFullResponseStartFrame,
     TextFrames and an LLMFullResponseEndFrame. Note that the `messages`
