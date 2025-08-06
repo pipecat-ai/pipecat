@@ -658,6 +658,11 @@ class BaseOutputTransport(FrameProcessor):
                             num_channels=self._params.audio_out_channels,
                         )
                         yield frame
+                        # Allow other asyncio tasks to execute by adding a small sleep
+                        # Without this sleep, in task cancellation scenarios, this loop would
+                        # continuously return without any delay, leading to 100% CPU utilization
+                        # and preventing cancel/stop signals from being processed properly
+                        await asyncio.sleep(0)
 
             if self._mixer:
                 return with_mixer(BOT_VAD_STOP_SECS)

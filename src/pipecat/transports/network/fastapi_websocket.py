@@ -419,12 +419,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         Args:
             frame: The output audio frame to write.
         """
-        if self._client.is_closing:
-            return
-
-        if not self._client.is_connected:
-            # Simulate audio playback with a sleep.
-            await self._write_audio_sleep()
+        if self._client.is_closing or not self._client.is_connected:
             return
 
         frame = OutputAudioRawFrame(
