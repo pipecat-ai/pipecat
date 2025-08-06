@@ -19,7 +19,6 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    LLMMessagesFrame,
     StartFrame,
     StartInterruptionFrame,
     StopInterruptionFrame,
@@ -266,10 +265,6 @@ Please be very concise in your responses. Unless you are explicitly asked to do 
 
 
 class StatementJudgeContextFilter(FrameProcessor):
-    def __init__(self, notifier: BaseNotifier, **kwargs):
-        super().__init__(**kwargs)
-        self._notifier = notifier
-
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
         # We must not block system frames.
@@ -277,14 +272,8 @@ class StatementJudgeContextFilter(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        # Just treat an LLMMessagesFrame as complete, no matter what.
-        if isinstance(frame, LLMMessagesFrame):
-            await self._notifier.notify()
-            return
-
-        # Otherwise, we only want to handle OpenAILLMContextFrames, and only want to push a simple
-        # messages frame that contains a system prompt and the most recent user messages,
-        # concatenated.
+        # We only want to handle OpenAILLMContextFrames, and only want to push through a simplified
+        # context frame that contains a system prompt and the most recent user messages,
         if isinstance(frame, OpenAILLMContextFrame):
             # Take text content from the most recent user messages.
             messages = frame.context.messages
@@ -301,7 +290,7 @@ class StatementJudgeContextFilter(FrameProcessor):
                     for content in message["content"]:
                         if content["type"] == "text":
                             user_text_messages.insert(0, content["text"])
-            # If we have any user text content, push an LLMMessagesFrame
+            # If we have any user text content, push a context frame with the simplified context.
             if user_text_messages:
                 user_message = " ".join(reversed(user_text_messages))
                 logger.debug(f"!!! {user_message}")
@@ -314,7 +303,7 @@ class StatementJudgeContextFilter(FrameProcessor):
                 if last_assistant_message:
                     messages.append(last_assistant_message)
                 messages.append({"role": "user", "content": user_message})
-                await self.push_frame(LLMMessagesFrame(messages))
+                await self.push_frame(OpenAILLMContextFrame(OpenAILLMContext(messages)))
 
 
 class CompletenessCheck(FrameProcessor):
@@ -499,7 +488,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # This turns the LLM context into an inference request to classify the user's speech
     # as complete or incomplete.
-    statement_judge_context_filter = StatementJudgeContextFilter(notifier=notifier)
+    statement_judge_context_filter = StatementJudgeContextFilter()
 
     # This sends a UserStoppedSpeakingFrame and triggers the notifier event
     completeness_check = CompletenessCheck(notifier=notifier)
@@ -522,7 +511,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def pass_only_llm_trigger_frames(frame):
         return (
             isinstance(frame, OpenAILLMContextFrame)
-            or isinstance(frame, LLMMessagesFrame)
             or isinstance(frame, StartInterruptionFrame)
             or isinstance(frame, StopInterruptionFrame)
             or isinstance(frame, FunctionCallInProgressFrame)
@@ -542,14 +530,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 ],
                 [
                     # Ignore everything except an OpenAILLMContextFrame. Pass a specially constructed
-                    # LLMMessagesFrame to the statement classifier LLM. The only frame this
+                    # simplified context frame to the statement classifier LLM. The only frame this
                     # sub-pipeline will output is a UserStoppedSpeakingFrame.
                     statement_judge_context_filter,
                     statement_llm,
                     completeness_check,
                 ],
                 [
-                    # Block everything except OpenAILLMContextFrame and LLMMessagesFrame
+                    # Block everything except frames that trigger LLM inference.
                     FunctionFilter(filter=pass_only_llm_trigger_frames),
                     llm,
                     bot_output_gate,  # Buffer all llm/tts output until notified.
