@@ -4337,7 +4337,7 @@ dev = [
     { name = "pytest", specifier = "~=8.4.1" },
     { name = "pytest-aiohttp", specifier = "==1.1.0" },
     { name = "pytest-asyncio", specifier = "~=1.0.0" },
-    { name = "python-dotenv", specifier = "~=1.1.1" },
+    { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
     { name = "ruff", specifier = "~=0.12.1" },
     { name = "setuptools", specifier = "~=78.1.1" },
     { name = "setuptools-scm", specifier = "~=8.3.1" },
