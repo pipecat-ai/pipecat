@@ -490,6 +490,17 @@ class LLMMessagesFrame(DataFrame):
 
     messages: List[dict]
 
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        warnings.simplefilter("always")
+        warnings.warn(
+            "LLMMessagesFrame is deprecated and will be removed in a future release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
 
 @dataclass
 class LLMMessagesAppendFrame(DataFrame):
