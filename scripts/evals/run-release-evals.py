@@ -78,7 +78,7 @@ TESTS_14 = [
     ("14a-function-calling-anthropic.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14b-function-calling-anthropic-video.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14d-function-calling-video.py", PROMPT_WEATHER, EVAL_WEATHER),
-    ("14e-function-calling-gemini.py", PROMPT_WEATHER, EVAL_WEATHER),
+    ("14e-function-calling-google.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14f-function-calling-groq.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14g-function-calling-grok.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14h-function-calling-azure.py", PROMPT_WEATHER, EVAL_WEATHER),
