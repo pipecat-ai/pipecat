@@ -45,7 +45,7 @@ autodoc_default_options = {
     "show-inheritance": True,
 }
 
-# Mock imports for problematic dependencies only
+# Mock imports for optional dependencies
 autodoc_mock_imports = [
     # Krisp - has build issues on some platforms
     "pipecat_ai_krisp",
@@ -54,10 +54,45 @@ autodoc_mock_imports = [
     "_tkinter",
     "tkinter",
     # Platform-specific audio libraries (if needed)
-    # gstreamer
     "gi",
     "gi.require_version",
     "gi.repository",
+    # OpenCV - sometimes has import issues during docs build
+    "cv2",
+    # Heavy ML packages excluded from ReadTheDocs
+    # ultravox dependencies
+    "vllm",
+    "vllm.engine.arg_utils",
+    # local-smart-turn dependencies
+    "coremltools",
+    "coremltools.models",
+    "coremltools.models.MLModel",
+    "torch",
+    "torch.nn",
+    "torch.nn.functional",
+    "torchaudio",
+    # moondream dependencies
+    "transformers",
+    "transformers.AutoTokenizer",
+    "transformers.AutoFeatureExtractor",
+    "AutoFeatureExtractor",
+    "timm",
+    "einops",
+    "intel_extension_for_pytorch",
+    "huggingface_hub",
+    # riva dependencies
+    "riva",
+    "riva.client",
+    "riva.client.Auth",
+    "riva.client.ASRService",
+    "riva.client.StreamingRecognitionConfig",
+    "riva.client.RecognitionConfig",
+    "riva.client.AudioEncoding",
+    "riva.client.proto.riva_tts_pb2",
+    "riva.client.SpeechSynthesisService",
+    # MLX dependencies (Apple Silicon specific)
+    "mlx",
+    "mlx_whisper",  # Note: might need underscore format too
 ]
 
 # HTML output settings
