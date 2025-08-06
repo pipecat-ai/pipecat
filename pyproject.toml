@@ -118,7 +118,7 @@ dev = [
     "ruff~=0.12.1",
     "setuptools~=78.1.1",
     "setuptools_scm~=8.3.1",
-    "python-dotenv~=1.1.1",
+    "python-dotenv>=1.0.1,<2.0.0",
 ]
 
 docs = [
