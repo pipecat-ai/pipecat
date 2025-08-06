@@ -112,6 +112,12 @@ You can get started with Pipecat running on your local machine, then move your a
 
 ## 🛠️ Contributing to the framework
 
+### Prerequisites
+
+**Python Version:** 3.10+
+
+### Setup Steps
+
 1. Clone the repository and navigate to it:
 
    ```bash
@@ -130,6 +136,18 @@ You can get started with Pipecat running on your local machine, then move your a
    ```bash
    uv run pre-commit install
    ```
+
+### Python 3.13+ Note
+
+Some features require PyTorch (not yet available on Python 3.13+):
+
+- `ultravox`, `local-smart-turn`, `moondream`, `mlx-whisper`
+
+**For full compatibility:** Use Python 3.12
+
+```bash
+uv python pin 3.12 && uv sync --group dev --all-extras --no-extra krisp
+```
 
 ### Running tests
 
