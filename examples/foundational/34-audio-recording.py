@@ -18,11 +18,6 @@ The example:
         - Individual recording of user audio
         - Individual recording of assistant audio
 
-Example usage (run from pipecat root directory):
-    $ pip install "pipecat-ai[daily,openai,cartesia,silero]"
-    $ pip install -r dev-requirements.txt
-    $ python examples/foundational/34-audio-recording.py
-
 Requirements:
     - OpenAI API key (for GPT-4)
     - Cartesia API key (for text-to-speech)
