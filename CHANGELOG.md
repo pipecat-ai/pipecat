@@ -88,6 +88,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `LLMMessagesFrame` is deprecated, in favor of either:
+
+  - `LLMMessagesUpdateFrame` with `run_llm=True`
+  - `OpenAILLMContextFrame` with desired messages in a new context
+
+- `LLMUserResponseAggregator` and `LLMAssistantResponseAggregator` are
+  deprecated, as they depended on the now-deprecated `LLMMessagesFrame`. Use
+  `LLMUserContextAggregator` and `LLMAssistantResponseAggregator` (or
+  LLM-specific subclasses thereof) instead.
+
 - In the `pipecat.runner.daily`, the `configure_with_args()` function is
   deprecated. Use the `configure()` function instead.
 
