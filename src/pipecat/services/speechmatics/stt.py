@@ -74,7 +74,7 @@ class DiarizationFocusMode(str, Enum):
 class AdditionalVocabEntry:
     """Additional vocabulary entry.
 
-    Attributes:
+    Parameters:
         content: The word to add to the dictionary.
         sounds_like: Similar words to the word.
     """
@@ -87,7 +87,7 @@ class AdditionalVocabEntry:
 class DiarizationKnownSpeaker:
     """Known speakers for speaker diarization.
 
-    Attributes:
+    Parameters:
         label: The label of the speaker.
         speaker_identifiers: One or more data strings for the speaker.
     """
