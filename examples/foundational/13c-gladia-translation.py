@@ -56,6 +56,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = GladiaSTTService(
         api_key=os.getenv("GLADIA_API_KEY"),
+        region=os.getenv("GLADIA_REGION"),
         params=GladiaInputParams(
             language_config=LanguageConfig(
                 languages=[Language.EN],  # Input in English
