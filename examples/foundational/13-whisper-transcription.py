@@ -60,7 +60,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline([transport.input(), stt, tl])
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(
+        pipeline,
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

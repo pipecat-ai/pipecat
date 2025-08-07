@@ -22,10 +22,12 @@ class RunnerArguments:
 
     handle_sigint: bool = field(init=False)
     handle_sigterm: bool = field(init=False)
+    pipeline_idle_timeout_secs: int = field(init=False)
 
     def __post_init__(self):
         self.handle_sigint = True
         self.handle_sigterm = False
+        self.pipeline_idle_timeout_secs = 300
 
 
 @dataclass

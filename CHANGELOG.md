@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new `handle_sigint` and `handle_sigterm` to `RunnerArguments`. This
   allows applications to know what settings they should use for the environment
-  they are running on.
+  they are running on. Also, added `pipeline_idle_timeout_secs` to be able to
+  control the `PipelineTask` idle timeout.
 
 - Added `processor` field to `ErrorFrame` to indicate `FrameProcessor` that
   generated the error.
