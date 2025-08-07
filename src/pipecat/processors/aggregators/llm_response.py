@@ -995,7 +995,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 class LLMUserResponseAggregator(LLMUserContextAggregator):
     """User response aggregator that outputs LLMMessagesFrame instead of context frames.
 
-    .. deprecated:: 0.0.78
+    .. deprecated:: 0.0.79
         This class is deprecated and will be removed in a future version.
         Use `LLMUserContextAggregator` or another LLM-specific subclass instead.
 
@@ -1038,7 +1038,7 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
     """Assistant response aggregator that outputs LLMMessagesFrame instead of context frames.
 
-    .. deprecated:: 0.0.78
+    .. deprecated:: 0.0.79
         This class is deprecated and will be removed in a future version.
         Use `LLMAssistantContextAggregator` or another LLM-specific subclass instead.
 

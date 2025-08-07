@@ -478,7 +478,7 @@ class TranscriptionUpdateFrame(DataFrame):
 class LLMMessagesFrame(DataFrame):
     """Frame containing LLM messages for chat completion.
 
-    .. deprecated:: 0.0.78
+    .. deprecated:: 0.0.79
         This class is deprecated and will be removed in a future version.
         Instead, use either:
         - `LLMMessagesUpdateFrame` with `run_llm=True`
