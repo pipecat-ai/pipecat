@@ -1013,10 +1013,6 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
     ):
         """Initialize the user response aggregator.
 
-        .. deprecated:: 0.0.78
-            This class is deprecated and will be removed in a future version.
-            Use `LLMUserContextAggregator` or another LLM-specific subclass instead.
-
         Args:
             messages: Initial messages for the conversation context.
             params: Configuration parameters for aggregation behavior.
