@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndFrame, LLMMessagesFrame, TTSSpeakFrame
+from pipecat.frames.frames import EndFrame, LLMMessagesAppendFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -75,23 +75,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def handle_user_idle(user_idle: UserIdleProcessor, retry_count: int) -> bool:
         if retry_count == 1:
             # First attempt: Add a gentle prompt to the conversation
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "The user has been quiet. Politely and briefly ask if they're still there.",
-                }
-            )
-            await user_idle.push_frame(LLMMessagesFrame(messages))
+            message = {
+                "role": "system",
+                "content": "The user has been quiet. Politely and briefly ask if they're still there.",
+            }
+            await user_idle.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
             return True
         elif retry_count == 2:
             # Second attempt: More direct prompt
-            messages.append(
-                {
-                    "role": "system",
-                    "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
-                }
-            )
-            await user_idle.push_frame(LLMMessagesFrame(messages))
+            message = {
+                "role": "system",
+                "content": "The user is still inactive. Ask if they'd like to continue our conversation.",
+            }
+            await user_idle.push_frame(LLMMessagesAppendFrame([message], run_llm=True))
             return True
         else:
             # Third attempt: End the conversation
