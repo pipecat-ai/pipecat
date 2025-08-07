@@ -46,7 +46,8 @@ from pipecat.transports.services.daily import DailyParams, DailyTransport
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-PIPELINE_IDLE_TIMEOUT_SECS = 30
+PIPELINE_IDLE_TIMEOUT_SECS = 60
+EVAL_TIMEOUT_SECS = 90
 
 
 class EvalRunner:
@@ -105,12 +106,16 @@ class EvalRunner:
                 asyncio.create_task(run_example_pipeline(script_path)),
                 asyncio.create_task(run_eval_pipeline(self, example_file, prompt, eval)),
             ]
-            _, pending = await asyncio.wait(tasks, timeout=90)
+            _, pending = await asyncio.wait(tasks, timeout=EVAL_TIMEOUT_SECS)
             if pending:
                 logger.error(f"ERROR: Eval timeout expired, cancelling pending tasks...")
+                # Both pipeline idle timeouts should have worked and both tasks
+                # should have exited already, but if we got here something went
+                # wrong so we perform an abrupt asyncio task cancellation, which
+                # will not cleanup things nicely.
                 for task in pending:
                     task.cancel()
-                    await asyncio.gather(*pending, return_exceptions=True)
+                await asyncio.gather(*pending, return_exceptions=True)
         except Exception as e:
             logger.error(f"ERROR: Unable to run {example_file}: {e}")
 
@@ -177,7 +182,10 @@ async def run_example_pipeline(script_path: Path):
         ),
     )
 
-    await module.run_bot(transport, RunnerArguments())
+    runner_args = RunnerArguments()
+    runner_args.pipeline_idle_timeout_secs = PIPELINE_IDLE_TIMEOUT_SECS
+
+    await module.run_bot(transport, runner_args)
 
 
 async def run_eval_pipeline(
