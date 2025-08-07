@@ -742,7 +742,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                     # Human conversation branch
                     human_audio_blocker,
                     # stt,
-                    transcript.user(),  # Captures user transcripts
+                    # transcript.user(),  # Captures user transcripts
                     human_context_aggregator.user(),
                     human_llm,
                     human_tts,
@@ -750,9 +750,9 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                 ],
             ),
             transport.output(),
-            transcript.assistant(),  # Captures assistant transcripts
+            # transcript.assistant(),  # Captures assistant transcripts
             human_context_aggregator.assistant(),
-            audiobuffer,
+            # audiobuffer,
         ]
     )
 
