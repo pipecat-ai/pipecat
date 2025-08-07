@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `enable_emulated_vad_interruptions` to `LLMUserAggregatorParams`.
+  When user speech is emulated (e.g. when a transcription is received but
+  VAD doesn't detect speech), this parameter controls whether the emulated
+  speech can interrupt the bot. Default is False (emulated speech is ignored
+  while the bot is speaking).
+
 - Added new `handle_sigint` and `handle_sigterm` to `RunnerArguments`. This
   allows applications to know what settings they should use for the environment
   they are running on. Also, added `pipeline_idle_timeout_secs` to be able to
