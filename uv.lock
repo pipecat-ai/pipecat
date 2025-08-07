@@ -4364,7 +4364,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26.4,<3" },
     { name = "nvidia-riva-client", marker = "extra == 'riva'", specifier = "~=2.21.1" },
     { name = "onnxruntime", marker = "extra == 'silero'", specifier = "~=1.20.1" },
-    { name = "openai", specifier = ">=1.74.0,<2" },
+    { name = "openai", specifier = ">=1.74.0,<=1.99.1" },
     { name = "opencv-python", marker = "extra == 'webrtc'", specifier = "~=4.11.0.86" },
     { name = "openpipe", marker = "extra == 'openpipe'", specifier = "~=4.50.0" },
     { name = "opentelemetry-api", marker = "extra == 'tracing'", specifier = ">=1.33.0" },
