@@ -115,6 +115,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed in a future version. Use the `/start` endpoint in its place. In the
   meantime, both endpoints work and deliver equivalent functionality.
 
+### Other
+
+- Added `07aa-interruptible-soniox.py`, `07ab-interruptible-inworld-http.py`,
+  `07ac-interruptible-asyncai.py` and `07ac-interruptible-asyncai-http.py`
+  release evals.
+
 ## [0.0.77] - 2025-07-31
 
 ### Added
