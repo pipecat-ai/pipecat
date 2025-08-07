@@ -12,6 +12,7 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 """
 
 import asyncio
+import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Set
@@ -994,6 +995,10 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 class LLMUserResponseAggregator(LLMUserContextAggregator):
     """User response aggregator that outputs LLMMessagesFrame instead of context frames.
 
+    .. deprecated:: 0.0.79
+        This class is deprecated and will be removed in a future version.
+        Use `LLMUserContextAggregator` or another LLM-specific subclass instead.
+
     This aggregator extends LLMUserContextAggregator but pushes LLMMessagesFrame
     objects downstream instead of OpenAILLMContextFrame objects. This is useful
     when you need message-based output rather than context-based output.
@@ -1013,6 +1018,12 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
+        warnings.warn(
+            "LLMUserResponseAggregator is deprecated and will be removed in a future version. "
+            "Use LLMUserContextAggregator or another LLM-specific subclass instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
     async def _process_aggregation(self):
@@ -1026,6 +1037,10 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
 
 class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
     """Assistant response aggregator that outputs LLMMessagesFrame instead of context frames.
+
+    .. deprecated:: 0.0.79
+        This class is deprecated and will be removed in a future version.
+        Use `LLMAssistantContextAggregator` or another LLM-specific subclass instead.
 
     This aggregator extends LLMAssistantContextAggregator but pushes LLMMessagesFrame
     objects downstream instead of OpenAILLMContextFrame objects. This is useful
@@ -1046,6 +1061,12 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
+        warnings.warn(
+            "LLMAssistantResponseAggregator is deprecated and will be removed in a future version. "
+            "Use LLMAssistantContextAggregator or another LLM-specific subclass instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
     async def push_aggregation(self):

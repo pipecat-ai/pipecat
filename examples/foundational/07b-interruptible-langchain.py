@@ -16,13 +16,16 @@ from langchain_openai import ChatOpenAI
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMMessagesFrame
+from pipecat.frames.frames import LLMMessagesUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
+    LLMAssistantContextAggregator,
+    LLMUserContextAggregator,
+)
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
 )
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 from pipecat.runner.types import RunnerArguments
@@ -97,8 +100,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     lc = LangchainProcessor(history_chain)
 
-    tma_in = LLMUserResponseAggregator()
-    tma_out = LLMAssistantResponseAggregator()
+    context = OpenAILLMContext()
+    tma_in = LLMUserContextAggregator(context=context)
+    tma_out = LLMAssistantContextAggregator(context=context)
 
     pipeline = Pipeline(
         [
@@ -125,11 +129,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        # the `LLMMessagesFrame` will be picked up by the LangchainProcessor using
+        # An `OpenAILLMContextFrame` will be picked up by the LangchainProcessor using
         # only the content of the last message to inject it in the prompt defined
         # above. So no role is required here.
         messages = [({"content": "Please briefly introduce yourself to the user."})]
-        await task.queue_frames([LLMMessagesFrame(messages)])
+        await task.queue_frames([LLMMessagesUpdateFrame(messages, run_llm=True)])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
