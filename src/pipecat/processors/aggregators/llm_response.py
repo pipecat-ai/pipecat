@@ -1056,10 +1056,6 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
     ):
         """Initialize the assistant response aggregator.
 
-        .. deprecated:: 0.0.78
-            This class is deprecated and will be removed in a future version.
-            Use `LLMAssistantContextAggregator` or another LLM-specific subclass instead.
-
         Args:
             messages: Initial messages for the conversation context.
             params: Configuration parameters for aggregation behavior.
