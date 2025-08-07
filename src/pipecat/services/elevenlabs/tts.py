@@ -556,7 +556,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     # This can happen if a message is received _after_ we have closed a context
                     # due to user interruption but _before_ the `isFinal` message for the context
                     # is received.
-                    logger.trace(f"Ignoring message from unavailable context: {received_ctx_id}")
+                    logger.debug(f"Ignoring message from unavailable context: {received_ctx_id}")
                     continue
 
             if msg.get("audio"):
