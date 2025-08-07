@@ -144,6 +144,8 @@ class ParallelPipeline(BasePipeline):
 
         self._seen_ids = set()
         self._endframe_counter: Dict[int, int] = {}
+        self._start_frame_counter: Dict[int, int] = {}
+        self._started = False
 
         self._up_task = None
         self._down_task = None
@@ -185,7 +187,7 @@ class ParallelPipeline(BasePipeline):
 
             # We will add a source before the pipeline and a sink after.
             source = ParallelPipelineSource(self._up_queue, self._parallel_push_frame)
-            sink = ParallelPipelineSink(self._down_queue, self._parallel_push_frame)
+            sink = ParallelPipelineSink(self._down_queue, self._pipeline_sink_push_frame)
             self._sources.append(source)
             self._sinks.append(sink)
 
@@ -218,7 +220,7 @@ class ParallelPipeline(BasePipeline):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self._start(frame)
+            self._start_frame_counter[frame.id] = len(self._pipelines)
         elif isinstance(frame, EndFrame):
             self._endframe_counter[frame.id] = len(self._pipelines)
         elif isinstance(frame, CancelFrame):
@@ -296,6 +298,25 @@ class ParallelPipeline(BasePipeline):
         if frame.id not in self._seen_ids:
             self._seen_ids.add(frame.id)
             await self.push_frame(frame, direction)
+
+    async def _pipeline_sink_push_frame(self, frame: Frame, direction: FrameDirection):
+        if isinstance(frame, StartFrame):
+            # Decrement counter and check if all pipelines have processed the StartFrame
+            start_frame_counter = self._start_frame_counter.get(frame.id, 0)
+            if start_frame_counter > 0:
+                self._start_frame_counter[frame.id] -= 1
+                start_frame_counter = self._start_frame_counter[frame.id]
+
+            # Only push the StartFrame when all pipelines have processed it
+            if start_frame_counter == 0:
+                self._started = True
+                await self._start(frame)
+                await self._parallel_push_frame(frame, direction)
+        else:
+            if self._started:
+                await self._parallel_push_frame(frame, direction)
+            else:
+                await self._down_queue.put(frame)
 
     async def _process_up_queue(self):
         """Process upstream frames from all parallel branches."""
