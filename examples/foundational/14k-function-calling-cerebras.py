@@ -131,6 +131,7 @@ Start by asking me for my location. Then, use 'get_weather_current' to give me a
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
