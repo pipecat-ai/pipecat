@@ -106,6 +106,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `LLMUserContextAggregator` and `LLMAssistantResponseAggregator` (or
   LLM-specific subclasses thereof) instead.
 
+## [Unreleased]
+
+### Added
+
+- For `OpenAILLMService` and its subclasses, added the ability to retry
+  executing a chat completion after a timeout period. The new args are
+  `timeout` and `retry_on_timeout`. This feature is disabled by default.
+
 ## [0.0.78] - 2025-08-07
 
 ### Added
