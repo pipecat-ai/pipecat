@@ -81,6 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `RivaSTTService` issue that would result in an unhandled
+  `concurrent.futures.CancelledError` when a future is cancelled when reading
+  from the audio chunks from the incoming audio stream.
+
 - Fixed an issue in the `BaseOutputTransport`, mainly reproducible with
   `FastAPIWebsocketOutputTransport` when the audio mixer was enabled, where the
   loop could consume 100% CPU by continuously returning without delay, preventing
