@@ -14,6 +14,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -34,7 +35,6 @@ load_dotenv(override=True)
 
 
 BASE_FILENAME = "/tmp/pipecat_conversation_"
-tts = None
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
@@ -87,7 +87,7 @@ async def load_conversation(params: FunctionCallParams):
             logger.debug(
                 f"loaded conversation from {filename}\n{json.dumps(params.context.messages, indent=4)}"
             )
-        await tts.say("Ok, I've loaded that conversation.")
+        await params.llm.queue_frame(TTSSpeakFrame("Ok, I've loaded that conversation."))
     except Exception as e:
         await params.result_callback({"success": False, "error": str(e)})
 
@@ -190,7 +190,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    global tts
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
