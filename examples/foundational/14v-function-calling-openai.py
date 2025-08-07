@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-
 import os
 
 from dotenv import load_dotenv
@@ -20,10 +19,10 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.azure.tts import AzureTTSService
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openrouter.llm import OpenRouterLLMService
+from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.openai.tts import OpenAITTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
@@ -33,6 +32,10 @@ load_dotenv(override=True)
 
 async def fetch_weather_from_api(params: FunctionCallParams):
     await params.result_callback({"conditions": "nice", "temperature": "75"})
+
+
+async def fetch_restaurant_recommendation(params: FunctionCallParams):
+    await params.result_callback({"name": "The Golden Dragon"})
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -60,21 +63,27 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
-
-    tts = AzureTTSService(
-        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
-        region=os.getenv("AZURE_SPEECH_REGION"),
-        voice="en-US-JennyNeural",
-        params=AzureTTSService.InputParams(language="en-US", rate="1.1", style="cheerful"),
+    stt = OpenAISTTService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o-transcribe",
+        prompt="Expect words related weather, such as temperature and conditions. And restaurant names.",
     )
 
-    llm = OpenRouterLLMService(
-        api_key=os.getenv("OPENROUTER_API_KEY"), model="openai/gpt-4o-2024-11-20"
+    # voice choices: ash, ballad, or any other voice available in the OpenAI TTS API
+    # see https://www.openai.fm/
+    tts = OpenAITTSService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        voice="ballad",
+        instructions="Please speak clearly and at a moderate pace.",
     )
+
+    # model choices: gpt-4o, gpt-4.1, etc.
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+
     # You can also register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
+    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
 
     @llm.event_handler("on_function_calls_started")
     async def on_function_calls_started(service, function_calls):
@@ -96,7 +105,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
         required=["location", "format"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function])
+    restaurant_function = FunctionSchema(
+        name="get_restaurant_recommendation",
+        description="Get a restaurant recommendation",
+        properties={
+            "location": {
+                "type": "string",
+                "description": "The city and state, e.g. San Francisco, CA",
+            },
+        },
+        required=["location"],
+    )
+    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
+
     messages = [
         {
             "role": "system",
@@ -125,7 +146,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
-        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
