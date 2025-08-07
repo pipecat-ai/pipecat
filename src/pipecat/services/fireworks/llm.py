@@ -54,20 +54,13 @@ class FireworksLLMService(OpenAILLMService):
         logger.debug(f"Creating Fireworks client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    async def get_chat_completions(
+    def build_chat_completion_params(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ):
-        """Get chat completions from Fireworks API.
+    ) -> dict:
+        """Build parameters for Fireworks chat completion request.
 
-        Removes OpenAI-specific parameters not supported by Fireworks and
-        configures the request with Fireworks-compatible settings.
-
-        Args:
-            context: The OpenAI LLM context containing tools and settings.
-            messages: List of chat completion message parameters.
-
-        Returns:
-            Async generator yielding chat completion chunks from Fireworks API.
+        Fireworks doesn't support some OpenAI parameters like seed, max_completion_tokens,
+        and stream_options.
         """
         params = {
             "model": self.model_name,
@@ -83,6 +76,4 @@ class FireworksLLMService(OpenAILLMService):
         }
 
         params.update(self._settings["extra"])
-
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+        return params
