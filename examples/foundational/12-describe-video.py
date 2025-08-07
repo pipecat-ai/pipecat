@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
+from pipecat.frames.frames import Frame, TextFrame, TTSSpeakFrame, UserImageRequestFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -119,7 +119,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         image_requester.set_participant_id(client_id)
 
         # Welcome message
-        await tts.say("Hi there! Feel free to ask me what I see.")
+        await task.queue_frame(TTSSpeakFrame("Hi there! Feel free to ask me what I see."))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

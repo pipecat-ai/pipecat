@@ -14,6 +14,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -87,7 +88,7 @@ async def load_conversation(params: FunctionCallParams):
             logger.debug(
                 f"loaded conversation from {filename}\n{json.dumps(params.context.messages, indent=4)}"
             )
-        await tts.say("Ok, I've loaded that conversation.")
+        await params.llm.queue_frame(TTSSpeakFrame("Ok, I've loaded that conversation."))
     except Exception as e:
         await params.result_callback({"success": False, "error": str(e)})
 
