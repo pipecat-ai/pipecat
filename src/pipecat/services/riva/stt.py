@@ -7,6 +7,7 @@
 """NVIDIA Riva Speech-to-Text service implementations for real-time and batch transcription."""
 
 import asyncio
+from concurrent.futures import CancelledError as FuturesCancelledError
 from typing import AsyncGenerator, List, Mapping, Optional
 
 from loguru import logger
@@ -167,7 +168,7 @@ class RivaSTTService(STTService):
 
         self._asr_service = riva.client.ASRService(auth)
 
-        self._queue = asyncio.Queue()
+        self._queue = None
         self._config = None
         self._thread_task = None
         self._response_task = None
@@ -238,6 +239,7 @@ class RivaSTTService(STTService):
         riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
         self._config = config
+        self._queue = WatchdogQueue(self.task_manager)
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
@@ -366,8 +368,12 @@ class RivaSTTService(STTService):
         """
         if not self._thread_running:
             raise StopIteration
-        future = asyncio.run_coroutine_threadsafe(self._queue.get(), self.get_event_loop())
-        return future.result()
+
+        try:
+            future = asyncio.run_coroutine_threadsafe(self._queue.get(), self.get_event_loop())
+            return future.result()
+        except FuturesCancelledError:
+            raise StopIteration
 
     def __iter__(self):
         """Return iterator for audio chunk processing.
