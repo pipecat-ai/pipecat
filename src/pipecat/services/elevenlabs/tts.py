@@ -546,7 +546,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 continue
 
             # Check if this message belongs to the current context.
-            # This should never happen, so warn about it.
             if not self.audio_context_available(received_ctx_id):
                 if self._context_id == received_ctx_id:
                     logger.debug(
@@ -554,7 +553,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     )
                     await self.create_audio_context(self._context_id)
                 else:
-                    logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
+                    # This can happen if a message is received _after_ we have closed a context
+                    # due to user interruption but _before_ the `isFinal` message for the context
+                    # is received.
+                    logger.debug(f"Ignoring message from unavailable context: {received_ctx_id}")
                     continue
 
             if msg.get("audio"):
