@@ -256,6 +256,7 @@ class FrameProcessor(BaseObject):
         self.__should_block_frames = False
         self.__process_event = None
         self.__process_frame_task: Optional[asyncio.Task] = None
+        self.__process_queue = None
 
     @property
     def id(self) -> int:
@@ -782,8 +783,12 @@ class FrameProcessor(BaseObject):
 
             if isinstance(frame, SystemFrame):
                 await self.__process_frame(frame, direction, callback)
-            else:
+            elif self.__process_queue:
                 await self.__process_queue.put((frame, direction, callback))
+            else:
+                raise RuntimeError(
+                    f"{self}: __process_queue is None when processing frame {frame.name}"
+                )
 
     async def __process_frame_task_handler(self):
         """Handle non-system frames from the process queue."""
