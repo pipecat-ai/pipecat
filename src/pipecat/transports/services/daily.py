@@ -13,6 +13,7 @@ real-time communication features.
 
 import asyncio
 import time
+from concurrent.futures import CancelledError as FuturesCancelledError
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Dict, Mapping, Optional
@@ -1320,10 +1321,13 @@ class DailyTransportClient(EventHandler):
 
     def _call_async_callback(self, queue: asyncio.Queue, callback, *args):
         """Queue a callback for async execution on the event loop."""
-        future = asyncio.run_coroutine_threadsafe(
-            queue.put((callback, *args)), self._get_event_loop()
-        )
-        future.result()
+        try:
+            future = asyncio.run_coroutine_threadsafe(
+                queue.put((callback, *args)), self._get_event_loop()
+            )
+            future.result()
+        except FuturesCancelledError:
+            pass
 
     async def _callback_task_handler(self, queue: asyncio.Queue):
         """Handle queued callbacks from the specified queue."""

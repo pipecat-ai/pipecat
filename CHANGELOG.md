@@ -81,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `DailyTransport` issue that would result in an unhandled
+  `concurrent.futures.CancelledError` when a future is cancelled.
+
 - Fixed a `RivaSTTService` issue that would result in an unhandled
   `concurrent.futures.CancelledError` when a future is cancelled when reading
   from the audio chunks from the incoming audio stream.
