@@ -43,7 +43,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             base_url=os.getenv("PIPER_BASE_URL"), aiohttp_session=session, sample_rate=24000
         )
 
-        task = PipelineTask(Pipeline([tts, transport.output()]))
+        task = PipelineTask(
+            Pipeline([tts, transport.output()]),
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        )
 
         # Register an event handler so we can play the audio when the client joins
         @transport.event_handler("on_client_connected")

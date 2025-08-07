@@ -29,6 +29,8 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
@@ -136,6 +138,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
         observers=[
             CustomObserver(),
             LLMLogObserver(),
