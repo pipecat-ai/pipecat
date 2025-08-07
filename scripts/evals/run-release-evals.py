@@ -84,16 +84,16 @@ TESTS_14 = [
     ("14h-function-calling-azure.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14i-function-calling-fireworks.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14j-function-calling-nim.py", PROMPT_WEATHER, EVAL_WEATHER),
+    ("14m-function-calling-openrouter.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14n-function-calling-perplexity.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14p-function-calling-gemini-vertex-ai.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14q-function-calling-qwen.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14r-function-calling-aws.py", PROMPT_WEATHER, EVAL_WEATHER),
+    ("14v-function-calling-openai.py.py", PROMPT_WEATHER, EVAL_WEATHER),
     # Currently not working.
     # ("14c-function-calling-together.py", PROMPT_WEATHER, EVAL_WEATHER),
-    # ("14j-function-calling-nim.py", PROMPT_WEATHER, EVAL_WEATHER),
     # ("14k-function-calling-cerebras.py", PROMPT_WEATHER, EVAL_WEATHER),
     # ("14l-function-calling-deepseek.py", PROMPT_WEATHER, EVAL_WEATHER),
-    # ("14m-function-calling-openrouter.py", PROMPT_WEATHER, EVAL_WEATHER),
     # ("14o-function-calling-gemini-openai-format.py", PROMPT_WEATHER, EVAL_WEATHER),
 ]
 
