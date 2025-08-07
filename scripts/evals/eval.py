@@ -182,7 +182,10 @@ async def run_example_pipeline(script_path: Path):
         ),
     )
 
-    await module.run_bot(transport, RunnerArguments())
+    runner_args = RunnerArguments()
+    runner_args.pipeline_idle_timeout_secs = PIPELINE_IDLE_TIMEOUT_SECS
+
+    await module.run_bot(transport, runner_args)
 
 
 async def run_eval_pipeline(
