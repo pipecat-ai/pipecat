@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `TTSService.say()` is deprecated, push a `TTSSpeakFrame` instead. Calling
+  functions directly is a discouraged pattern in Pipecat because, for example,
+  it might cause issues with frame ordering.
+
 - `LLMMessagesFrame` is deprecated, in favor of either:
 
   - `LLMMessagesUpdateFrame` with `run_llm=True`
@@ -67,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added Chinese, Japanese, Korean word timestamp support to
   `CartesiaTTSService`.
 
-- Added `region` parameter to `GladiaSTTService`. Accepted values: eu-west (default), us-west.
+- Added `region` parameter to `GladiaSTTService`. Accepted values: eu-west
+  (default), us-west.
 
 ### Changed
 
