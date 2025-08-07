@@ -5,7 +5,12 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.79] - 2025-08-07
+
+### Changed
+
+- Changed `pipecat-ai`'s `openai` dependency to `>=1.74.0,<=1.99.1` due to a
+  breaking change in `openai` 1.99.2 ([commit](https://github.com/openai/openai-python/commit/657f551dbe583ffb259d987dafae12c6211fba06))
 
 ### Deprecated
 
