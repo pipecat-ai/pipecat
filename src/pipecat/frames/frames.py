@@ -502,7 +502,10 @@ class LLMMessagesFrame(DataFrame):
 
         warnings.simplefilter("always")
         warnings.warn(
-            "LLMMessagesFrame is deprecated and will be removed in a future release.",
+            "LLMMessagesFrame is deprecated and will be removed in a future version. "
+            "Instead, use either "
+            "`LLMMessagesUpdateFrame` with `run_llm=True`, or "
+            "`OpenAILLMContextFrame` with desired messages in a new context",
             DeprecationWarning,
             stacklevel=2,
         )
