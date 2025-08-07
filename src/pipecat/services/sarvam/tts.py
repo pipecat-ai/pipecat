@@ -9,10 +9,17 @@
 import asyncio
 import base64
 import json
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
-import websockets
+
+try:
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
+except ModuleNotFoundError as e:
+    logger.error(f"Exception: {e}")
+    logger.error("In order to use Sarvam, you need to `pip install pipecat-ai[sarvam]`.")
+    raise Exception(f"Missing module: {e}")
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -28,7 +35,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import TTSService, WebsocketTTSService
+from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
@@ -60,7 +67,7 @@ def language_to_sarvam_language(language: Language) -> Optional[str]:
     return LANGUAGE_MAP.get(language)
 
 
-class SarvamTTSService(TTSService):
+class SarvamHttpTTSService(TTSService):
     """Text-to-Speech service using Sarvam AI's API.
 
     Converts text to speech using Sarvam AI's TTS models with support for multiple
@@ -125,7 +132,7 @@ class SarvamTTSService(TTSService):
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
-        params = params or SarvamTTSService.InputParams()
+        params = params or SarvamHttpTTSService.InputParams()
 
         self._api_key = api_key
         self._base_url = base_url
@@ -250,28 +257,35 @@ class SarvamTTSService(TTSService):
             yield TTSStoppedFrame()
 
 
-class SarvamWebsocketTTSService(WebsocketTTSService):
+class SarvamTTSService(InterruptibleTTSService):
     """Minimalist TTS service for Sarvam AI WebSocket endpoint using Pipecat base class.
 
     Supports streaming text-to-speech with buffering and real-time audio generation.
     """
+
+    class InputParams(BaseModel):
+        """Docs."""
+
+        pitch: Optional[float] = Field(default=0.0, ge=-0.75, le=0.75)
+        pace: Optional[float] = Field(default=1.0, ge=0.3, le=3.0)
+        loudness: Optional[float] = Field(default=1.0, ge=0.1, le=3.0)
+        enable_preprocessing: Optional[bool] = False
+        min_buffer_size: Optional[int] = 50
+        max_chunk_length: Optional[int] = 200
+        output_audio_codec: Optional[str] = "linear16"
+        output_audio_bitrate: Optional[str] = "128k"
+        language: Optional[Language] = Language.EN
 
     def __init__(
         self,
         *,
         api_key: str,
         model: str = "bulbul:v2",
-        target_language_code: str = "hi-IN",
-        pitch: float = 0.0,
-        pace: float = 1.0,
-        speaker: str = "anushka",
-        loudness: float = 1.0,
-        speech_sample_rate: int = 24000,
-        enable_preprocessing: bool = False,
-        min_buffer_size: int = 50,
-        max_chunk_length: int = 200,
-        output_audio_codec: str = "linear16",
-        output_audio_bitrate: str = "128k",
+        voice_id: str = "anushka",
+        url: str = "wss://api.sarvam.ai/text-to-speech/ws",
+        aggregate_sentences: Optional[bool] = True,
+        sample_rate: Optional[int] = None,
+        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initialize the Sarvam TTS service with voice and transport configuration.
@@ -279,6 +293,11 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
         Args:
             api_key: Sarvam API key for authenticating TTS requests.
             model: Identifier of the Sarvam speech model (default “bulbul:v2”).
+            voice_id: Voice identifier for synthesis (default “anushka”).
+            url: WebSocket URL for connecting to the TTS backend (default production URL).
+            aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
+            sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
+            params: Optional input parameters to override global configuration.
             target_language_code: BCP-47 code of the target language (default “hi-IN”).
             pitch: Relative pitch adjustment (default 0.0).
             pace: Playback speed multiplier (default 1.0).
@@ -290,7 +309,7 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
             max_chunk_length: Maximum number of tokens in one chunk (default 200).
             output_audio_codec: Audio codec of output frames (default “linear16”).
             output_audio_bitrate: Bitrate for output audio format (default “128k”).
-            **kwargs: Optional keyword arguments forwarded to WebsocketTTSService (such as
+            **kwargs: Optional keyword arguments forwarded to InterruptibleTTSService (such as
                 `push_stop_frames`, `sample_rate`, task manager parameters, event hooks, etc.)
                 to customize transport behavior or enable metrics support.
 
@@ -299,31 +318,36 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
         """
         # Initialize parent class first
         super().__init__(
+            aggregate_sentences=aggregate_sentences,
+            push_text_frames=False,
+            pause_frame_processing=True,
             push_stop_frames=True,
-            sample_rate=speech_sample_rate,
+            sample_rate=sample_rate,
             **kwargs,
         )
+        params = params or SarvamTTSService.InputParams()
 
         # WebSocket endpoint URL
-        self._websocket_url = f"wss://api.sarvam.ai/text-to-speech/ws?model={model}"
+        self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
         self.set_model_name(model)
-        self.set_voice(speaker)
+        self.set_voice(voice_id)
         # Configuration parameters
-        self._config = {
-            "target_language_code": target_language_code,
-            "pitch": pitch,
-            "pace": pace,
-            "speaker": speaker,
-            "loudness": loudness,
-            "speech_sample_rate": speech_sample_rate,
-            "enable_preprocessing": enable_preprocessing,
-            "min_buffer_size": min_buffer_size,
-            "max_chunk_length": max_chunk_length,
-            "output_audio_codec": output_audio_codec,
-            "output_audio_bitrate": output_audio_bitrate,
+        self._settings = {
+            "target_language_code": (
+                self.language_to_service_language(params.language) if params.language else "en-IN"
+            ),
+            "pitch": params.pitch,
+            "pace": params.pace,
+            "speaker": voice_id,
+            "loudness": params.loudness,
+            "speech_sample_rate": 0,
+            "enable_preprocessing": params.enable_preprocessing,
+            "min_buffer_size": params.min_buffer_size,
+            "max_chunk_length": params.max_chunk_length,
+            "output_audio_codec": params.output_audio_codec,
+            "output_audio_bitrate": params.output_audio_bitrate,
         }
-        # self._websocket = None
         self._started = False
         self._cumulative_time = 0
 
@@ -356,6 +380,8 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
+
+        self._settings["speech_sample_rate"] = self.sample_rate
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -393,20 +419,25 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
-            self._started = False
+
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Update service settings and reconnect if voice changed."""
+        prev_voice = self._voice_id
+        await super()._update_settings(settings)
+        if not prev_voice == self._voice_id:
+            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+            await self._disconnect()
+            await self._connect()
 
     async def _flush_and_reconnect(self):
         """Flush current synthesis and reconnect WebSocket to clear stale requests."""
         try:
-            logger.debug("Flushing and reconnecting func")
             if self._websocket:
                 # Send flush message if supported
                 msg = {"type": "flush"}
                 await self._websocket.send(json.dumps(msg))
 
             # Disconnect and reconnect to clear any pending synthesis
-            logger.debug("flush wala disconnect")
             await self._disconnect()
             await self._connect()
 
@@ -425,7 +456,6 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket and clean up tasks."""
-        logger.debug("in _disconnect func")
         if self._receive_task:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
@@ -439,15 +469,17 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
     async def _connect_websocket(self):
         """Establish WebSocket connection to Sarvam API."""
         try:
-            if self._websocket and not self._websocket.closed:
+            if self._websocket and self._websocket.state is State.OPEN:
                 logger.debug("Webscoket already connected")
                 return
 
             logger.debug("Connecting to Sarvam TTS Websocket")
-            subprotocols = [f"api-subscription-key.{self._api_key}"]
-            self._websocket = await websockets.connect(
+
+            self._websocket = await websocket_connect(
                 self._websocket_url,
-                subprotocols=subprotocols,
+                additional_headers={
+                    "api-subscription-key": self._api_key,
+                },
                 ping_interval=None,  # We'll handle pings manually
                 ping_timeout=10,
                 close_timeout=10,
@@ -464,8 +496,8 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
         """Send initial configuration message."""
         if not self._websocket:
             raise Exception("WebSocket not connected")
-
-        config_message = {"type": "config", "data": self._config}
+        logger.debug(f"Config being sent is {self._settings}")
+        config_message = {"type": "config", "data": self._settings}
 
         try:
             await self._websocket.send(json.dumps(config_message))
@@ -489,9 +521,16 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
             self._started = False
             self._websocket = None
 
+    def _get_websocket(self):
+        if self._websocket:
+            return self._websocket
+        raise Exception("Websocket not connected")
+
     async def _receive_messages(self):
         """Receive and process messages from Sarvam WebSocket."""
-        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
+        async for message in WatchdogAsyncIterator(
+            self._get_websocket(), manager=self.task_manager
+        ):
             if isinstance(message, str):
                 msg = json.loads(message)
                 if msg.get("type") == "audio":
@@ -551,7 +590,7 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
         logger.debug(f"Generating TTS: [{text}]")
 
         try:
-            if not self._websocket or (getattr(self._websocket, "close_code", None) is not None):
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             try:
@@ -565,7 +604,6 @@ class SarvamWebsocketTTSService(WebsocketTTSService):
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
                 yield TTSStoppedFrame()
-                logger.debug("error wala disconnect")
                 await self._disconnect()
                 await self._connect()
                 return
