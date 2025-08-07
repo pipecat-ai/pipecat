@@ -35,7 +35,6 @@ load_dotenv(override=True)
 
 
 BASE_FILENAME = "/tmp/pipecat_conversation_"
-tts = None
 
 
 async def fetch_weather_from_api(params: FunctionCallParams):
@@ -191,7 +190,7 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    global tts
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
