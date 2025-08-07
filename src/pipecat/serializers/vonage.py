@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
-
 VONAGE_SAMPLE_RATE = 16000
 
 
@@ -33,7 +32,7 @@ class VonageFrameSerializer(FrameSerializer):
     media streams protocol. It supports audio conversion, DTMF events, and automatic
     call termination.
     """
-    
+
     class InputParams(BaseModel):
         """Configuration parameters for VonageFrameSerializer.
 
@@ -43,10 +42,12 @@ class VonageFrameSerializer(FrameSerializer):
         auto_hang_up: bool = True
 
     def __init__(
-        self,
-        params: Optional[InputParams] = None,
-        ):
+            self,
+            params: Optional[InputParams] = None,
+    ):
         """Initialize the VonageFrameSerializer."""
+        self.chunk_size = None
+        self.chunk_frames = None
         self._sample_rate = VONAGE_SAMPLE_RATE
         self._input_resampler = create_stream_resampler()
         self._output_resampler = create_stream_resampler()
@@ -70,6 +71,37 @@ class VonageFrameSerializer(FrameSerializer):
     async def setup(self, frame: StartFrame):
         self._sample_rate = VONAGE_SAMPLE_RATE
 
+    async def resample_audio(
+            self,
+            data: bytes,
+            current_rate,
+            num_channels,
+            sample_width,
+            target_rate=VONAGE_SAMPLE_RATE,
+    ) -> bytes:
+        wf = wave.open(io.BytesIO(data), "rb")
+        """
+        num_channels = wf.getnchannels()
+        sample_rate = wf.getframerate()
+        bit_depth = wf.getsampwidth() * 8  # Convert bytes to bits
+        """
+        num_frames = wf.getnframes()
+        pcm_data = wf.readframes(num_frames)  # Extract PCM data
+
+        """Resample audio data to 16kHz mono PCM 16-bit."""
+        audio = AudioSegment.from_raw(
+            io.BytesIO(pcm_data),
+            sample_width=sample_width,
+            frame_rate=current_rate,
+            channels=num_channels,
+        )
+        resampled_audio = (
+            audio.set_channels(num_channels)
+            .set_sample_width(sample_width)
+            .set_frame_rate(target_rate)
+        )
+        return resampled_audio.raw_data
+
     async def serialize(self, frame: Frame) -> str | bytes | None:
         """
         Serialize a Pipecat frame into Vonage-compatible format.
@@ -81,9 +113,9 @@ class VonageFrameSerializer(FrameSerializer):
             bytes or list of bytes: Serialized chunk(s), or None.
         """
         if (
-            self._params.auto_hang_up
-            and not self._hangup_attempted
-            and isinstance(frame, (EndFrame, CancelFrame))
+                self._params.auto_hang_up
+                and not self._hangup_attempted
+                and isinstance(frame, (EndFrame, CancelFrame))
         ):
             self._hangup_attempted = True
             logger.debug("VonageFrameSerializer would trigger hangup here (not implemented)")
@@ -94,7 +126,21 @@ class VonageFrameSerializer(FrameSerializer):
             return json.dumps(answer)
 
         elif isinstance(frame, OutputAudioRawFrame):
-            return frame.audio
+            resampled_data = await self.resample_audio(
+                frame.audio, frame.sample_rate, self.channels, self.sample_width, self._sample_rate
+            )
+
+            self.chunk_frames = int(self._sample_rate * self.chunk_duration_ms / 1000)
+            self.chunk_size = self.chunk_frames * self.channels * self.sample_width
+
+            chunks = []
+            frame_size = self.chunk_size
+            for i in range(0, len(resampled_data), frame_size):
+                chunk = resampled_data[i: i + frame_size]
+                chunks.append(chunk)
+
+            # return resampled_data
+            return chunks
 
         elif isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
             logger.info(

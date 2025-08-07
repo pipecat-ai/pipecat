@@ -6,11 +6,8 @@
 
 import asyncio
 import os
-from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -18,12 +15,11 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.chunked_audio_sender import VonageWebsocketServerTransport
 from pipecat.serializers.vonage import VonageFrameSerializer
-from pipecat.processors.chunked_audio_sender import ChunkedAudioSenderProcessor
 from pipecat.services.openai import OpenAISTTService, OpenAITTSService, OpenAILLMService
 from pipecat.transports.network.websocket_server import (
     WebsocketServerParams,
-    WebsocketServerTransport,
 )
 
 # Load environment variables from .env file
@@ -42,7 +38,7 @@ SYSTEM_INSTRUCTION = (
 async def run_bot_websocket_server():
     vonage_frame_serializer = VonageFrameSerializer()
 
-    ws_transport = WebsocketServerTransport(
+    ws_transport = VonageWebsocketServerTransport(
         host="0.0.0.0",
         port=8005,
         params=WebsocketServerParams(
@@ -85,8 +81,7 @@ async def run_bot_websocket_server():
         context_aggregator.user(),
         llm,
         tts,
-        ChunkedAudioSenderProcessor(),
-        ws_transport.output(),
+        ws_transport.output()
     ])
 
     task = PipelineTask(
