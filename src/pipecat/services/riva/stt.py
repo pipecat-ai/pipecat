@@ -168,7 +168,7 @@ class RivaSTTService(STTService):
 
         self._asr_service = riva.client.ASRService(auth)
 
-        self._queue = asyncio.Queue()
+        self._queue = None
         self._config = None
         self._thread_task = None
         self._response_task = None
@@ -239,6 +239,7 @@ class RivaSTTService(STTService):
         riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
         self._config = config
+        self._queue = WatchdogQueue(self.task_manager)
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
