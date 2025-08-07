@@ -63,8 +63,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     tts = AzureTTSService(
-        api_key=os.getenv("AZURE_API_KEY"),
-        region="eastus",
+        api_key=os.getenv("AZURE_SPEECH_API_KEY"),
+        region=os.getenv("AZURE_SPEECH_REGION"),
         voice="en-US-JennyNeural",
         params=AzureTTSService.InputParams(language="en-US", rate="1.1", style="cheerful"),
     )
