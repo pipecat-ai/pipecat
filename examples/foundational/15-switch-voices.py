@@ -12,19 +12,25 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, TTSTextFrame
+from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.filters.function_filter import FunctionFilter
+from pipecat.processors.transcript_processor import (
+    AssistantTranscriptProcessor,
+    TranscriptProcessor,
+)
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
@@ -114,6 +120,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm.register_function("switch_voice", tts.switch_voice)
 
+    transcript = TranscriptProcessor()
+
+    @transcript.event_handler("on_transcript_update")
+    async def handle_update(processor, frame):
+        for message in frame.messages:
+            logger.info(f"{message.role}: {message.content}")
+
     tools = [
         ChatCompletionToolParam(
             type="function",
@@ -136,7 +149,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. Your output should not include non-alphanumeric characters. You can do the following voices: 'News Lady', 'British Lady' and 'Barbershop Man'.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities. Respond to what the user said in a creative and helpful way. You can do the following voices: 'News Lady', 'British Lady' and 'Barbershop Man'.",
         },
     ]
 
@@ -147,10 +160,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),  # Transport user input
             stt,
+            transcript.user(),  # Place after STT
             context_aggregator.user(),  # User responses
             llm,  # LLM
             tts,  # TTS with switch voice functionality
             transport.output(),  # Transport bot output
+            transcript.assistant(),  # Place after transport.output()
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
