@@ -13,14 +13,13 @@ enabling integration with OpenPipe's fine-tuning and monitoring capabilities.
 from typing import Dict, List, Optional
 
 from loguru import logger
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.llm import OpenAILLMService
 
 try:
     from openpipe import AsyncOpenAI as OpenPipeAI
-    from openpipe import AsyncStream
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenPipe, you need to `pip install pipecat-ai[openpipe]`.")
@@ -87,22 +86,27 @@ class OpenPipeLLMService(OpenAILLMService):
         )
         return client
 
-    async def get_chat_completions(
+    def build_chat_completion_params(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        """Generate streaming chat completions with OpenPipe logging.
+    ) -> dict:
+        """Build parameters for OpenPipe chat completion request.
+
+        Adds OpenPipe-specific logging and tagging parameters.
 
         Args:
-            context: The OpenAI LLM context containing conversation state.
-            messages: List of chat completion message parameters.
+            context: The LLM context containing tools and configuration.
+            messages: List of chat completion messages to send.
 
         Returns:
-            Async stream of chat completion chunks.
+            Dictionary of parameters for the chat completion request.
         """
-        chunks = await self._client.chat.completions.create(
-            model=self.model_name,
-            stream=True,
-            messages=messages,
-            openpipe={"tags": self._tags, "log_request": True},
-        )
-        return chunks
+        # Start with base parameters
+        params = super().build_chat_completion_params(context, messages)
+
+        # Add OpenPipe-specific parameters
+        params["openpipe"] = {
+            "tags": self._tags,
+            "log_request": True,
+        }
+
+        return params
