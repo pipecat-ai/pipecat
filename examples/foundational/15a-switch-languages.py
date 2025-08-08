@@ -13,6 +13,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import Frame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -32,23 +33,42 @@ from pipecat.transports.services.daily import DailyParams
 load_dotenv(override=True)
 
 
-current_language = "English"
+class SwitchLanguage(ParallelPipeline):
+    def __init__(self):
+        self._current_language = "English"
 
+        english_tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        )
 
-async def switch_language(params: FunctionCallParams):
-    global current_language
-    current_language = params.arguments["language"]
-    await params.result_callback(
-        {"voice": f"Your answers from now on should be in {current_language}."}
-    )
+        spanish_tts = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
+        )
 
+        super().__init__(
+            # English
+            [FunctionFilter(self.english_filter), english_tts],
+            # Spanish
+            [FunctionFilter(self.spanish_filter), spanish_tts],
+        )
 
-async def english_filter(frame) -> bool:
-    return current_language == "English"
+    @property
+    def current_language(self):
+        return self._current_language
 
+    async def switch_language(self, params: FunctionCallParams):
+        self._current_language = params.arguments["language"]
+        await params.result_callback(
+            {"voice": f"Your answers from now on should be in {self.current_language}."}
+        )
 
-async def spanish_filter(frame) -> bool:
-    return current_language == "Spanish"
+    async def english_filter(self, _: Frame) -> bool:
+        return self.current_language == "English"
+
+    async def spanish_filter(self, _: Frame) -> bool:
+        return self.current_language == "Spanish"
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -80,18 +100,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         api_key=os.getenv("DEEPGRAM_API_KEY"), live_options=LiveOptions(language="multi")
     )
 
-    english_tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    )
-
-    spanish_tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="d4db5fb9-f44b-4bd1-85fa-192e0f0d75f9",  # Spanish-speaking Lady
-    )
+    tts = SwitchLanguage()
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-    llm.register_function("switch_language", switch_language)
+    llm.register_function("switch_language", tts.switch_language)
 
     tools = [
         ChatCompletionToolParam(
@@ -128,10 +140,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,  # STT
             context_aggregator.user(),  # User responses
             llm,  # LLM
-            ParallelPipeline(  # TTS (bot will speak the chosen language)
-                [FunctionFilter(english_filter), english_tts],  # English
-                [FunctionFilter(spanish_filter), spanish_tts],  # Spanish
-            ),
+            tts,  # TTS (bot will speak the chosen language)
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
@@ -153,7 +162,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append(
             {
                 "role": "system",
-                "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {current_language}.",
+                "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {tts.current_language}.",
             }
         )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
