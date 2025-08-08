@@ -19,6 +19,7 @@ from loguru import logger
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -29,6 +30,7 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
@@ -229,6 +231,13 @@ class TavusVideoService(AIService):
         elif isinstance(frame, OutputTransportReadyFrame):
             self._transport_ready = True
             await self.push_frame(frame, direction)
+        elif isinstance(frame, TTSStartedFrame):
+            await self.start_ttfb_metrics()
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # We constantly receive audio through WebRTC, but most of the time it is silence.
+            # As soon as we receive actual audio, the base output transport will create a
+            # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
+            await self.stop_ttfb_metrics()
         else:
             await self.push_frame(frame, direction)
 

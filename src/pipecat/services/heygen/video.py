@@ -20,6 +20,7 @@ from loguru import logger
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
+    BotStartedSpeakingFrame,
     CancelFrame,
     EndFrame,
     Frame,
@@ -30,6 +31,7 @@ from pipecat.frames.frames import (
     SpeechOutputAudioRawFrame,
     StartFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -232,8 +234,23 @@ class HeyGenVideoService(AIService):
             await self.push_frame(frame, direction)
         elif isinstance(frame, TTSAudioRawFrame):
             await self._handle_audio_frame(frame)
+        elif isinstance(frame, TTSStartedFrame):
+            await self.start_ttfb_metrics()
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            # We constantly receive audio through WebRTC, but most of the time it is silence.
+            # As soon as we receive actual audio, the base output transport will create a
+            # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
+            await self.stop_ttfb_metrics()
         else:
             await self.push_frame(frame, direction)
+
+    def can_generate_metrics(self) -> bool:
+        """Check if the service can generate metrics.
+
+        Returns:
+            True if metrics generation is supported.
+        """
+        return True
 
     async def _handle_user_started_speaking(self):
         """Handle the event when a user starts speaking.
