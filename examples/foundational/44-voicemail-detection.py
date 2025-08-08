@@ -82,9 +82,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-    voicemail_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    classifier_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    voicemail = VoicemailDetector(llm=voicemail_llm, on_voicemail_detected=handle_voicemail)
+    voicemail = VoicemailDetector(llm=classifier_llm, on_voicemail_detected=handle_voicemail)
 
     messages = [
         {
@@ -98,15 +98,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     pipeline = Pipeline(
         [
-            transport.input(),  # Transport user input
+            transport.input(),
             stt,
-            voicemail.detector(),
-            context_aggregator.user(),  # User responses
-            llm,  # LLM
-            tts,  # TTS
-            voicemail.buffer(),
-            transport.output(),  # Transport bot output
-            context_aggregator.assistant(),  # Assistant spoken responses
+            voicemail.detector(),  # Voicemail detection
+            context_aggregator.user(),
+            llm,
+            tts,
+            voicemail.buffer(),  # TTS buffering
+            transport.output(),
+            context_aggregator.assistant(),
         ]
     )
 
