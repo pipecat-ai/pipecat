@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     SystemFrame,
     TranscriptionFrame,
     TTSSpeakFrame,
+    TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
@@ -608,7 +609,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
 
     human_tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
-        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",
+        voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",
     )
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -756,13 +757,8 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             await super().process_frame(frame, direction)
             # Log all frame types for comprehensive debugging
             frame_type = type(frame).__name__
-            if hasattr(frame, "text") and frame.text:
+            if isinstance(frame, TTSTextFrame):
                 logger.info(f"🔊 TTS DEBUG ({self._name}): {frame_type} - {frame.text}")
-            elif "TTS" in frame_type or "Audio" in frame_type or "Text" in frame_type:
-                logger.info(f"🔊 TTS DEBUG ({self._name}): {frame_type} (no text content)")
-            # Log a few more frame types that might be relevant
-            elif frame_type in ["StartFrame", "EndFrame", "OutputTransportReadyFrame"]:
-                logger.debug(f"🔊 TTS DEBUG ({self._name}): {frame_type}")
             await self.push_frame(frame, direction)
 
     voicemail_tts_debug = TTSDebugProcessor("VOICEMAIL")
@@ -806,7 +802,8 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                 ],
             ),
             transport.output(),
-            # post_transport_debug,  # Debug what survives transport.output()
+            post_transport_debug,  # Debug what survives transport.output()
+            # human_context_aggregator.assistant(),
         ]
     )
 
