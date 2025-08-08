@@ -204,7 +204,7 @@ class GladiaSTTService(STTService):
         self,
         *,
         api_key: str,
-        region: Optional[Literal["us-west", "eu-west"]] = "eu-west",
+        region: Literal["us-west", "eu-west"] | None,
         url: str = "https://api.gladia.io/v2/live",
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
@@ -340,13 +340,6 @@ class GladiaSTTService(STTService):
         self._settings = settings
 
         return settings
-
-    def _get_endpoint_url(self) -> str:
-        query_params = dict()
-        query_params["region"] = self._region or "eu-west"
-        query = urlencode(query_params)
-
-        return f"{self._url}?{query}"
 
     async def start(self, frame: StartFrame):
         """Start the Gladia STT websocket connection.
@@ -496,13 +489,12 @@ class GladiaSTTService(STTService):
     async def _setup_gladia(self, settings: Dict[str, Any]):
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                self._get_endpoint_url(),
-                headers={"X-Gladia-Key": self._api_key, "Content-Type": "application/json"},
+                self._url,
+                headers={"X-Gladia-Key": self._api_key},
                 json=settings,
+                params={"region": self._region or "eu-west"},
             ) as response:
                 if response.ok:
-                    response_text = await response.json()
-                    logger.error(f"Gladia response: {response_text}")
                     return await response.json()
                 else:
                     error_text = await response.text()
