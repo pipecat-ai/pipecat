@@ -14,7 +14,7 @@ management, and frame flow control mechanisms.
 import asyncio
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence
+from typing import Any, Awaitable, Callable, Coroutine, List, Optional, Sequence, Tuple
 
 from loguru import logger
 
@@ -38,6 +38,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
+from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.base_object import BaseObject
 
@@ -52,6 +53,9 @@ class FrameDirection(Enum):
 
     DOWNSTREAM = 1
     UPSTREAM = 2
+
+
+FrameCallback = Callable[["FrameProcessor", Frame, FrameDirection], Awaitable[None]]
 
 
 @dataclass
@@ -71,7 +75,7 @@ class FrameProcessorSetup:
     watchdog_timers_enabled: bool = False
 
 
-class FrameProcessorQueue(WatchdogQueue):
+class FrameProcessorQueue(WatchdogPriorityQueue):
     """A priority queue for systems frames and other frames.
 
     This is a specialized queue for frame processors that separates and
@@ -88,6 +92,9 @@ class FrameProcessorQueue(WatchdogQueue):
 
     """
 
+    HIGH_PRIORITY = 1
+    LOW_PRIORITY = 2
+
     def __init__(self, manager: BaseTaskManager):
         """Initialize the FrameProcessorQueue.
 
@@ -96,11 +103,10 @@ class FrameProcessorQueue(WatchdogQueue):
 
         """
         super().__init__(manager)
-        self.__event = WatchdogEvent(manager)
-        self.__main_queue = WatchdogQueue(manager)
-        self.__system_queue = WatchdogQueue(manager)
+        self.__counter = 0
+        self.__system_counter = 0
 
-    async def put(self, item: Any):
+    async def put(self, item: Tuple[Frame, FrameDirection, FrameCallback]):
         """Put an item into the appropriate queue.
 
         System frames (`SystemFrame`) are placed into the system queue and all others
@@ -110,11 +116,13 @@ class FrameProcessorQueue(WatchdogQueue):
             item (Any): The item to enqueue.
 
         """
-        if isinstance(item, SystemFrame):
-            await self.__system_queue.put(item)
+        frame, _, _ = item
+        if isinstance(frame, SystemFrame):
+            await super().put((self.HIGH_PRIORITY, self.__system_counter, item))
+            self.__system_counter += 1
         else:
-            await self.__main_queue.put(item)
-        self.__event.set()
+            await super().put((self.LOW_PRIORITY, self.__counter, item))
+            self.__counter += 1
 
     async def get(self) -> Any:
         """Retrieve the next item from the queue.
@@ -126,37 +134,8 @@ class FrameProcessorQueue(WatchdogQueue):
             Any: The next item from the system or main queue.
 
         """
-        # Wait for an item in any of the queues if they are empty.
-        if self.__main_queue.empty() and self.__system_queue.empty():
-            await self.__event.wait()
-
-        # Prioritize system frames.
-        if self.__system_queue.qsize() > 0:
-            item = await self.__system_queue.get()
-            self.__system_queue.task_done()
-        else:
-            item = await self.__main_queue.get()
-            self.__main_queue.task_done()
-
-        # Clear the event only if all queues are empty.
-        if self.__main_queue.empty() and self.__system_queue.empty():
-            self.__event.clear()
-
+        _, _, item = await super().get()
         return item
-
-    def cancel(self):
-        """Cancel both internal queues.
-
-        This method is used to stop processing and release any pending tasks
-        in both the system and main queues. Typically used during shutdown
-        or cleanup to prevent further processing of frames.
-
-        """
-        self.__main_queue.cancel()
-        self.__system_queue.cancel()
-
-
-FrameCallback = Callable[["FrameProcessor", Frame, FrameDirection], Awaitable[None]]
 
 
 class FrameProcessor(BaseObject):
@@ -254,9 +233,7 @@ class FrameProcessor(BaseObject):
         # called. To resume processing frames we need to call
         # `resume_processing_frames()` which will wake up the event.
         self.__should_block_frames = False
-        self.__process_event = None
         self.__process_frame_task: Optional[asyncio.Task] = None
-        self.__process_queue = None
 
     @property
     def id(self) -> int:
@@ -745,9 +722,7 @@ class FrameProcessor(BaseObject):
         """Create the non-system frame processing task."""
         if not self.__process_frame_task:
             self.__should_block_frames = False
-            if not self.__process_event:
-                self.__process_event = WatchdogEvent(self.task_manager)
-            self.__process_event.clear()
+            self.__process_event = WatchdogEvent(self.task_manager)
             self.__process_queue = WatchdogQueue(self.task_manager)
             self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
 
@@ -790,10 +765,12 @@ class FrameProcessor(BaseObject):
                     f"{self}: __process_queue is None when processing frame {frame.name}"
                 )
 
+            self.__input_queue.task_done()
+
     async def __process_frame_task_handler(self):
         """Handle non-system frames from the process queue."""
         while True:
-            if self.__should_block_frames and self.__process_event:
+            if self.__should_block_frames:
                 logger.trace(f"{self}: frame processing paused")
                 await self.__process_event.wait()
                 self.__process_event.clear()
@@ -803,3 +780,5 @@ class FrameProcessor(BaseObject):
             (frame, direction, callback) = await self.__process_queue.get()
 
             await self.__process_frame(frame, direction, callback)
+
+            self.__process_queue.task_done()
