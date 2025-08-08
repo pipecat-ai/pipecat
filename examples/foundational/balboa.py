@@ -609,7 +609,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
 
     human_tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
-        voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",
+        voice_id="b7d50908-b17c-442d-ad8d-810c63997ed9",
     )
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
@@ -784,8 +784,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                 ],
                 [
                     voicemail_tts,
-                    # voicemail_tts_debug,  # Debug TTS frames
-                    # transcript.assistant(),  # Capture voicemail TTS frames
+                    transcript.assistant(),  # Capture voicemail TTS frames
                 ],
                 [
                     # Human conversation branch
@@ -796,15 +795,11 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                     human_llm,
                     FunctionFilter(human_filter),
                     human_tts,
-                    # human_tts_debug,  # Debug TTS frames
-                    # transcript.assistant(),  # Capture human TTS frames
+                    transcript.assistant(),  # Capture human TTS frame
                     human_context_aggregator.assistant(),
                 ],
             ),
             transport.output(),
-            post_transport_debug,  # Debug what survives transport.output()
-            transcript.assistant(),  # Capture human TTS frame
-            # human_context_aggregator.assistant(),
         ]
     )
 
