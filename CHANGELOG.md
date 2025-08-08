@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- Updated `pyproject.toml` to once again pin `numba` to `>=0.61.2` in order to
+  resolve package versioning issues.
+
 ### Other
 
 - Updated `15-switch-voices.py` and `15a-switch-languages.py` examples to show
