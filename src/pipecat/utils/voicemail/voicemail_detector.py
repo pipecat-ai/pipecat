@@ -23,6 +23,8 @@ from pipecat.frames.frames import (
     EndFrame,
     EndTaskFrame,
     Frame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMTextFrame,
     StartFrame,
     TTSAudioRawFrame,
@@ -40,8 +42,8 @@ class ClassifierGate(FrameProcessor):
     """Gate processor that controls frame flow based on classification decisions.
 
     The gate starts open and closes permanently once a classification decision
-    is made (LIVE or MAIL). This ensures the classifier only runs until a definitive
-    decision is reached.
+    is made (CONVERSATION or VOICEMAIL). This ensures the classifier only runs until
+    a definitive decision is reached.
     """
 
     def __init__(self, notifier: BaseNotifier):
@@ -102,9 +104,9 @@ class ClassifierGate(FrameProcessor):
 class VoicemailProcessor(FrameProcessor):
     """Processor that handles LLM classification responses and triggers callbacks.
 
-    Processes LLM text responses to determine if the call is a voicemail (MAIL)
-    or conversation (LIVE), then triggers appropriate actions including
-    developer callbacks for voicemail detection.
+    Processes LLM text responses to determine if the call is a voicemail (VOICEMAIL)
+    or conversation (CONVERSATION), then triggers appropriate actions including developer
+    callbacks for voicemail detection.
     """
 
     def __init__(
@@ -129,6 +131,11 @@ class VoicemailProcessor(FrameProcessor):
         self._voicemail_notifier = voicemail_notifier
         self._on_voicemail_detected = on_voicemail_detected
 
+        # Aggregation state
+        self._aggregating = False
+        self._response_buffer = ""
+        self._decision_made = False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle LLM classification responses.
 
@@ -138,29 +145,60 @@ class VoicemailProcessor(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, LLMTextFrame):
-            response = frame.text.strip().upper()
-            if "LIVE" in response:
-                logger.info(f"{self}: LIVE conversation detected - releasing buffer")
-                await self._gate_notifier.notify()
-                await self._conversation_notifier.notify()
-            elif "MAIL" in response:
-                logger.info(f"{self}: VOICEMAIL detected - triggering callback")
-                # Notify gate to close (decision is final)
-                await self._gate_notifier.notify()
-                await self._voicemail_notifier.notify()
-                # Push BotInterruptionFrame to clear the pipeline
-                await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
-                # Call developer callback if provided
-                if self._on_voicemail_detected:
-                    try:
-                        await self._on_voicemail_detected(self)
-                    except Exception as e:
-                        logger.exception(f"{self}: Error in voicemail callback: {e}")
+        if isinstance(frame, LLMFullResponseStartFrame):
+            # Start aggregating the LLM response
+            self._aggregating = True
+            self._response_buffer = ""
+            logger.debug(f"{self}: Starting LLM response aggregation")
+
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            # End of LLM response - make decision
+            if self._aggregating and not self._decision_made:
+                await self._process_classification(self._response_buffer.strip())
+            self._aggregating = False
+            self._response_buffer = ""
+
+        elif isinstance(frame, LLMTextFrame) and self._aggregating:
+            # Accumulate text tokens
+            self._response_buffer += frame.text
+            logger.debug(f"{self}: Accumulated: '{self._response_buffer}'")
 
         else:
-            # Push the frame
+            # Always push the frame downstream (for context aggregator)
             await self.push_frame(frame, direction)
+
+    async def _process_classification(self, full_response: str):
+        """Process the complete LLM classification response.
+
+        Args:
+            full_response: The complete aggregated response from the LLM.
+        """
+        if self._decision_made:
+            return
+
+        response = full_response.upper()
+        logger.info(f"{self}: Processing classification: '{full_response}'")
+
+        if "CONVERSATION" in response:
+            self._decision_made = True
+            logger.info(f"{self}: CONVERSATION detected - releasing buffer")
+            await self._gate_notifier.notify()
+            await self._conversation_notifier.notify()
+
+        elif "VOICEMAIL" in response:
+            self._decision_made = True
+            logger.info(f"{self}: VOICEMAIL detected - triggering callback")
+            await self._gate_notifier.notify()
+            await self._voicemail_notifier.notify()
+            await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+
+            if self._on_voicemail_detected:
+                try:
+                    await self._on_voicemail_detected(self)
+                except Exception as e:
+                    logger.exception(f"{self}: Error in voicemail callback: {e}")
+        else:
+            logger.warning(f"{self}: Unexpected classification response: '{full_response}'")
 
 
 class VoicemailBuffer(FrameProcessor):
@@ -260,14 +298,14 @@ class VoicemailDetector(ParallelPipeline):
     2. Classification branch: LLM-based classification that can interrupt for voicemail
 
     The classifier runs in parallel and makes a one-time decision to either:
-    - Continue normal conversation flow (LIVE response)
-    - Interrupt and trigger voicemail handling (MAIL response)
+    - Continue normal conversation flow (CONVERSATION response)
+    - Interrupt and trigger voicemail handling (VOICEMAIL response)
     """
 
     # Default prompt
     DEFAULT_SYSTEM_PROMPT = """You are a voicemail detection classifier for an OUTBOUND calling system. A bot has called a phone number and you need to determine if a human answered or if the call went to voicemail based on the provided text.
 
-HUMAN ANSWERED - LIVE CONVERSATION (respond "LIVE"):
+HUMAN ANSWERED - LIVE CONVERSATION (respond "CONVERSATION"):
 - Personal greetings: "Hello?", "Hi", "Yeah?", "John speaking"
 - Interactive responses: "Who is this?", "What do you want?", "Can I help you?"
 - Conversational tone expecting back-and-forth dialogue
@@ -276,7 +314,7 @@ HUMAN ANSWERED - LIVE CONVERSATION (respond "LIVE"):
 - Natural, spontaneous speech patterns
 - Immediate acknowledgment of the call
 
-VOICEMAIL SYSTEM (respond "MAIL"):
+VOICEMAIL SYSTEM (respond "VOICEMAIL"):
 - Automated voicemail greetings: "Hi, you've reached [name], please leave a message"
 - Phone carrier messages: "The number you have dialed is not in service", "Please leave a message", "All circuits are busy"
 - Professional voicemail: "This is [name], I'm not available right now"
@@ -285,7 +323,7 @@ VOICEMAIL SYSTEM (respond "MAIL"):
 - Carrier system messages: "mailbox is full", "has not been set up"
 - Business hours messages: "our office is currently closed"
 
-Respond with ONLY "LIVE" if a person answered, or "MAIL" if it's voicemail/recording."""
+Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's voicemail/recording."""
 
     def __init__(
         self,
@@ -301,8 +339,8 @@ Respond with ONLY "LIVE" if a person answered, or "MAIL" if it's voicemail/recor
             on_voicemail_detected: Callback function called when voicemail is detected.
             system_prompt: Optional custom system prompt for classification. If None, uses
                 default prompt optimized for outbound calling scenarios. If providing a
-                custom prompt, ensure it results in a clear "LIVE" or "MAIL" response, where
-                "LIVE" indicates a human answered and "MAIL" indicates voicemail.
+                custom prompt, ensure it results in a clear "CONVERSATION" or "VOICEMAIL" response,
+                where "CONVERSATION" indicates a human answered and "VOICEMAIL" indicates voicemail.
         """
         self._classifier_llm = llm
         self._prompt = system_prompt if system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
@@ -345,6 +383,23 @@ Respond with ONLY "LIVE" if a person answered, or "MAIL" if it's voicemail/recor
                 self._context_aggregator.assistant(),
             ],
         )
+
+    def _validate_prompt(self, prompt: str) -> None:
+        """Validate custom prompt contains essential instructions.
+
+        Args:
+            prompt: The custom system prompt to validate.
+        """
+        # Check for exact response format requirements
+        has_conversation = "CONVERSATION" in prompt
+        has_voicemail = "VOICEMAIL" in prompt
+
+        if not has_conversation or not has_voicemail:
+            logger.warning(
+                "Custom system prompt should instruct the LLM to respond with exactly "
+                '"CONVERSATION" or "VOICEMAIL" for proper detection functionality. '
+                'Example: "Respond with ONLY \\"CONVERSATION\\" if a person answered, or \\"VOICEMAIL\\" if it\'s voicemail/recording."'
+            )
 
     def detector(self) -> "VoicemailDetector":
         """Get the detector pipeline (for placement after STT).
