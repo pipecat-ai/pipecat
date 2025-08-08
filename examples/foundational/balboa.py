@@ -54,6 +54,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMContext, GoogleLLMService
@@ -540,6 +541,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         logger.info(f"Voicemail detected - confidence: {confidence}, reasoning: {reasoning}")
 
         if confidence >= VOICEMAIL_CONFIDENCE_THRESHOLD and current_mode == MUTE_MODE:
+            logger.info(f"🔄 MODE CHANGE: {current_mode} -> {VOICEMAIL_MODE}")
             current_mode = VOICEMAIL_MODE
             is_voicemail = True
 
@@ -547,6 +549,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
 
             # Generate voicemail message
             message = "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
+            logger.info(f"🎤 SENDING VOICEMAIL MESSAGE: {message}")
             await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
             await voicemail_tts.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
@@ -561,11 +564,13 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
         logger.info(f"Human detected - confidence: {confidence}, reasoning: {reasoning}")
 
         if confidence >= HUMAN_CONFIDENCE_THRESHOLD and current_mode == MUTE_MODE:
+            logger.info(f"🔄 MODE CHANGE: {current_mode} -> {HUMAN_MODE}")
             current_mode = HUMAN_MODE
             is_voicemail = False
 
             await human_notifier.notify()
             message = "Hello, this is virtual agent John. Am I speaking to Tim?"
+            logger.info(f"🎤 SENDING HUMAN MESSAGE: {message}")
             await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
 
         await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
@@ -715,12 +720,56 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
 
     # Filter functions
     async def voicemail_filter(frame) -> bool:
-        return current_mode == VOICEMAIL_MODE or MUTE_MODE
+        result = current_mode == VOICEMAIL_MODE or current_mode == MUTE_MODE
+        if hasattr(frame, "text") and frame.text:
+            logger.debug(
+                f"🎯 VOICEMAIL FILTER: mode={current_mode}, allowing={result}, frame={type(frame).__name__}"
+            )
+        return result
 
     async def human_filter(frame) -> bool:
-        return current_mode == HUMAN_MODE
+        result = current_mode == HUMAN_MODE
+        if hasattr(frame, "text") and frame.text:
+            logger.debug(
+                f"🎯 HUMAN FILTER: mode={current_mode}, allowing={result}, frame={type(frame).__name__}"
+            )
+        return result
 
     debug_processor = DebugClass()
+
+    transcript = TranscriptProcessor()
+
+    @transcript.event_handler("on_transcript_update")
+    async def handle_update(processor, frame):
+        for message in frame.messages:
+            logger.info(f"📝 TRANSCRIPT {message.role}: {message.content}")
+
+    # Add debug logging for TTS frames
+    class TTSDebugProcessor(FrameProcessor):
+        """Debug processor to track TTS frames."""
+
+        def __init__(self, name):
+            super().__init__()
+            self._name = name
+
+        async def process_frame(self, frame, direction):
+            await super().process_frame(frame, direction)
+            # Log all frame types for comprehensive debugging
+            frame_type = type(frame).__name__
+            if hasattr(frame, "text") and frame.text:
+                logger.info(f"🔊 TTS DEBUG ({self._name}): {frame_type} - {frame.text}")
+            elif "TTS" in frame_type or "Audio" in frame_type or "Text" in frame_type:
+                logger.info(f"🔊 TTS DEBUG ({self._name}): {frame_type} (no text content)")
+            # Log a few more frame types that might be relevant
+            elif frame_type in ["StartFrame", "EndFrame", "OutputTransportReadyFrame"]:
+                logger.debug(f"🔊 TTS DEBUG ({self._name}): {frame_type}")
+            await self.push_frame(frame, direction)
+
+    voicemail_tts_debug = TTSDebugProcessor("VOICEMAIL")
+    human_tts_debug = TTSDebugProcessor("HUMAN")
+
+    # Debug processor to see what makes it past transport.output()
+    post_transport_debug = TTSDebugProcessor("POST_TRANSPORT")
 
     # ------------ PIPELINE ------------
 
@@ -730,29 +779,34 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             ParallelPipeline(
                 # Voicemail detection branch
                 [
-                    voicemail_audio_blocker,
+                    voicemail_audio_blocker,  # Allows audio at the start to detect voicemail, and while in voicemail mode. Is blocked when LLM detects human.
                     _VADPrebufferProcessor,
                     audio_collector,
                     detection_context_aggregator.user(),
                     detection_llm,
                     FunctionFilter(voicemail_filter),
                 ],
-                [voicemail_tts],
+                [
+                    voicemail_tts,
+                    # voicemail_tts_debug,  # Debug TTS frames
+                    transcript.assistant(),  # Capture voicemail TTS frames
+                ],
                 [
                     # Human conversation branch
-                    human_audio_blocker,
-                    # stt,
-                    # transcript.user(),  # Captures user transcripts
+                    human_audio_blocker,  # Allows audio when in human mode, blocks when voicemail is detected or when deciding if human or voicemail.
+                    stt,
+                    transcript.user(),  # Place after STT
                     human_context_aggregator.user(),
                     human_llm,
-                    human_tts,
                     FunctionFilter(human_filter),
+                    human_tts,
+                    # human_tts_debug,  # Debug TTS frames
+                    transcript.assistant(),  # Capture human TTS frames
+                    human_context_aggregator.assistant(),
                 ],
             ),
             transport.output(),
-            # transcript.assistant(),  # Captures assistant transcripts
-            human_context_aggregator.assistant(),
-            # audiobuffer,
+            # post_transport_debug,  # Debug what survives transport.output()
         ]
     )
 

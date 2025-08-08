@@ -12,7 +12,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, TTSTextFrame
+from pipecat.frames.frames import EndFrame, Frame, TTSTextFrame, UserStartedSpeakingFrame
 from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
@@ -30,6 +30,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -177,6 +178,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        observers=[
+            DebugLogObserver(
+                frame_types={
+                    TTSTextFrame: (BaseOutputTransport, FrameEndpoint.DESTINATION),
+                    UserStartedSpeakingFrame: (BaseInputTransport, FrameEndpoint.SOURCE),
+                    EndFrame: None,
+                }
+            ),
+        ],
     )
 
     @transport.event_handler("on_client_connected")
