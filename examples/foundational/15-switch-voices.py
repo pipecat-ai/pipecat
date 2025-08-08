@@ -12,6 +12,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import Frame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -31,29 +32,54 @@ from pipecat.transports.services.daily import DailyParams
 load_dotenv(override=True)
 
 
-current_voice = "News Lady"
+class SwitchVoices(ParallelPipeline):
+    def __init__(self):
+        self._current_voice = "News Lady"
 
+        news_lady = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="bf991597-6c13-47e4-8411-91ec2de5c466",  # Newslady
+        )
 
-async def switch_voice(params: FunctionCallParams):
-    global current_voice
-    current_voice = params.arguments["voice"]
-    await params.result_callback(
-        {
-            "voice": f"You are now using your {current_voice} voice. Your responses should now be as if you were a {current_voice}."
-        }
-    )
+        british_lady = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        )
 
+        barbershop_man = CartesiaTTSService(
+            api_key=os.getenv("CARTESIA_API_KEY"),
+            voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
+        )
 
-async def news_lady_filter(frame) -> bool:
-    return current_voice == "News Lady"
+        super().__init__(
+            # News Lady voice
+            [FunctionFilter(self.news_lady_filter), news_lady],
+            # British Reading Lady voice
+            [FunctionFilter(self.british_lady_filter), british_lady],
+            # Barbershop Man voice
+            [FunctionFilter(self.barbershop_man_filter), barbershop_man],
+        )
 
+    @property
+    def current_voice(self):
+        return self._current_voice
 
-async def british_lady_filter(frame) -> bool:
-    return current_voice == "British Lady"
+    async def switch_voice(self, params: FunctionCallParams):
+        self._current_voice = params.arguments["voice"]
+        await params.result_callback(
+            {
+                "voice": f"You are now using your {self.current_voice} voice. Your responses should now be as if you were a {self.current_voice}."
+            }
+        )
 
+    async def news_lady_filter(self, _: Frame) -> bool:
+        return self.current_voice == "News Lady"
 
-async def barbershop_man_filter(frame) -> bool:
-    return current_voice == "Barbershop Man"
+    async def british_lady_filter(self, _: Frame) -> bool:
+        return self.current_voice == "British Lady"
+
+    async def barbershop_man_filter(self, _: Frame) -> bool:
+        return self.current_voice == "Barbershop Man"
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -83,23 +109,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    news_lady = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="bf991597-6c13-47e4-8411-91ec2de5c466",  # Newslady
-    )
-
-    british_lady = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
-    )
-
-    barbershop_man = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="a0e99841-438c-4a64-b679-ae501e7d6091",  # Barbershop Man
-    )
+    tts = SwitchVoices()
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
-    llm.register_function("switch_voice", switch_voice)
+    llm.register_function("switch_voice", tts.switch_voice)
 
     tools = [
         ChatCompletionToolParam(
@@ -136,14 +149,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
-            ParallelPipeline(  # TTS (one of the following vocies)
-                [FunctionFilter(news_lady_filter), news_lady],  # News Lady voice
-                [
-                    FunctionFilter(british_lady_filter),
-                    british_lady,
-                ],  # British Reading Lady voice
-                [FunctionFilter(barbershop_man_filter), barbershop_man],  # Barbershop Man voice
-            ),
+            tts,  # TTS with switch voice functionality
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses
         ]
@@ -165,7 +171,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         messages.append(
             {
                 "role": "system",
-                "content": f"Please introduce yourself to the user and let them know the voices you can do. Your initial responses should be as if you were a {current_voice}.",
+                "content": f"Please introduce yourself to the user and let them know the voices you can do. Your initial responses should be as if you were a {tts.current_voice}.",
             }
         )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
