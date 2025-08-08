@@ -785,7 +785,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                 [
                     voicemail_tts,
                     # voicemail_tts_debug,  # Debug TTS frames
-                    transcript.assistant(),  # Capture voicemail TTS frames
+                    # transcript.assistant(),  # Capture voicemail TTS frames
                 ],
                 [
                     # Human conversation branch
@@ -797,12 +797,13 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
                     FunctionFilter(human_filter),
                     human_tts,
                     # human_tts_debug,  # Debug TTS frames
-                    transcript.assistant(),  # Capture human TTS frames
+                    # transcript.assistant(),  # Capture human TTS frames
                     human_context_aggregator.assistant(),
                 ],
             ),
             transport.output(),
             post_transport_debug,  # Debug what survives transport.output()
+            transcript.assistant(),  # Capture human TTS frame
             # human_context_aggregator.assistant(),
         ]
     )
