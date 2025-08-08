@@ -22,9 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Improving the latency of the `HeyGenVideoService`.
 
-- Updated `15-switch-voices.py` and `15a-switch-languages.py` examples to show
-  how to enclose complex logic (e.g. `ParallelPipeline`) into a single processor
-  so the main pipeline becomes simpler.
+- Updated foundational examples to show how to enclose complex logic
+  (e.g. `ParallelPipeline`) into a single processor so the main pipeline becomes
+  simpler.
 
 ## [0.0.79] - 2025-08-07
 
