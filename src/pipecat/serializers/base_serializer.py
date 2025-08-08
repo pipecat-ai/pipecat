@@ -18,10 +18,12 @@ class FrameSerializerType(Enum):
     Parameters:
         BINARY: Binary serialization format for compact representation.
         TEXT: Text-based serialization format for human-readable output.
+        BOTH: Serialization format that contains both binary and text-based output.
     """
 
     BINARY = "binary"
     TEXT = "text"
+    BOTH = "both"
 
 
 class FrameSerializer(ABC):
@@ -38,7 +40,7 @@ class FrameSerializer(ABC):
         """Get the serialization type supported by this serializer.
 
         Returns:
-            The FrameSerializerType indicating binary or text format.
+            The FrameSerializerType indicating binary, text, or both format.
         """
         pass
 

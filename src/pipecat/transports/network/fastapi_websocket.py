@@ -85,17 +85,30 @@ class FastAPIWebsocketClient:
     with support for both binary and text message types.
     """
 
-    def __init__(self, websocket: WebSocket, is_binary: bool, callbacks: FastAPIWebsocketCallbacks):
+    def __init__(self, websocket: WebSocket, is_binary: bool | str , callbacks: FastAPIWebsocketCallbacks):
         """Initialize the WebSocket client.
 
         Args:
             websocket: The FastAPI WebSocket connection.
-            is_binary: Whether to use binary message format.
+            is_binary: Whether to use binary message format. Can be a boolean or a string like 'both'
             callbacks: Event callback functions.
         """
         self._websocket = websocket
         self._closing = False
-        self._is_binary = is_binary
+        # if is_binary is a boolean, use it directly; if it's a string, treat it as a type
+        if isinstance(is_binary, bool):
+            self._is_binary = is_binary
+        elif isinstance(is_binary, str):
+            if is_binary.lower() == "binary":
+                self._is_binary = True
+            elif is_binary.lower() == "text":
+                self._is_binary = False
+            elif is_binary.lower() == "both":
+                self._is_binary = False
+                # In 'both' mode, we will use text for iterating and binary for sending
+                self._is_both = True    
+            else:
+                raise ValueError(f"Invalid is_binary value: {is_binary}")
         self._callbacks = callbacks
         self._leave_counter = 0
 
@@ -113,7 +126,17 @@ class FastAPIWebsocketClient:
         Returns:
             An async iterator yielding bytes or strings based on message type.
         """
-        return self._websocket.iter_bytes() if self._is_binary else self._websocket.iter_text()
+        # if is_both is set, we need an iterator that can handle both text and binary messages
+        if hasattr(self, '_is_both') and self._is_both:
+            async def both_iter():
+                async for message in self._websocket.iter_text():
+                    yield message
+                async for message in self._websocket.iter_bytes():
+                    yield message
+
+            return both_iter()
+        else:
+            return self._websocket.iter_bytes() if self._is_binary else self._websocket.iter_text()
 
     async def send(self, data: str | bytes):
         """Send data through the WebSocket connection.
@@ -122,8 +145,8 @@ class FastAPIWebsocketClient:
             data: The data to send (string or bytes).
         """
         try:
-            if self._can_send():
-                if self._is_binary:
+            if self._can_send():                :
+                if self._is_binary or (hasattr(self, '_is_both') and self._is_both and isinstance(data, bytes)):
                     await self._websocket.send_bytes(data)
                 else:
                     await self._websocket.send_text(data)
@@ -504,8 +527,12 @@ class FastAPIWebsocketTransport(BaseTransport):
         )
 
         is_binary = False
+        is_both = False
+        is_text = False
         if self._params.serializer:
             is_binary = self._params.serializer.type == FrameSerializerType.BINARY
+            is_both = self._params.serializer.type == FrameSerializerType.BOTH
+            is_text = self._params.serializer.type == FrameSerializerType.TEXT
         self._client = FastAPIWebsocketClient(websocket, is_binary, self._callbacks)
 
         self._input = FastAPIWebsocketInputTransport(
