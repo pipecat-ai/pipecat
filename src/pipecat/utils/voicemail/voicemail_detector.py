@@ -12,7 +12,7 @@ conversations.
 """
 
 import asyncio
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, List, Optional
 
 from loguru import logger
 
@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
     Frame,
     LLMTextFrame,
     StartFrame,
+    TTSAudioRawFrame,
+    TTSTextFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -107,17 +109,24 @@ class VoicemailProcessor(FrameProcessor):
 
     def __init__(
         self,
-        notifier: BaseNotifier,
+        *,
+        gate_notifier: BaseNotifier,
+        conversation_notifier: BaseNotifier,  # Buffer should release frames
+        voicemail_notifier: BaseNotifier,  # Buffer should clear frames
         on_voicemail_detected: Optional[Callable[["VoicemailProcessor"], Awaitable[None]]] = None,
     ):
         """Initialize the voicemail processor.
 
         Args:
-            notifier: Notifier to signal classification decisions.
+            gate_notifier: Notifier to signal gate about classification decisions.
+            conversation_notifier: Notifier to signal buffer to release frames.
+            voicemail_notifier: Notifier to signal buffer to clear frames.
             on_voicemail_detected: Callback function called when voicemail is detected.
         """
         super().__init__()
-        self._notifier = notifier
+        self._gate_notifier = gate_notifier
+        self._conversation_notifier = conversation_notifier
+        self._voicemail_notifier = voicemail_notifier
         self._on_voicemail_detected = on_voicemail_detected
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -133,11 +142,13 @@ class VoicemailProcessor(FrameProcessor):
             response = frame.text.strip().upper()
             if "NO" in response:
                 logger.info(f"{self}: CONVERSATION detected - notifying to close gate")
-                await self._notifier.notify()
+                await self._gate_notifier.notify()
+                await self._conversation_notifier.notify()
             elif "YES" in response:
                 logger.info(f"{self}: VOICEMAIL detected - triggering callback")
                 # Notify gate to close (decision is final)
-                await self._notifier.notify()
+                await self._gate_notifier.notify()
+                await self._voicemail_notifier.notify()
                 # Push BotInterruptionFrame to clear the pipeline
                 await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
                 # Call developer callback if provided
@@ -150,6 +161,95 @@ class VoicemailProcessor(FrameProcessor):
         else:
             # Push the frame
             await self.push_frame(frame, direction)
+
+
+class VoicemailBuffer(FrameProcessor):
+    """Buffers TTS frames until voicemail classification decision is made.
+
+    Holds TTS frames in a buffer while voicemail classification is in progress.
+    Releases all buffered frames when conversation is detected, or keeps them
+    buffered when voicemail is detected.
+    """
+
+    def __init__(self, conversation_notifier: BaseNotifier, voicemail_notifier: BaseNotifier):
+        """Initialize the voicemail buffer.
+
+        Args:
+            conversation_notifier: Notifier that signals when to release buffered frames.
+            voicemail_notifier: Notifier that signals when to keep buffered frames.
+        """
+        super().__init__()
+        self._conversation_notifier = conversation_notifier
+        self._voicemail_notifier = voicemail_notifier
+        self._frame_buffer: List[tuple[Frame, FrameDirection]] = []
+        self._buffering_active = True
+        self._conversation_task: Optional[asyncio.Task] = None
+        self._voicemail_task: Optional[asyncio.Task] = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and handle buffering logic.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, StartFrame):
+            self._conversation_task = self.create_task(self._wait_for_conversation())
+            self._voicemail_task = self.create_task(self._wait_for_voicemail())
+            logger.info(f"{self}: Buffer tasks started")
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, (EndFrame, CancelFrame)):
+            if self._conversation_task:
+                await self.cancel_task(self._conversation_task)
+                self._conversation_task = None
+            if self._voicemail_task:
+                await self.cancel_task(self._voicemail_task)
+                self._voicemail_task = None
+            await self.push_frame(frame, direction)
+
+        # Buffer TTS frames while buffering is active
+        if self._buffering_active and isinstance(frame, (TTSTextFrame, TTSAudioRawFrame)):
+            self._frame_buffer.append((frame, direction))
+        else:
+            await self.push_frame(frame, direction)
+
+    async def _wait_for_conversation(self):
+        """Wait for conversation detection - release buffered frames."""
+        try:
+            await self._conversation_notifier.wait()
+            logger.info(f"{self}: CONVERSATION - releasing frames")
+
+            self._buffering_active = False
+            for frame, direction in self._frame_buffer:
+                await self.push_frame(frame, direction)
+            self._frame_buffer.clear()
+
+            # Cancel the other task
+            if self._voicemail_task:
+                await self.cancel_task(self._voicemail_task)
+                self._voicemail_task = None
+
+        except asyncio.CancelledError:
+            raise
+
+    async def _wait_for_voicemail(self):
+        """Wait for voicemail detection - clear buffered frames."""
+        try:
+            await self._voicemail_notifier.wait()
+            logger.info(f"{self}: VOICEMAIL - clearing frames")
+
+            self._buffering_active = False
+            self._frame_buffer.clear()
+
+            # Cancel the other task
+            if self._conversation_task:
+                await self.cancel_task(self._conversation_task)
+                self._conversation_task = None
+
+        except asyncio.CancelledError:
+            raise
 
 
 class VoicemailDetector(ParallelPipeline):
@@ -204,10 +304,18 @@ Respond with ONLY "YES" if it's a voicemail, or "NO" if it's a conversation atte
         ]
         self._context = OpenAILLMContext(self._messages)
         self._context_aggregator = llm.create_context_aggregator(self._context)
-        self._conversation_notifier = EventNotifier()
-        self._classifier_gate = ClassifierGate(self._conversation_notifier)
+        self._gate_notifier = EventNotifier()
+        self._conversation_notifier = EventNotifier()  # For releasing buffer
+        self._voicemail_notifier = EventNotifier()  # For clearing buffer
+        self._classifier_gate = ClassifierGate(self._gate_notifier)
         self._voicemail_processor = VoicemailProcessor(
-            self._conversation_notifier, on_voicemail_detected
+            gate_notifier=self._gate_notifier,
+            conversation_notifier=self._conversation_notifier,
+            voicemail_notifier=self._voicemail_notifier,
+            on_voicemail_detected=on_voicemail_detected,
+        )
+        self._voicemail_buffer = VoicemailBuffer(
+            self._conversation_notifier, self._voicemail_notifier
         )
 
         super().__init__(
@@ -222,3 +330,19 @@ Respond with ONLY "YES" if it's a voicemail, or "NO" if it's a conversation atte
                 self._context_aggregator.assistant(),
             ],
         )
+
+    def detector(self) -> "VoicemailDetector":
+        """Get the detector pipeline (for placement after STT).
+
+        Returns:
+            The VoicemailDetector instance itself.
+        """
+        return self
+
+    def buffer(self) -> VoicemailBuffer:
+        """Get the buffer processor (for placement after TTS).
+
+        Returns:
+            The VoicemailBuffer processor instance.
+        """
+        return self._voicemail_buffer
