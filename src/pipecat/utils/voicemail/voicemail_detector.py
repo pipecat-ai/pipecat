@@ -40,7 +40,7 @@ class ClassifierGate(FrameProcessor):
     """Gate processor that controls frame flow based on classification decisions.
 
     The gate starts open and closes permanently once a classification decision
-    is made (YES or NO). This ensures the classifier only runs until a definitive
+    is made (LIVE or MAIL). This ensures the classifier only runs until a definitive
     decision is reached.
     """
 
@@ -102,9 +102,9 @@ class ClassifierGate(FrameProcessor):
 class VoicemailProcessor(FrameProcessor):
     """Processor that handles LLM classification responses and triggers callbacks.
 
-    Processes LLM text responses to determine if the call is a voicemail (YES)
-    or conversation (NO), then triggers appropriate actions including developer
-    callbacks for voicemail detection.
+    Processes LLM text responses to determine if the call is a voicemail (MAIL)
+    or conversation (LIVE), then triggers appropriate actions including
+    developer callbacks for voicemail detection.
     """
 
     def __init__(
@@ -140,11 +140,11 @@ class VoicemailProcessor(FrameProcessor):
 
         if isinstance(frame, LLMTextFrame):
             response = frame.text.strip().upper()
-            if "NO" in response:
-                logger.info(f"{self}: CONVERSATION detected - notifying to close gate")
+            if "LIVE" in response:
+                logger.info(f"{self}: LIVE conversation detected - releasing buffer")
                 await self._gate_notifier.notify()
                 await self._conversation_notifier.notify()
-            elif "YES" in response:
+            elif "MAIL" in response:
                 logger.info(f"{self}: VOICEMAIL detected - triggering callback")
                 # Notify gate to close (decision is final)
                 await self._gate_notifier.notify()
@@ -260,53 +260,68 @@ class VoicemailDetector(ParallelPipeline):
     2. Classification branch: LLM-based classification that can interrupt for voicemail
 
     The classifier runs in parallel and makes a one-time decision to either:
-    - Continue normal conversation flow (NO response)
-    - Interrupt and trigger voicemail handling (YES response)
+    - Continue normal conversation flow (LIVE response)
+    - Interrupt and trigger voicemail handling (MAIL response)
     """
+
+    # Default prompt
+    DEFAULT_SYSTEM_PROMPT = """You are a voicemail detection classifier for an OUTBOUND calling system. A bot has called a phone number and you need to determine if a human answered or if the call went to voicemail based on the provided text.
+
+HUMAN ANSWERED - LIVE CONVERSATION (respond "LIVE"):
+- Personal greetings: "Hello?", "Hi", "Yeah?", "John speaking"
+- Interactive responses: "Who is this?", "What do you want?", "Can I help you?"
+- Conversational tone expecting back-and-forth dialogue
+- Questions directed at the caller: "Hello? Anyone there?"
+- Informal responses: "Yep", "What's up?", "Speaking"
+- Natural, spontaneous speech patterns
+- Immediate acknowledgment of the call
+
+VOICEMAIL SYSTEM (respond "MAIL"):
+- Automated voicemail greetings: "Hi, you've reached [name], please leave a message"
+- Phone carrier messages: "The number you have dialed is not in service", "Please leave a message", "All circuits are busy"
+- Professional voicemail: "This is [name], I'm not available right now"
+- Instructions about leaving messages: "leave a message", "leave your name and number"
+- References to callback or messaging: "call me back", "I'll get back to you"
+- Carrier system messages: "mailbox is full", "has not been set up"
+- Business hours messages: "our office is currently closed"
+
+Respond with ONLY "LIVE" if a person answered, or "MAIL" if it's voicemail/recording."""
 
     def __init__(
         self,
         *,
         llm: LLMService,
         on_voicemail_detected: Optional[Callable[[], Awaitable[None]]] = None,
+        system_prompt: Optional[str] = None,
     ):
         """Initialize the voicemail detector.
 
         Args:
             llm: LLM service for classification.
             on_voicemail_detected: Callback function called when voicemail is detected.
+            system_prompt: Optional custom system prompt for classification. If None, uses
+                default prompt optimized for outbound calling scenarios. If providing a
+                custom prompt, ensure it results in a clear "LIVE" or "MAIL" response, where
+                "LIVE" indicates a human answered and "MAIL" indicates voicemail.
         """
         self._classifier_llm = llm
+        self._prompt = system_prompt if system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
+
+        if system_prompt is not None:
+            self._validate_prompt(system_prompt)
+
         self._messages = [
             {
                 "role": "system",
-                "content": """You are a voicemail detection classifier. Your job is to determine if the caller is leaving a voicemail message or trying to have a live conversation.
-
-VOICEMAIL INDICATORS (respond "YES"):
-- One-way communication (caller talks without expecting immediate responses)
-- Messages like "Hi, this is [name], please call me back"
-- "I'm calling about..." followed by details without pausing for response
-- "Leave me a message" or "call me when you get this"
-- Monologue-style speech patterns
-- Mentions of time/date when they're calling
-- Business-like messages with contact information
-
-CONVERSATION INDICATORS (respond "NO"):
-- Interactive speech ("Hello?", "Are you there?", "Can you hear me?")
-- Questions directed at the recipient expecting immediate answers
-- Responses to prompts or questions
-- Back-and-forth dialogue patterns
-- Greetings expecting responses ("Hi, how are you?")
-- Real-time problem solving or discussion
-
-Respond with ONLY "YES" if it's a voicemail, or "NO" if it's a conversation attempt. Do not explain your reasoning.""",
+                "content": self._prompt,
             },
         ]
+
         self._context = OpenAILLMContext(self._messages)
         self._context_aggregator = llm.create_context_aggregator(self._context)
         self._gate_notifier = EventNotifier()
-        self._conversation_notifier = EventNotifier()  # For releasing buffer
-        self._voicemail_notifier = EventNotifier()  # For clearing buffer
+        self._conversation_notifier = EventNotifier()
+        self._voicemail_notifier = EventNotifier()
         self._classifier_gate = ClassifierGate(self._gate_notifier)
         self._voicemail_processor = VoicemailProcessor(
             gate_notifier=self._gate_notifier,
