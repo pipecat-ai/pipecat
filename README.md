@@ -128,7 +128,7 @@ You can get started with Pipecat running on your local machine, then move your a
 2. Install development and testing dependencies:
 
    ```bash
-   uv sync --group dev --all-extras --no-extra krisp
+   uv sync --group dev --all-extras --no-extra gstreamer --no-extra krisp --no-extra local
    ```
 
 3. Install the git pre-commit hooks:
@@ -137,17 +137,24 @@ You can get started with Pipecat running on your local machine, then move your a
    uv run pre-commit install
    ```
 
-### Python 3.13+ Note
+### Python 3.13+ Compatibility
 
-Some features require PyTorch (not yet available on Python 3.13+):
-
-- `ultravox`, `local-smart-turn`, `moondream`, `mlx-whisper`
-
-**For full compatibility:** Use Python 3.12
+Some features require PyTorch, which doesn't yet support Python 3.13+. Install using:
 
 ```bash
-uv python pin 3.12 && uv sync --group dev --all-extras --no-extra krisp
+uv sync --group dev --all-extras \
+  --no-extra gstreamer \
+  --no-extra krisp \
+  --no-extra local \
+  --no-extra local-smart-turn \
+  --no-extra mlx-whisper \
+  --no-extra moondream \
+  --no-extra ultravox
 ```
+
+> **Tip:** For full compatibility, use Python 3.12: `uv python pin 3.12`
+
+> **Note**: Some extras (local, gstreamer) require system dependencies. See documentation if you encounter build errors.
 
 ### Running tests
 
