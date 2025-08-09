@@ -31,6 +31,8 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopInterruptionFrame,
     TTSAudioRawFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -109,7 +111,7 @@ class ClassifierGate(FrameProcessor):
     async def _wait_for_notification(self):
         """Wait for classification decision notification and close the gate.
 
-        This method blocks until the VoicemailProcessor makes a classification
+        This method blocks until the ClassificationProcessor makes a classification
         decision and signals through the notifier. Once notified, the gate
         closes permanently to stop further classification processing.
         """
@@ -207,7 +209,7 @@ class ConversationGate(FrameProcessor):
             raise
 
 
-class VoicemailProcessor(FrameProcessor):
+class ClassificationProcessor(FrameProcessor):
     """Processor that handles LLM classification responses and triggers callbacks.
 
     This processor aggregates LLM text tokens into complete responses and analyzes
@@ -230,7 +232,9 @@ class VoicemailProcessor(FrameProcessor):
         gate_notifier: BaseNotifier,
         conversation_notifier: BaseNotifier,
         voicemail_notifier: BaseNotifier,
-        on_voicemail_detected: Optional[Callable[["VoicemailProcessor"], Awaitable[None]]] = None,
+        on_voicemail_detected: Optional[
+            Callable[["ClassificationProcessor"], Awaitable[None]]
+        ] = None,
         voicemail_response_delay: float,
     ):
         """Initialize the voicemail processor.
@@ -238,9 +242,9 @@ class VoicemailProcessor(FrameProcessor):
         Args:
             gate_notifier: Notifier to signal the ClassifierGate about classification
                 decisions so it can close and stop processing.
-            conversation_notifier: Notifier to signal the VoicemailBuffer to release
+            conversation_notifier: Notifier to signal the TTSBuffer to release
                 all buffered TTS frames for normal conversation flow.
-            voicemail_notifier: Notifier to signal the VoicemailBuffer to clear
+            voicemail_notifier: Notifier to signal the TTSBuffer to clear
                 buffered TTS frames since voicemail was detected.
             on_voicemail_detected: Optional callback function called when voicemail
                 is detected. The callback receives this processor instance and can
@@ -392,7 +396,7 @@ class VoicemailProcessor(FrameProcessor):
             self._voicemail_callback_task = None
 
 
-class VoicemailBuffer(FrameProcessor):
+class TTSBuffer(FrameProcessor):
     """Buffers TTS frames until voicemail classification decision is made.
 
     This processor holds TTS output frames in a buffer while the voicemail
@@ -455,7 +459,9 @@ class VoicemailBuffer(FrameProcessor):
             await self.push_frame(frame, direction)
 
         # Core buffering logic: hold TTS frames, pass everything else through
-        elif self._buffering_active and isinstance(frame, (TTSTextFrame, TTSAudioRawFrame)):
+        elif self._buffering_active and isinstance(
+            frame, (TTSStartedFrame, TTSStoppedFrame, TTSTextFrame, TTSAudioRawFrame)
+        ):
             # Buffer TTS frames while waiting for classification decision
             self._frame_buffer.append((frame, direction))
         else:
@@ -583,22 +589,24 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
         self,
         *,
         llm: LLMService,
-        on_voicemail_detected: Optional[Callable[["VoicemailProcessor"], Awaitable[None]]] = None,
         system_prompt: Optional[str] = None,
-        voicemail_response_delay: float = 2.0,
+        on_voicemail_detected: Optional[
+            Callable[["ClassificationProcessor"], Awaitable[None]]
+        ] = None,
+        voicemail_response_delay: Optional[float] = 2.0,
     ):
         """Initialize the voicemail detector with classification and buffering components.
 
         Args:
             llm: LLM service used for voicemail vs conversation classification.
                 Should be fast and reliable for real-time classification.
-            on_voicemail_detected: Optional callback function invoked when voicemail
-                is detected. Receives the VoicemailProcessor instance which can be
-                used to push frames (like custom voicemail greetings).
             system_prompt: Optional custom system prompt for classification. If None,
                 uses the default prompt optimized for outbound calling scenarios.
                 Custom prompts should instruct the LLM to respond with exactly
                 "CONVERSATION" or "VOICEMAIL" for proper detection functionality.
+            on_voicemail_detected: Optional callback function invoked when voicemail
+                is detected. Receives the ClassificationProcessor instance which can be
+                used to push frames (like custom voicemail greetings).
             voicemail_response_delay: Delay in seconds after user stops speaking
                 before triggering the voicemail callback. This allows voicemail
                 responses to be played back after a short delay to ensure the response
@@ -632,16 +640,14 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
         # Create the processor components
         self._classifier_gate = ClassifierGate(self._gate_notifier)
         self._conversation_gate = ConversationGate(self._voicemail_notifier)
-        self._voicemail_processor = VoicemailProcessor(
+        self._voicemail_processor = ClassificationProcessor(
             gate_notifier=self._gate_notifier,
             conversation_notifier=self._conversation_notifier,
             voicemail_notifier=self._voicemail_notifier,
             on_voicemail_detected=on_voicemail_detected,
             voicemail_response_delay=voicemail_response_delay,
         )
-        self._voicemail_buffer = VoicemailBuffer(
-            self._conversation_notifier, self._voicemail_notifier
-        )
+        self._voicemail_buffer = TTSBuffer(self._conversation_notifier, self._voicemail_notifier)
 
         # Initialize the parallel pipeline with conversation and classifier branches
         super().__init__(
@@ -688,13 +694,13 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
         """
         return self
 
-    def buffer(self) -> VoicemailBuffer:
+    def buffer(self) -> TTSBuffer:
         """Get the buffer processor for placement after TTS in the main pipeline.
 
         This should be placed after the TTS service and before the transport
         output to enable TTS frame buffering during classification.
 
         Returns:
-            The VoicemailBuffer processor instance.
+            The TTSBuffer processor instance.
         """
         return self._voicemail_buffer
