@@ -175,6 +175,7 @@ class FrameProcessor(BaseObject):
         self,
         *,
         name: Optional[str] = None,
+        enable_direct_mode: bool = False,
         enable_watchdog_logging: Optional[bool] = None,
         enable_watchdog_timers: Optional[bool] = None,
         metrics: Optional[FrameProcessorMetrics] = None,
@@ -185,6 +186,7 @@ class FrameProcessor(BaseObject):
 
         Args:
             name: Optional name for this processor instance.
+            enable_direct_mode: Whether to process frames immediately or use internal queues.
             enable_watchdog_logging: Whether to enable watchdog logging for tasks.
             enable_watchdog_timers: Whether to enable watchdog timers for tasks.
             metrics: Optional metrics collector for this processor.
@@ -195,6 +197,9 @@ class FrameProcessor(BaseObject):
         self._parent: Optional["FrameProcessor"] = None
         self._prev: Optional["FrameProcessor"] = None
         self._next: Optional["FrameProcessor"] = None
+
+        # Enable direct mode to skip queues and process frames right away.
+        self._enable_direct_mode = enable_direct_mode
 
         # Enable watchdog timers for all tasks created by this frame processor.
         self._enable_watchdog_timers = enable_watchdog_timers
@@ -558,7 +563,10 @@ class FrameProcessor(BaseObject):
         if self._cancelling:
             return
 
-        await self.__input_queue.put((frame, direction, callback))
+        if self._enable_direct_mode:
+            await self.__process_frame(frame, direction, callback)
+        else:
+            await self.__input_queue.put((frame, direction, callback))
 
     async def pause_processing_frames(self):
         """Pause processing of queued frames."""
@@ -730,6 +738,9 @@ class FrameProcessor(BaseObject):
 
     def __create_input_task(self):
         """Create the frame input processing task."""
+        if self._enable_direct_mode:
+            return
+
         if not self.__input_frame_task:
             self.__input_queue = FrameProcessorQueue(self.task_manager)
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
@@ -743,6 +754,9 @@ class FrameProcessor(BaseObject):
 
     def __create_process_task(self):
         """Create the non-system frame processing task."""
+        if self._enable_direct_mode:
+            return
+
         if not self.__process_frame_task:
             self.__should_block_frames = False
             if not self.__process_event:
@@ -759,7 +773,7 @@ class FrameProcessor(BaseObject):
             self.__process_frame_task = None
 
     async def __process_frame(
-        self, frame: Frame, direction: FrameDirection, callback: FrameCallback
+        self, frame: Frame, direction: FrameDirection, callback: Optional[FrameCallback]
     ):
         try:
             # Process the frame.
