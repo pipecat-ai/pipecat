@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `pipecat.utils.voicemail`, a module for detecting voicemail vs. live
+  conversation, primarily intended for use in outbound calling scenarios.
+
 - Added new frames to the `idle_timeout_frames` arg: `TranscriptionFrame`,
   `InterimTranscriptionFrame`, `UserStartedSpeakingFrame`, and
   `UserStoppedSpeakingFrame`. These additions serve as indicators of user
