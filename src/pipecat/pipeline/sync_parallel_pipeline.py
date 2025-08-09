@@ -49,7 +49,7 @@ class SyncParallelPipelineSource(FrameProcessor):
         Args:
             upstream_queue: Queue for collecting upstream frames from the pipeline.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._up_queue = upstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -81,7 +81,7 @@ class SyncParallelPipelineSink(FrameProcessor):
         Args:
             downstream_queue: Queue for collecting downstream frames from the pipeline.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._down_queue = downstream_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

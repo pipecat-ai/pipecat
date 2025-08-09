@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `pyproject.toml` to once again pin `numba` to `>=0.61.2` in order to
   resolve package versioning issues.
 
+### Performance
+
+- Improved some frame processors performance by introducing a direct mode. In
+  direct mode a frame processor will process frames right away avoiding the need
+  for internal queues and tasks. This is useful for some simple processos. For
+  example, in processors that wrap other processors (e.g. `Pipeline`,
+  `ParallelPipeline`), we add one processor before and one after the wrapped
+  processors (internally, you will see them as sources and sinks). These sources
+  and sinks don't do any special processing and they basically forward
+  frames. So, for these simple processors we now enable the new direct mode
+  which avoids creating any internal tasks (and queues) and therefore improves
+  performance.
+
 ### Other
 
 - Updated `15-switch-voices.py` and `15a-switch-languages.py` examples to show
