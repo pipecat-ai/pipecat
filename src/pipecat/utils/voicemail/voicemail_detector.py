@@ -120,7 +120,6 @@ class ClassifierGate(FrameProcessor):
 
             if self._gate_opened:
                 self._gate_opened = False
-                logger.debug(f"{self}: Gate closed - classification complete")
         except asyncio.CancelledError:
             logger.debug(f"{self}: Gate task was cancelled")
             raise
@@ -200,7 +199,6 @@ class ConversationGate(FrameProcessor):
 
             if self._gate_opened:
                 self._gate_opened = False
-                logger.debug(f"{self}: Conversation gate closed - voicemail detected")
         except asyncio.CancelledError:
             logger.debug(f"{self}: Conversation gate task was cancelled")
             raise
@@ -288,7 +286,6 @@ class ClassificationProcessor(FrameProcessor):
             # Begin aggregating a new LLM response
             self._processing_response = True
             self._response_buffer = ""
-            logger.debug(f"{self}: Starting LLM response aggregation")
 
         elif isinstance(frame, LLMFullResponseEndFrame):
             # Complete response received - make classification decision
@@ -300,21 +297,16 @@ class ClassificationProcessor(FrameProcessor):
         elif isinstance(frame, LLMTextFrame) and self._processing_response:
             # Accumulate text tokens from the streaming LLM response
             self._response_buffer += frame.text
-            logger.trace(f"{self}: Buffer: '{self._response_buffer}'")
 
         elif isinstance(frame, UserStartedSpeakingFrame):
             # User started speaking - cancel voicemail callback timer
             if self._voicemail_callback_task:
-                logger.debug(f"{self}: User started speaking, cancelling voicemail callback")
                 await self.cancel_task(self._voicemail_callback_task)
                 self._voicemail_callback_task = None
 
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # User stopped speaking - restart voicemail callback timer if voicemail detected
             if self._voicemail_detected and not self._voicemail_callback_task:
-                logger.debug(
-                    f"{self}: User stopped speaking, restarting voicemail callback timer ({self._voicemail_response_delay}s)"
-                )
                 self._voicemail_callback_task = self.create_task(self._delayed_voicemail_callback())
 
         else:
@@ -333,11 +325,10 @@ class ClassificationProcessor(FrameProcessor):
             full_response: The complete aggregated response text from the LLM.
         """
         if self._decision_made:
-            logger.debug(f"{self}: Decision already made, ignoring response")
             return
 
         response = full_response.upper()
-        logger.info(f"{self}: Classifying response: '{full_response}'")
+        logger.debug(f"{self}: Classifying response: '{full_response}'")
 
         if "CONVERSATION" in response:
             # Human answered - continue normal conversation flow
@@ -360,14 +351,11 @@ class ClassificationProcessor(FrameProcessor):
             # Always start the callback timer immediately
             # It will be cancelled and restarted if user starts/stops speaking
             if not self._voicemail_callback_task:
-                logger.debug(
-                    f"{self}: Starting voicemail callback timer ({self._voicemail_response_delay}s)"
-                )
                 self._voicemail_callback_task = self.create_task(self._delayed_voicemail_callback())
 
         else:
-            # Unexpected response - log warning but don't crash
-            logger.warning(f"{self}: Unexpected classification response: '{full_response}'")
+            # This can happen if the LLM is interrupted before completing the response
+            logger.debug(f"{self}: No classification found: '{full_response}'")
 
     async def _delayed_voicemail_callback(self):
         """Execute the voicemail callback after the configured delay.
@@ -377,20 +365,16 @@ class ClassificationProcessor(FrameProcessor):
         based on user speech patterns to ensure proper timing.
         """
         try:
-            logger.debug(
-                f"{self}: Waiting {self._voicemail_response_delay}s before voicemail callback"
-            )
             await asyncio.sleep(self._voicemail_response_delay)
 
-            logger.info(f"{self}: Executing voicemail callback")
             if self._on_voicemail_detected:
                 try:
+                    logger.debug(f"{self}: Executing voicemail callback")
                     await self._on_voicemail_detected(self)
                 except Exception as e:
                     logger.exception(f"{self}: Error in voicemail callback: {e}")
 
         except asyncio.CancelledError:
-            logger.debug(f"{self}: Voicemail callback timer was cancelled")
             raise
         finally:
             self._voicemail_callback_task = None
@@ -589,21 +573,15 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
         self,
         *,
         llm: LLMService,
+        on_voicemail_detected: Callable[["ClassificationProcessor"], Awaitable[None]],
+        voicemail_response_delay: float = 2.0,
         system_prompt: Optional[str] = None,
-        on_voicemail_detected: Optional[
-            Callable[["ClassificationProcessor"], Awaitable[None]]
-        ] = None,
-        voicemail_response_delay: Optional[float] = 2.0,
     ):
         """Initialize the voicemail detector with classification and buffering components.
 
         Args:
             llm: LLM service used for voicemail vs conversation classification.
                 Should be fast and reliable for real-time classification.
-            system_prompt: Optional custom system prompt for classification. If None,
-                uses the default prompt optimized for outbound calling scenarios.
-                Custom prompts should instruct the LLM to respond with exactly
-                "CONVERSATION" or "VOICEMAIL" for proper detection functionality.
             on_voicemail_detected: Optional callback function invoked when voicemail
                 is detected. Receives the ClassificationProcessor instance which can be
                 used to push frames (like custom voicemail greetings).
@@ -611,6 +589,10 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
                 before triggering the voicemail callback. This allows voicemail
                 responses to be played back after a short delay to ensure the response
                 occurs during the voicemail recording. Default is 2.0 seconds.
+            system_prompt: Optional custom system prompt for classification. If None,
+                uses the default prompt optimized for outbound calling scenarios.
+                Custom prompts should instruct the LLM to respond with exactly
+                "CONVERSATION" or "VOICEMAIL" for proper detection functionality.
         """
         self._classifier_llm = llm
         self._prompt = system_prompt if system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
@@ -640,7 +622,7 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
         # Create the processor components
         self._classifier_gate = ClassifierGate(self._gate_notifier)
         self._conversation_gate = ConversationGate(self._voicemail_notifier)
-        self._voicemail_processor = ClassificationProcessor(
+        self._classification_processor = ClassificationProcessor(
             gate_notifier=self._gate_notifier,
             conversation_notifier=self._conversation_notifier,
             voicemail_notifier=self._voicemail_notifier,
@@ -658,7 +640,7 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
                 self._classifier_gate,
                 self._context_aggregator.user(),
                 self._classifier_llm,
-                self._voicemail_processor,
+                self._classification_processor,
                 self._context_aggregator.assistant(),
             ],
         )
