@@ -24,6 +24,8 @@ ASSETS_DIR = SCRIPT_DIR / "assets"
 
 FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples" / "foundational"
 
+# User speaks first
+USER_SPEAKS_FIRST = True
 
 # Math
 PROMPT_SIMPLE_MATH = "A simple math addition."
@@ -45,6 +47,12 @@ EVAL_SWITCH_LANGUAGE = "Check if the user is now talking in Spanish."
 # Vision
 PROMPT_VISION = ("What do you see?", Image.open(ASSETS_DIR / "cat.jpg"))
 EVAL_VISION = "A cat description."
+
+# Voicemail
+PROMPT_VOICEMAIL = "Please leave a message after the beep."
+EVAL_VOICEMAIL = "Assess the conversation and determine if it is a voicemail."
+PROMPT_CONVERSATION = "Hello, this is Mark."
+EVAL_CONVERSATION = "A start of a conversation, not a voicemail."
 
 TESTS_07 = [
     # 07 series
@@ -157,6 +165,11 @@ TESTS_43 = [
     ("43a-heygen-video-service.py", PROMPT_SIMPLE_MATH, None),
 ]
 
+TESTS_44 = [
+    ("44-voicemail-detection.py", PROMPT_VOICEMAIL, EVAL_VOICEMAIL, USER_SPEAKS_FIRST),
+    ("44-voicemail-detection.py", PROMPT_CONVERSATION, EVAL_CONVERSATION, USER_SPEAKS_FIRST),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_12,
@@ -168,6 +181,7 @@ TESTS = [
     *TESTS_27,
     *TESTS_40,
     *TESTS_43,
+    *TESTS_44,
 ]
 
 
@@ -189,8 +203,15 @@ async def main(args: argparse.Namespace):
         log_level=log_level,
     )
 
-    for test, prompt, eval in TESTS:
-        await runner.run_eval(test, prompt, eval)
+    # Parse test config: (test, prompt, eval) or (test, prompt, eval, user_speaks_first)
+    for test_config in TESTS:
+        if len(test_config) == 3:
+            test, prompt, eval = test_config
+            user_speaks_first = False
+        else:
+            test, prompt, eval, user_speaks_first = test_config
+
+        await runner.run_eval(test, prompt, eval, user_speaks_first)
 
     runner.print_results()
 
