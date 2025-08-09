@@ -97,11 +97,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [
             transport.input(),
             stt,
-            voicemail.detector(),  # Voicemail detection
+            voicemail.detector(),  # Voicemail detection — between STT and User context aggregator
             context_aggregator.user(),
             llm,
             tts,
-            voicemail.buffer(),  # TTS buffering
+            voicemail.buffer(),  # TTS buffering — Immediately after the TTS service
             transport.output(),
             context_aggregator.assistant(),
         ]
