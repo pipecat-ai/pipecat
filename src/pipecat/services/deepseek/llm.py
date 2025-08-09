@@ -9,8 +9,7 @@
 from typing import List
 
 from loguru import logger
-from openai import AsyncStream
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.llm import OpenAILLMService
@@ -55,20 +54,12 @@ class DeepSeekLLMService(OpenAILLMService):
         logger.debug(f"Creating DeepSeek client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    async def get_chat_completions(
+    def _build_chat_completion_params(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        """Create a streaming chat completion using DeepSeek's API.
+    ) -> dict:
+        """Build parameters for DeepSeek chat completion request.
 
-        Args:
-            context: The context object containing tools configuration
-                and other settings for the chat completion.
-            messages: The list of messages comprising the conversation
-                history and current request.
-
-        Returns:
-            A streaming response of chat completion chunks that can be
-            processed asynchronously.
+        DeepSeek doesn't support some OpenAI parameters like seed and max_completion_tokens.
         """
         params = {
             "model": self.model_name,
@@ -85,6 +76,4 @@ class DeepSeekLLMService(OpenAILLMService):
         }
 
         params.update(self._settings["extra"])
-
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+        return params
