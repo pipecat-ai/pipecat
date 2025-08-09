@@ -13,6 +13,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from eval import EvalRunner
 from loguru import logger
+from test import test_tuple
 from utils import check_env_variables
 
 load_dotenv(override=True)
@@ -21,6 +22,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples" / "foundational"
 
+# User speaks first
+USER_SPEAKS_FIRST = True
 
 # Math
 PROMPT_SIMPLE_MATH = "A simple math addition."
@@ -34,6 +37,12 @@ EVAL_WEATHER = (
 # Online search
 PROMPT_ONLINE_SEARCH = "What's the date right now in London?"
 EVAL_ONLINE_SEARCH = f"Today is {datetime.now(timezone.utc).strftime('%B %d, %Y')}."
+
+# Voicemail
+PROMPT_VOICEMAIL = "Please leave a message after the beep."
+EVAL_VOICEMAIL = "Assess the conversation and determine if it is a voicemail."
+PROMPT_CONVERSATION = "Hello, this is Mark."
+EVAL_CONVERSATION = "A start of a conversation, not a voicemail."
 
 TESTS_07 = [
     # 07 series
@@ -132,6 +141,11 @@ TESTS_43 = [
     ("43a-heygen-video-service.py", PROMPT_SIMPLE_MATH, None),
 ]
 
+TESTS_44 = [
+    ("44-voicemail-detection.py", PROMPT_VOICEMAIL, EVAL_VOICEMAIL, USER_SPEAKS_FIRST),
+    ("44-voicemail-detection.py", PROMPT_CONVERSATION, EVAL_CONVERSATION, USER_SPEAKS_FIRST),
+]
+
 TESTS = [
     *TESTS_07,
     *TESTS_14,
@@ -141,6 +155,7 @@ TESTS = [
     *TESTS_27,
     *TESTS_40,
     *TESTS_43,
+    *TESTS_44,
 ]
 
 
@@ -162,8 +177,14 @@ async def main(args: argparse.Namespace):
         log_level=log_level,
     )
 
-    for test, prompt, eval in TESTS:
-        await runner.run_eval(test, prompt, eval)
+    for test_tuple in TESTS:
+        if len(test_tuple) == 3:
+            test, prompt, eval = test_tuple
+            user_speaks_first = False
+        else:
+            test, prompt, eval, user_speaks_first = test_tuple
+
+        await runner.run_eval(test, prompt, eval, user_speaks_first)
 
     runner.print_results()
 
