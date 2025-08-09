@@ -59,7 +59,7 @@ async def handle_voicemail(processor):
         processor: The VoicemailProcessor instance. processor.push_frame() is
             available to push frames.
     """
-    logger.info("Voicemail detected! Playing greeting...")
+    logger.info("Voicemail detected! Leaving a message...")
 
     # Push frames using standard Pipecat pattern
     await processor.push_frame(
