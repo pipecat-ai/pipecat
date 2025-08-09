@@ -103,6 +103,7 @@ ultravox = [ "transformers>=4.48.0", "vllm>=0.9.0" ]
 webrtc = [ "aiortc~=1.11.0", "opencv-python~=4.11.0.86" ]
 websocket = [ "websockets>=13.1,<15.0", "fastapi>=0.115.6,<0.117.0" ]
 whisper = [ "faster-whisper~=1.1.1" ]
+mistralai = [ "mistralai (>=1.9.2,<2.0.0)" ]
 
 [dependency-groups]
 dev = [
