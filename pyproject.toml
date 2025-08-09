@@ -34,7 +34,7 @@ dependencies = [
     "resampy~=0.4.3",
     "soxr~=0.5.0",
     "openai>=1.74.0,<=1.99.1",
-    # Pinning numba to resolve package dependencies
+    # Pinning numba (resampy dep) to resolve a package dependency
     "numba==0.61.2",
 ]
 

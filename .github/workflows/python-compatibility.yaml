@@ -9,14 +9,14 @@ on:
     paths: ['pyproject.toml']
 
 jobs:
-  test-compatibility:
+  test-dev-environment:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.10.18', '3.11.13', '3.12.11', '3.13.5']
 
-    name: Python ${{ matrix.python-version }}
+    name: Dev Environment - Python ${{ matrix.python-version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,7 +55,69 @@ jobs:
             --no-extra moondream \
             --no-extra mlx-whisper
 
-      - name: Verify installation
+      - name: Verify dev installation
         run: |
           uv run python --version
-          uv run python -c "import pipecat; print('✅ Pipecat imports successfully')"
+          uv run python -c "import pipecat; print('✅ Dev environment - Pipecat imports successfully')"
+
+  test-user-experience:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10.18', '3.11.13', '3.12.11', '3.13.5']
+
+    name: User Experience - Python ${{ matrix.python-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            portaudio19-dev \
+            libcairo2-dev \
+            libgirepository1.0-dev \
+            pkg-config
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: 'latest'
+
+      - name: Set up Python ${{ matrix.python-version }}
+        run: |
+          uv python install ${{ matrix.python-version }}
+
+      - name: Build local package
+        run: |
+          uv build
+
+      - name: Create test project
+        run: |
+          mkdir test-project
+          cd test-project
+          uv init --python ${{ matrix.python-version }}
+
+      - name: Test comprehensive extras with uv add (Python 3.10-3.12)
+        if: "!startsWith(matrix.python-version, '3.13.')"
+        run: |
+          cd test-project
+          # Use uv add with built wheel to leverage dependency management
+          uv add "../dist/pipecat_ai-"*".whl[anthropic,assemblyai,asyncai,aws,aws-nova-sonic,azure,cartesia,cerebras,deepseek,daily,deepgram,elevenlabs,fal,fireworks,fish,gladia,google,grok,groq,gstreamer,heygen,inworld,koala,langchain,livekit,lmnt,local,mcp,mem0,mlx-whisper,moondream,nim,neuphonic,noisereduce,openai,openpipe,openrouter,perplexity,playht,qwen,rime,riva,runner,sambanova,sentry,local-smart-turn,remote-smart-turn,silero,simli,soniox,soundfile,speechmatics,tavus,together,tracing,ultravox,webrtc,websocket,whisper]"
+
+      - name: Test Python 3.13 compatible extras with uv add
+        if: startsWith(matrix.python-version, '3.13.')
+        run: |
+          cd test-project
+          # Use uv add with built wheel and Python 3.13 compatible extras
+          uv add "../dist/pipecat_ai-"*".whl[anthropic,assemblyai,asyncai,aws,aws-nova-sonic,azure,cartesia,cerebras,deepseek,daily,deepgram,elevenlabs,fal,fireworks,fish,gladia,google,grok,groq,gstreamer,heygen,inworld,koala,langchain,livekit,lmnt,local,mcp,mem0,nim,neuphonic,noisereduce,openai,openpipe,openrouter,perplexity,playht,qwen,rime,riva,runner,sambanova,sentry,remote-smart-turn,silero,simli,soniox,soundfile,speechmatics,tavus,together,tracing,webrtc,websocket,whisper]"
+
+      - name: Verify user installation
+        run: |
+          cd test-project
+          uv run python --version
+          uv run python -c "import pipecat; print('✅ User experience - Pipecat imports successfully')"
+          # Test that basic functionality works
+          uv run python -c "from pipecat.pipeline.pipeline import Pipeline; print('✅ Pipeline import works')"
