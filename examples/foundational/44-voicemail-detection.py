@@ -61,9 +61,6 @@ async def handle_voicemail(processor):
     """
     logger.info("Voicemail detected! Playing greeting...")
 
-    # Wait a moment for interruption to clear
-    await asyncio.sleep(1)
-
     # Push frames using standard Pipecat pattern
     await processor.push_frame(
         TTSSpeakFrame("This is Mattie. Call me back when you can!"),
