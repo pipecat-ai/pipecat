@@ -128,6 +128,14 @@ class AzureBaseTTSService(TTSService):
             "volume": params.volume,
         }
 
+        # Define SSML escape mappings based on SSML reserved characters
+        # See - https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure
+        self.ssml_escape_chars = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;'
+        }
+
         self._api_key = api_key
         self._region = region
         self._voice_id = voice
@@ -154,6 +162,10 @@ class AzureBaseTTSService(TTSService):
 
     def _construct_ssml(self, text: str) -> str:
         language = self._settings["language"]
+
+        # Escape special characters
+        escaped_text = self._escape_text(text)
+
         ssml = (
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
@@ -183,7 +195,7 @@ class AzureBaseTTSService(TTSService):
         if self._settings["emphasis"]:
             ssml += f"<emphasis level='{self._settings['emphasis']}'>"
 
-        ssml += text
+        ssml += escaped_text
 
         if self._settings["emphasis"]:
             ssml += "</emphasis>"
@@ -196,6 +208,20 @@ class AzureBaseTTSService(TTSService):
         ssml += "</voice></speak>"
 
         return ssml
+
+    def _escape_text(self, text: str) -> str:
+        """Escape special characters in text for SSML.
+
+        Args:
+            text: The text to escape.
+
+        Returns:
+            The escaped text.
+        """
+        escaped_text = text
+        for char, escape_code in self.ssml_escape_chars.items():
+            escaped_text = escaped_text.replace(char, escape_code)
+        return escaped_text
 
 
 class AzureTTSService(AzureBaseTTSService):
