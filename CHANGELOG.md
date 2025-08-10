@@ -24,9 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated Moondream to revision `2025-01-09`.
 
+- Updated `PlayHTHttpTTSService` to no longer use the `pyht` client to remove
+  compatibility issues with other packages. Now you can use the PlayHT HTTP
+  service with other services, like GoogleLLMService.
+
 - Updated `pyproject.toml` to once again pin `numba` to `>=0.61.2` in order to
   resolve package versioning issues.
-- Updated the `STTMuteFilter` to include `VADUserStartedSpeakingFrame` and `VADUserStoppedSpeakingFrame` in the list of frames to filter when the filtering is on.
+
+- Updated the `STTMuteFilter` to include `VADUserStartedSpeakingFrame` and
+  `VADUserStoppedSpeakingFrame` in the list of frames to filter when the
+  filtering is on.
 
 ### Performance
 
