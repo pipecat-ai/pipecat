@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GeminiTTSService` which uses Google Gemini to generate TTS output. The
+  Gemini model can be prompted to insert styled speech to control the TTS
+  output.
+
 - Added Exotel support to Pipecat's development runner. You can now connect
   using the runner with `uv run bot.py -t exotel` and an ngrok connection to
   HTTP port 7860.
@@ -75,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated foundational examples to show how to enclose complex logic
   (e.g. `ParallelPipeline`) into a single processor so the main pipeline becomes
   simpler.
+
+- Added `07n-interruptible-gemini.py`, demonstrating how to use
+  `GeminiTTSService`.
 
 ## [0.0.79] - 2025-08-07
 
