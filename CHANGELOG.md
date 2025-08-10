@@ -7,10 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `MistralLLMService`, using Mistral's chat completion API.
+
 ### Fixed
 
 - Fixed an issue where `AsyncAITTSService` had very high latency in responding
   by adding `force=true` when sending the flush command.
+
+### Other
+
+- Added `14w-function-calling-mistal.py` using `MistralLLMService`.
 
 ## [0.0.80] - 2025-08-13
 
