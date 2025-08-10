@@ -60,6 +60,7 @@ class AzureSTTService(STTService):
         region: str,
         language: Language = Language.EN_US,
         sample_rate: Optional[int] = None,
+        endpoint_id: Optional[str] = None,
         **kwargs,
     ):
         """Initialize the Azure STT service.
@@ -69,6 +70,7 @@ class AzureSTTService(STTService):
             region: Azure region for the Speech service (e.g., 'eastus').
             language: Language for speech recognition. Defaults to English (US).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
+            endpoint_id: Custom model endpoint id.
             **kwargs: Additional arguments passed to parent STTService.
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
@@ -78,6 +80,9 @@ class AzureSTTService(STTService):
             region=region,
             speech_recognition_language=language_to_azure_language(language),
         )
+
+        if endpoint_id:
+            self._speech_config.endpoint_id = endpoint_id
 
         self._audio_stream = None
         self._speech_recognizer = None
