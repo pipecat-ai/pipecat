@@ -28,7 +28,6 @@ from PIL import Image
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame, Frame
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 # JSON custom encoder to handle bytes arrays so that we can log contexts
 # with images to the console.
@@ -41,19 +40,19 @@ class CustomEncoder(json.JSONEncoder):
     readable representations in log output instead of raw binary data.
     """
 
-    def default(self, obj):
+    def default(self, o):
         """Encode special objects for JSON serialization.
 
         Args:
-            obj: The object to encode.
+            o: The object to encode.
 
         Returns:
             Encoded representation of the object.
         """
-        if isinstance(obj, io.BytesIO):
+        if isinstance(o, io.BytesIO):
             # Convert the first 8 bytes to an ASCII hex string
-            return f"{obj.getbuffer()[0:8].hex()}..."
-        return super().default(obj)
+            return f"{o.getbuffer()[0:8].hex()}..."
+        return super().default(o)
 
 
 class OpenAILLMContext:
@@ -99,7 +98,7 @@ class OpenAILLMContext:
         self._llm_adapter = llm_adapter
 
     @staticmethod
-    def from_messages(messages: List[dict]) -> "OpenAILLMContext":
+    def from_messages(messages: List[ChatCompletionMessageParam]) -> "OpenAILLMContext":
         """Create a context from a list of message dictionaries.
 
         Args:
@@ -280,7 +279,7 @@ class OpenAILLMContext:
         self._tools = tools
 
     def add_image_frame_message(
-        self, *, format: str, size: tuple[int, int], image: bytes, text: str = None
+        self, *, format: str, size: tuple[int, int], image: bytes, text: Optional[str]
     ):
         """Add a message containing an image frame.
 
@@ -302,7 +301,7 @@ class OpenAILLMContext:
         )
         self.add_message({"role": "user", "content": content})
 
-    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: str = None):
+    def add_audio_frames_message(self, *, audio_frames: list[AudioRawFrame], text: Optional[str]):
         """Add a message containing audio frames.
 
         Args:

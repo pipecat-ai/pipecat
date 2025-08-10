@@ -1,7 +1,7 @@
 import asyncio
 import json
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
+from enum import Enum
+from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
 from loguru import logger
@@ -12,16 +12,16 @@ from mistralai import (
     ResponseDoneEvent,
     ResponseStartedEvent,
 )
-from openai import NOT_GIVEN, NotGiven
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+)
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import (
+    CancelFrame,
     Frame,
-    FunctionCallCancelFrame,
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -31,9 +31,7 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
-    LLMAssistantContextAggregator,
     LLMUserAggregatorParams,
-    LLMUserContextAggregator,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -41,16 +39,12 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
+from pipecat.services.openai.llm import (
+    OpenAIAssistantContextAggregator,
+    OpenAIContextAggregatorPair,
+    OpenAIUserContextAggregator,
+)
 from pipecat.utils.tracing.service_decorators import traced_llm
-
-if TYPE_CHECKING:
-    from openai.types.chat import (
-        ChatCompletionAssistantMessageParam,
-        ChatCompletionMessageParam,
-        ChatCompletionToolChoiceOptionParam,
-        ChatCompletionToolParam,
-        ChatCompletionUserMessageParam,
-    )
 
 try:
     from mistralai import Mistral
@@ -58,6 +52,9 @@ try:
         CompletionArgs,
         ConversationEvents,
         ConversationInputs,
+        FunctionResultEntry,
+        MessageInputEntry,
+        MessageOutputEntry,
     )
     from mistralai.utils import BackoffStrategy, RetryConfig, eventstreaming
 except ModuleNotFoundError as e:
@@ -66,77 +63,13 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-@dataclass
-class MistralContextAggregatorPair:
-    """Pair of context aggregators for Mistral conversations."""
+class ToolChoiceEnum(str, Enum):
+    """Enum for tool choice."""
 
-    _user: "MistralUserContextAggregator"
-    _assistant: "MistralAssistantContextAggregator"
-
-    def user(self) -> "MistralUserContextAggregator":
-        """Get the user context aggregator.
-
-        Returns:
-            The user context aggregator instance.
-        """
-        return self._user
-
-    def assistant(self) -> "MistralAssistantContextAggregator":
-        """Get the assistant context aggregator.
-
-        Returns:
-            The assistant context aggregator instance.
-        """
-        return self._assistant
-
-
-class MistralLLMContext(OpenAILLMContext):
-    """LLM context specialized for Mistral's conversation format."""
-
-    def __init__(
-        self,
-        messages: Optional[List[ChatCompletionMessageParam]] = None,
-        tools: List[ChatCompletionToolParam] | NotGiven | ToolsSchema = NOT_GIVEN,
-        tool_choice: ChatCompletionToolChoiceOptionParam | NotGiven = NOT_GIVEN,
-    ):
-        """Initialize the Mistral LLM context.
-
-        Args:
-            messages: Initial list of conversation messages.
-            tools: Available function calling tools.
-            tool_choice: Tool selection preference.
-        """
-        super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
-
-    @staticmethod
-    def upgrade_to_mistral(obj: OpenAILLMContext) -> "MistralLLMContext":
-        """Upgrade an OpenAI context to Mistral format.
-
-        Converts message format and restructures content for Mistral compatibility.
-
-        Args:
-            obj: The OpenAI context to upgrade.
-
-        Returns:
-            The upgraded Mistral context.
-        """
-        if isinstance(obj, OpenAILLMContext) and not isinstance(obj, MistralLLMContext):
-            new_obj = MistralLLMContext(messages=obj.messages, tools=obj.tools, tool_choice=obj.tool_choice)
-            new_obj.__dict__.update(obj.__dict__)
-            return new_obj
-        return obj
-
-    @staticmethod
-    def from_messages(messages: List[ChatCompletionMessageParam]) -> "MistralLLMContext":
-        """Create context from a list of messages.
-
-        Args:
-            messages: List of conversation messages.
-
-        Returns:
-            New Anthropic context with the provided messages.
-        """
-        return MistralLLMContext(messages=messages)
+    auto = "auto"
+    none = "none"
+    any = "any"
+    required = "required"
 
 
 class MistralLLMService(LLMService):
@@ -152,6 +85,7 @@ class MistralLLMService(LLMService):
         safe_prompt: Optional[bool] = Field(default_factory=lambda: False)
         handoff_execution: Optional[str] = Field(default_factory=lambda: "server")
         store: Optional[bool] = Field(default_factory=lambda: True)
+        tool_choice: Optional[ToolChoiceEnum] = Field(default_factory=lambda: ToolChoiceEnum.auto)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -172,9 +106,9 @@ class MistralLLMService(LLMService):
             client: Optional custom Mistral client instance.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        super().__init__(**kwargs)
+        super().__init__(model=model, params=params, **kwargs)
         params = params or MistralLLMService.InputParams()
-        self._mistral_client = client or Mistral(api_key=api_key)
+        self._client = client or Mistral(api_key=api_key)
         self.set_model_name(model)
         self._settings = {
             "max_tokens": params.max_tokens,
@@ -184,36 +118,11 @@ class MistralLLMService(LLMService):
             "safe_prompt": params.safe_prompt,
             "handoff_execution": params.handoff_execution,
             "store": params.store,
+            "tool_choice": params.tool_choice,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
         self._current_conversation_id = None
-        self._current_stream_task = None
         self._stop_streaming = False
-
-    def can_generate_metrics(self) -> bool:
-        """Check if this service can generate usage metrics.
-
-        Returns:
-            True, as Anthropic provides detailed token usage metrics.
-        """
-        return True
-
-    @property
-    def model_name(self) -> str:
-        """Return model_name.
-
-        Returns:
-            str: String of model name
-        """
-        return self._model_name
-
-    def set_model_name(self, model: str):
-        """Set model_name.
-
-        Args:
-            model (str): String of model name
-        """
-        super().set_model_name(model)
 
     def create_context_aggregator(
         self,
@@ -221,22 +130,27 @@ class MistralLLMService(LLMService):
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> MistralContextAggregatorPair:
-        """Create contact aggregator from OpenAILLMCFontext.
+    ) -> OpenAIContextAggregatorPair:
+        """Create OpenAI-specific context aggregators.
+
+        Creates a pair of context aggregators optimized for OpenAI's message format,
+        including support for function calls, tool usage, and image handling.
 
         Args:
-            context: The LLM context.
-            user_params: User aggregator parameters.
-            assistant_params: Assistant aggregator parameters.
+            context: The LLM context to create aggregators for.
+            user_params: Parameters for user message aggregation.
+            assistant_params: Parameters for assistant message aggregation.
 
         Returns:
-            A pair of context aggregators, one for the user and one for the assistant,
-            encapsulated in an MistralContextAggregatorPair.            
+            OpenAIContextAggregatorPair: A pair of context aggregators, one for
+            the user and one for the assistant, encapsulated in an
+            OpenAIContextAggregatorPair.
+
         """
-        context = MistralLLMContext.upgrade_to_mistral(context)
-        user = MistralUserContextAggregator(context, params=user_params)
-        assistant = MistralAssistantContextAggregator(context, params=assistant_params)
-        return MistralContextAggregatorPair(_user=user, _assistant=assistant)
+        context.set_llm_adapter(self.get_llm_adapter())
+        user = OpenAIUserContextAggregator(context, params=user_params)
+        assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
+        return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
 
     def _convert_to_mistral_input(self, messages: List[Dict]) -> List[Dict]:
         """Convert messages to Mistral's conversation input format."""
@@ -258,7 +172,13 @@ class MistralLLMService(LLMService):
             # Convert to Mistral conversation input format
             if role == "user":
                 inputs.append(
-                    {"object": "entry", "type": "message.input", "role": "user", "content": content, "prefix": False}
+                    {
+                        "object": "entry",
+                        "type": "message.input",
+                        "role": "user",
+                        "content": content,
+                        "prefix": False,
+                    }
                 )
             elif role == "assistant":
                 inputs.append(
@@ -283,66 +203,39 @@ class MistralLLMService(LLMService):
                 )
         return inputs
 
-    def _create_conversation_inputs(self, messages: List[ChatCompletionMessageParam]) -> ConversationInputs:
+    def _create_conversation_inputs(
+        self, messages: List[ChatCompletionMessageParam]
+    ) -> ConversationInputs:
         """Create ConversationInputs object for Mistral API."""
         inputs = []
-        for msg in messages:
-            if msg.get("role") == "user":
-                inputs.append(
-                    {
-                        "object": "entry",
-                        "type": "message.input",
-                        "role": "user",
-                        "content": msg.get("content"),
-                        "prefix": False,
-                    }
+        function_calls_pending = {}  # Track pending function calls by tool_call_id
+
+        last_message = messages[-1]
+        role = last_message.get("role")
+        content = last_message.get("content", "")
+
+        if role == "user":
+            entry = MessageInputEntry(role="user", content=str(content), prefix=False)
+            inputs.append(entry)
+
+        elif role == "tool" or role == "function":
+            entry = FunctionResultEntry(
+                tool_call_id=last_message.get("tool_call_id", ""), result=str(content)
+            )
+            inputs.append(entry)
+
+        elif role == "assistant":
+            if content and str(content).strip():
+                entry = MessageOutputEntry(
+                    role="assistant",
+                    content=str(content),
                 )
-            elif msg.get("role") == "assistant" and "tool_calls" in msg:
-                tool_calls = msg.get("tool_calls")
-                for tool_call in tool_calls if tool_calls else []:
-                    inputs.append(
-                        {
-                            "object": "entry",
-                            "type": tool_call.get("type"),
-                            "tool_call_id": tool_call.get("id"),
-                            "function": tool_call.get("function"),
-                        }
-                    )
-            elif msg.get("role") == "function":
-                inputs.append(
-                    {
-                        "object": "entry",
-                        "type": "function.result",
-                        "tool_call_id": msg.get("tool_call_id", ""),
-                        "result": msg.get("content"),
-                    }
-                )
-            else:
-                inputs.append(
-                    {
-                        "object": "entry",
-                        "type": "message.output",
-                        "role": msg.get("role"),
-                        "content": msg.get("content"),
-                        "prefix": False,
-                    }
-                )
+                inputs.append(entry)
+
         return inputs
 
-    async def _stop_current_stream(self):
-        """Stop the current streaming task if it exists."""
-        if self._current_stream_task:
-            self._stop_streaming = True
-            try:
-                await self.cancel_task(self._current_stream_task)
-            except Exception as e:
-                logger.warning(f"Error stopping stream task: {e}")
-            finally:
-                self._current_stream_task = None
-                self._stop_streaming = False
-
     async def _process_conversation_stream(
-        self, context: MistralLLMContext, stream: eventstreaming.EventStreamAsync[ConversationEvents]
+        self, context: OpenAILLMContext, stream: eventstreaming.EventStreamAsync[ConversationEvents]
     ):
         """Process the conversation event stream from Mistral."""
         try:
@@ -351,16 +244,21 @@ class MistralLLMService(LLMService):
             prompt_tokens = 0
             completion_tokens = 0
 
+            # Dictionaries to accumulate argument fragments and track function calls
+            function_args_accumulators = {}  # {tool_call_id: accumulated_args}
+            function_metadata = {}  # {tool_call_id: {'name': function_name, 'complete': False}}
+
             async for event in stream:
                 if self._stop_streaming:
                     break
-                logger.debug(event)
+
+                await self.stop_ttfb_metrics()
 
                 data = event.data
 
-                # Gestion des différents types d'événements
+                # Management of different types of events
                 if isinstance(data, ResponseStartedEvent):
-                    # Stocker l'ID de conversation pour les futurs appels
+                    # Store the conversation ID for future calls
                     if hasattr(data, "conversation_id"):
                         self._current_conversation_id = data.conversation_id
 
@@ -369,39 +267,71 @@ class MistralLLMService(LLMService):
                         await self.push_frame(LLMTextFrame(str(data.content)))
                         full_response += str(data.content)
 
-                elif isinstance(data, (FunctionCallEvent, dict)) and getattr(event, "type", "") == "function.call":
-                    # Appel de fonction détecté
+                elif (
+                    isinstance(data, FunctionCallEvent)
+                    and getattr(data, "type", "") == "function.call.delta"
+                ):
+                    # Argument fragment for a function call
                     tool_call_id = data.tool_call_id
-                    function_name = data.name
-                    arguments = data.arguments
-
-                    # Créer et stocker l'appel de fonction
-                    function_call = FunctionCallFromLLM(
-                        context=context,
-                        tool_call_id=tool_call_id,
-                        function_name=function_name,
-                        arguments=arguments if isinstance(arguments, dict) else json.loads(arguments or "{}"),
+                    delta_arguments = (
+                        data.arguments
+                        if isinstance(data.arguments, str)
+                        else json.dumps(data.arguments or {})
                     )
-                    function_calls.append(function_call)
+                    function_name = data.name if hasattr(data, "name") else "unknown_function"
 
-                    # Notifier le pipeline qu'un appel de fonction est en cours
-                    await self.push_frame(
-                        FunctionCallInProgressFrame(
-                            function_name=function_name, tool_call_id=tool_call_id, arguments=arguments
-                        )
-                    )
+                    # If this is a new function call (first fragment)
+                    if tool_call_id not in function_args_accumulators:
+                        function_args_accumulators[tool_call_id] = delta_arguments
+                        function_metadata[tool_call_id] = {"name": function_name, "complete": False}
+                    else:
+                        function_args_accumulators[tool_call_id] += delta_arguments
+
+                    # Try to parse the accumulated JSON to see if it is complete
+                    try:
+                        accumulated_args = function_args_accumulators[tool_call_id]
+
+                        # Clean up the accumulated arguments (may contain multiple JSON fragments)
+                        # It is assumed that the fragments form a complete JSON when concatenated
+                        parsed_args = json.loads(accumulated_args)
+
+                        # If we reach here, the JSON is complete
+                        if not function_metadata[tool_call_id]["complete"]:
+                            function_metadata[tool_call_id]["complete"] = True
+
+                            # Create the FunctionCallFromLLM object and add it to the list
+                            function_call = FunctionCallFromLLM(
+                                context=context,
+                                tool_call_id=tool_call_id,
+                                function_name=function_metadata[tool_call_id]["name"],
+                                arguments=parsed_args,
+                            )
+                            function_calls.append(function_call)
+
+                            # Notify the pipeline that a function call is in progress
+                            await self.push_frame(
+                                FunctionCallInProgressFrame(
+                                    function_name=function_metadata[tool_call_id]["name"],
+                                    tool_call_id=tool_call_id,
+                                    arguments=parsed_args,
+                                )
+                            )
+
+                    except json.JSONDecodeError:
+                        # The JSON is not yet complete, continue accumulating
+                        pass
 
                 elif isinstance(data, ResponseDoneEvent):
-                    # Fin de la réponse - récupérer les infos d'usage
+                    # End of the response - retrieve usage information
                     if isinstance(data.usage, ConversationUsageInfo):
                         prompt_tokens = data.usage.prompt_tokens
                         completion_tokens = data.usage.completion_tokens
 
-            # Une fois le stream terminé, on exécute les appels de fonction si nécessaire
+            # Once the stream is finished, execute the function calls if necessary
             if function_calls:
                 await self.run_function_calls(function_calls)
 
-            # Si on a des métriques de tokens, on les rapporte
+            # If we have token metrics, report them
             if prompt_tokens and completion_tokens:
                 await self._report_usage_metrics(
                     prompt_tokens=prompt_tokens,
@@ -416,7 +346,7 @@ class MistralLLMService(LLMService):
             logger.exception(f"Error processing conversation stream: {e}")
 
     @traced_llm
-    async def _process_context(self, context: MistralLLMContext):
+    async def _process_context(self, context: OpenAILLMContext):
         """Process the conversation context with Mistral's API."""
         try:
             await self.push_frame(LLMFullResponseStartFrame())
@@ -424,19 +354,19 @@ class MistralLLMService(LLMService):
 
             # Convert messages to Mistral's conversation format
             inputs = self._create_conversation_inputs(context.messages)
-            logger.debug(inputs)
 
             # Prepare the completion arguments
             completion_args = CompletionArgs(
                 max_tokens=self._settings["max_tokens"],
                 temperature=self._settings["temperature"],
                 top_p=self._settings["top_p"],
+                tool_choice=self._settings["tool_choice"],
             )
 
             # If we have a conversation ID, we're continuing an existing conversation
             if self._current_conversation_id:
                 # Use append_stream to add to existing conversation
-                stream = await self._mistral_client.beta.conversations.append_stream_async(
+                stream = await self._client.beta.conversations.append_stream_async(
                     conversation_id=self._current_conversation_id,
                     inputs=inputs,
                     stream=True,
@@ -445,23 +375,30 @@ class MistralLLMService(LLMService):
                     retries=RetryConfig(
                         strategy="backoff",
                         backoff=BackoffStrategy(
-                            initial_interval=500, max_interval=1000, exponent=1.1, max_elapsed_time=5000
+                            initial_interval=500,
+                            max_interval=1000,
+                            exponent=1.1,
+                            max_elapsed_time=5000,
                         ),
                         retry_connection_errors=True,
                     ),
                 )
             else:
                 # Start a new conversation
-                stream = await self._mistral_client.beta.conversations.start_stream_async(
+                stream = await self._client.beta.conversations.start_stream_async(
                     inputs=inputs,
                     stream=True,
+                    tools=context.tools or [],
                     store=self._settings["store"],
                     completion_args=completion_args,
                     model=self.model_name,
                     retries=RetryConfig(
                         strategy="backoff",
                         backoff=BackoffStrategy(
-                            initial_interval=500, max_interval=1000, exponent=1.1, max_elapsed_time=5000
+                            initial_interval=500,
+                            max_interval=1000,
+                            exponent=1.1,
+                            max_elapsed_time=5000,
                         ),
                         retry_connection_errors=True,
                     ),
@@ -469,7 +406,6 @@ class MistralLLMService(LLMService):
 
             await self.start_ttfb_metrics()
             await self._process_conversation_stream(context, stream)
-            await self.stop_ttfb_metrics()
 
         except asyncio.CancelledError:
             raise
@@ -481,10 +417,10 @@ class MistralLLMService(LLMService):
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
 
-    async def cancel(self, frame=None):
+    async def cancel(self, frame: CancelFrame):
         """Cancel any ongoing requests."""
         await super().cancel(frame)
-        await self._stop_current_stream()
+        self._stop_streaming = True
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames and route them appropriately.
@@ -500,9 +436,9 @@ class MistralLLMService(LLMService):
         context = None
 
         if isinstance(frame, OpenAILLMContextFrame):
-            context = MistralLLMContext.upgrade_to_mistral(frame.context)
+            context: OpenAILLMContext = frame.context
         elif isinstance(frame, LLMMessagesFrame):
-            context = MistralLLMContext.from_messages(frame.messages)
+            context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:
@@ -539,44 +475,3 @@ class MistralLLMService(LLMService):
                 self.set_model_name(value)
             else:
                 logger.warning(f"Unknown setting for {self.name} service: {key}")
-
-
-class MistralUserContextAggregator(LLMUserContextAggregator):
-    """Mistral-specific user context aggregator."""
-
-    pass
-
-
-class MistralAssistantContextAggregator(LLMAssistantContextAggregator):
-    """Context aggregator for assistant messages in Mistral conversations."""
-
-    async def handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
-        """Handle a function call that is starting."""
-        assistant_message = ChatCompletionAssistantMessageParam(
-            role="assistant", content=f"Calling function {frame.function_name} with arguments: {frame.arguments}"
-        )
-        self._context.add_message(assistant_message)
-        self._context.add_message(
-            ChatCompletionUserMessageParam(role="user", content=f"Function call {frame.tool_call_id} in progress")
-        )
-
-    async def handle_function_call_result(self, frame: FunctionCallResultFrame):
-        """Handle the result of a completed function call."""
-        result_str = json.dumps(frame.result) if frame.result else "COMPLETED"
-        await self._update_function_call_result(frame.function_name, frame.tool_call_id, result_str)
-
-    async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
-        """Handle cancellation of a function call."""
-        await self._update_function_call_result(frame.function_name, frame.tool_call_id, "CANCELLED")
-
-    async def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
-        """Update the context with function call results."""
-        # Find and update the appropriate message
-        for i, message in enumerate(self._context.messages):
-            if (
-                message["role"] == "user"
-                and isinstance(message["content"], str)
-                and f"Function call {tool_call_id}" in message["content"]
-            ):
-                self._context.messages[i]["content"] = f"Function call {tool_call_id} result: {result}"
-                break
