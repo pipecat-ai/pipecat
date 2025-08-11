@@ -454,7 +454,7 @@ class PlayHTHttpTTSService(TTSService):
         super().__init__(sample_rate=sample_rate, **kwargs)
 
         # Warn about deprecated protocol parameter if explicitly provided
-        if protocol is not None:
+        if protocol:
             warnings.warn(
                 "The 'protocol' parameter is deprecated and will be removed in a future version.",
                 DeprecationWarning,
@@ -569,7 +569,9 @@ class PlayHTHttpTTSService(TTSService):
                     in_header = True
                     buffer = b""
 
-                    async for chunk in response.content.iter_chunked(8192):
+                    CHUNK_SIZE = self.chunk_size
+
+                    async for chunk in response.content.iter_chunked(CHUNK_SIZE):
                         if len(chunk) == 0:
                             continue
 
