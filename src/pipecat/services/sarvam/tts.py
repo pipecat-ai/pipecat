@@ -496,6 +496,7 @@ class SarvamTTSService(InterruptibleTTSService):
         """Send initial configuration message."""
         if not self._websocket:
             raise Exception("WebSocket not connected")
+        self._settings["speaker"] = self._voice_id
         logger.debug(f"Config being sent is {self._settings}")
         config_message = {"type": "config", "data": self._settings}
 
