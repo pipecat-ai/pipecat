@@ -35,6 +35,10 @@ EVAL_WEATHER = (
 PROMPT_ONLINE_SEARCH = "What's the date right now in London?"
 EVAL_ONLINE_SEARCH = f"Today is {datetime.now(timezone.utc).strftime('%B %d, %Y')}."
 
+# Switch language
+PROMPT_SWITCH_LANGUAGE = "Say something in Spanish."
+EVAL_SWITCH_LANGUAGE = "Check if the user is now talking in Spanish."
+
 TESTS_07 = [
     # 07 series
     ("07-interruptible.py", PROMPT_SIMPLE_MATH, None),
@@ -101,6 +105,10 @@ TESTS_14 = [
     # ("14o-function-calling-gemini-openai-format.py", PROMPT_WEATHER, EVAL_WEATHER),
 ]
 
+TESTS_15 = [
+    ("15a-switch-languages.py", PROMPT_SWITCH_LANGUAGE, EVAL_SWITCH_LANGUAGE),
+]
+
 TESTS_19 = [
     ("19-openai-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("19a-azure-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER),
@@ -135,6 +143,7 @@ TESTS_43 = [
 TESTS = [
     *TESTS_07,
     *TESTS_14,
+    *TESTS_15,
     *TESTS_19,
     *TESTS_21,
     *TESTS_26,
