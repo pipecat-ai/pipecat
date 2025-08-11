@@ -49,7 +49,7 @@ class ParallelPipelineSource(FrameProcessor):
             upstream_queue: Queue for collecting upstream frames from this branch.
             push_frame_func: Function to push frames to the parent parallel pipeline.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._up_queue = upstream_queue
         self._push_frame_func = push_frame_func
 
@@ -90,7 +90,7 @@ class ParallelPipelineSink(FrameProcessor):
             downstream_queue: Queue for collecting downstream frames from this branch.
             push_frame_func: Function to push frames to the parent parallel pipeline.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._down_queue = downstream_queue
         self._push_frame_func = push_frame_func
 

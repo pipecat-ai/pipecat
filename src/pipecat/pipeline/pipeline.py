@@ -32,7 +32,7 @@ class PipelineSource(FrameProcessor):
         Args:
             upstream_push_frame: Coroutine function to handle upstream frames.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._upstream_push_frame = upstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -65,7 +65,7 @@ class PipelineSink(FrameProcessor):
         Args:
             downstream_push_frame: Coroutine function to handle downstream frames.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._downstream_push_frame = downstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

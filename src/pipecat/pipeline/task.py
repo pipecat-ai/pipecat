@@ -110,14 +110,14 @@ class PipelineTaskSource(FrameProcessor):
     pipeline.
     """
 
-    def __init__(self, up_queue: asyncio.Queue, **kwargs):
+    def __init__(self, up_queue: asyncio.Queue):
         """Initialize the pipeline task source.
 
         Args:
             up_queue: Queue for upstream frame processing.
             **kwargs: Additional arguments passed to the parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(enable_direct_mode=True)
         self._up_queue = up_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -144,14 +144,14 @@ class PipelineTaskSink(FrameProcessor):
     act on them, for example, waiting to receive an EndFrame.
     """
 
-    def __init__(self, down_queue: asyncio.Queue, **kwargs):
+    def __init__(self, down_queue: asyncio.Queue):
         """Initialize the pipeline task sink.
 
         Args:
             down_queue: Queue for downstream frame processing.
             **kwargs: Additional arguments passed to the parent class.
         """
-        super().__init__(**kwargs)
+        super().__init__(enable_direct_mode=True)
         self._down_queue = down_queue
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
