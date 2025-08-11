@@ -30,6 +30,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
+    CancelTaskFrame,
     EndFrame,
     EndTaskFrame,
     Frame,
@@ -285,8 +286,10 @@ class VoicemailDetectionObserver(BaseObserver):
             if self._last_turn_time:
                 diff_time = time.time() - self._last_turn_time
                 self._voicemail_speaking = diff_time < self._timeout
+                logger.debug(f"📩️ Voicemail speaking status: {self._voicemail_speaking}")
             if self._voicemail_speaking:
                 await asyncio.sleep(0.5)
+                logger.debug(f"📩️ Voicemail waiting status: {self._voicemail_speaking}")
 
 
 class VADPrebufferProcessor(FrameProcessor):
@@ -552,7 +555,20 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             message = "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
             logger.info(f"🎤 SENDING VOICEMAIL MESSAGE: {message}")
             await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
-            await voicemail_tts.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+
+            logger.debug(f"📩️ Pushing EndTaskFrame")
+            await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+            await params.llm.queue_frame(CancelTaskFrame(), FrameDirection.UPSTREAM)
+            await pipeline_task.cancel()
+
+            # logger.debug(f"📩️ Pushing EndTaskFrame")
+            # await voicemail_tts.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+            # logger.debug(f"📩️ Pushing CancelTaskFrame")
+            # await voicemail_tts.queue_frame(CancelTaskFrame(), FrameDirection.UPSTREAM)
+            # logger.debug(f"📩️ Pushing both")
+
+            # await pipeline_task.queue_frames([EndTaskFrame(), CancelTaskFrame()])
+            await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
 
         await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
 
