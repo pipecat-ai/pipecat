@@ -319,7 +319,7 @@ class SarvamTTSService(InterruptibleTTSService):
         # Initialize parent class first
         super().__init__(
             aggregate_sentences=aggregate_sentences,
-            push_text_frames=False,
+            push_text_frames=True,
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,
@@ -575,6 +575,7 @@ class SarvamTTSService(InterruptibleTTSService):
             msg = {"type": "text", "data": {"text": text}}
             logger.debug(f"Sending text to websocket: {msg}")
             await self._websocket.send(json.dumps(msg))
+            await self.flush_audio()
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
