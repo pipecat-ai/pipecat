@@ -215,10 +215,11 @@ class OjinPersonaFSM:
             PersonaState.SPEECH,
             PersonaState.IDLE_TO_SPEECH,
         ):
+            await self.set_state(PersonaState.IDLE)  # Corrected from DittoState
+
             while not self._speech_frames.empty():
                 self._speech_frames.get_nowait()
 
-            await self.set_state(PersonaState.IDLE)  # Corrected from DittoState
 
     def _start_playback(self):
         """Start the animation playback loop.
@@ -373,7 +374,7 @@ class OjinPersonaFSM:
 
                 if frame is None:
                     self._num_frames_missed += 1
-                    logger.warning(f"Frames missed {self._num_frames_missed}")
+                    # logger.warning(f"Frames missed {self._num_frames_missed}")
 
                     if self._last_frame is not None:
                         return self._last_frame
@@ -664,6 +665,9 @@ class OjinPersonaService(FrameProcessor):
 
         """
         assert self._client is not None
+        if hasattr(message, 'interaction_id'):
+            logger.info(f"interaction {message.interaction_id}")
+
         await self._client.send_message(message)
 
     async def _handle_ojin_message(self, message: BaseModel):
@@ -679,10 +683,11 @@ class OjinPersonaService(FrameProcessor):
         """       
 
         if isinstance(message, OjinPersonaInteractionResponseMessage):
+            logger.warning(message.interaction_id)
             if self._interaction is None:
                 logger.warning("No interaction in progress when receiving video frame")
                 return
-            logger.debug(f"Video frame received: {self._interaction.frame_idx} isFinal: {message.is_final_response}")
+            # logger.info(f"Video frame received: {self._interaction.frame_idx} isFinal: {message.is_final_response}")
             # Create and push the image frame
             image_frame = OutputImageRawFrame(
                 image=message.video_frame_bytes,
@@ -812,13 +817,14 @@ class OjinPersonaService(FrameProcessor):
         
         logger.debug(f"Try interrupt interaction in state {self._interaction.state}")
         if self._interaction.state != InteractionState.INACTIVE:
-            logger.debug("Sending CancelInteractionMessage")
+            logger.warning("Sending CancelInteractionMessage")
             await self.push_ojin_message(
                 OjinPersonaCancelInteractionMessage(
                     interaction_id=self._interaction.interaction_id,
                 )
             )
             if self._fsm is not None:
+                await self._fsm.interrupt()
                 await self._fsm.on_conversation_signal(
                     ConversationSignal.USER_INTERRUPTED_AI
                 )
