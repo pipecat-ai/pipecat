@@ -18,7 +18,9 @@ try:
     from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Sarvam, you need to `pip install pipecat-ai[sarvam]`.")
+    logger.error(
+        "In order to use Sarvam, you need to `pip install pipecat-ai[sarvam]`."
+    )
     raise Exception(f"Missing module: {e}")
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -140,7 +142,9 @@ class SarvamHttpTTSService(TTSService):
 
         self._settings = {
             "language": (
-                self.language_to_service_language(params.language) if params.language else "en-IN"
+                self.language_to_service_language(params.language)
+                if params.language
+                else "en-IN"
             ),
             "pitch": params.pitch,
             "pace": params.pace,
@@ -201,7 +205,7 @@ class SarvamHttpTTSService(TTSService):
                 "pitch": self._settings["pitch"],
                 "pace": self._settings["pace"],
                 "loudness": self._settings["loudness"],
-                "speech_sample_rate": self.sample_rate,
+                "sample_rate": self.sample_rate,
                 "enable_preprocessing": self._settings["enable_preprocessing"],
                 "model": self._model_name,
             }
@@ -215,7 +219,9 @@ class SarvamHttpTTSService(TTSService):
 
             yield TTSStartedFrame()
 
-            async with self._session.post(url, json=payload, headers=headers) as response:
+            async with self._session.post(
+                url, json=payload, headers=headers
+            ) as response:
                 if response.status != 200:
                     error_text = await response.text()
                     logger.error(f"Sarvam API error: {error_text}")
@@ -258,13 +264,48 @@ class SarvamHttpTTSService(TTSService):
 
 
 class SarvamTTSService(InterruptibleTTSService):
-    """Minimalist TTS service for Sarvam AI WebSocket endpoint using Pipecat base class.
+    """WebSocket-based text-to-speech service using Sarvam AI.
 
-    Supports streaming text-to-speech with buffering and real-time audio generation.
+    Provides streaming TTS with real-time audio generation for multiple Indian languages.
+    Supports voice control parameters like pitch, pace, and loudness adjustment.
+
+    Example::
+
+        tts = SarvamTTSService(
+            api_key="your-api-key",
+            voice_id="anushka",
+            model="bulbul:v2",
+            params=SarvamTTSService.InputParams(
+                language=Language.HI,
+                pitch=0.1,
+                pace=1.2
+            )
+        )
     """
 
     class InputParams(BaseModel):
-        """Docs."""
+        """Configuration parameters for Sarvam TTS.
+
+        Parameters:
+            pitch: Voice pitch adjustment (-0.75 to 0.75). Defaults to 0.0.
+            pace: Speech pace multiplier (0.3 to 3.0). Defaults to 1.0.
+            loudness: Volume multiplier (0.1 to 3.0). Defaults to 1.0.
+            enable_preprocessing: Enable text preprocessing. Defaults to False.
+            min_buffer_size: Minimum number of characters to buffer before generating audio.
+                Lower values reduce latency but may affect quality. Defaults to 50.
+            max_chunk_length: Maximum number of characters processed in a single chunk.
+                Controls memory usage and processing efficiency. Defaults to 200.
+            output_audio_codec: Audio codec format. Defaults to "linear16".
+            output_audio_bitrate: Audio bitrate. Defaults to "128k".
+            language: Target language for synthesis. Supports Bengali (bn-IN), English (en-IN),
+                Gujarati (gu-IN), Hindi (hi-IN), Kannada (kn-IN), Malayalam (ml-IN),
+                Marathi (mr-IN), Odia (od-IN), Punjabi (pa-IN), Tamil (ta-IN),
+                Telugu (te-IN). Defaults to en-IN.
+
+                Available Speakers:
+            Female: anushka, manisha, vidya, arya
+            Male: abhilash, karun, hitesh
+        """
 
         pitch: Optional[float] = Field(default=0.0, ge=-0.75, le=0.75)
         pace: Optional[float] = Field(default=1.0, ge=0.3, le=3.0)
@@ -335,7 +376,9 @@ class SarvamTTSService(InterruptibleTTSService):
         # Configuration parameters
         self._settings = {
             "target_language_code": (
-                self.language_to_service_language(params.language) if params.language else "en-IN"
+                self.language_to_service_language(params.language)
+                if params.language
+                else "en-IN"
             ),
             "pitch": params.pitch,
             "pace": params.pace,
@@ -411,7 +454,9 @@ class SarvamTTSService(InterruptibleTTSService):
             msg = {"type": "flush"}
             await self._websocket.send(json.dumps(msg))
 
-    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+    async def push_frame(
+        self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
+    ):
         """Push a frame downstream with special handling for stop conditions.
 
         Args:
@@ -449,7 +494,9 @@ class SarvamTTSService(InterruptibleTTSService):
         await self._connect_websocket()
 
         if self._websocket and not self._receive_task:
-            self._receive_task = self.create_task(self._receive_task_handler(self._report_error))
+            self._receive_task = self.create_task(
+                self._receive_task_handler(self._report_error)
+            )
 
         if self._websocket and not self._keepalive_task:
             self._keepalive_task = self.create_task(self._keepalive_task_handler())
@@ -546,8 +593,13 @@ class SarvamTTSService(InterruptibleTTSService):
                     logger.error(f"TTS Error: {error_msg}")
 
                     # If it's a timeout error, the connection might need to be reset
-                    if "too long" in error_msg.lower() or "timeout" in error_msg.lower():
-                        logger.warning("Connection timeout detected, service may need restart")
+                    if (
+                        "too long" in error_msg.lower()
+                        or "timeout" in error_msg.lower()
+                    ):
+                        logger.warning(
+                            "Connection timeout detected, service may need restart"
+                        )
 
                     await self.push_frame(ErrorFrame(f"TTS Error: {error_msg}"))
 
