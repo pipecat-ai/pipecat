@@ -36,6 +36,7 @@ dependencies = [
     "openai>=1.74.0,<=1.99.1",
     # Pinning numba to resolve package dependencies
     "numba==0.61.2",
+    "pipecat-ai-flows>=0.0.18",
 ]
 
 [project.urls]

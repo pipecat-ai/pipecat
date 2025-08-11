@@ -615,25 +615,11 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             # Generate voicemail message
             message = "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
             logger.info(f"🎤 SENDING VOICEMAIL MESSAGE: {message}")
-            await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
+            await params.llm.push_frame(TTSSpeakFrame(text=message))
 
-            logger.warning(
-                f"📩️ EndTaskFrame upstream routing seems blocked - using direct EndFrame approach"
-            )
-            # Direct approach: Send EndFrame directly to the pipeline task
-            # This bypasses the complex ParallelPipeline routing that seems to be blocking EndTaskFrame
-            await pipeline_task.queue_frame(EndFrame())
-            logger.warning(f"📩️ EndFrame sent directly to pipeline task")
-            # await pipeline_task.cancel()
-
-            # logger.debug(f"📩️ Pushing EndTaskFrame")
-            # await voicemail_tts.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-            # logger.debug(f"📩️ Pushing CancelTaskFrame")
-            # await voicemail_tts.queue_frame(CancelTaskFrame(), FrameDirection.UPSTREAM)
-            # logger.debug(f"📩️ Pushing both")
-
-            # await pipeline_task.queue_frames([EndTaskFrame(), CancelTaskFrame()])
-            await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
+            # Following the official Pipecat docs: "From inside the pipeline, push upstream to reach the source"
+            logger.warning(f"📩️ Using correct pattern: EndTaskFrame upstream from function call")
+            await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
         await params.result_callback({"confidence": f"{confidence}", "reasoning": reasoning})
 
