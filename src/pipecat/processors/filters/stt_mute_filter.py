@@ -32,6 +32,8 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -205,6 +207,8 @@ class STTMuteFilter(FrameProcessor):
             (
                 StartInterruptionFrame,
                 StopInterruptionFrame,
+                VADUserStartedSpeakingFrame,
+                VADUserStoppedSpeakingFrame,
                 UserStartedSpeakingFrame,
                 UserStoppedSpeakingFrame,
                 InputAudioRawFrame,
