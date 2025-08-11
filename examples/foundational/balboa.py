@@ -292,6 +292,64 @@ class VoicemailDetectionObserver(BaseObserver):
                 logger.debug(f"📩️ Voicemail waiting status: {self._voicemail_speaking}")
 
 
+class PipelineDebugObserver(BaseObserver):
+    """Observes pipeline frames to debug EndFrame/EndTaskFrame flow."""
+
+    def __init__(self):
+        super().__init__()
+        self._processed_frames = set()
+
+    async def on_push_frame(self, data: FramePushed):
+        frame = data.frame
+
+        # Only track unique frames to avoid duplicate logs
+        if frame.id in self._processed_frames:
+            return
+        self._processed_frames.add(frame.id)
+
+        # Track shutdown-related frames
+        if isinstance(frame, (EndFrame, EndTaskFrame, CancelFrame, CancelTaskFrame)):
+            source_name = (
+                data.source.__class__.__name__
+                if hasattr(data, "source") and data.source
+                else "Unknown"
+            )
+            dest_name = (
+                data.destination.__class__.__name__
+                if hasattr(data, "destination") and data.destination
+                else "Unknown"
+            )
+            logger.warning(
+                f"🔍 SHUTDOWN FRAME OBSERVER: {type(frame).__name__} from {source_name} -> {dest_name}"
+            )
+
+        # Track TTS completion frames that might affect shutdown timing
+        elif hasattr(frame, "text") and frame.text and isinstance(frame, TTSSpeakFrame):
+            source_name = (
+                data.source.__class__.__name__
+                if hasattr(data, "source") and data.source
+                else "Unknown"
+            )
+            logger.info(
+                f"🔍 TTS FRAME OBSERVER: TTSSpeakFrame with text: '{frame.text[:50]}...' from {source_name}"
+            )
+
+        # Track pipeline state changes
+        elif isinstance(frame, (StartFrame, BotInterruptionFrame)):
+            source_name = (
+                data.source.__class__.__name__
+                if hasattr(data, "source") and data.source
+                else "Unknown"
+            )
+            logger.info(f"🔍 PIPELINE STATE OBSERVER: {type(frame).__name__} from {source_name}")
+
+    async def on_pipeline_started(self, pipeline_task):
+        logger.warning("🔍 PIPELINE DEBUG: Pipeline started")
+
+    async def on_pipeline_ended(self, pipeline_task):
+        logger.warning("🔍 PIPELINE DEBUG: Pipeline ended - shutdown completed successfully")
+
+
 class VADPrebufferProcessor(FrameProcessor):
     """
     This processor buffers a specified number of audio frames before speech is
@@ -534,6 +592,9 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
     # Observer for voicemail detection
     voicemail_observer = VoicemailDetectionObserver()
 
+    # Debug observer to trace EndFrame flow
+    debug_observer = PipelineDebugObserver()
+
     # ------------ FUNCTION HANDLERS ------------
 
     async def voicemail_detected(params: FunctionCallParams):
@@ -556,10 +617,14 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             logger.info(f"🎤 SENDING VOICEMAIL MESSAGE: {message}")
             await voicemail_tts.queue_frame(TTSSpeakFrame(text=message))
 
-            logger.debug(f"📩️ Pushing EndTaskFrame")
-            await params.llm.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-            await params.llm.queue_frame(CancelTaskFrame(), FrameDirection.UPSTREAM)
-            await pipeline_task.cancel()
+            logger.warning(
+                f"📩️ EndTaskFrame upstream routing seems blocked - using direct EndFrame approach"
+            )
+            # Direct approach: Send EndFrame directly to the pipeline task
+            # This bypasses the complex ParallelPipeline routing that seems to be blocking EndTaskFrame
+            await pipeline_task.queue_frame(EndFrame())
+            logger.warning(f"📩️ EndFrame sent directly to pipeline task")
+            # await pipeline_task.cancel()
 
             # logger.debug(f"📩️ Pushing EndTaskFrame")
             # await voicemail_tts.queue_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
@@ -830,7 +895,7 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             audio_out_sample_rate=16000,
         ),
         cancel_on_idle_timeout=False,
-        observers=[voicemail_observer],
+        observers=[voicemail_observer],  # Temporarily removing debug_observer due to API mismatch
     )
 
     flow_manager = FlowManager(
@@ -869,7 +934,12 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
 
     @transport.event_handler("on_participant_left")
     async def on_participant_left(transport, participant, reason):
+        logger.warning(f"🔍 TRANSPORT DEBUG: Participant left - {participant} (reason: {reason})")
         await pipeline_task.queue_frame(EndFrame())
+
+    @transport.event_handler("on_left")
+    async def on_left(transport):
+        logger.warning(f"🔍 TRANSPORT DEBUG: Transport left room")
 
     # Remove the problematic on_pipeline_started handler
     # The context will be initialized naturally when frames flow through the pipeline
