@@ -1,8 +1,7 @@
-#
-# Copyright (c) 2024–2025, Vonage, Inc.
-#
-# SPDX-License-Identifier: BSD 2-Clause License
-#
+# SPDX-License-Identifier: BSD-2-Clause
+"""Example: Vonage serializer + custom WS transport + OpenAI STT/LLM/TTS."""
+
+from __future__ import annotations
 
 import asyncio
 import os
@@ -15,97 +14,100 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.processors.chunked_audio_sender import VonageWebsocketServerTransport
+from pipecat.transports.services.vonage import VonageWebsocketServerTransport
 from pipecat.serializers.vonage import VonageFrameSerializer
 from pipecat.services.openai import OpenAISTTService, OpenAITTSService, OpenAILLMService
-from pipecat.transports.network.websocket_server import (
-    WebsocketServerParams,
+from pipecat.transports.network.websocket_server import WebsocketServerParams
+
+# ---- Constants ---------------------------------------------------------------
+
+WS_HOST: str = "0.0.0.0"
+WS_PORT: int = 8005
+SESSION_TIMEOUT_SECONDS: int = 60 * 3  # 3 minutes
+AUDIO_OUT_SAMPLE_RATE: int = 24_000
+
+SYSTEM_INSTRUCTION: str = (
+    "You are OpenAI Chatbot, a friendly, helpful robot. "
+    "Your output will be converted to audio, so avoid special characters. "
+    "Respond to the user in a creative, helpful way. Keep responses brief—"
+    "one or two sentences."
 )
 
-# Load environment variables from .env file
+# Load environment variables from .env
 load_dotenv()
 
-# Define initial system instruction
-SYSTEM_INSTRUCTION = (
-    "You are OpenAI Chatbot, a friendly, helpful robot. "
-    "Your goal is to demonstrate your capabilities in a succinct way. "
-    "Your output will be converted to audio so don't include special characters in your answers. "
-    "Respond to what the user said in a creative and helpful way. Keep your responses brief. "
-    "One or two sentences at most."
-)
 
-
-async def run_bot_websocket_server():
-    vonage_frame_serializer = VonageFrameSerializer()
+async def run_bot_websocket_server() -> None:
+    serializer = VonageFrameSerializer()
 
     ws_transport = VonageWebsocketServerTransport(
-        host="0.0.0.0",
-        port=8005,
+        host=WS_HOST,
+        port=WS_PORT,
         params=WebsocketServerParams(
-            serializer=vonage_frame_serializer,
+            serializer=serializer,
             audio_in_enabled=True,
             audio_out_enabled=True,
             add_wav_header=True,
             vad_analyzer=SileroVADAnalyzer(),
-            session_timeout=60 * 3,  # 3 minutes
+            session_timeout=SESSION_TIMEOUT_SECONDS,
         ),
     )
 
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
         model="gpt-4o-transcribe",
-        prompt="Expect words based on questions with various topics, such as technology, science, and culture."
+        prompt=(
+            "Expect words based on questions across technology, science, and culture."
+        ),
     )
 
     tts = OpenAITTSService(
         api_key=os.getenv("OPENAI_API_KEY"),
         voice="coral",
-        instructions="There could be new line characters in text like \n which you can ignore while conversion to speech audio"
+        instructions="There may be literal '\\n' characters; ignore them when speaking.",
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    messages = [
-        {
-            "role": "system",
-            "content": SYSTEM_INSTRUCTION,
-        },
-    ]
-
+    messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
     context = OpenAILLMContext(messages)
     context_aggregator = llm.create_context_aggregator(context)
 
-    pipeline = Pipeline([
-        ws_transport.input(),
-        stt,
-        context_aggregator.user(),
-        llm,
-        tts,
-        ws_transport.output()
-    ])
+    pipeline = Pipeline(
+        [
+            ws_transport.input(),
+            stt,
+            context_aggregator.user(),
+            llm,
+            tts,
+            ws_transport.output(),
+        ]
+    )
 
     task = PipelineTask(
         pipeline,
         params=PipelineParams(
-            audio_out_sample_rate=24000,
+            audio_out_sample_rate=AUDIO_OUT_SAMPLE_RATE,
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
     )
 
     @ws_transport.event_handler("on_client_connected")
-    async def on_client_connected(transport, client):
+    async def on_client_connected(_transport, _client) -> None:
         logger.info("Client connected")
-        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append(
+            {"role": "system", "content": "Please introduce yourself to the user."}
+        )
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @ws_transport.event_handler("on_client_disconnected")
-    async def on_client_disconnected(transport, client):
+    async def on_client_disconnected(_transport, _client) -> None:
         logger.info("Client disconnected")
         await task.cancel()
 
     @ws_transport.event_handler("on_websocket_ready")
-    async def on_websocket_ready(client):
+    async def on_websocket_ready(_client) -> None:
         logger.info("Server WebSocket ready")
 
     runner = PipelineRunner(handle_sigint=False)
