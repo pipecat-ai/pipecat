@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- Improving the latency of the `HeyGenVideoService`.
+
 - Improved some frame processors performance by using the new frame processor
   direct mode. In direct mode a frame processor will process frames right away
   avoiding the need for internal queues and tasks. This is useful for some
@@ -46,7 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
-- Improving the latency of the `HeyGenVideoService`.
+- Added foundational example `15a-switch-languages.py` to release evals. It is
+  able to detect if we switched the language properly.
 
 - Updated foundational examples to show how to enclose complex logic
   (e.g. `ParallelPipeline`) into a single processor so the main pipeline becomes

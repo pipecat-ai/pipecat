@@ -210,7 +210,10 @@ async def run_eval_pipeline(
     # 5" (in audio) this can be converted to "32 is 5".
     stt = DeepgramSTTService(
         api_key=os.getenv("DEEPGRAM_API_KEY"),
-        live_options=LiveOptions(smart_format=False),
+        live_options=LiveOptions(
+            language="multi",
+            smart_format=False,
+        ),
     )
 
     tts = CartesiaTTSService(
