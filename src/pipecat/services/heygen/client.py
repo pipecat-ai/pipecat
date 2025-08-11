@@ -362,7 +362,7 @@ class HeyGenClient:
         """Simulate audio playback timing with appropriate delays."""
         # Only sleep after we've sent the first second of audio
         # This appears to reduce the latency to receive the answer from HeyGen
-        if self._audio_seconds_sent < 1.0:
+        if self._audio_seconds_sent < 3.0:
             self._audio_seconds_sent += self._send_interval
             self._next_send_time = time.monotonic() + self._send_interval
             return
