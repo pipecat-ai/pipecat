@@ -616,7 +616,6 @@ async def run_bot(room_url: str, token: str, body: dict) -> None:
             message = "Hello, this is a message for Pipecat example user. This is Chatbot. Please call back on 123-456-7891. Thank you."
             logger.info(f"🎤 SENDING VOICEMAIL MESSAGE: {message}")
             await params.llm.push_frame(TTSSpeakFrame(text=message))
-
             # Following the official Pipecat docs: "From inside the pipeline, push upstream to reach the source"
             logger.warning(f"📩️ Using correct pattern: EndTaskFrame upstream from function call")
             await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
