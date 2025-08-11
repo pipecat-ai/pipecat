@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated Moondream to revision `2025-01-09`.
+
 - Updated `pyproject.toml` to once again pin `numba` to `>=0.61.2` in order to
   resolve package versioning issues.
 - Updated the `STTMuteFilter` to include `VADUserStartedSpeakingFrame` and `VADUserStoppedSpeakingFrame` in the list of frames to filter when the filtering is on.
