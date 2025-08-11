@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `enable_direct_mode` argument to `FrameProcessor`. The direct mode is
+  for processors which require very little I/O or compute resources, that is
+  processors that can perform their task almost immediately. These type of
+  processors don't need any of the internal tasks and queues usually created by
+  frame processors which means overall application performance might be slightly
+  increased. Use with care.
+
 - Added TTFB metrics for `HeyGenVideoService` and `TavusVideoService`.
 
 - Added `endpoint_id` parameter to `AzureSTTService`. ([Custom EndpointId](https://docs.azure.cn/en-us/ai-services/speech-service/how-to-recognize-speech?pivots=programming-language-python#use-a-custom-endpoint))
@@ -18,6 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `pyproject.toml` to once again pin `numba` to `>=0.61.2` in order to
   resolve package versioning issues.
 - Updated the `STTMuteFilter` to include `VADUserStartedSpeakingFrame` and `VADUserStoppedSpeakingFrame` in the list of frames to filter when the filtering is on.
+
+### Performance
+
+- Improved some frame processors performance by using the new frame processor
+  direct mode. In direct mode a frame processor will process frames right away
+  avoiding the need for internal queues and tasks. This is useful for some
+  simple processors. For example, in processors that wrap other processors
+  (e.g. `Pipeline`, `ParallelPipeline`), we add one processor before and one
+  after the wrapped processors (internally, you will see them as sources and
+  sinks). These sources and sinks don't do any special processing and they
+  basically forward frames. So, for these simple processors we now enable the
+  new direct mode which avoids creating any internal tasks (and queues) and
+  therefore improves performance.
 
 ### Other
 
