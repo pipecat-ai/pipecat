@@ -403,9 +403,11 @@ class OpenAILLMContextAssistantTimestampFrame(DataFrame):
 
     timestamp: str
 
-# A more universal (LLM-agnostic) name for 
+
+# A more universal (LLM-agnostic) name for
 # OpenAILLMContextAssistantTimestampFrame, matching LLMContext
 LLMContextAssistantTimestampFrame = OpenAILLMContextAssistantTimestampFrame
+
 
 @dataclass
 class TranscriptionMessage:
