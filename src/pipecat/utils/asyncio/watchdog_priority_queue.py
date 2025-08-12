@@ -25,28 +25,37 @@ class WatchdogPriorityCancelSentinel:
 
     An instance of this class is typically inserted into a
     `WatchdogPriorityQueue` to act as a high-priority marker asyncio task
-    cancellation. The `__lt__` method always returns `True`, ensuring that the
-    sentinel is considered "less than" any other item in the queue, and
-    therefore processed before anything else.
+    cancellation.
 
     """
 
-    def __lt__(self, other):
-        return True
+    pass
 
 
 class WatchdogPriorityQueue(asyncio.PriorityQueue):
-    """Watchdog-enabled asyncio PriorityQueue.
+    """Class for watchdog-enabled asyncio PriorityQueue.
 
     An asynchronous priority queue that resets the current task watchdog
     timer. This is necessary to avoid task watchdog timers to expire while we
     are waiting to get an item from the queue.
+
+    This queue expects items to be tuples, with the actual payload stored
+    in the last element. All preceding elements are treated as numeric
+    priority fields. For example:
+
+        (0, 1, "foo")
+
+    The tuple length must be specified at creation time so the queue can
+    correctly construct special items, such as the watchdog cancel sentinel,
+    with the proper tuple structure.
+
     """
 
     def __init__(
         self,
         manager: BaseTaskManager,
         *,
+        tuple_size: int,
         maxsize: int = 0,
         timeout: float = 2.0,
     ) -> None:
@@ -54,12 +63,14 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
 
         Args:
             manager: The task manager for watchdog timer control.
+            tuple_size: The number of values in each inserted tuple.
             maxsize: Maximum queue size. 0 means unlimited.
             timeout: Timeout in seconds between watchdog resets while waiting.
         """
         super().__init__(maxsize)
         self._manager = manager
         self._timeout = timeout
+        self._tuple_size = tuple_size
 
     async def get(self):
         """Get an item from the queue with watchdog monitoring.
@@ -72,7 +83,10 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
         else:
             get_result = await super().get()
 
-        if isinstance(get_result, WatchdogPriorityCancelSentinel):
+        # Value is always at the end of the tuple.
+        item = get_result[-1]
+
+        if isinstance(item, WatchdogPriorityCancelSentinel):
             logger.trace(
                 "Received WatchdogPriorityCancelSentinel, throwing CancelledError to force cancelling"
             )
@@ -101,7 +115,10 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
         forces the task to raise CancelledError when consumed, ensuring proper
         task termination.
         """
-        super().put_nowait(WatchdogPriorityCancelSentinel())
+        item = [float("-inf")] * self._tuple_size
+        # Values go always at the end.
+        item[-1] = WatchdogPriorityCancelSentinel()
+        super().put_nowait(tuple(item))
 
     async def _watchdog_get(self):
         """Get item from queue while periodically resetting watchdog timer."""

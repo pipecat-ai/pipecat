@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `WatchdogPriorityQueue` now requires the items to be inserted to always be
+  tuples and the size of the tuple needs to be specified in the constructor when
+  creating the queue with the `tuple_size` argument.
+
 - Updated Moondream to revision `2025-01-09`.
 
 - Updated `PlayHTHttpTTSService` to no longer use the `pyht` client to remove
@@ -59,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   therefore improves performance.
 
 ### Fixed
+
+- Fixed a `WatchdogPriorityQueue` issue that could cause an exception when
+  compating watchdog cancel sentinel items with other items in the queue.
 
 - Fixed an issue that would cause system frames to not be processed with higher
   priority than other frames. This could cause slower interruption times.
