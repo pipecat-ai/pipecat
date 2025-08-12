@@ -560,7 +560,7 @@ class DailyTransportClient(EventHandler):
         self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
         if self._params.audio_in_enabled:
-            if self._params.audio_in_user_tracks and not self._audio_task:
+            if self._params.audio_in_user_tracks and not self._audio_task and self._task_manager:
                 self._audio_queue = WatchdogQueue(self._task_manager)
                 self._audio_task = self._task_manager.create_task(
                     self._callback_task_handler(self._audio_queue),

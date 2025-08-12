@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import asyncio
 import io
 import os
@@ -13,11 +12,12 @@ import time
 import wave
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import aiofiles
 from deepgram import LiveOptions
 from loguru import logger
+from PIL.ImageFile import ImageFile
 from utils import (
     EvalResult,
     load_module_from_path,
@@ -30,7 +30,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import EndTaskFrame
+from pipecat.frames.frames import EndTaskFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -48,6 +48,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 PIPELINE_IDLE_TIMEOUT_SECS = 60
 EVAL_TIMEOUT_SECS = 90
+
+EvalPrompt = str | Tuple[str, ImageFile]
 
 
 class EvalRunner:
@@ -87,7 +89,7 @@ class EvalRunner:
     async def assert_eval_false(self):
         await self._queue.put(False)
 
-    async def run_eval(self, example_file: str, prompt: str, eval: Optional[str] = None):
+    async def run_eval(self, example_file: str, prompt: EvalPrompt, eval: Optional[str] = None):
         if not re.match(self._pattern, example_file):
             return
 
@@ -178,6 +180,7 @@ async def run_example_pipeline(script_path: Path):
         DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            video_in_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         ),
     )
@@ -189,7 +192,10 @@ async def run_example_pipeline(script_path: Path):
 
 
 async def run_eval_pipeline(
-    eval_runner: EvalRunner, example_file: str, prompt: str, eval: Optional[str]
+    eval_runner: EvalRunner,
+    example_file: str,
+    prompt: EvalPrompt,
+    eval: Optional[str],
 ):
     logger.info(f"Starting eval bot")
 
@@ -202,6 +208,7 @@ async def run_eval_pipeline(
         DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
+            video_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=2.0)),
         ),
     )
@@ -242,6 +249,14 @@ async def run_eval_pipeline(
     )
     tools = ToolsSchema(standard_tools=[eval_function])
 
+    # Load example prompt depending on image.
+    example_prompt = ""
+    example_image: Optional[ImageFile] = None
+    if isinstance(prompt, str):
+        example_prompt = prompt
+    elif isinstance(prompt, tuple):
+        example_prompt, example_image = prompt
+
     # See if we need to include an eval prompt.
     eval_prompt = ""
     if eval:
@@ -250,7 +265,7 @@ async def run_eval_pipeline(
     messages = [
         {
             "role": "system",
-            "content": f"You are an LLM eval, be extremly brief. Your goal is to only ask one question: {prompt}. Call the eval function only if the user answers the question and check if the answer is correct (words as numbers are valid). {eval_prompt}",
+            "content": f"You are an LLM eval, be extremly brief. Your goal is to only ask one question: {example_prompt}. Call the eval function only if the user answers the question and check if the answer is correct (words as numbers are valid). {eval_prompt}",
         },
     ]
 
@@ -288,6 +303,14 @@ async def run_eval_pipeline(
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        if example_image:
+            await task.queue_frame(
+                OutputImageRawFrame(
+                    image=example_image.tobytes(),
+                    size=example_image.size,
+                    format="RGB",
+                )
+            )
         await audio_buffer.start_recording()
 
     @transport.event_handler("on_client_disconnected")

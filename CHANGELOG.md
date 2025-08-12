@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Other
 
+- Add vision support to release evals so we can run the foundational examples 12
+  series.
+
 - Added foundational example `15a-switch-languages.py` to release evals. It is
   able to detect if we switched the language properly.
 

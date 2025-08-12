@@ -13,11 +13,14 @@ from pathlib import Path
 from dotenv import load_dotenv
 from eval import EvalRunner
 from loguru import logger
+from PIL import Image
 from utils import check_env_variables
 
 load_dotenv(override=True)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+ASSETS_DIR = SCRIPT_DIR / "assets"
 
 FOUNDATIONAL_DIR = SCRIPT_DIR.parent.parent / "examples" / "foundational"
 
@@ -38,6 +41,10 @@ EVAL_ONLINE_SEARCH = f"Today is {datetime.now(timezone.utc).strftime('%B %d, %Y'
 # Switch language
 PROMPT_SWITCH_LANGUAGE = "Say something in Spanish."
 EVAL_SWITCH_LANGUAGE = "Check if the user is now talking in Spanish."
+
+# Vision
+PROMPT_VISION = ("What do you see?", Image.open(ASSETS_DIR / "cat.jpg"))
+EVAL_VISION = "A cat description."
 
 TESTS_07 = [
     # 07 series
@@ -79,6 +86,13 @@ TESTS_07 = [
     # ("07p-interruptible-krisp.py", PROMPT_SIMPLE_MATH, None),
     # Needs GPU resources.
     # ("07u-interruptible-ultravox.py", PROMPT_SIMPLE_MATH, None),
+]
+
+TESTS_12 = [
+    ("12-describe-video.py", PROMPT_VISION, EVAL_VISION),
+    ("12a-describe-video-gemini-flash.py", PROMPT_VISION, EVAL_VISION),
+    ("12b-describe-video-gpt-4o.py", PROMPT_VISION, EVAL_VISION),
+    ("12c-describe-video-anthropic.py", PROMPT_VISION, EVAL_VISION),
 ]
 
 TESTS_14 = [
@@ -142,6 +156,7 @@ TESTS_43 = [
 
 TESTS = [
     *TESTS_07,
+    *TESTS_12,
     *TESTS_14,
     *TESTS_15,
     *TESTS_19,
