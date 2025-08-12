@@ -204,7 +204,7 @@ class GladiaSTTService(STTService):
         self,
         *,
         api_key: str,
-        region: Literal["us-west", "eu-west"] | None,
+        region: Literal["us-west", "eu-west"] | None = None,
         url: str = "https://api.gladia.io/v2/live",
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
