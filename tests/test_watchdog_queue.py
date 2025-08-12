@@ -41,7 +41,7 @@ class TestWatchdogQueue(unittest.IsolatedAsyncioTestCase):
 
 class TestWatchdogPriorityQueue(unittest.IsolatedAsyncioTestCase):
     async def test_simple_item(self):
-        queue = WatchdogPriorityQueue(TaskManager())
+        queue = WatchdogPriorityQueue(TaskManager(), tuple_size=2)
         await queue.put((3, 1))
         await queue.put((2, 1))
         await queue.put((1, 1))
@@ -53,7 +53,7 @@ class TestWatchdogPriorityQueue(unittest.IsolatedAsyncioTestCase):
         queue.task_done()
 
     async def test_watchdog_sentinel(self):
-        queue = WatchdogPriorityQueue(TaskManager())
+        queue = WatchdogPriorityQueue(TaskManager(), tuple_size=2)
         await queue.put((0, 1))
         # The get should throw an exception because the watchdog sentinel has
         # higher priority.

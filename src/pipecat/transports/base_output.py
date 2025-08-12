@@ -12,7 +12,6 @@ output processing, including frame buffering, mixing, timing, and media streamin
 
 import asyncio
 import itertools
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
@@ -429,7 +428,7 @@ class BaseOutputTransport(FrameProcessor):
                 frame: The end frame signaling sender shutdown.
             """
             # Let the sink tasks process the queue until they reach this EndFrame.
-            await self._clock_queue.put((sys.maxsize, frame.id, frame))
+            await self._clock_queue.put((float("inf"), frame.id, frame))
             await self._audio_queue.put(frame)
 
             # At this point we have enqueued an EndFrame and we need to wait for
@@ -828,7 +827,9 @@ class BaseOutputTransport(FrameProcessor):
         def _create_clock_task(self):
             """Create the clock/timing processing task."""
             if not self._clock_task:
-                self._clock_queue = WatchdogPriorityQueue(self._transport.task_manager)
+                self._clock_queue = WatchdogPriorityQueue(
+                    self._transport.task_manager, tuple_size=3
+                )
                 self._clock_task = self._transport.create_task(self._clock_task_handler())
 
         async def _cancel_clock_task(self):

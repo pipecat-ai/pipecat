@@ -97,13 +97,11 @@ class FrameProcessorQueue(WatchdogPriorityQueue):
             manager (BaseTaskManager): The task manager used by the internal watchdog queues.
 
         """
-        super().__init__(manager)
+        super().__init__(manager, tuple_size=3)
         self.__high_counter = 0
         self.__low_counter = 0
 
-    async def put(
-        self, item: WatchdogPriorityCancelSentinel | Tuple[Frame, FrameDirection, FrameCallback]
-    ):
+    async def put(self, item: Tuple[Frame, FrameDirection, FrameCallback]):
         """Put an item into the priority queue.
 
         System frames (`SystemFrame`) have higher priority than any other
@@ -114,10 +112,6 @@ class FrameProcessorQueue(WatchdogPriorityQueue):
             item (Any): The item to enqueue.
 
         """
-        if isinstance(item, WatchdogPriorityCancelSentinel):
-            await super().put(item)
-            return
-
         frame, _, _ = item
         if isinstance(frame, SystemFrame):
             self.__high_counter += 1
