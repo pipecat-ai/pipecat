@@ -41,10 +41,20 @@ class VonageFrameSerializer(FrameSerializer):
     """Produces 16 kHz mono PCM chunks; resamples using WAV+pydub path."""
 
     class InputParams(BaseModel):
+        """Configuration options for the Vonage frame serializer.
+
+        Controls whether to send a clear-audio event and whether
+        to auto-hang-up on End/Cancel frames.
+        """
         auto_hang_up: bool = True
         send_clear_audio_event: bool = True
 
     def __init__(self, params: Optional[InputParams] = None) -> None:
+        """Initialize the VonageFrameSerializer.
+
+        Args:
+            params: Optional configuration parameters for serialization.
+        """
         self._params: VonageFrameSerializer.InputParams = (
             params or VonageFrameSerializer.InputParams()
         )
@@ -61,9 +71,14 @@ class VonageFrameSerializer(FrameSerializer):
 
     @property
     def type(self) -> FrameSerializerType:
+        """Return the serializer type (binary frames)."""
         return FrameSerializerType.BINARY
 
     async def setup(self, frame: StartFrame) -> None:
+        """Prepare the serializer for a new session.
+
+        Sets the sample rate and sleep interval for chunk pacing.
+        """
         self._sample_rate_hz = AUDIO_TARGET_RATE_HZ
         self.sleep_interval = CHUNK_PERIOD_SECONDS
 
@@ -78,6 +93,7 @@ class VonageFrameSerializer(FrameSerializer):
         target_rate_hz: int,
     ) -> bytes:
         """Resample via WAV header + pydub.
+
         NOTE: This assumes `data` contains a WAV header. If your pipeline disables
         WAV headers, switch to a raw-PCM resampler instead.
         """
@@ -105,7 +121,14 @@ class VonageFrameSerializer(FrameSerializer):
     # --- API ------------------------------------------------------------------
 
     async def serialize(self, frame: Frame) -> Optional[Union[str, bytes, list[bytes]]]:
-        # Optional hangup gate (behavior unchanged)
+        """Convert a Frame into one or more serialized payloads.
+
+        Args:
+            frame: The frame to serialize.
+
+        Returns:
+            The serialized data as a string, bytes, or list of bytes.
+        """
         if self._params.auto_hang_up and isinstance(frame, (EndFrame, CancelFrame)):
             logger.debug(
                 "VonageFrameSerializer: End/Cancel observed (auto-hang-up not implemented)."
@@ -129,6 +152,14 @@ class VonageFrameSerializer(FrameSerializer):
         return None
 
     async def deserialize(self, data: Union[str, bytes]) -> Optional[Frame]:
+        """Convert serialized input data into a Frame.
+
+        Args:
+            data: The raw audio or frame payload.
+
+        Returns:
+            The corresponding Frame instance, or None if parsing fails.
+        """
         if isinstance(data, (bytes, bytearray)):
             audio = await self._in_resampler.resample(
                 bytes(data), self._sample_rate_hz, self._sample_rate_hz
