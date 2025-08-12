@@ -77,6 +77,17 @@ def _detect_transport_type_from_message(message_data: dict) -> str:
         logger.trace("Auto-detected: PLIVO")
         return "plivo"
 
+    # Exotel detection
+    if (
+        message_data.get("event") == "start"
+        and "start" in message_data
+        and "stream_sid" in message_data.get("start", {})
+        and "call_sid" in message_data.get("start", {})
+        and "account_sid" in message_data.get("start", {})
+    ):
+        logger.trace("Auto-detected: EXOTEL")
+        return "exotel"
+
     logger.trace("Auto-detection failed - unknown format")
     return "unknown"
 
@@ -91,6 +102,7 @@ async def parse_telephony_websocket(websocket: WebSocket):
         - Twilio: {"stream_id": str, "call_id": str}
         - Telnyx: {"stream_id": str, "call_control_id": str, "outbound_encoding": str}
         - Plivo: {"stream_id": str, "call_id": str}
+        - Exotel: {"stream_id": str, "call_id": str, "account_sid": str}
 
     Example usage::
 
@@ -158,6 +170,14 @@ async def parse_telephony_websocket(websocket: WebSocket):
             call_data = {
                 "stream_id": start_data.get("streamId"),
                 "call_id": start_data.get("callId"),
+            }
+
+        elif transport_type == "exotel":
+            start_data = call_data_raw.get("start", {})
+            call_data = {
+                "stream_id": start_data.get("stream_sid"),
+                "call_id": start_data.get("call_sid"),
+                "account_sid": start_data.get("account_sid"),
             }
 
         else:
@@ -379,10 +399,17 @@ async def _create_telephony_transport(
             auth_id=os.getenv("PLIVO_AUTH_ID", ""),
             auth_token=os.getenv("PLIVO_AUTH_TOKEN", ""),
         )
+    elif transport_type == "exotel":
+        from pipecat.serializers.exotel import ExotelFrameSerializer
+
+        params.serializer = ExotelFrameSerializer(
+            stream_sid=call_data["stream_id"],
+            call_sid=call_data["call_id"],
+        )
     else:
         raise ValueError(
             f"Unsupported telephony provider: {transport_type}. "
-            f"Supported providers: twilio, telnyx, plivo"
+            f"Supported providers: twilio, telnyx, plivo, exotel"
         )
 
     return FastAPIWebsocketTransport(websocket=websocket, params=params)
@@ -399,7 +426,7 @@ async def create_transport(
     Args:
         runner_args: Arguments from the runner.
         transport_params: Dict mapping transport names to parameter factory functions.
-            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo"
+            Keys should be: "daily", "webrtc", "twilio", "telnyx", "plivo", "exotel"
             Values should be functions that return transport parameters when called.
 
     Returns:
@@ -435,6 +462,12 @@ async def create_transport(
                 # add_wav_header and serializer will be set automatically
             ),
             "plivo": lambda: FastAPIWebsocketParams(
+                audio_in_enabled=True,
+                audio_out_enabled=True,
+                vad_analyzer=SileroVADAnalyzer(),
+                # add_wav_header and serializer will be set automatically
+            ),
+            "exotel": lambda: FastAPIWebsocketParams(
                 audio_in_enabled=True,
                 audio_out_enabled=True,
                 vad_analyzer=SileroVADAnalyzer(),
