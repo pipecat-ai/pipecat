@@ -93,7 +93,7 @@ class BaseOpenAILLMService(LLMService):
         project=None,
         default_headers: Optional[Mapping[str, str]] = None,
         params: Optional[InputParams] = None,
-        timeout: Optional[float] = 5.0,
+        retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
         **kwargs,
     ):
@@ -107,7 +107,7 @@ class BaseOpenAILLMService(LLMService):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             params: Input parameters for model configuration and behavior.
-            timeout: Request timeout in seconds. Defaults to 5.0 seconds.
+            retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
             retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
@@ -125,7 +125,7 @@ class BaseOpenAILLMService(LLMService):
             "max_completion_tokens": params.max_completion_tokens,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
-        self._timeout = timeout
+        self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
         self.set_model_name(model)
         self._client = self.create_client(
@@ -197,11 +197,12 @@ class BaseOpenAILLMService(LLMService):
         if self._retry_on_timeout:
             try:
                 chunks = await asyncio.wait_for(
-                    self._client.chat.completions.create(**params), timeout=self._timeout
+                    self._client.chat.completions.create(**params), timeout=self._retry_timeout_secs
                 )
                 return chunks
             except (APITimeoutError, asyncio.TimeoutError):
                 # Retry, this time without a timeout so we get a response
+                logger.debug(f"{self}: Retrying chat completion due to timeout")
                 chunks = await self._client.chat.completions.create(**params)
                 return chunks
         else:
