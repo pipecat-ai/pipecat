@@ -36,6 +36,15 @@ class VonageWebsocketServerTransport(WebsocketServerTransport):
         input_name: Optional[str] = None,
         output_name: Optional[str] = None,
     ) -> None:
+        """Initialize the Vonage WebSocket server transport.
+
+        Args:
+            params: WebSocket server parameters including serializer and audio options.
+            host: Host address for the WebSocket server.
+            port: Port number for the WebSocket server.
+            input_name: Optional name for the input transport.
+            output_name: Optional name for the output transport.
+        """
         super().__init__(params, host, port, input_name, output_name)
         self._params = params
 
@@ -50,6 +59,13 @@ class VonageWebsocketServerOutputTransport(WebsocketServerOutputTransport):
     """Output transport that sends each serializer-produced chunk and sleeps between sends."""
 
     def __init__(self, transport: BaseTransport, params: WebsocketServerParams, **kwargs) -> None:
+        """Initialize the Vonage WebSocket output transport.
+
+        Args:
+            transport: The base transport instance to wrap.
+            params: WebSocket server parameters.
+            **kwargs: Additional keyword arguments for the base class.
+        """
         super().__init__(transport, params, **kwargs)
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame) -> None:
