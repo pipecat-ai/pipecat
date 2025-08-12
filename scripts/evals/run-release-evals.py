@@ -68,6 +68,7 @@ TESTS_07 = [
     ("07k-interruptible-lmnt.py", PROMPT_SIMPLE_MATH, None),
     ("07l-interruptible-groq.py", PROMPT_SIMPLE_MATH, None),
     ("07m-interruptible-aws.py", PROMPT_SIMPLE_MATH, None),
+    ("07n-interruptible-gemini.py", PROMPT_SIMPLE_MATH, None),
     ("07n-interruptible-google.py", PROMPT_SIMPLE_MATH, None),
     ("07o-interruptible-assemblyai.py", PROMPT_SIMPLE_MATH, None),
     ("07q-interruptible-rime.py", PROMPT_SIMPLE_MATH, None),
