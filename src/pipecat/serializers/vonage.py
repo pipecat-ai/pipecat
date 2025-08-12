@@ -27,9 +27,9 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 # ---- Audio/timing constants --------------------------------------------------
 
 AUDIO_TARGET_RATE_HZ: int = 16_000  # 16 kHz target
-AUDIO_CHANNELS_MONO: int = 1    # mono
-PCM16_SAMPLE_WIDTH_BYTES: int = 2   # 16-bit PCM
-CHUNK_DURATION_MS: int = 20 # telephony frame
+AUDIO_CHANNELS_MONO: int = 1  # mono
+PCM16_SAMPLE_WIDTH_BYTES: int = 2  # 16-bit PCM
+CHUNK_DURATION_MS: int = 20  # telephony frame
 SECONDS_PER_MS: float = 1.0 / 1_000.0
 CHUNK_PERIOD_SECONDS: float = CHUNK_DURATION_MS * SECONDS_PER_MS
 
@@ -49,8 +49,8 @@ class VonageFrameSerializer(FrameSerializer):
             params or VonageFrameSerializer.InputParams()
         )
         self._sample_rate_hz: int = AUDIO_TARGET_RATE_HZ
-        self._in_resampler = create_stream_resampler()  # passthrough in this setup
-        self._out_resampler = create_stream_resampler() # retained for parity if needed
+        self._in_resampler = create_stream_resampler()
+        self._out_resampler = create_stream_resampler()
 
         # Transport reads this for pacing (one sleep per chunk).
         self.sleep_interval: float = CHUNK_PERIOD_SECONDS
