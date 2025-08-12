@@ -14,13 +14,13 @@ from pydub import AudioSegment
 
 from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     Frame,
+    InputAudioRawFrame,
+    OutputAudioRawFrame,
     StartFrame,
     StartInterruptionFrame,
-    OutputAudioRawFrame,
-    InputAudioRawFrame,
-    EndFrame,
-    CancelFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
