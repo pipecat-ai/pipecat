@@ -26,10 +26,10 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 
 # ---- Audio/timing constants --------------------------------------------------
 
-AUDIO_TARGET_RATE_HZ: int = 16_000          # 16 kHz target
-AUDIO_CHANNELS_MONO: int = 1                # mono
-PCM16_SAMPLE_WIDTH_BYTES: int = 2           # 16-bit PCM
-CHUNK_DURATION_MS: int = 20                 # telephony frame
+AUDIO_TARGET_RATE_HZ: int = 16_000  # 16 kHz target
+AUDIO_CHANNELS_MONO: int = 1    # mono
+PCM16_SAMPLE_WIDTH_BYTES: int = 2   # 16-bit PCM
+CHUNK_DURATION_MS: int = 20 # telephony frame
 SECONDS_PER_MS: float = 1.0 / 1_000.0
 CHUNK_PERIOD_SECONDS: float = CHUNK_DURATION_MS * SECONDS_PER_MS
 
@@ -45,10 +45,12 @@ class VonageFrameSerializer(FrameSerializer):
         send_clear_audio_event: bool = True
 
     def __init__(self, params: Optional[InputParams] = None) -> None:
-        self._params: VonageFrameSerializer.InputParams = params or VonageFrameSerializer.InputParams()
+        self._params: VonageFrameSerializer.InputParams = (
+            params or VonageFrameSerializer.InputParams()
+        )
         self._sample_rate_hz: int = AUDIO_TARGET_RATE_HZ
-        self._in_resampler = create_stream_resampler()   # passthrough in this setup
-        self._out_resampler = create_stream_resampler()  # retained for parity if needed
+        self._in_resampler = create_stream_resampler()  # passthrough in this setup
+        self._out_resampler = create_stream_resampler() # retained for parity if needed
 
         # Transport reads this for pacing (one sleep per chunk).
         self.sleep_interval: float = CHUNK_PERIOD_SECONDS
@@ -91,8 +93,8 @@ class VonageFrameSerializer(FrameSerializer):
         )
         resampled = (
             segment.set_channels(num_channels)
-                   .set_sample_width(sample_width_bytes)
-                   .set_frame_rate(target_rate_hz)
+            .set_sample_width(sample_width_bytes)
+            .set_frame_rate(target_rate_hz)
         )
         return resampled.raw_data
 
@@ -105,7 +107,9 @@ class VonageFrameSerializer(FrameSerializer):
     async def serialize(self, frame: Frame) -> Optional[Union[str, bytes, list[bytes]]]:
         # Optional hangup gate (behavior unchanged)
         if self._params.auto_hang_up and isinstance(frame, (EndFrame, CancelFrame)):
-            logger.debug("VonageFrameSerializer: End/Cancel observed (auto-hang-up not implemented).")
+            logger.debug(
+                "VonageFrameSerializer: End/Cancel observed (auto-hang-up not implemented)."
+            )
             return None
 
         if isinstance(frame, StartInterruptionFrame) and self._params.send_clear_audio_event:
@@ -126,7 +130,9 @@ class VonageFrameSerializer(FrameSerializer):
 
     async def deserialize(self, data: Union[str, bytes]) -> Optional[Frame]:
         if isinstance(data, (bytes, bytearray)):
-            audio = await self._in_resampler.resample(bytes(data), self._sample_rate_hz, self._sample_rate_hz)
+            audio = await self._in_resampler.resample(
+                bytes(data), self._sample_rate_hz, self._sample_rate_hz
+            )
             return InputAudioRawFrame(
                 audio=audio,
                 num_channels=AUDIO_CHANNELS_MONO,

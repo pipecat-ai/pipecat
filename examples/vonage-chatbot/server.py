@@ -56,9 +56,7 @@ async def run_bot_websocket_server() -> None:
     stt = OpenAISTTService(
         api_key=os.getenv("OPENAI_API_KEY"),
         model="gpt-4o-transcribe",
-        prompt=(
-            "Expect words based on questions across technology, science, and culture."
-        ),
+        prompt=("Expect words based on questions across technology, science, and culture."),
     )
 
     tts = OpenAITTSService(
@@ -96,9 +94,7 @@ async def run_bot_websocket_server() -> None:
     @ws_transport.event_handler("on_client_connected")
     async def on_client_connected(_transport, _client) -> None:
         logger.info("Client connected")
-        messages.append(
-            {"role": "system", "content": "Please introduce yourself to the user."}
-        )
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
 
     @ws_transport.event_handler("on_client_disconnected")
