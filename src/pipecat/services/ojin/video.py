@@ -13,6 +13,7 @@ import numpy as np
 # Will use numpy when implementing persona-specific processing
 from loguru import logger
 from ojin.ojin_persona_client import OjinPersonaClient
+from ojin.entities.interaction_messages import ErrorResponseMessage
 from ojin.ojin_persona_messages import (
     IOjinPersonaClient,
     OjinPersonaCancelInteractionMessage,
@@ -590,7 +591,12 @@ class OjinPersonaService(FrameProcessor):
         audio and receiving messages.
         """
         assert self._client is not None
-        await self._client.connect()
+        try:
+            await self._client.connect()
+        except ConnectionError as e:
+            logger.error(e)
+            return
+
         # Create tasks to process audio and video
         self._audio_input_task = self.create_task(self._process_queued_audio())
         self._receive_task = self.create_task(self._receive_messages())
@@ -729,6 +735,12 @@ class OjinPersonaService(FrameProcessor):
             assert self._interaction is not None
             self._interaction.interaction_id = message.interaction_id
             self._interaction.set_state(InteractionState.ACTIVE)
+        elif isinstance(message, ErrorResponseMessage):
+            if message.payload.code == "NO_BACKEND_SERVER_AVAILABLE":
+                logger.error("No OJIN servers available. Please try again later.")
+
+            await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
 
     def get_fsm_state(self) -> PersonaState:
         """Get the current state of the persona's finite state machine.
@@ -871,10 +883,6 @@ class OjinPersonaService(FrameProcessor):
         logger.debug("Sending StartInteractionMessage")
         await self.push_ojin_message(StartInteractionMessage())
 
-        # immediately receive the ready message for now
-        assert self._client is not None
-        message = await self._client.receive_message()
-        await self._handle_ojin_message(message)
 
     async def _end_interaction(self):
         """End the current interaction.
