@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Exotel support to Pipecat's development runner. You can now connect
+  using the runner with `uv run bot.py -t exotel` and an ngrok connection to
+  HTTP port 7860.
+
 - Added `enable_direct_mode` argument to `FrameProcessor`. The direct mode is
   for processors which require very little I/O or compute resources, that is
   processors that can perform their task almost immediately. These type of
