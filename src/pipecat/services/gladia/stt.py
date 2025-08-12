@@ -488,11 +488,14 @@ class GladiaSTTService(STTService):
 
     async def _setup_gladia(self, settings: Dict[str, Any]):
         async with aiohttp.ClientSession() as session:
+            params = {}
+            if self._region:
+                params["region"] = self._region
             async with session.post(
                 self._url,
                 headers={"X-Gladia-Key": self._api_key},
                 json=settings,
-                params={"region": self._region or "eu-west"},
+                params=params,
             ) as response:
                 if response.ok:
                     return await response.json()
