@@ -14,10 +14,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-from pipecat.transports.services.vonage import VonageWebsocketServerTransport
 from pipecat.serializers.vonage import VonageFrameSerializer
 from pipecat.services.openai import OpenAISTTService, OpenAITTSService, OpenAILLMService
 from pipecat.transports.network.websocket_server import WebsocketServerParams
+from pipecat.transports.services.vonage import VonageWebsocketServerTransport
 
 # ---- Constants ---------------------------------------------------------------
 
