@@ -4266,7 +4266,6 @@ openpipe = [
     { name = "openpipe" },
 ]
 playht = [
-    { name = "pyht" },
     { name = "websockets" },
 ]
 rime = [
@@ -4402,7 +4401,6 @@ requires-dist = [
     { name = "pyaudio", marker = "extra == 'local'", specifier = "~=0.2.14" },
     { name = "pydantic", specifier = ">=2.10.6,<3" },
     { name = "pygobject", marker = "extra == 'gstreamer'", specifier = "~=3.50.0" },
-    { name = "pyht", marker = "extra == 'playht'", specifier = ">=0.1.6" },
     { name = "pyloudnorm", specifier = "~=0.1.1" },
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
@@ -5147,23 +5145,6 @@ dependencies = [
     { name = "pycairo" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/71/eb/53106840011df907781891a4968a35cfde42aef0e80f74c060367402a468/pygobject-3.50.1.tar.gz", hash = "sha256:a4df4e7adef7f4f01685a763d138eac9396585bfc68a7d31bbe4fbca2de0d7cb", size = 1081846, upload-time = "2025-05-25T14:53:01.761Z" }
-
-[[package]]
-name = "pyht"
-version = "0.1.6"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "filelock" },
-    { name = "grpcio" },
-    { name = "protobuf" },
-    { name = "requests" },
-    { name = "websockets" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/c8/04/26710ad6f87443c4edd6b49afe623644b4c33927ef8d1e830561f80b6dae/pyht-0.1.6.tar.gz", hash = "sha256:1827dc9fccf4da7d5c8d55f60e117bf50f0db19f442488799a9b70e0a607fd5a", size = 28222, upload-time = "2024-11-14T10:29:04.075Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a0/c1/76d67ddae6581b75a12dc1e45a65ab907a76023156947d600da04cb41f5c/pyht-0.1.6-py3-none-any.whl", hash = "sha256:f6c29d150e7bec71fd1a0a74d156e6260953109b0666b460fbe245bf6451337b", size = 29428, upload-time = "2024-11-14T10:29:02.466Z" },
-]
 
 [[package]]
 name = "pyjwt"
