@@ -25,7 +25,7 @@ class RunnerArguments:
     pipeline_idle_timeout_secs: int = field(init=False)
 
     def __post_init__(self):
-        self.handle_sigint = True
+        self.handle_sigint = False
         self.handle_sigterm = False
         self.pipeline_idle_timeout_secs = 300
 
