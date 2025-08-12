@@ -46,6 +46,7 @@ class VonageFrameSerializer(FrameSerializer):
         Controls whether to send a clear-audio event and whether
         to auto-hang-up on End/Cancel frames.
         """
+
         auto_hang_up: bool = True
         send_clear_audio_event: bool = True
 
