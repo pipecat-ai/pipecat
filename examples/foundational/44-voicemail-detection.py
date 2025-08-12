@@ -50,27 +50,6 @@ transport_params = {
 }
 
 
-async def handle_voicemail(processor):
-    """Called when a voicemail is detected.
-
-    Args:
-        processor: The VoicemailProcessor instance. processor.push_frame() is
-            available to push frames.
-    """
-    logger.info("Voicemail detected! Leaving a message...")
-
-    # Push frames using standard Pipecat pattern
-    await processor.push_frame(
-        TTSSpeakFrame(
-            "Hello, this is Jamie calling about your appointment. Please call me back at 555-0123 when you get this."
-        )
-    )
-
-    # NOTE: A common pattern is to end pipeline after the voicemail is left.
-    # Uncomment the following line to end the pipeline after leaving the voicemail.
-    # await processor.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
-
-
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
@@ -84,7 +63,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     classifier_llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-    voicemail = VoicemailDetector(llm=classifier_llm, on_voicemail_detected=handle_voicemail)
+    voicemail = VoicemailDetector(llm=classifier_llm)
 
     messages = [
         {
@@ -127,6 +106,21 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
+
+    @voicemail.event_handler("on_voicemail_detected")
+    async def handle_voicemail(processor):
+        logger.info("Voicemail detected! Leaving a message...")
+
+        # Push frames using standard Pipecat pattern
+        await processor.push_frame(
+            TTSSpeakFrame(
+                "Hello, this is Jamie calling about your appointment. Please call me back at 555-0123 when you get this."
+            )
+        )
+
+        # NOTE: A common pattern is to end pipeline after the voicemail is left.
+        # Uncomment the following line to end the pipeline after leaving the voicemail.
+        # await processor.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
