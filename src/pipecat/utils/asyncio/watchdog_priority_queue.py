@@ -20,7 +20,17 @@ from pipecat.utils.asyncio.task_manager import BaseTaskManager
 
 
 @dataclass
-class _WatchdogPriorityCancelSentinel:
+class WatchdogPriorityCancelSentinel:
+    """Sentinel object used in priority queues to force cancellation.
+
+    An instance of this class is typically inserted into a
+    `WatchdogPriorityQueue` to act as a high-priority marker asyncio task
+    cancellation. The `__lt__` method always returns `True`, ensuring that the
+    sentinel is considered "less than" any other item in the queue, and
+    therefore processed before anything else.
+
+    """
+
     def __lt__(self, other):
         return True
 
@@ -62,7 +72,7 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
         else:
             get_result = await super().get()
 
-        if isinstance(get_result, _WatchdogPriorityCancelSentinel):
+        if isinstance(get_result, WatchdogPriorityCancelSentinel):
             logger.trace(
                 "Received WatchdogPriorityCancelSentinel, throwing CancelledError to force cancelling"
             )
@@ -91,7 +101,7 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
         forces the task to raise CancelledError when consumed, ensuring proper
         task termination.
         """
-        super().put_nowait(_WatchdogPriorityCancelSentinel())
+        super().put_nowait(WatchdogPriorityCancelSentinel())
 
     async def _watchdog_get(self):
         """Get item from queue while periodically resetting watchdog timer."""

@@ -38,7 +38,10 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
-from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
+from pipecat.utils.asyncio.watchdog_priority_queue import (
+    WatchdogPriorityCancelSentinel,
+    WatchdogPriorityQueue,
+)
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.base_object import BaseObject
 
@@ -79,16 +82,8 @@ class FrameProcessorQueue(WatchdogPriorityQueue):
     """A priority queue for systems frames and other frames.
 
     This is a specialized queue for frame processors that separates and
-    prioritizes system frames over other frames.
-
-    This queue uses two internal `WatchdogQueue` instances:
-    - One for system-level frames (`SystemFrame`)
-    - One for regular frames
-
-    It ensures that `SystemFrame` objects are processed before any other
-    frames. Additionally, it uses an `asyncio.Event` to signal when new items
-    have been added to either queue, allowing consumers to wait efficiently when
-    the queue is empty.
+    prioritizes system frames over other frames. It ensures that `SystemFrame`
+    objects are processed before any other frames by using a priority queue.
 
     """
 
@@ -103,26 +98,33 @@ class FrameProcessorQueue(WatchdogPriorityQueue):
 
         """
         super().__init__(manager)
-        self.__counter = 0
-        self.__system_counter = 0
+        self.__high_counter = 0
+        self.__low_counter = 0
 
-    async def put(self, item: Tuple[Frame, FrameDirection, FrameCallback]):
-        """Put an item into the appropriate queue.
+    async def put(
+        self, item: WatchdogPriorityCancelSentinel | Tuple[Frame, FrameDirection, FrameCallback]
+    ):
+        """Put an item into the priority queue.
 
-        System frames (`SystemFrame`) are placed into the system queue and all others
-        into the regular queue. Signals the event to wake up any waiting consumers.
+        System frames (`SystemFrame`) have higher priority than any other
+        frames. If a non-frame item (e.g. a watchdog cancellation sentinel) is
+        provided it will have the highest priority.
 
         Args:
             item (Any): The item to enqueue.
 
         """
+        if isinstance(item, WatchdogPriorityCancelSentinel):
+            await super().put(item)
+            return
+
         frame, _, _ = item
         if isinstance(frame, SystemFrame):
-            await super().put((self.HIGH_PRIORITY, self.__system_counter, item))
-            self.__system_counter += 1
+            self.__high_counter += 1
+            await super().put((self.HIGH_PRIORITY, self.__high_counter, item))
         else:
-            await super().put((self.LOW_PRIORITY, self.__counter, item))
-            self.__counter += 1
+            self.__low_counter += 1
+            await super().put((self.LOW_PRIORITY, self.__low_counter, item))
 
     async def get(self) -> Any:
         """Retrieve the next item from the queue.
