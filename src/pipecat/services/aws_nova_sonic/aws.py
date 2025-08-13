@@ -933,12 +933,13 @@ class AWSNovaSonicLLMService(LLMService):
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.TEXT:
                 # Ignore non-final text, and the "interrupted" message (which isn't meaningful text)
-                if content.text_stage == TextStage.FINAL :
+                if content.text_stage == TextStage.FINAL:
                     if stop_reason != "INTERRUPTED":
                         if self._assistant_is_responding:
                             # Text added to the ongoing assistant response
                             await self._report_assistant_response_text_added(content.text_content)
                     else:
+                        # We got an interruption(barge-in) detection from Nova Sonic. 
                         await self.push_frame(StartInterruptionFrame())
         elif content.role == Role.USER:
             if content.type == ContentType.TEXT:
