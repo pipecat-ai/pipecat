@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.80] - 2025-08-13
 
 ### Added
 
@@ -64,10 +64,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue with the `BaseWhisperSTTService` where the language was
+  specified as an enum and not a string.
+
 - Fixed an issue where `SmallWebRTCTransport` ended before TTS finished.
 
 - Fixed an issue in `OpenAIRealtimeBetaLLMService` where specifying a `text`
   `modalities` didn't result in text being outputted from the model.
+
+- Added SSML reserved character escaping to `AzureBaseTTSService` to properly
+  handle special characters in text sent to Azure TTS. This fixes an issue
+  where characters like `&`, `<`, `>`, `"`, and `'` in LLM-generated text would
+  cause TTS failures.
 
 - Fixed a `WatchdogPriorityQueue` issue that could cause an exception when
   compating watchdog cancel sentinel items with other items in the queue.
@@ -309,8 +317,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `on_transcription_stopped` and `on_transcription_error` to Daily
   callbacks.
-
-- Added SSML reserved character escaping to `AzureBaseTTSService` to properly handle special characters in text sent to Azure TTS. This fixes an issue where characters like `&`, `<`, `>`, `"`, and `'` in LLM-generated text would cause TTS failures.
 
 ### Changed
 
