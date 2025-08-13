@@ -66,18 +66,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where `SmallWebRTCTransport` ended before TTS finished.
 
+- Fixed an issue in `OpenAIRealtimeBetaLLMService` where specifying a `text`
+  `modalities` didn't result in text being outputted from the model.
+
 - Fixed a `WatchdogPriorityQueue` issue that could cause an exception when
   compating watchdog cancel sentinel items with other items in the queue.
 
 - Fixed an issue that would cause system frames to not be processed with higher
   priority than other frames. This could cause slower interruption times.
 
-### Fixed
-
 - Fixed an issue where retrying a websocket connection error would result in an
   error.
 
 ### Other
+
+- Add foundation example `19b-openai-realtime-beta-text.py`, showing how to use
+  `OpenAIRealtimeBetaLLMService` to output text to a TTS service.
 
 - Add vision support to release evals so we can run the foundational examples 12
   series.
@@ -307,7 +311,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   callbacks.
 
 - Added SSML reserved character escaping to `AzureBaseTTSService` to properly handle special characters in text sent to Azure TTS. This fixes an issue where characters like `&`, `<`, `>`, `"`, and `'` in LLM-generated text would cause TTS failures.
-- 
+
 ### Changed
 
 - Changed the default `url` for `NeuphonicTTSService` to

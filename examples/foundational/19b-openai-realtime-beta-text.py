@@ -22,6 +22,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia import CartesiaTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai_realtime_beta import (
     InputAudioNoiseReduction,
@@ -113,6 +114,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     session_properties = SessionProperties(
         input_audio_transcription=InputAudioTranscription(),
+        modalities=["text"],
         # Set openai TurnDetection parameters. Not setting this at all will turn it
         # on by default
         turn_detection=SemanticTurnDetection(),
@@ -146,6 +148,11 @@ Remember, your responses should be short. Just one or two sentences, usually."""
         start_audio_paused=False,
     )
 
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
+
     # you can either register a single function for all function calls, or specific functions
     # llm.register_function(None, fetch_weather_from_api)
     llm.register_function("get_current_weather", fetch_weather_from_api)
@@ -168,6 +175,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
             transport.input(),  # Transport user input
             context_aggregator.user(),
             llm,  # LLM
+            tts,  # TTS
             transcript.user(),  # Placed after the LLM, as LLM pushes TranscriptionFrames downstream
             transport.output(),  # Transport bot output
             transcript.assistant(),  # After the transcript output, to time with the audio output
