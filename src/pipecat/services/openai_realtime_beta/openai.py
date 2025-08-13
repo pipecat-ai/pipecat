@@ -66,7 +66,7 @@ from .context import (
 from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 try:
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
@@ -387,9 +387,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 # Here we assume that if we have a websocket, we are connected. We
                 # handle disconnections in the send/recv code paths.
                 return
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 uri=self.base_url,
-                extra_headers={
+                additional_headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "OpenAI-Beta": "realtime=v1",
                 },

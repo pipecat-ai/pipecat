@@ -439,6 +439,7 @@ class LiveKitTransportClient:
                 self._process_audio_stream(audio_stream, participant.sid),
                 f"{self}::_process_audio_stream",
             )
+            await self._callbacks.on_audio_track_subscribed(participant.sid)
 
     async def _async_on_track_unsubscribed(
         self,
@@ -604,6 +605,11 @@ class LiveKitInputTransport(BaseInputTransport):
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(
                     audio_frame_event
                 )
+
+                # Skip frames with no audio data
+                if len(pipecat_audio_frame.audio) == 0:
+                    continue
+
                 input_audio_frame = UserAudioRawFrame(
                     user_id=participant_id,
                     audio=pipecat_audio_frame.audio,

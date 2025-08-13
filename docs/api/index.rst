@@ -14,7 +14,7 @@ Quick Links
 * `Join our Community <https://discord.gg/pipecat>`_
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: API Reference
    :hidden:
 
@@ -26,6 +26,7 @@ Quick Links
    Observers <api/pipecat.observers>
    Pipeline <api/pipecat.pipeline>
    Processors <api/pipecat.processors>
+   Runner <api/pipecat.runner>
    Serializers <api/pipecat.serializers>
    Services <api/pipecat.services>
    Sync <api/pipecat.sync>

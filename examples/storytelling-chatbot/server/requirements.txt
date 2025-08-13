@@ -1,5 +1,0 @@
-async_timeout
-fastapi
-uvicorn
-python-dotenv
-pipecat-ai[daily,silero,openai,cartesia,google]

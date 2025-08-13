@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.frames.frames import (
+    ErrorFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
@@ -346,6 +347,7 @@ class AnthropicLLMService(LLMService):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
+            await self.push_error(ErrorFrame(f"{e}"))
         finally:
             await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
@@ -446,14 +448,16 @@ class AnthropicLLMContext(OpenAILLMContext):
             system: System message content.
         """
         super().__init__(messages=messages, tools=tools, tool_choice=tool_choice)
+        self.__setup_local()
+        self.system = system
 
+    def __setup_local(self):
         # For beta prompt caching. This is a counter that tracks the number of turns
         # we've seen above the cache threshold. We reset this when we reset the
         # messages list. We only care about this number being 0, 1, or 2. But
         # it's easiest just to treat it as a counter.
         self.turns_above_cache_threshold = 0
-
-        self.system = system
+        return
 
     @staticmethod
     def upgrade_to_anthropic(obj: OpenAILLMContext) -> "AnthropicLLMContext":
@@ -470,6 +474,7 @@ class AnthropicLLMContext(OpenAILLMContext):
         logger.debug(f"Upgrading to Anthropic: {obj}")
         if isinstance(obj, OpenAILLMContext) and not isinstance(obj, AnthropicLLMContext):
             obj.__class__ = AnthropicLLMContext
+            obj.__setup_local()
             obj._restructure_from_openai_messages()
         return obj
 
