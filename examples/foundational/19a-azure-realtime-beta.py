@@ -133,7 +133,7 @@ You have access to the following tools:
 - get_current_weather: Get the current weather for a given location.
 - get_restaurant_recommendation: Get a restaurant recommendation for a given location.
 
-Remember, your responses should be short. Just one or two sentences, usually.""",
+Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
     llm = AzureRealtimeBetaLLMService(
