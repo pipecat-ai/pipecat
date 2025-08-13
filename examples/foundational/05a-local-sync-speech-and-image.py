@@ -15,7 +15,6 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     Frame,
-    LLMMessagesFrame,
     OutputAudioRawFrame,
     TextFrame,
     TTSAudioRawFrame,
@@ -25,6 +24,10 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService
@@ -137,7 +140,7 @@ async def main():
             )
 
             task = PipelineTask(pipeline)
-            await task.queue_frame(LLMMessagesFrame(messages))
+            await task.queue_frame(OpenAILLMContextFrame(OpenAILLMContext(messages)))
             await task.stop_when_done()
 
             await runner.run(task)

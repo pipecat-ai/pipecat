@@ -14,7 +14,8 @@ import asyncio
 import base64
 import json
 import warnings
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Literal, Optional
+from urllib.parse import urlencode
 
 import aiohttp
 from loguru import logger
@@ -203,6 +204,7 @@ class GladiaSTTService(STTService):
         self,
         *,
         api_key: str,
+        region: Literal["us-west", "eu-west"] | None = None,
         url: str = "https://api.gladia.io/v2/live",
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
@@ -217,6 +219,7 @@ class GladiaSTTService(STTService):
 
         Args:
             api_key: Gladia API key for authentication.
+            region: Region used to process audio. eu-west or us-west. Defaults to eu-west.
             url: Gladia API URL. Defaults to "https://api.gladia.io/v2/live".
             confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
@@ -241,6 +244,7 @@ class GladiaSTTService(STTService):
             )
 
         self._api_key = api_key
+        self._region = region
         self._url = url
         self.set_model_name(model)
         self._confidence = confidence
@@ -484,10 +488,14 @@ class GladiaSTTService(STTService):
 
     async def _setup_gladia(self, settings: Dict[str, Any]):
         async with aiohttp.ClientSession() as session:
+            params = {}
+            if self._region:
+                params["region"] = self._region
             async with session.post(
                 self._url,
-                headers={"X-Gladia-Key": self._api_key, "Content-Type": "application/json"},
+                headers={"X-Gladia-Key": self._api_key},
                 json=settings,
+                params=params,
             ) as response:
                 if response.ok:
                     return await response.json()

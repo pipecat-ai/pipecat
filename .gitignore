@@ -31,8 +31,6 @@ MANIFEST
 fly.toml
 
 # Examples
-examples/telnyx-chatbot/templates/streams.xml
-examples/twilio-chatbot/templates/streams.xml
 examples/**/node_modules/
 examples/**/.expo/
 examples/**/dist/
@@ -51,3 +49,6 @@ examples/**/web-build/
 # Documentation
 docs/api/_build/
 docs/api/api
+
+# uv
+.python-version

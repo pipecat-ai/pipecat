@@ -262,7 +262,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         *,
         api_key: str,
         voice_id: str,
-        model: str = "eleven_flash_v2_5",
+        model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -274,7 +274,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         Args:
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
-            model: TTS model to use (e.g., "eleven_flash_v2_5").
+            model: TTS model to use (e.g., "eleven_turbo_v2_5").
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
@@ -546,7 +546,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 continue
 
             # Check if this message belongs to the current context.
-            # This should never happen, so warn about it.
             if not self.audio_context_available(received_ctx_id):
                 if self._context_id == received_ctx_id:
                     logger.debug(
@@ -554,7 +553,10 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     )
                     await self.create_audio_context(self._context_id)
                 else:
-                    logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
+                    # This can happen if a message is received _after_ we have closed a context
+                    # due to user interruption but _before_ the `isFinal` message for the context
+                    # is received.
+                    logger.debug(f"Ignoring message from unavailable context: {received_ctx_id}")
                     continue
 
             if msg.get("audio"):
@@ -709,7 +711,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         api_key: str,
         voice_id: str,
         aiohttp_session: aiohttp.ClientSession,
-        model: str = "eleven_flash_v2_5",
+        model: str = "eleven_turbo_v2_5",
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -721,7 +723,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
-            model: TTS model to use (e.g., "eleven_flash_v2_5").
+            model: TTS model to use (e.g., "eleven_turbo_v2_5").
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.

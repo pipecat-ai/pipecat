@@ -269,9 +269,20 @@ class TTSService(AIService):
     async def say(self, text: str):
         """Immediately speak the provided text.
 
+        .. deprecated:: 0.0.79
+            Push a `TTSSpeakFrame` instead to ensure frame ordering is maintained.
+
         Args:
             text: The text to speak.
         """
+        import warnings
+
+        warnings.warn(
+            "`TTSService.say()` is deprecated. Push a `TTSSpeakFrame` instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         await self.queue_frame(TTSSpeakFrame(text))
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):

@@ -1,4 +1,3 @@
-import argparse
 import os
 
 from dotenv import load_dotenv
@@ -13,6 +12,8 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.services.google.frames import LLMSearchResponseFrame
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -95,7 +96,7 @@ class GroundingMetadataProcessor(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting Gemini Live Grounding Metadata Test Bot")
 
     # Create tools using ToolsSchema with custom tools for Gemini
@@ -137,7 +138,10 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         ]
     )
 
-    task = PipelineTask(pipeline)
+    task = PipelineTask(
+        pipeline,
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+    )
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
@@ -148,18 +152,20 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

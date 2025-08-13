@@ -21,24 +21,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        id: setup_python
-        uses: actions/setup-python@v4
+      
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
         with:
-          python-version: '3.10'
-      - name: Setup virtual environment
-        run: |
-          python -m venv .venv
-      - name: Install basic Python dependencies
-        run: |
-          source .venv/bin/activate
-          python -m pip install --upgrade pip
-          pip install -r dev-requirements.txt
+          version: "latest"
+      
+      - name: Set up Python
+        run: uv python install 3.10
+      
+      - name: Install development dependencies
+        run: uv sync --group dev
+      
       - name: Build project
-        run: |
-          source .venv/bin/activate
-          python -m build
-      - name: Install project and other Python dependencies
-        run: |
-          source .venv/bin/activate
-          pip install --editable .
+        run: uv build
+      
+      - name: Install project in editable mode
+        run: uv pip install --editable .

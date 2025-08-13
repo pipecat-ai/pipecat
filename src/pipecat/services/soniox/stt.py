@@ -284,7 +284,7 @@ class SonioxSTTService(STTService):
         """Connection has to be open all the time."""
         try:
             while True:
-                logger.debug("Sending keepalive message")
+                logger.trace("Sending keepalive message")
                 if self._websocket and self._websocket.state is State.OPEN:
                     await self._websocket.send(KEEPALIVE_MESSAGE)
                 else:
