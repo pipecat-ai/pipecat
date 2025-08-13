@@ -29,10 +29,10 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 AUDIO_TARGET_RATE_HZ: int = 16_000  # 16 kHz target
 AUDIO_CHANNELS_MONO: int = 1  # mono
 PCM16_SAMPLE_WIDTH_BYTES: int = 2  # 16-bit PCM
-SLEEP_INTERVAL: float = 0.01
+SLEEP_INTERVAL_PER_CHUNK: float = 0.01
 
 BYTES_PER_SAMPLE_MONO: int = AUDIO_CHANNELS_MONO * PCM16_SAMPLE_WIDTH_BYTES
-BYTES_PER_CHUNK: int = int(AUDIO_TARGET_RATE_HZ * SLEEP_INTERVAL) * BYTES_PER_SAMPLE_MONO
+BYTES_PER_CHUNK: int = int(AUDIO_TARGET_RATE_HZ * SLEEP_INTERVAL_PER_CHUNK) * BYTES_PER_SAMPLE_MONO
 
 
 class VonageFrameSerializer(FrameSerializer):
@@ -62,7 +62,7 @@ class VonageFrameSerializer(FrameSerializer):
         self._out_resampler = create_stream_resampler()
 
         # Transport reads this for pacing (one sleep per chunk).
-        self.sleep_interval: float = SLEEP_INTERVAL
+        self.sleep_interval: float = SLEEP_INTERVAL_PER_CHUNK
 
         # Serializer-side audio format assumptions for pydub path:
         self._channels: int = AUDIO_CHANNELS_MONO
@@ -79,7 +79,7 @@ class VonageFrameSerializer(FrameSerializer):
         Sets the sample rate and sleep interval for chunk pacing.
         """
         self._sample_rate_hz = AUDIO_TARGET_RATE_HZ
-        self.sleep_interval = SLEEP_INTERVAL
+        self.sleep_interval = SLEEP_INTERVAL_PER_CHUNK
 
     # --- helpers --------------------------------------------------------------
 
