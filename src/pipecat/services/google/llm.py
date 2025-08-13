@@ -918,6 +918,10 @@ class GoogleLLMService(LLMService):
         elif isinstance(frame, LLMMessagesFrame):
             context = GoogleLLMContext(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
+            # This is only useful in very simple pipelines because it creates
+            # a new context. Generally we want a context manager to catch
+            # UserImageRawFrames coming through the pipeline and add them
+            # to the context.
             context = GoogleLLMContext()
             context.add_image_frame_message(
                 format=frame.format, size=frame.size, image=frame.image, text=frame.text
