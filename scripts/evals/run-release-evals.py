@@ -127,6 +127,7 @@ TESTS_15 = [
 TESTS_19 = [
     ("19-openai-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("19a-azure-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER),
+    ("19b-openai-realtime-beta-text.py", PROMPT_WEATHER, EVAL_WEATHER),
 ]
 
 TESTS_21 = [
