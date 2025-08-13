@@ -311,7 +311,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   callbacks.
 
 - Added SSML reserved character escaping to `AzureBaseTTSService` to properly handle special characters in text sent to Azure TTS. This fixes an issue where characters like `&`, `<`, `>`, `"`, and `'` in LLM-generated text would cause TTS failures.
--
 
 ### Changed
 
