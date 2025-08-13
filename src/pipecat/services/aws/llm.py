@@ -58,6 +58,7 @@ try:
     import aioboto3
     import httpx
     from botocore.config import Config
+    from botocore.exceptions import ReadTimeoutError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -724,6 +725,8 @@ class AWSBedrockLLMService(LLMService):
         aws_region: str = "us-east-1",
         params: Optional[InputParams] = None,
         client_config: Optional[Config] = None,
+        retry_timeout_secs: Optional[float] = 5.0,
+        retry_on_timeout: Optional[bool] = False,
         **kwargs,
     ):
         """Initialize the AWS Bedrock LLM service.
@@ -736,6 +739,8 @@ class AWSBedrockLLMService(LLMService):
             aws_region: AWS region for the Bedrock service.
             params: Model parameters and configuration.
             client_config: Custom boto3 client configuration.
+            retry_timeout_secs: Request timeout in seconds for retry logic.
+            retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         super().__init__(**kwargs)
@@ -762,6 +767,8 @@ class AWSBedrockLLMService(LLMService):
         }
 
         self.set_model_name(model)
+        self._retry_timeout_secs = retry_timeout_secs
+        self._retry_on_timeout = retry_on_timeout
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -781,6 +788,31 @@ class AWSBedrockLLMService(LLMService):
             True if metrics generation is supported.
         """
         return True
+
+    async def _create_converse_stream(self, client, request_params):
+        """Create converse stream with optional timeout and retry.
+
+        Args:
+            client: The AWS Bedrock client instance.
+            request_params: Parameters for the converse_stream call.
+
+        Returns:
+            Async stream of response events.
+        """
+        if self._retry_on_timeout:
+            try:
+                response = await asyncio.wait_for(
+                    client.converse_stream(**request_params), timeout=self._retry_timeout_secs
+                )
+                return response
+            except (ReadTimeoutError, asyncio.TimeoutError) as e:
+                # Retry, this time without a timeout so we get a response
+                logger.debug(f"{self}: Retrying converse_stream due to timeout")
+                response = await client.converse_stream(**request_params)
+                return response
+        else:
+            response = await client.converse_stream(**request_params)
+            return response
 
     def create_context_aggregator(
         self,
@@ -911,7 +943,7 @@ class AWSBedrockLLMService(LLMService):
                 service_name="bedrock-runtime", **self._aws_params
             ) as client:
                 # Call AWS Bedrock with streaming
-                response = await client.converse_stream(**request_params)
+                response = await self._create_converse_stream(client, request_params)
 
                 await self.stop_ttfb_metrics()
 
