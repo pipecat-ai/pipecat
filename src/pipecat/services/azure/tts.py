@@ -68,6 +68,16 @@ class AzureBaseTTSService(TTSService):
     construction, voice configuration, and parameter management.
     """
 
+    # Define SSML escape mappings based on SSML reserved characters
+    # See - https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure
+    SSML_ESCAPE_CHARS = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&apos;",
+    }
+
     class InputParams(BaseModel):
         """Input parameters for Azure TTS voice configuration.
 
@@ -126,14 +136,6 @@ class AzureBaseTTSService(TTSService):
             "style": params.style,
             "style_degree": params.style_degree,
             "volume": params.volume,
-        }
-
-        # Define SSML escape mappings based on SSML reserved characters
-        # See - https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure
-        self.ssml_escape_chars = {
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;'
         }
 
         self._api_key = api_key
@@ -210,7 +212,14 @@ class AzureBaseTTSService(TTSService):
         return ssml
 
     def _escape_text(self, text: str) -> str:
-        """Escape special characters in text for SSML.
+        """Escapes XML/SSML reserved characters according to Microsoft documentation.
+
+        This method escapes the following characters:
+        - & becomes &amp;
+        - < becomes &lt;
+        - > becomes &gt;
+        - " becomes &quot;
+        - ' becomes &apos;
 
         Args:
             text: The text to escape.
@@ -219,7 +228,7 @@ class AzureBaseTTSService(TTSService):
             The escaped text.
         """
         escaped_text = text
-        for char, escape_code in self.ssml_escape_chars.items():
+        for char, escape_code in AzureBaseTTSService.SSML_ESCAPE_CHARS.items():
             escaped_text = escaped_text.replace(char, escape_code)
         return escaped_text
 
