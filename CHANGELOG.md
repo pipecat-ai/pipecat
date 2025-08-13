@@ -304,6 +304,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `on_transcription_stopped` and `on_transcription_error` to Daily
   callbacks.
 
+- Added SSML reserved character escaping to `AzureBaseTTSService` to properly handle special characters in text sent to Azure TTS. This fixes an issue where characters like `&`, `<`, `>`, `"`, and `'` in LLM-generated text would cause TTS failures.
+- 
 ### Changed
 
 - Changed the default `url` for `NeuphonicTTSService` to
