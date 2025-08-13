@@ -75,12 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed an issue that would cause system frames to not be processed with higher
   priority than other frames. This could cause slower interruption times.
 
-### Fixed
-
 - Fixed an issue where retrying a websocket connection error would result in an
   error.
 
 ### Other
+
+- Add foundation example `19b-openai-realtime-beta-text.py`, showing how to use
+  `OpenAIRealtimeBetaLLMService` to output text to a TTS service.
 
 - Add vision support to release evals so we can run the foundational examples 12
   series.
