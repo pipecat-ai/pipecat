@@ -113,7 +113,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     session_properties = SessionProperties(
         input_audio_transcription=InputAudioTranscription(),
-        modalities=["text", "audio"],
         # Set openai TurnDetection parameters. Not setting this at all will turn it
         # on by default
         turn_detection=SemanticTurnDetection(),
@@ -159,16 +158,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
         [{"role": "user", "content": "Say hello!"}],
-        # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
-        #     [
-        #         {
-        #             "role": "user",
-        #             "content": [
-        #                 {"type": "text", "text": "Say"},
-        #                 {"type": "text", "text": "yo what's up!"},
-        #             ],
-        #         }
-        #     ],
         tools,
     )
 
