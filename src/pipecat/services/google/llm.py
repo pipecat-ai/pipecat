@@ -16,19 +16,20 @@ import json
 import os
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
+from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter, GeminiLLMInvocationParams
 from pipecat.frames.frames import (
     AudioRawFrame,
     Frame,
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -38,6 +39,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -67,6 +69,7 @@ try:
         FunctionCall,
         FunctionResponse,
         GenerateContentConfig,
+        GenerateContentResponse,
         HttpOptions,
         Part,
     )
@@ -436,11 +439,20 @@ class GoogleLLMContext(OpenAILLMContext):
                 )
         elif role == "tool":
             role = "model"
+            try:
+                response = json.loads(message["content"])
+                if isinstance(response, dict):
+                    response_dict = response
+                else:
+                    response_dict = {"value": response}
+            except Exception as e:
+                # Response might not be JSON-deserializable (e.g. plain text).
+                response_dict = {"value": message["content"]}
             parts.append(
                 Part(
                     function_response=FunctionResponse(
                         name="tool_call_result",  # seems to work to hard-code the same name every time
-                        response=json.loads(message["content"]),
+                        response=response_dict,
                     )
                 )
             )
@@ -636,9 +648,8 @@ class GoogleLLMService(LLMService):
     """Google AI (Gemini) LLM service implementation.
 
     This class implements inference with Google's AI models, translating internally
-    from OpenAILLMContext to the messages format expected by the Google AI model.
-    We use OpenAILLMContext as a lingua franca for all LLM services to enable
-    easy switching between different LLMs.
+    from an OpenAILLMContext or a universal LLMContext to the messages format
+    expected by the Google AI model.
     """
 
     # Overriding the default adapter to use the Gemini one.
@@ -740,8 +751,89 @@ class GoogleLLMService(LLMService):
         except Exception as e:
             logger.exception(f"Failed to unset thinking budget: {e}")
 
+    async def _stream_content(
+        self, params_from_context: GeminiLLMInvocationParams
+    ) -> AsyncIterator[GenerateContentResponse]:
+        messages = params_from_context["messages"]
+        if (
+            params_from_context["system_instruction"]
+            and self._system_instruction != params_from_context["system_instruction"]
+        ):
+            logger.debug(f"System instruction changed: {params_from_context['system_instruction']}")
+            self._system_instruction = params_from_context["system_instruction"]
+
+        tools = []
+        if params_from_context["tools"]:
+            tools = params_from_context["tools"]
+        elif self._tools:
+            tools = self._tools
+        tool_config = None
+        if self._tool_config:
+            tool_config = self._tool_config
+
+        # Filter out None values and create GenerationContentConfig
+        generation_params = {
+            k: v
+            for k, v in {
+                "system_instruction": self._system_instruction,
+                "temperature": self._settings["temperature"],
+                "top_p": self._settings["top_p"],
+                "top_k": self._settings["top_k"],
+                "max_output_tokens": self._settings["max_tokens"],
+                "tools": tools,
+                "tool_config": tool_config,
+            }.items()
+            if v is not None
+        }
+
+        if self._settings["extra"]:
+            generation_params.update(self._settings["extra"])
+
+        # possibly modify generation_params (in place) to set thinking to off by default
+        self._maybe_unset_thinking_budget(generation_params)
+
+        generation_config = (
+            GenerateContentConfig(**generation_params) if generation_params else None
+        )
+
+        await self.start_ttfb_metrics()
+        return await self._client.aio.models.generate_content_stream(
+            model=self._model_name,
+            contents=messages,
+            config=generation_config,
+        )
+
+    async def _stream_content_specific_context(
+        self, context: OpenAILLMContext
+    ) -> AsyncIterator[GenerateContentResponse]:
+        logger.debug(
+            # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
+            f"{self}: Generating chat from OpenAI context [{context.get_messages_for_logging()}]"
+        )
+
+        params = GeminiLLMInvocationParams(
+            messages=context.messages,
+            system_instruction=context.system_message,
+            tools=context.tools,
+        )
+
+        return await self._stream_content(params)
+
+    async def _stream_content_universal_context(
+        self, context: LLMContext
+    ) -> AsyncIterator[GenerateContentResponse]:
+        adapter = self.get_llm_adapter()
+        logger.debug(
+            # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
+            f"{self}: Generating chat from universal context [{adapter.get_messages_for_logging(context)}]"
+        )
+
+        params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+
+        return await self._stream_content(params)
+
     @traced_llm
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: OpenAILLMContext | LLMContext):
         await self.push_frame(LLMFullResponseStartFrame())
 
         prompt_tokens = 0
@@ -754,55 +846,11 @@ class GoogleLLMService(LLMService):
         search_result = ""
 
         try:
-            logger.debug(
-                # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
-                f"{self}: Generating chat [{context.get_messages_for_logging()}]"
-            )
-
-            messages = context.messages
-            if context.system_message and self._system_instruction != context.system_message:
-                logger.debug(f"System instruction changed: {context.system_message}")
-                self._system_instruction = context.system_message
-
-            tools = []
-            if context.tools:
-                tools = context.tools
-            elif self._tools:
-                tools = self._tools
-            tool_config = None
-            if self._tool_config:
-                tool_config = self._tool_config
-
-            # Filter out None values and create GenerationContentConfig
-            generation_params = {
-                k: v
-                for k, v in {
-                    "system_instruction": self._system_instruction,
-                    "temperature": self._settings["temperature"],
-                    "top_p": self._settings["top_p"],
-                    "top_k": self._settings["top_k"],
-                    "max_output_tokens": self._settings["max_tokens"],
-                    "tools": tools,
-                    "tool_config": tool_config,
-                }.items()
-                if v is not None
-            }
-
-            if self._settings["extra"]:
-                generation_params.update(self._settings["extra"])
-
-            # possibly modify generation_params (in place) to set thinking to off by default
-            self._maybe_unset_thinking_budget(generation_params)
-
-            generation_config = (
-                GenerateContentConfig(**generation_params) if generation_params else None
-            )
-
-            await self.start_ttfb_metrics()
-            response = await self._client.aio.models.generate_content_stream(
-                model=self._model_name,
-                contents=messages,
-                config=generation_config,
+            # Generate content using either OpenAILLMContext or universal LLMContext
+            response = await (
+                self._stream_content_specific_context(context)
+                if isinstance(context, OpenAILLMContext)
+                else self._stream_content_universal_context(context)
             )
 
             function_calls = []
@@ -915,7 +963,12 @@ class GoogleLLMService(LLMService):
 
         if isinstance(frame, OpenAILLMContextFrame):
             context = GoogleLLMContext.upgrade_to_google(frame.context)
+        elif isinstance(frame, LLMContextFrame):
+            # Handle universal (LLM-agnostic) LLM context frames
+            context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
+            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
+            # LLMContext with it
             context = GoogleLLMContext(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
             # This is only useful in very simple pipelines because it creates

@@ -285,7 +285,6 @@ class BaseOpenAILLMService(LLMService):
         )
 
         params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
-
         chunks = await self.get_chat_completions(params)
 
         return chunks
@@ -302,16 +301,12 @@ class BaseOpenAILLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        if isinstance(context, OpenAILLMContext):
-            # Use OpenAI-specific context
-            chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
-                context
-            )
-        else:
-            # Use universal (LLM-agnostic) context
-            chunk_stream: AsyncStream[
-                ChatCompletionChunk
-            ] = await self._stream_chat_completions_universal_context(context)
+        # Generate chat completions using either OpenAILLMContext or universal LLMContext
+        chunk_stream = await (
+            self._stream_chat_completions(context)
+            if isinstance(context, OpenAILLMContext)
+            else self._stream_chat_completions_universal_context(context)
+        )
 
         async for chunk in chunk_stream:
             if chunk.usage:
