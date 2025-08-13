@@ -62,7 +62,7 @@ class MoondreamService(VisionService):
     """
 
     def __init__(
-        self, *, model="vikhyatk/moondream2", revision="2024-08-26", use_cpu=False, **kwargs
+        self, *, model="vikhyatk/moondream2", revision="2025-01-09", use_cpu=False, **kwargs
     ):
         """Initialize the Moondream service.
 
@@ -82,14 +82,15 @@ class MoondreamService(VisionService):
             device = torch.device("cpu")
             dtype = torch.float32
 
-        self._tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
-
         logger.debug("Loading Moondream model...")
 
         self._model = AutoModelForCausalLM.from_pretrained(
-            model, trust_remote_code=True, revision=revision
-        ).to(device=device, dtype=dtype)
-        self._model.eval()
+            model,
+            trust_remote_code=True,
+            revision=revision,
+            device_map={"": device},
+            torch_dtype=dtype,
+        ).eval()
 
         logger.debug("Loaded Moondream model")
 
@@ -121,9 +122,7 @@ class MoondreamService(VisionService):
             """
             image = Image.frombytes(frame.format, frame.size, frame.image)
             image_embeds = self._model.encode_image(image)
-            description = self._model.answer_question(
-                image_embeds=image_embeds, question=frame.text, tokenizer=self._tokenizer
-            )
+            description = self._model.query(image_embeds, frame.text)["answer"]
             return description
 
         description = await asyncio.to_thread(get_image_description, frame)

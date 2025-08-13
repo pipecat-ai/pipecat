@@ -13,7 +13,7 @@ using Rime's API for streaming and batch audio synthesis.
 import base64
 import json
 import uuid
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
 from loguru import logger
@@ -39,7 +39,8 @@ from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Rime, you need to `pip install pipecat-ai[rime]`.")
@@ -180,6 +181,16 @@ class RimeTTSService(AudioContextWordTTSService):
         self._model = model
         await super().set_model(model)
 
+    async def _update_settings(self, settings: Mapping[str, Any]):
+        """Update service settings and reconnect if voice changed."""
+        prev_voice = self._voice_id
+        await super()._update_settings(settings)
+        if not prev_voice == self._voice_id:
+            self._settings["speaker"] = self._voice_id
+            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+            await self._disconnect()
+            await self._connect()
+
     def _build_msg(self, text: str = "") -> dict:
         """Build JSON message for Rime API."""
         return {"text": text, "contextId": self._context_id}
@@ -238,13 +249,13 @@ class RimeTTSService(AudioContextWordTTSService):
     async def _connect_websocket(self):
         """Connect to Rime websocket API with configured settings."""
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
 
             params = "&".join(f"{k}={v}" for k, v in self._settings.items())
             url = f"{self._url}?{params}"
             headers = {"Authorization": f"Bearer {self._api_key}"}
-            self._websocket = await websockets.connect(url, extra_headers=headers)
+            self._websocket = await websocket_connect(url, additional_headers=headers)
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._websocket = None
@@ -380,7 +391,7 @@ class RimeTTSService(AudioContextWordTTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             try:

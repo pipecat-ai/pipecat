@@ -25,7 +25,6 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.direct_function import DirectFunction, DirectFunctionWrapper
-from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.frames.frames import (
     CancelFrame,
@@ -108,6 +107,7 @@ class FunctionCallRegistryItem:
     function_name: Optional[str]
     handler: FunctionCallHandler | "DirectFunctionWrapper"
     cancel_on_interruption: bool
+    handler_deprecated: bool
 
 
 @dataclass
@@ -176,6 +176,7 @@ class LLMService(AIService):
         self._functions: Dict[Optional[str], FunctionCallRegistryItem] = {}
         self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
+        self._tracing_enabled: bool = False
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
@@ -218,6 +219,7 @@ class LLMService(AIService):
         await super().start(frame)
         if not self._run_in_parallel:
             await self._create_sequential_runner_task()
+        self._tracing_enabled = frame.enable_tracing
 
     async def stop(self, frame: EndFrame):
         """Stop the LLM service.
@@ -280,12 +282,25 @@ class LLMService(AIService):
             cancel_on_interruption: Whether to cancel this function call when an
                 interruption occurs. Defaults to True.
         """
+        signature = inspect.signature(handler)
+        handler_deprecated = len(signature.parameters) > 1
+        if handler_deprecated:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
+                    DeprecationWarning,
+                )
+
         # Registering a function with the function_name set to None will run
         # that handler for all functions
         self._functions[function_name] = FunctionCallRegistryItem(
             function_name=function_name,
             handler=handler,
             cancel_on_interruption=cancel_on_interruption,
+            handler_deprecated=handler_deprecated,
         )
 
         # Start callbacks are now deprecated.
@@ -323,6 +338,7 @@ class LLMService(AIService):
             function_name=wrapper.name,
             handler=wrapper,
             cancel_on_interruption=cancel_on_interruption,
+            handler_deprecated=False,
         )
 
     def unregister_function(self, function_name: Optional[str]):
@@ -550,17 +566,7 @@ class LLMService(AIService):
             )
         else:
             # Handler is a FunctionCallHandler
-            signature = inspect.signature(item.handler)
-            if len(signature.parameters) > 1:
-                import warnings
-
-                with warnings.catch_warnings():
-                    warnings.simplefilter("always")
-                    warnings.warn(
-                        "Function calls with parameters `(function_name, tool_call_id, arguments, llm, context, result_callback)` are deprecated, use a single `FunctionCallParams` parameter instead.",
-                        DeprecationWarning,
-                    )
-
+            if item.handler_deprecated:
                 await item.handler(
                     runner_item.function_name,
                     runner_item.tool_call_id,

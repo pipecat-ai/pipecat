@@ -42,4 +42,4 @@ class OLLamaLLMService(OpenAILLMService):
             An OpenAI-compatible client configured for Ollama.
         """
         logger.debug(f"Creating Ollama client with api {base_url}")
-        return super().create_client(base_url, **kwargs)
+        return super().create_client(base_url=base_url, **kwargs)

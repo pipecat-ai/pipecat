@@ -108,6 +108,10 @@ class ExotelFrameSerializer(FrameSerializer):
             serialized_data = await self._output_resampler.resample(
                 data, frame.sample_rate, self._exotel_sample_rate
             )
+            if serialized_data is None or len(serialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
+
             payload = base64.b64encode(serialized_data).decode("ascii")
 
             answer = {
@@ -144,6 +148,9 @@ class ExotelFrameSerializer(FrameSerializer):
                 self._exotel_sample_rate,
                 self._sample_rate,
             )
+            if deserialized_data is None or len(deserialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
 
             # Input: Exotel takes PCM data, so just resample to match sample_rate
             audio_frame = InputAudioRawFrame(

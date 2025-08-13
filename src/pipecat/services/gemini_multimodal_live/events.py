@@ -114,13 +114,15 @@ class RealtimeInputConfig(BaseModel):
 
 
 class RealtimeInput(BaseModel):
-    """Contains realtime input media chunks.
+    """Contains realtime input media chunks and text.
 
     Parameters:
         mediaChunks: List of media chunks for realtime processing.
+        text: Text for realtime processing.
     """
 
-    mediaChunks: List[MediaChunk]
+    mediaChunks: Optional[List[MediaChunk]] = None
+    text: Optional[str] = None
 
 
 class ClientContent(BaseModel):
@@ -190,6 +192,24 @@ class VideoInputMessage(BaseModel):
         )
 
 
+class TextInputMessage(BaseModel):
+    """Message containing text input data."""
+
+    realtimeInput: RealtimeInput
+
+    @classmethod
+    def from_text(cls, text: str) -> "TextInputMessage":
+        """Create a text input message from a string.
+
+        Args:
+            text: The text to send.
+
+        Returns:
+            A TextInputMessage instance.
+        """
+        return cls(realtimeInput=RealtimeInput(text=text))
+
+
 class ClientContentMessage(BaseModel):
     """Message containing client content for the API.
 
@@ -246,6 +266,55 @@ class Config(BaseModel):
     """
 
     setup: Setup
+
+
+#
+# Grounding metadata models
+#
+
+
+class SearchEntryPoint(BaseModel):
+    """Represents the search entry point with rendered content for search suggestions."""
+
+    renderedContent: Optional[str] = None
+
+
+class WebSource(BaseModel):
+    """Represents a web source from grounding chunks."""
+
+    uri: Optional[str] = None
+    title: Optional[str] = None
+
+
+class GroundingChunk(BaseModel):
+    """Represents a grounding chunk containing web source information."""
+
+    web: Optional[WebSource] = None
+
+
+class GroundingSegment(BaseModel):
+    """Represents a segment of text that is grounded."""
+
+    startIndex: Optional[int] = None
+    endIndex: Optional[int] = None
+    text: Optional[str] = None
+
+
+class GroundingSupport(BaseModel):
+    """Represents support information for grounded text segments."""
+
+    segment: Optional[GroundingSegment] = None
+    groundingChunkIndices: Optional[List[int]] = None
+    confidenceScores: Optional[List[float]] = None
+
+
+class GroundingMetadata(BaseModel):
+    """Represents grounding metadata from Google Search."""
+
+    searchEntryPoint: Optional[SearchEntryPoint] = None
+    groundingChunks: Optional[List[GroundingChunk]] = None
+    groundingSupports: Optional[List[GroundingSupport]] = None
+    webSearchQueries: Optional[List[str]] = None
 
 
 #
@@ -339,6 +408,7 @@ class ServerContent(BaseModel):
     turnComplete: Optional[bool] = None
     inputTranscription: Optional[BidiGenerateContentTranscription] = None
     outputTranscription: Optional[BidiGenerateContentTranscription] = None
+    groundingMetadata: Optional[GroundingMetadata] = None
 
 
 class FunctionCall(BaseModel):

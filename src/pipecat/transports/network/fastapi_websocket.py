@@ -132,8 +132,11 @@ class FastAPIWebsocketClient:
                 f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
             )
             # For some reason the websocket is disconnected, and we are not able to send data
-            # So let's properly handle it and disconnect the transport
-            if self._websocket.application_state == WebSocketState.DISCONNECTED:
+            # So let's properly handle it and disconnect the transport if it is not already disconnecting
+            if (
+                self._websocket.application_state == WebSocketState.DISCONNECTED
+                and not self.is_closing
+            ):
                 logger.warning("Closing already disconnected websocket!")
                 self._closing = True
                 await self.trigger_client_disconnected()
@@ -146,8 +149,12 @@ class FastAPIWebsocketClient:
 
         if self.is_connected and not self.is_closing:
             self._closing = True
-            await self._websocket.close()
-            await self.trigger_client_disconnected()
+            try:
+                await self._websocket.close()
+            except Exception as e:
+                logger.error(f"{self} exception while closing the websocket: {e}")
+            finally:
+                await self.trigger_client_disconnected()
 
     async def trigger_client_disconnected(self):
         """Trigger the client disconnected callback."""
@@ -412,12 +419,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         Args:
             frame: The output audio frame to write.
         """
-        if self._client.is_closing:
-            return
-
-        if not self._client.is_connected:
-            # Simulate audio playback with a sleep.
-            await self._write_audio_sleep()
+        if self._client.is_closing or not self._client.is_connected:
             return
 
         frame = OutputAudioRawFrame(

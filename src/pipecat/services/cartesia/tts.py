@@ -34,10 +34,15 @@ from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.skip_tags_aggregator import SkipTagsAggregator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
+# Suppress regex warnings from pydub (used by cartesia)
+warnings.filterwarnings("ignore", message="invalid escape sequence", category=SyntaxWarning)
+
+
 # See .env.example for Cartesia configuration needed
 try:
-    import websockets
     from cartesia import AsyncCartesia
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Cartesia, you need to `pip install pipecat-ai[cartesia]`.")
@@ -211,6 +216,54 @@ class CartesiaTTSService(AudioContextWordTTSService):
         """
         return language_to_cartesia_language(language)
 
+    def _is_cjk_language(self, language: str) -> bool:
+        """Check if the given language is CJK (Chinese, Japanese, Korean).
+
+        Args:
+            language: The language code to check.
+
+        Returns:
+            True if the language is Chinese, Japanese, or Korean.
+        """
+        cjk_languages = {"zh", "ja", "ko"}
+        base_lang = language.split("-")[0].lower()
+        return base_lang in cjk_languages
+
+    def _process_word_timestamps_for_language(
+        self, words: List[str], starts: List[float]
+    ) -> List[tuple[str, float]]:
+        """Process word timestamps based on the current language.
+
+        For CJK languages, Cartesia groups related characters in the same timestamp message.
+        For example, in Japanese a single message might be `['こ', 'ん', 'に', 'ち', 'は', '。']`.
+        We combine these into single words so the downstream aggregator can add natural
+        spacing between meaningful units rather than individual characters.
+
+        For non-CJK languages, words are already properly separated and are used as-is.
+
+        Args:
+            words: List of words/characters from Cartesia.
+            starts: List of start timestamps for each word/character.
+
+        Returns:
+            List of (word, start_time) tuples processed for the language.
+        """
+        current_language = self._settings.get("language", "en")
+
+        # Check if this is a CJK language
+        if self._is_cjk_language(current_language):
+            # For CJK languages, combine all characters in this message into one word
+            # using the first character's start time
+            if words and starts:
+                combined_word = "".join(words)
+                first_start = starts[0]
+                return [(combined_word, first_start)]
+            else:
+                return []
+        else:
+            # For non-CJK languages, use as-is
+            return list(zip(words, starts))
+
     def _build_msg(
         self, text: str = "", continue_transcript: bool = True, add_timestamps: bool = True
     ):
@@ -288,10 +341,10 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
     async def _connect_websocket(self):
         try:
-            if self._websocket and self._websocket.open:
+            if self._websocket and self._websocket.state is State.OPEN:
                 return
             logger.debug("Connecting to Cartesia")
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 f"{self._url}?api_key={self._api_key}&cartesia_version={self._cartesia_version}"
             )
         except Exception as e:
@@ -346,9 +399,11 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
                 await self.remove_audio_context(msg["context_id"])
             elif msg["type"] == "timestamps":
-                await self.add_word_timestamps(
-                    list(zip(msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]))
+                # Process the timestamps based on language before adding them
+                processed_timestamps = self._process_word_timestamps_for_language(
+                    msg["word_timestamps"]["words"], msg["word_timestamps"]["start"]
                 )
+                await self.add_word_timestamps(processed_timestamps)
             elif msg["type"] == "chunk":
                 await self.stop_ttfb_metrics()
                 self.start_word_timestamps()
@@ -380,7 +435,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         logger.debug(f"{self}: Generating TTS [{text}]")
 
         try:
-            if not self._websocket or self._websocket.closed:
+            if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
             if not self._context_id:
