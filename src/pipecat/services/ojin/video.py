@@ -375,7 +375,7 @@ class OjinPersonaFSM:
 
                 if frame is None:
                     self._num_frames_missed += 1
-                    # logger.warning(f"Frames missed {self._num_frames_missed}")
+                    logger.debug(f"Frames missed {self._num_frames_missed}")
 
                     if self._last_frame is not None:
                         return self._last_frame
