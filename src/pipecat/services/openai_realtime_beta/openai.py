@@ -171,6 +171,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         """
         self._audio_input_paused = paused
 
+    def _is_modality_enabled(self, modality: str) -> bool:
+        """Check if a specific modality is enabled, "text" or "audio"."""
+        modalities = self._session_properties.modalities or ["audio", "text"]
+        return modality in modalities
+
+    def _get_enabled_modalities(self) -> list[str]:
+        """Get the list of enabled modalities."""
+        return self._session_properties.modalities or ["audio", "text"]
+
     async def retrieve_conversation_item(self, item_id: str):
         """Retrieve a conversation item by ID from the server.
 
@@ -243,7 +252,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.stop_all_metrics()
         if self._current_assistant_response:
             await self.push_frame(LLMFullResponseEndFrame())
-            await self.push_frame(TTSStoppedFrame())
+            # Only push TTSStoppedFrame if audio modality is enabled
+            if self._is_modality_enabled("audio"):
+                await self.push_frame(TTSStoppedFrame())
 
     async def _handle_user_started_speaking(self, frame):
         pass
@@ -469,6 +480,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_speech_started(evt)
             elif evt.type == "input_audio_buffer.speech_stopped":
                 await self._handle_evt_speech_stopped(evt)
+            elif evt.type == "response.text.delta":
+                await self._handle_evt_text_delta(evt)
             elif evt.type == "response.audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
@@ -617,6 +630,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # Response message without preceding user message. Add it to the context.
             await self._handle_assistant_output(evt.response.output)
 
+    async def _handle_evt_text_delta(self, evt):
+        if evt.delta:
+            await self.push_frame(LLMTextFrame(evt.delta))
+
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
@@ -723,7 +740,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.start_ttfb_metrics()
         await self.send_client_event(
             events.ResponseCreateEvent(
-                response=events.ResponseProperties(modalities=["audio", "text"])
+                response=events.ResponseProperties(modalities=self._get_enabled_modalities())
             )
         )
 

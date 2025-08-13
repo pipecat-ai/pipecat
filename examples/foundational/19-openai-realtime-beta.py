@@ -113,6 +113,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     session_properties = SessionProperties(
         input_audio_transcription=InputAudioTranscription(),
+        modalities=["text", "audio"],
         # Set openai TurnDetection parameters. Not setting this at all will turn it
         # on by default
         turn_detection=SemanticTurnDetection(),
