@@ -13,8 +13,8 @@ reporting patterns while maintaining compatibility with the Pipecat framework.
 
 from typing import List
 
-from openai import NOT_GIVEN, AsyncStream
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+from openai import NOT_GIVEN
+from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
@@ -53,17 +53,12 @@ class PerplexityLLMService(OpenAILLMService):
         self._has_reported_prompt_tokens = False
         self._is_processing = False
 
-    async def get_chat_completions(
+    def build_chat_completion_params(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        """Get chat completions from Perplexity API using OpenAI-compatible parameters.
+    ) -> dict:
+        """Build parameters for Perplexity chat completion request.
 
-        Args:
-            context: The context containing conversation history and settings.
-            messages: The messages to send to the API.
-
-        Returns:
-            A stream of chat completion chunks from the Perplexity API.
+        Perplexity uses a subset of OpenAI parameters and doesn't support tools.
         """
         params = {
             "model": self.model_name,
@@ -83,8 +78,7 @@ class PerplexityLLMService(OpenAILLMService):
         if self._settings["max_tokens"] is not NOT_GIVEN:
             params["max_tokens"] = self._settings["max_tokens"]
 
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+        return params
 
     async def _process_context(self, context: OpenAILLMContext):
         """Process a context through the LLM and accumulate token usage metrics.

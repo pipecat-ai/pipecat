@@ -6,6 +6,7 @@
 
 """Base OpenAI LLM service implementation."""
 
+import asyncio
 import base64
 import json
 from typing import Any, Dict, List, Mapping, Optional
@@ -14,6 +15,7 @@ import httpx
 from loguru import logger
 from openai import (
     NOT_GIVEN,
+    APITimeoutError,
     AsyncOpenAI,
     AsyncStream,
     DefaultAsyncHttpxClient,
@@ -91,6 +93,8 @@ class BaseOpenAILLMService(LLMService):
         project=None,
         default_headers: Optional[Mapping[str, str]] = None,
         params: Optional[InputParams] = None,
+        retry_timeout_secs: Optional[float] = 5.0,
+        retry_on_timeout: Optional[bool] = False,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -103,6 +107,8 @@ class BaseOpenAILLMService(LLMService):
             project: OpenAI project ID.
             default_headers: Additional HTTP headers to include in requests.
             params: Input parameters for model configuration and behavior.
+            retry_timeout_secs: Request timeout in seconds. Defaults to 5.0 seconds.
+            retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         super().__init__(**kwargs)
@@ -119,6 +125,8 @@ class BaseOpenAILLMService(LLMService):
             "max_completion_tokens": params.max_completion_tokens,
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
+        self._retry_timeout_secs = retry_timeout_secs
+        self._retry_on_timeout = retry_on_timeout
         self.set_model_name(model)
         self._client = self.create_client(
             api_key=api_key,
@@ -175,7 +183,7 @@ class BaseOpenAILLMService(LLMService):
     async def get_chat_completions(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
     ) -> AsyncStream[ChatCompletionChunk]:
-        """Get streaming chat completions from OpenAI API.
+        """Get streaming chat completions from OpenAI API with optional timeout and retry.
 
         Args:
             context: The LLM context containing tools and configuration.
@@ -183,6 +191,37 @@ class BaseOpenAILLMService(LLMService):
 
         Returns:
             Async stream of chat completion chunks.
+        """
+        params = self.build_chat_completion_params(context, messages)
+
+        if self._retry_on_timeout:
+            try:
+                chunks = await asyncio.wait_for(
+                    self._client.chat.completions.create(**params), timeout=self._retry_timeout_secs
+                )
+                return chunks
+            except (APITimeoutError, asyncio.TimeoutError):
+                # Retry, this time without a timeout so we get a response
+                logger.debug(f"{self}: Retrying chat completion due to timeout")
+                chunks = await self._client.chat.completions.create(**params)
+                return chunks
+        else:
+            chunks = await self._client.chat.completions.create(**params)
+            return chunks
+
+    def build_chat_completion_params(
+        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+    ) -> dict:
+        """Build parameters for chat completion request.
+
+        Subclasses can override this to customize parameters for different providers.
+
+        Args:
+            context: The LLM context containing tools and configuration.
+            messages: List of chat completion messages to send.
+
+        Returns:
+            Dictionary of parameters for the chat completion request.
         """
         params = {
             "model": self.model_name,
@@ -201,9 +240,7 @@ class BaseOpenAILLMService(LLMService):
         }
 
         params.update(self._settings["extra"])
-
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+        return params
 
     async def _stream_chat_completions(
         self, context: OpenAILLMContext
