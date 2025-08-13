@@ -763,7 +763,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         del self._function_calls_in_progress[frame.request.tool_call_id]
 
         # Update context with the image frame
-        await self._update_function_call_result(
+        self._update_function_call_result(
             frame.request.function_name, frame.request.tool_call_id, "COMPLETED"
         )
         self._context.add_image_frame_message(
