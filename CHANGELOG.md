@@ -64,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where `SmallWebRTCTransport` ended before TTS finished.
+
 - Fixed a `WatchdogPriorityQueue` issue that could cause an exception when
   compating watchdog cancel sentinel items with other items in the queue.
 
