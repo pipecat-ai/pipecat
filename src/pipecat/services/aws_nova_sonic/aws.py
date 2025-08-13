@@ -931,7 +931,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         if content.role == Role.ASSISTANT:
             if content.type == ContentType.TEXT:
-                # Ignore non-final text, and the "interrupted" message (which isn't meaningful text)
+                # Ignore non-final text, but do process the "interrupted" message
                 if content.text_stage == TextStage.FINAL:
                     if stop_reason != "INTERRUPTED":
                         if self._assistant_is_responding:
