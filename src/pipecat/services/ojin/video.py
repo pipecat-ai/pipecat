@@ -736,11 +736,21 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.interaction_id = message.interaction_id
             self._interaction.set_state(InteractionState.ACTIVE)
         elif isinstance(message, ErrorResponseMessage):
+            is_fatal = False
             if message.payload.code == "NO_BACKEND_SERVER_AVAILABLE":
                 logger.error("No OJIN servers available. Please try again later.")
+                is_fatal = True
+            elif message.payload.code == "FRAME_SIZE_TOO_BIG":
+                logger.error("Frame Size sent to Ojin server was higher than the allowed max limit.")
+            elif message.payload.code == "INVALID_INTERACTION_ID":
+                logger.error("Invalid interaction ID sent to Ojin server")
+            elif message.payload.code == "FAILED_CREATE_MODEL":
+                is_fatal = True
+                logger.error("Ojin couldn't create a model from supplied persona ID.")
 
-            await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
-            await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+            if is_fatal:
+                await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
+                await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
 
     def get_fsm_state(self) -> PersonaState:
         """Get the current state of the persona's finite state machine.
