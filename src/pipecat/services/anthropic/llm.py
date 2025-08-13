@@ -57,7 +57,7 @@ from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
-    from anthropic import NOT_GIVEN, AsyncAnthropic, NotGiven
+    from anthropic import NOT_GIVEN, APITimeoutError, AsyncAnthropic, NotGiven
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Anthropic, you need to `pip install pipecat-ai[anthropic]`.")
@@ -133,6 +133,8 @@ class AnthropicLLMService(LLMService):
         model: str = "claude-sonnet-4-20250514",
         params: Optional[InputParams] = None,
         client=None,
+        retry_timeout_secs: Optional[float] = 5.0,
+        retry_on_timeout: Optional[bool] = False,
         **kwargs,
     ):
         """Initialize the Anthropic LLM service.
@@ -142,6 +144,8 @@ class AnthropicLLMService(LLMService):
             model: Model name to use. Defaults to "claude-sonnet-4-20250514".
             params: Optional model parameters for inference.
             client: Optional custom Anthropic client instance.
+            retry_timeout_secs: Request timeout in seconds for retry logic.
+            retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         super().__init__(**kwargs)
@@ -150,6 +154,8 @@ class AnthropicLLMService(LLMService):
             api_key=api_key
         )  # if the client is provided, use it and remove it, otherwise create a new one
         self.set_model_name(model)
+        self._retry_timeout_secs = retry_timeout_secs
+        self._retry_on_timeout = retry_on_timeout
         self._settings = {
             "max_tokens": params.max_tokens,
             "enable_prompt_caching_beta": params.enable_prompt_caching_beta or False,
@@ -166,6 +172,31 @@ class AnthropicLLMService(LLMService):
             True, as Anthropic provides detailed token usage metrics.
         """
         return True
+
+    async def _create_message_stream(self, api_call, params):
+        """Create message stream with optional timeout and retry.
+
+        Args:
+            api_call: The Anthropic API method to call.
+            params: Parameters for the API call.
+
+        Returns:
+            Async stream of message events.
+        """
+        if self._retry_on_timeout:
+            try:
+                response = await asyncio.wait_for(
+                    api_call(**params), timeout=self._retry_timeout_secs
+                )
+                return response
+            except (APITimeoutError, asyncio.TimeoutError):
+                # Retry, this time without a timeout so we get a response
+                logger.info(f"{self}: Retrying message creation due to timeout")
+                response = await api_call(**params)
+                return response
+        else:
+            response = await api_call(**params)
+            return response
 
     @property
     def enable_prompt_caching_beta(self) -> bool:
@@ -250,7 +281,7 @@ class AnthropicLLMService(LLMService):
 
             params.update(self._settings["extra"])
 
-            response = await api_call(**params)
+            response = await self._create_message_stream(api_call, params)
 
             await self.stop_ttfb_metrics()
 
