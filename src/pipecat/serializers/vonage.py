@@ -29,11 +29,10 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 AUDIO_TARGET_RATE_HZ: int = 16_000  # 16 kHz target
 AUDIO_CHANNELS_MONO: int = 1  # mono
 PCM16_SAMPLE_WIDTH_BYTES: int = 2  # 16-bit PCM
-CHUNK_DURATION_MS: int = 20  # telephony frame
-SECONDS_PER_MS: float = 1.0 / 1_000.0
-CHUNK_PERIOD_SECONDS: float = CHUNK_DURATION_MS * SECONDS_PER_MS
+CHUNK_PERIOD_SECONDS: float = 0.01
 
-BYTES_PER_CHUNK: float = 0.01
+BYTES_PER_SAMPLE_MONO: int = AUDIO_CHANNELS_MONO * PCM16_SAMPLE_WIDTH_BYTES
+BYTES_PER_CHUNK: int = int(AUDIO_TARGET_RATE_HZ * CHUNK_PERIOD_SECONDS) * BYTES_PER_SAMPLE_MONO
 
 
 class VonageFrameSerializer(FrameSerializer):
