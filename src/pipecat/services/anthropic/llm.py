@@ -191,7 +191,7 @@ class AnthropicLLMService(LLMService):
                 return response
             except (APITimeoutError, asyncio.TimeoutError):
                 # Retry, this time without a timeout so we get a response
-                logger.info(f"{self}: Retrying message creation due to timeout")
+                logger.debug(f"{self}: Retrying message creation due to timeout")
                 response = await api_call(**params)
                 return response
         else:
