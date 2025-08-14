@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     ImageContextRawFrame,
+    OutputImageRawFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -326,7 +327,7 @@ class LLMUserContextAggregator(LLMContextAggregator):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, ImageContextRawFrame):
+        if isinstance(frame, OutputImageRawFrame):
             # print("caching latest")
             self.latest_cached_frame = frame
     
