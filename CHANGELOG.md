@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an `AudioBufferProcessor` issues that would cause audio overlap when
+  setting a max buffer size.
+
 - Fixed an issue where `AsyncAITTSService` had very high latency in responding
   by adding `force=true` when sending the flush command.
 
