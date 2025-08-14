@@ -5,6 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed an issue where `AsyncAITTSService` had very high latency in responding
+  by adding `force=true` when sending the flush command.
+
 ## [0.0.80] - 2025-08-13
 
 ### Added
@@ -68,8 +75,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   therefore improves performance.
 
 ### Fixed
-
-- Fixed AsyncAI WS TTS startup latency by sending `force=true`
 
 - Fixed an issue with the `BaseWhisperSTTService` where the language was
   specified as an enum and not a string.
