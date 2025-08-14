@@ -38,12 +38,6 @@ from pipecat.transports.services.daily import DailyParams
 load_dotenv(override=True)
 
 # Create VAD parameters optimized for quiet speakers
-quiet_speaker_vad_params = VADParams(
-    confidence=0.4,  # Lower confidence threshold (default: 0.7)
-    min_volume=0.3,  # Lower volume threshold (default: 0.6)
-    start_secs=0.1,  # Faster response to speech start (default: 0.2)
-    stop_secs=1.0,  # Longer wait before stopping (default: 0.8)
-)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -53,17 +47,17 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=quiet_speaker_vad_params),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=quiet_speaker_vad_params),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(params=quiet_speaker_vad_params),
+        vad_analyzer=SileroVADAnalyzer(),
     ),
 }
 
