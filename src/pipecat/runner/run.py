@@ -402,6 +402,7 @@ async def _run_daily_direct():
 
         # Direct connections have no request body, so use empty dict
         runner_args = DailyRunnerArguments(room_url=room_url, token=token)
+        runner_args.handle_sigint = True
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()
