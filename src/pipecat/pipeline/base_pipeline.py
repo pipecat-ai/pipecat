@@ -19,9 +19,9 @@ class BasePipeline(FrameProcessor):
     metrics collection from their contained processors.
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         """Initialize the base pipeline."""
-        super().__init__()
+        super().__init__(**kwargs)
 
     @abstractmethod
     def processors_with_metrics(self) -> List[FrameProcessor]:
