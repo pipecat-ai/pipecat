@@ -61,6 +61,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         return {
             "system_instruction": messages.system_instruction,
             "messages": messages.messages,
+            # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
         }
 

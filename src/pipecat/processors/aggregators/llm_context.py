@@ -24,7 +24,6 @@ from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
     ChatCompletionMessageParam,
     ChatCompletionToolChoiceOptionParam,
-    ChatCompletionToolParam,
 )
 from PIL import Image
 
@@ -36,7 +35,6 @@ from pipecat.frames.frames import AudioRawFrame, Frame
 # diverge from OpenAI's, we should ditch this. In fact, audio frames already
 # diverge from OpenAI's standard format...we really ought to do this.
 LLMContextMessage = ChatCompletionMessageParam
-LLMContextTool = ChatCompletionToolParam
 LLMContextToolChoice = ChatCompletionToolChoiceOptionParam
 NOT_GIVEN = OPEN_AI_NOT_GIVEN
 NotGiven = OpenAINotGiven
@@ -53,7 +51,7 @@ class LLMContext:
     def __init__(
         self,
         messages: Optional[List[LLMContextMessage]] = None,
-        tools: List[LLMContextTool] | NotGiven | ToolsSchema = NOT_GIVEN,
+        tools: ToolsSchema | NotGiven = NOT_GIVEN,
         tool_choice: LLMContextToolChoice | NotGiven = NOT_GIVEN,
     ):
         """Initialize the LLM context.
@@ -64,8 +62,9 @@ class LLMContext:
             tool_choice: Tool selection strategy for the LLM.
         """
         self._messages: List[LLMContextMessage] = messages if messages else []
-        self._tools: List[LLMContextTool] | NotGiven | ToolsSchema = tools
+        self._tools: ToolsSchema | NotGiven = tools
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
+        self._validate_tools()
 
     @property
     def messages(self) -> List[LLMContextMessage]:
@@ -77,7 +76,7 @@ class LLMContext:
         return self._messages
 
     @property
-    def tools(self) -> List[LLMContextTool] | NotGiven | List[Any]:
+    def tools(self) -> ToolsSchema | NotGiven:
         """Get the tools list.
 
         Returns:
@@ -118,17 +117,15 @@ class LLMContext:
         """
         self._messages[:] = messages
 
-    def set_tools(self, tools: List[LLMContextTool] | NotGiven | ToolsSchema = NOT_GIVEN):
+    def set_tools(self, tools: ToolsSchema | NotGiven = NOT_GIVEN):
         """Set the available tools for the LLM.
 
         Args:
-            tools: List of tools available to the LLM, a ToolsSchema, or NOT_GIVEN to disable tools.
+            tools: A ToolsSchema or NOT_GIVEN to disable tools.
         """
         # TODO: convert empty ToolsSchema to NOT_GIVEN if needed?
-        # TODO: maybe someday also convert provider-specific tools to ToolsSchema so it's always in a provider-neutral format here? See open_ai_adapter.py for related comment. Pipecat Flows is currently converting provider-specific tools to ToolsSchema...
-        if isinstance(tools, list) and len(tools) == 0:
-            tools = NOT_GIVEN
         self._tools = tools
+        self._validate_tools()
 
     def set_tool_choice(self, tool_choice: LLMContextToolChoice | NotGiven):
         """Set the tool choice configuration.
@@ -195,3 +192,12 @@ class LLMContext:
             }
         )
         self.add_message({"role": "user", "content": content})
+
+    def _validate_tools(self):
+        """Validate the tools schema.
+
+        Raises:
+            TypeError: If tools are not a ToolsSchema or NotGiven.
+        """
+        if self._tools is not NOT_GIVEN and not isinstance(self._tools, ToolsSchema):
+            raise TypeError("In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN.")

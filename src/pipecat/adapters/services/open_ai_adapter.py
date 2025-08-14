@@ -57,7 +57,7 @@ class OpenAILLMAdapter(BaseLLMAdapter):
         """
         return {
             "messages": self._from_standard_messages(context.messages),
-            # TODO: doesn't seem quite right that we may or may not need to convert tools here; they should already be guaranteed to exist in a universal format in the universal LLMContext, right?
+            # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
             "tool_choice": context.tool_choice,
         }
