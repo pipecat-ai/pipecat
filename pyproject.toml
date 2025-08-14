@@ -4,6 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pipecat-ai"
+dynamic = ["version"]
 description = "An open source framework for voice (and multimodal) assistants"
 license = "BSD-2-Clause"
 license-files = ["LICENSE"]

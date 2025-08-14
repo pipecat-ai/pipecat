@@ -13,6 +13,7 @@ import numpy as np
 # Will use numpy when implementing persona-specific processing
 from loguru import logger
 from ojin.ojin_persona_client import OjinPersonaClient
+from ojin.entities.interaction_messages import ErrorResponseMessage
 from ojin.ojin_persona_messages import (
     IOjinPersonaClient,
     OjinPersonaCancelInteractionMessage,
@@ -374,7 +375,7 @@ class OjinPersonaFSM:
 
                 if frame is None:
                     self._num_frames_missed += 1
-                    # logger.warning(f"Frames missed {self._num_frames_missed}")
+                    logger.debug(f"Frames missed {self._num_frames_missed}")
 
                     if self._last_frame is not None:
                         return self._last_frame
@@ -578,10 +579,14 @@ class OjinPersonaService(FrameProcessor):
         if new_state == PersonaState.SPEECH and self._audio_output_task is None:
             await self._start_pushing_audio_output()
 
-        if new_state == PersonaState.IDLE and self._audio_output_task is not None:
-            if self._settings.push_bot_stopped_speaking_frames:
-                await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
-            await self._stop_pushing_audio_output()
+        if new_state == PersonaState.IDLE:
+            logger.debug("PersonaState.IDLE reached - closing interaction")
+            self._close_interaction()
+            if self._audio_output_task is not None:
+                logger.debug("Stopping audio output")
+                await self._stop_pushing_audio_output()
+                if self._settings.push_bot_stopped_speaking_frames:
+                    await self.push_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
 
     async def _start(self):
         """Initialize the persona service and start processing.
@@ -590,7 +595,12 @@ class OjinPersonaService(FrameProcessor):
         audio and receiving messages.
         """
         assert self._client is not None
-        await self._client.connect()
+        try:
+            await self._client.connect()
+        except ConnectionError as e:
+            logger.error(e)
+            return
+
         # Create tasks to process audio and video
         self._audio_input_task = self.create_task(self._process_queued_audio())
         self._receive_task = self.create_task(self._receive_messages())
@@ -709,8 +719,7 @@ class OjinPersonaService(FrameProcessor):
 
             self._interaction.next_frame()
             if message.is_final_response:
-                logger.debug("No more video frames expected")
-                self._close_interaction()
+                logger.debug("No more video frames expected")                
                 if self._fsm is not None:
                     await self._fsm.on_conversation_signal(
                         ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
@@ -729,6 +738,22 @@ class OjinPersonaService(FrameProcessor):
             assert self._interaction is not None
             self._interaction.interaction_id = message.interaction_id
             self._interaction.set_state(InteractionState.ACTIVE)
+        elif isinstance(message, ErrorResponseMessage):
+            is_fatal = False
+            if message.payload.code == "NO_BACKEND_SERVER_AVAILABLE":
+                logger.error("No OJIN servers available. Please try again later.")
+                is_fatal = True
+            elif message.payload.code == "FRAME_SIZE_TOO_BIG":
+                logger.error("Frame Size sent to Ojin server was higher than the allowed max limit.")
+            elif message.payload.code == "INVALID_INTERACTION_ID":
+                logger.error("Invalid interaction ID sent to Ojin server")
+            elif message.payload.code == "FAILED_CREATE_MODEL":
+                is_fatal = True
+                logger.error("Ojin couldn't create a model from supplied persona ID.")
+
+            if is_fatal:
+                await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
+                await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
 
     def get_fsm_state(self) -> PersonaState:
         """Get the current state of the persona's finite state machine.
@@ -871,10 +896,6 @@ class OjinPersonaService(FrameProcessor):
         logger.debug("Sending StartInteractionMessage")
         await self.push_ojin_message(StartInteractionMessage())
 
-        # immediately receive the ready message for now
-        assert self._client is not None
-        message = await self._client.receive_message()
-        await self._handle_ojin_message(message)
 
     async def _end_interaction(self):
         """End the current interaction.
