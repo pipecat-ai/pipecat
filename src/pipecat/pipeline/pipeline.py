@@ -175,7 +175,5 @@ class Pipeline(BasePipeline):
         """Link all processors in sequence and set their parent."""
         prev = self._processors[0]
         for curr in self._processors[1:]:
-            prev.set_parent(self)
             prev.link(curr)
             prev = curr
-        prev.set_parent(self)

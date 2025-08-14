@@ -38,10 +38,7 @@ from pipecat.observers.base_observer import BaseObserver, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
-from pipecat.utils.asyncio.watchdog_priority_queue import (
-    WatchdogPriorityCancelSentinel,
-    WatchdogPriorityQueue,
-)
+from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.base_object import BaseObject
 
@@ -169,7 +166,6 @@ class FrameProcessor(BaseObject):
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(name=name)
-        self._parent: Optional["FrameProcessor"] = None
         self._prev: Optional["FrameProcessor"] = None
         self._next: Optional["FrameProcessor"] = None
 
@@ -482,30 +478,6 @@ class FrameProcessor(BaseObject):
         processor._prev = self
         logger.debug(f"Linking {self} -> {self._next}")
 
-    def get_event_loop(self) -> asyncio.AbstractEventLoop:
-        """Get the event loop used by this processor.
-
-        Returns:
-            The asyncio event loop.
-        """
-        return self.task_manager.get_event_loop()
-
-    def set_parent(self, parent: "FrameProcessor"):
-        """Set the parent processor for this processor.
-
-        Args:
-            parent: The parent processor.
-        """
-        self._parent = parent
-
-    def get_parent(self) -> Optional["FrameProcessor"]:
-        """Get the parent processor.
-
-        Returns:
-            The parent processor, or None if no parent is set.
-        """
-        return self._parent
-
     def get_clock(self) -> BaseClock:
         """Get the clock used by this processor.
 
@@ -518,6 +490,14 @@ class FrameProcessor(BaseObject):
         if not self._clock:
             raise Exception(f"{self} Clock is still not initialized.")
         return self._clock
+
+    def get_event_loop(self) -> asyncio.AbstractEventLoop:
+        """Get the event loop used by this processor.
+
+        Returns:
+            The asyncio event loop.
+        """
+        return self.task_manager.get_event_loop()
 
     async def queue_frame(
         self,
