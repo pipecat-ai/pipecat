@@ -36,8 +36,6 @@ from pipecat.frames.frames import AudioRawFrame, Frame
 # should consider managing our own definitions. But we should do so carefully,
 # as the OpenAI messages are somewhat of a standard and we want to continue
 # supporting them.
-# TODO: "input_audio" messages already diverge slightly from OpenAI's standard
-# format...but they probably don't need to? Revisit.
 LLMStandardMessage = ChatCompletionMessageParam
 LLMContextToolChoice = ChatCompletionToolChoiceOptionParam
 NOT_GIVEN = OPEN_AI_NOT_GIVEN
@@ -194,9 +192,6 @@ class LLMContext:
         )
         self.add_message({"role": "user", "content": content})
 
-    # NOTE: today we've only built support for audio frames with the Google
-    # LLM, so this "universal" representation skews towards that.
-    # When we add support for other LLMs, we may need to adjust this.
     def add_audio_frames_message(
         self, *, audio_frames: list[AudioRawFrame], text: str = "Audio follows"
     ):
@@ -215,18 +210,57 @@ class LLMContext:
         content = []
         content.append({"type": "text", "text": text})
         data = b"".join(frame.audio for frame in audio_frames)
-        # TODO: filter this out in OpenAI adapter, since it doesn't support audio frames
+        data = bytes(
+            self._create_wav_header(
+                sample_rate,
+                num_channels,
+                16,
+                len(data),
+            )
+            + data
+        )
+        encoded_audio = base64.b64encode(data).decode("utf-8")
         content.append(
             {
                 "type": "input_audio",
-                "input_audio": {
-                    "data": data,
-                    "sample_rate": sample_rate,
-                    "num_channels": num_channels,
-                },
+                "input_audio": {"data": encoded_audio, "format": "wav"},
             }
         )
         self.add_message({"role": "user", "content": content})
+
+    def _create_wav_header(self, sample_rate, num_channels, bits_per_sample, data_size):
+        """Create a WAV file header for audio data.
+
+        Args:
+            sample_rate: Audio sample rate in Hz.
+            num_channels: Number of audio channels.
+            bits_per_sample: Bits per audio sample.
+            data_size: Size of audio data in bytes.
+
+        Returns:
+            WAV header as a bytearray.
+        """
+        # RIFF chunk descriptor
+        header = bytearray()
+        header.extend(b"RIFF")  # ChunkID
+        header.extend((data_size + 36).to_bytes(4, "little"))  # ChunkSize: total size - 8
+        header.extend(b"WAVE")  # Format
+        # "fmt " sub-chunk
+        header.extend(b"fmt ")  # Subchunk1ID
+        header.extend((16).to_bytes(4, "little"))  # Subchunk1Size (16 for PCM)
+        header.extend((1).to_bytes(2, "little"))  # AudioFormat (1 for PCM)
+        header.extend(num_channels.to_bytes(2, "little"))  # NumChannels
+        header.extend(sample_rate.to_bytes(4, "little"))  # SampleRate
+        # Calculate byte rate and block align
+        byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
+        block_align = num_channels * (bits_per_sample // 8)
+        header.extend(byte_rate.to_bytes(4, "little"))  # ByteRate
+        header.extend(block_align.to_bytes(2, "little"))  # BlockAlign
+        header.extend(bits_per_sample.to_bytes(2, "little"))  # BitsPerSample
+        # "data" sub-chunk
+        header.extend(b"data")  # Subchunk2ID
+        header.extend(data_size.to_bytes(4, "little"))  # Subchunk2Size
+        return header
 
     def _validate_tools(self):
         """Validate the tools schema.

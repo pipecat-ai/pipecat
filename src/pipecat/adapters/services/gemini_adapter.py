@@ -290,24 +290,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     )
                 elif c["type"] == "input_audio":
                     input_audio = c["input_audio"]
-                    parts.append(
-                        Part(
-                            inline_data=Blob(
-                                mime_type="audio/wav",
-                                data=(
-                                    bytes(
-                                        self.create_wav_header(
-                                            input_audio["sample_rate"],
-                                            input_audio["num_channels"],
-                                            16,
-                                            len(input_audio["data"]),
-                                        )
-                                        + input_audio["data"]
-                                    )
-                                ),
-                            )
-                        )
-                    )
+                    audio_bytes = base64.b64decode(input_audio["data"])
+                    parts.append(Part(inline_data=Blob(mime_type="audio/wav", data=audio_bytes)))
 
         message = Content(role=role, parts=parts)
         return message
