@@ -92,38 +92,4 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         # Fallback to return the same tools in case they are not in a standard format
         return tools
 
-    def create_wav_header(self, sample_rate, num_channels, bits_per_sample, data_size):
-        """Create a WAV file header for audio data.
-
-        Args:
-            sample_rate: Audio sample rate in Hz.
-            num_channels: Number of audio channels.
-            bits_per_sample: Bits per audio sample.
-            data_size: Size of audio data in bytes.
-
-        Returns:
-            WAV header as a bytearray.
-        """
-        # RIFF chunk descriptor
-        header = bytearray()
-        header.extend(b"RIFF")  # ChunkID
-        header.extend((data_size + 36).to_bytes(4, "little"))  # ChunkSize: total size - 8
-        header.extend(b"WAVE")  # Format
-        # "fmt " sub-chunk
-        header.extend(b"fmt ")  # Subchunk1ID
-        header.extend((16).to_bytes(4, "little"))  # Subchunk1Size (16 for PCM)
-        header.extend((1).to_bytes(2, "little"))  # AudioFormat (1 for PCM)
-        header.extend(num_channels.to_bytes(2, "little"))  # NumChannels
-        header.extend(sample_rate.to_bytes(4, "little"))  # SampleRate
-        # Calculate byte rate and block align
-        byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
-        block_align = num_channels * (bits_per_sample // 8)
-        header.extend(byte_rate.to_bytes(4, "little"))  # ByteRate
-        header.extend(block_align.to_bytes(2, "little"))  # BlockAlign
-        header.extend(bits_per_sample.to_bytes(2, "little"))  # BitsPerSample
-        # "data" sub-chunk
-        header.extend(b"data")  # Subchunk2ID
-        header.extend(data_size.to_bytes(4, "little"))  # Subchunk2Size
-        return header
-
     # TODO: we can move the logic to also handle the Messages here
