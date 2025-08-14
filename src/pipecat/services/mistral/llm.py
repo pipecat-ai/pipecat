@@ -145,20 +145,15 @@ class MistralLLMService(OpenAILLMService):
         if calls_to_execute:
             await super().run_function_calls(calls_to_execute)
 
-    async def get_chat_completions(
+    def build_chat_completion_params(
         self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> AsyncStream[ChatCompletionChunk]:
-        """Create a streaming chat completion using Mistral's API.
+    ) -> dict:
+        """Build parameters for Mistral chat completion request.
 
-        Args:
-            context: The context object containing tools configuration
-                and other settings for the chat completion.
-            messages: The list of messages comprising
-                the conversation history and current request.
-
-        Returns:
-            A streaming response of chat completion
-                chunks that can be processed asynchronously.
+        Handles Mistral-specific requirements including:
+        - Assistant message prefix requirement for API compatibility
+        - Parameter mapping (random_seed instead of seed)
+        - Core completion settings
         """
         # Apply Mistral's assistant prefix requirement for API compatibility
         fixed_messages = self._apply_mistral_assistant_prefix(messages)
@@ -184,5 +179,4 @@ class MistralLLMService(OpenAILLMService):
         # Add any extra parameters
         params.update(self._settings["extra"])
 
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+        return params
