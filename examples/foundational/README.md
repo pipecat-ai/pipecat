@@ -4,40 +4,32 @@ This directory contains examples showing how to build voice and multimodal agent
 
 ## Setup
 
-1. Make sure you have uv installed:
+1. Follow the [README](../../README.md#%EF%B8%8F-contributing-to-the-framework) steps to get your local environment configured.
 
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
+   > **Run from root directory**: Make sure you are running the steps from the root directory.
 
-   > **Need help?** Refer to the [uv install documentation](https://docs.astral.sh/uv/getting-started/installation/).
+   > **Using local audio?**: The `LocalAudioTransport` requires a system dependency for `portaudio`. Install the dependency to use the transport.
 
-2. Create a venv and install example dependencies:
-
-   ```bash
-   uv sync --all-extras --no-extra krisp
-   ```
-
-3. Create a `.env` file with your API keys:
+2. Copy the [`env.example`](../../env.example) file and add API keys for services you plan to use:
 
    ```bash
    cp env.example .env
    # Edit .env with your API keys
    ```
 
-4. Navigate to the examples directory:
+3. Navigate to the examples directory if you aren't already there:
 
    ```bash
    cd examples/foundational
    ```
 
-5. Run any example:
+4. Run any example:
 
    ```bash
    uv run python 01-say-one-thing.py
    ```
 
-6. Open the web interface at http://localhost:7860/client/ and click "Connect"
+5. Open the web interface at http://localhost:7860/client/ and click "Connect"
 
 ## Running examples with other transports
 
