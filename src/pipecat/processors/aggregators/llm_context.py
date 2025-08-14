@@ -17,8 +17,9 @@ service-specific adapter.
 import base64
 import io
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TypeAlias, Union
 
+from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
 from openai.types.chat import (
@@ -31,13 +32,31 @@ from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame, Frame
 
 # "Re-export" types from OpenAI that we're using as universal context types.
-# NOTE: this is just for convenience, for now. As soon as the universal types
-# diverge from OpenAI's, we should ditch this. In fact, audio frames already
-# diverge from OpenAI's standard format...we really ought to do this.
-LLMContextMessage = ChatCompletionMessageParam
+# NOTE: if universal message types need to someday diverge from OpenAI's, we
+# should consider managing our own definitions. But we should do so carefully,
+# as the OpenAI messages are somewhat of a standard and we want to continue
+# supporting them.
+# TODO: "input_audio" messages already diverge slightly from OpenAI's standard
+# format...but they probably don't need to? Revisit.
+LLMStandardMessage = ChatCompletionMessageParam
 LLMContextToolChoice = ChatCompletionToolChoiceOptionParam
 NOT_GIVEN = OPEN_AI_NOT_GIVEN
 NotGiven = OpenAINotGiven
+
+
+@dataclass
+class LLMSpecificMessage:
+    """A container for a context message that is specific to a particular LLM service.
+
+    Enables the use of service-specific message types while maintaining
+    compatibility with the universal LLM context format.
+    """
+
+    llm: str
+    message: Any
+
+
+LLMContextMessage: TypeAlias = Union[LLMStandardMessage, LLMSpecificMessage]
 
 
 class LLMContext:
@@ -66,14 +85,30 @@ class LLMContext:
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
         self._validate_tools()
 
-    @property
-    def messages(self) -> List[LLMContextMessage]:
+    def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
         """Get the current messages list.
+
+        Args:
+            llm_specific_filter: Optional filter to return LLM-specific
+                messages for the given LLM, in addition to the standard
+                messages. If messages end up being filtered, an error will be
+                logged.
 
         Returns:
             List of conversation messages.
         """
-        return self._messages
+        if llm_specific_filter is None:
+            return self._messages
+        filtered_messages = [
+            msg
+            for msg in self._messages
+            if not isinstance(msg, LLMSpecificMessage) or msg.llm == llm_specific_filter
+        ]
+        if len(filtered_messages) < len(self._messages):
+            logger.error(
+                f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
+            )
+        return filtered_messages
 
     @property
     def tools(self) -> ToolsSchema | NotGiven:
