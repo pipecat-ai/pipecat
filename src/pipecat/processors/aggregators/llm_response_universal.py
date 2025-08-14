@@ -53,7 +53,11 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+)
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -85,13 +89,13 @@ class LLMContextAggregator(FrameProcessor):
         self._aggregation: str = ""
 
     @property
-    def messages(self) -> List[dict]:
+    def messages(self) -> List[LLMContextMessage]:
         """Get messages from the LLM context.
 
         Returns:
             List of message dictionaries from the context.
         """
-        return self._context.messages
+        return self._context.get_messages()
 
     @property
     def role(self) -> str:
@@ -741,9 +745,10 @@ class LLMAssistantAggregator(LLMContextAggregator):
             del self._function_calls_in_progress[frame.tool_call_id]
 
     def _update_function_call_result(self, function_name: str, tool_call_id: str, result: Any):
-        for message in self._context.messages:
+        for message in self._context.get_messages():
             if (
-                message["role"] == "tool"
+                not isinstance(message, LLMSpecificMessage)
+                and message["role"] == "tool"
                 and message["tool_call_id"]
                 and message["tool_call_id"] == tool_call_id
             ):
