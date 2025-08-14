@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `MistralLLMService`, using Mistral's chat completion API.
 
+- For `OpenAILLMService` and its subclasses, added the ability to retry
+  executing a chat completion after a timeout period. The new args are
+  `retry_timeout_secs` and `retry_on_timeout`. This feature is disabled by
+  default.
+
 ### Fixed
 
 - Fixed an issue where `AsyncAITTSService` had very high latency in responding
@@ -27,11 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `GeminiTTSService` which uses Google Gemini to generate TTS output. The
   Gemini model can be prompted to insert styled speech to control the TTS
   output.
-
-- For `OpenAILLMService` and its subclasses, added the ability to retry
-  executing a chat completion after a timeout period. The new args are
-  `retry_timeout_secs` and `retry_on_timeout`. This feature is disabled by
-  default.
 
 - Added Exotel support to Pipecat's development runner. You can now connect
   using the runner with `uv run bot.py -t exotel` and an ngrok connection to
