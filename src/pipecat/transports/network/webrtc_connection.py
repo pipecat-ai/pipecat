@@ -39,6 +39,7 @@ except ModuleNotFoundError as e:
 SIGNALLING_TYPE = "signalling"
 AUDIO_TRANSCEIVER_INDEX = 0
 VIDEO_TRANSCEIVER_INDEX = 1
+SCREEN_VIDEO_TRANSCEIVER_INDEX = 2
 
 
 class TrackStatusMessage(BaseModel):
@@ -94,14 +95,16 @@ class SmallWebRTCTrack:
     enable/disable control and frame discarding for audio and video streams.
     """
 
-    def __init__(self, track: MediaStreamTrack):
+    def __init__(self, track: MediaStreamTrack, index: int):
         """Initialize the WebRTC track wrapper.
 
         Args:
             track: The underlying MediaStreamTrack to wrap.
+            index: The index of the track in the transceiver (0 for mic, 1 for cam, 2 for screen)
         """
         self._track = track
         self._enabled = True
+        self.source_index = index
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable the track.
@@ -191,6 +194,7 @@ class SmallWebRTCConnection(BaseObject):
         self._track_getters = {
             AUDIO_TRANSCEIVER_INDEX: self.audio_input_track,
             VIDEO_TRANSCEIVER_INDEX: self.video_input_track,
+            SCREEN_VIDEO_TRANSCEIVER_INDEX: self.screen_video_input_track,
         }
 
         self._initialize()
@@ -343,6 +347,9 @@ class SmallWebRTCConnection(BaseObject):
             video_input_track = self.video_input_track()
             if video_input_track:
                 await self.video_input_track().discard_old_frames()
+            screen_video_input_track = self.screen_video_input_track()
+            if screen_video_input_track:
+                await self.screen_video_input_track().discard_old_frames()
             self.ask_to_renegotiate()
 
     async def renegotiate(self, sdp: str, type: str, restart_pc: bool = False):
@@ -488,15 +495,15 @@ class SmallWebRTCConnection(BaseObject):
             return self._track_map[AUDIO_TRANSCEIVER_INDEX]
 
         # Transceivers always appear in creation-order for both peers
-        # For now we are only considering that we are going to have 02 transceivers,
-        # one for audio and one for video
+        # For support 3 receivers in the following order:
+        #   audio, video, screenVideo
         transceivers = self._pc.getTransceivers()
         if len(transceivers) == 0 or not transceivers[AUDIO_TRANSCEIVER_INDEX].receiver:
             logger.warning("No audio transceiver is available")
             return None
 
         track = transceivers[AUDIO_TRANSCEIVER_INDEX].receiver.track
-        audio_track = SmallWebRTCTrack(track) if track else None
+        audio_track = SmallWebRTCTrack(track, AUDIO_TRANSCEIVER_INDEX) if track else None
         self._track_map[AUDIO_TRANSCEIVER_INDEX] = audio_track
         return audio_track
 
@@ -510,16 +517,38 @@ class SmallWebRTCConnection(BaseObject):
             return self._track_map[VIDEO_TRANSCEIVER_INDEX]
 
         # Transceivers always appear in creation-order for both peers
-        # For now we are only considering that we are going to have 02 transceivers,
-        # one for audio and one for video
+        # For support 3 receivers in the following order:
+        #   audio, video, screenVideo
         transceivers = self._pc.getTransceivers()
         if len(transceivers) <= 1 or not transceivers[VIDEO_TRANSCEIVER_INDEX].receiver:
             logger.warning("No video transceiver is available")
             return None
 
         track = transceivers[VIDEO_TRANSCEIVER_INDEX].receiver.track
-        video_track = SmallWebRTCTrack(track) if track else None
+        video_track = SmallWebRTCTrack(track, VIDEO_TRANSCEIVER_INDEX) if track else None
         self._track_map[VIDEO_TRANSCEIVER_INDEX] = video_track
+        return video_track
+
+    def screen_video_input_track(self):
+        """Get the screen video input track wrapper.
+
+        Returns:
+            SmallWebRTCTrack wrapper for the screen video track, or None if unavailable.
+        """
+        if self._track_map.get(SCREEN_VIDEO_TRANSCEIVER_INDEX):
+            return self._track_map[SCREEN_VIDEO_TRANSCEIVER_INDEX]
+
+        # Transceivers always appear in creation-order for both peers
+        # For support 3 receivers in the following order:
+        #   audio, video, screenVideo
+        transceivers = self._pc.getTransceivers()
+        if len(transceivers) <= 1 or not transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver:
+            logger.warning("No screen video transceiver is available")
+            return None
+
+        track = transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver.track
+        video_track = SmallWebRTCTrack(track, SCREEN_VIDEO_TRANSCEIVER_INDEX) if track else None
+        self._track_map[SCREEN_VIDEO_TRANSCEIVER_INDEX] = video_track
         return video_track
 
     def send_app_message(self, message: Any):
