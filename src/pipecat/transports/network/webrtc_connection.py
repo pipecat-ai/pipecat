@@ -542,7 +542,7 @@ class SmallWebRTCConnection(BaseObject):
         # For support 3 receivers in the following order:
         #   audio, video, screenVideo
         transceivers = self._pc.getTransceivers()
-        if len(transceivers) <= 1 or not transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver:
+        if len(transceivers) <= 2 or not transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver:
             logger.warning("No screen video transceiver is available")
             return None
 
