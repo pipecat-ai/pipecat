@@ -169,11 +169,6 @@ class LLMContextAggregator(FrameProcessor):
         self._aggregation = ""
 
 
-# NOTE: the "universal" suffix is just meant to distinguish this aggregator
-# from the old LLMUserContextAggregator while we gradually migrate service to
-# use the new universal LLMContext and associated patterns. The suffix will go
-# away once the migration is complete and the other LLMUserContextAggregator is
-# deprecated.
 class LLMUserAggregator(LLMContextAggregator):
     """User LLM aggregator that processes speech-to-text transcriptions.
 
@@ -511,11 +506,6 @@ class LLMUserAggregator(LLMContextAggregator):
                 self._emulating_vad = True
 
 
-# NOTE: the "universal" suffix is just meant to distinguish this aggregator
-# from the old LLMAssistantContextAggregator while we gradually migrate service
-# to use the new universal LLMContext and associated patterns. The suffix will
-# go away once the migration is complete and the other
-# LLMAssistantContextAggregator is deprecated.
 class LLMAssistantAggregator(LLMContextAggregator):
     """Assistant LLM aggregator that processes bot responses and function calls.
 
