@@ -251,6 +251,36 @@ class FrameProcessor(BaseObject):
         return self._name
 
     @property
+    def processors(self) -> List["FrameProcessor"]:
+        """Return the list of sub-processors contained within this processor.
+
+        Only compound processors (e.g. pipelines and parallel pipelines) have
+        sub-processors. Non-compound processors will return an empty list.
+
+        Returns:
+            The list of sub-processors if this is a compound processor.
+        """
+        return []
+
+    @property
+    def next(self) -> Optional["FrameProcessor"]:
+        """Get the next processor.
+
+        Returns:
+            The next processor, or None if there's no next processor.
+        """
+        return self._next
+
+    @property
+    def previous(self) -> Optional["FrameProcessor"]:
+        """Get the previous processor.
+
+        Returns:
+            The previous processor, or None if there's no previous processor.
+        """
+        return self._prev
+
+    @property
     def interruptions_allowed(self):
         """Check if interruptions are allowed for this processor.
 
