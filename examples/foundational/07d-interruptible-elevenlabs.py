@@ -37,8 +37,6 @@ from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 
-# Create VAD parameters optimized for quiet speakers
-
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
