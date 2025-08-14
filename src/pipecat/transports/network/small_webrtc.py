@@ -679,25 +679,28 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             # Start screen video reception if it's not already running
             self._receive_screen_video_task = self.create_task(self._receive_video("screenVideo"))
 
-    async def capture_participant_video(
+    async def capture_participant_media(
         self,
-        video_source: str = "camera",
+        source: str = "camera",
     ):
-        """Capture video from a specific participant.
+        """Capture media from a specific participant.
 
         Args:
-            video_source: Video source to capture from.
+            source: Media source to capture from. ("camera", "microphone", or "screenVideo")
         """
         # If we're not already receiving video, try to get a frame now
         if (
-            video_source == "camera"
-            and not self._receive_video_task
-            and self._params.video_in_enabled
+            source == "microphone"
+            and not self._receive_audio_task
+            and self._params.audio_in_enabled
         ):
+            # Start audio reception if it's not already running
+            self._receive_audio_task = self.create_task(self._receive_audio())
+        elif source == "camera" and not self._receive_video_task and self._params.video_in_enabled:
             # Start video reception if it's not already running
             self._receive_video_task = self.create_task(self._receive_video("camera"))
         elif (
-            video_source == "screenVideo"
+            source == "screenVideo"
             and not self._receive_screen_video_task
             and self._params.video_in_enabled
         ):
@@ -892,15 +895,34 @@ class SmallWebRTCTransport(BaseTransport):
 
     async def capture_participant_video(
         self,
+        participant_id: str = None,
+        framerate: int = 30,
         video_source: str = "camera",
+        color_format: str = "RGB",
     ):
         """Capture video from a specific participant.
 
         Args:
-            participant_id: ID of the participant to capture video from.
-            framerate: Desired framerate for video capture.
+            participant_id: Unused parameter, kept for compatibility.
+            framerate: Unused parameter, kept for compatibility.
             video_source: Video source to capture from.
-            color_format: Color format for video frames.
+            color_format: Unused parameter, kept for compatibility.
         """
         if self._input:
-            await self._input.capture_participant_video(video_source)
+            await self._input.capture_participant_media(source=video_source)
+
+    async def capture_participant_audio(
+        self,
+        participant_id: str = None,
+        audio_source: str = "microphone",
+        sample_rate: int = 16000,
+    ):
+        """Capture audio from a specific participant.
+
+        Args:
+            participant_id: Unused parameter, kept for compatibility.
+            audio_source: Audio source to capture from. (currently, "microphone" is the only supported option)
+            sample_rate: Unused parameter, kept for compatibility.
+        """
+        if self._input:
+            await self._input.capture_participant_media(source=audio_source)
