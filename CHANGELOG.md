@@ -69,6 +69,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed AsyncAI WS TTS startup latency by sending `force=true`
+
 - Fixed an issue with the `BaseWhisperSTTService` where the language was
   specified as an enum and not a string.
 

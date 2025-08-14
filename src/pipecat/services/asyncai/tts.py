@@ -335,7 +335,7 @@ class AsyncAITTSService(InterruptibleTTSService):
                 yield TTSStartedFrame()
                 self._started = True
 
-            msg = self._build_msg(text=text)
+            msg = self._build_msg(text=text, force=True)
 
             try:
                 await self._get_websocket().send(msg)
