@@ -62,11 +62,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         model="bulbul:v2",
         voice_id="manisha",
     )
-    # tts = SarvamHttpTTSService(
-    #     api_key=os.getenv("SARVAM_API_KEY"),
-    #     aiohttp_session=session,
-    # )
-
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
     messages = [
@@ -105,9 +100,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([context_aggregator.user().get_context_frame()])
-        # Wait 30 seconds and then change the voice.
-        await asyncio.sleep(30)
-        await task.queue_frame(TTSUpdateSettingsFrame(settings={"voice": "anushka"}))
+
+        # Optionally, you can wait for 30 seconds and then change the voice.
+        # await asyncio.sleep(30)
+        # await task.queue_frame(TTSUpdateSettingsFrame(settings={"voice": "anushka"}))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
