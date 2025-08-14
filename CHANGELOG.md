@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `retry_timeout_secs` and `retry_on_timeout`. This feature is disabled by
   default.
 
+### Removed
+
+- Removed unused `FrameProcessor.set_parent()` and
+  `FrameProcessor.get_parent()`.
+
 ### Fixed
 
 - Fixed an `AudioBufferProcessor` issues that would cause audio overlap when
