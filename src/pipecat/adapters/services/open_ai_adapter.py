@@ -56,7 +56,7 @@ class OpenAILLMAdapter(BaseLLMAdapter):
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
         return {
-            "messages": self._from_standard_messages(context.messages),
+            "messages": self._from_universal_context_messages(self._get_messages(context)),
             # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
             "tool_choice": context.tool_choice,
@@ -90,7 +90,7 @@ class OpenAILLMAdapter(BaseLLMAdapter):
             List of messages in a format ready for logging about OpenAI.
         """
         msgs = []
-        for message in context.messages:
+        for message in self._get_messages(context):
             msg = copy.deepcopy(message)
             if "content" in msg:
                 if isinstance(msg["content"], list):
@@ -103,10 +103,13 @@ class OpenAILLMAdapter(BaseLLMAdapter):
             msgs.append(msg)
         return json.dumps(msgs, ensure_ascii=False)
 
-    def _from_standard_messages(
+    def _get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
+        return context.get_messages("openai")
+
+    def _from_universal_context_messages(
         self, messages: List[LLMContextMessage]
     ) -> List[ChatCompletionMessageParam]:
-        # Just a pass-through: messages is already the right type
+        # Just a pass-through: messages are already the right type
         return messages
 
     def _from_standard_tool_choice(

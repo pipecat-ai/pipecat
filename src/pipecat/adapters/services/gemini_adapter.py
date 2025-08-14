@@ -57,7 +57,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         Returns:
             Dictionary of parameters for Gemini's API.
         """
-        messages = self._from_standard_messages(context.messages)
+        messages = self._from_universal_context_messages(self._get_messages(context))
         return {
             "system_instruction": messages.system_instruction,
             "messages": messages.messages,
@@ -97,7 +97,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             List of messages in a format ready for logging about Gemini.
         """
         # Get messages in Gemini's format
-        messages = self._from_standard_messages(context.messages).messages
+        messages = self._from_universal_context_messages(self._get_messages(context)).messages
 
         # Sanitize messages for logging
         messages_for_logging = []
@@ -113,6 +113,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             messages_for_logging.append(obj)
         return messages_for_logging
 
+    def _get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
+        return context.get_messages("google")
+
     @dataclass
     class ConvertedMessages:
         """Container for converted messages.
@@ -123,8 +126,8 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         messages: List[Content]
         system_instruction: Optional[str] = None
 
-    def _from_standard_messages(
-        self, standard_messages: List[LLMContextMessage]
+    def _from_universal_context_messages(
+        self, universal_context_messages: List[LLMContextMessage]
     ) -> ConvertedMessages:
         """Restructures messages to ensure proper Google format and message ordering.
 
@@ -146,7 +149,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         messages = []
 
         # Process each message, preserving Google-formatted messages and converting others
-        for message in standard_messages:
+        for message in universal_context_messages:
             if isinstance(message, Content):
                 # Keep existing Google-formatted messages (e.g., function calls/responses)
                 # TODO: this branch is probably not needed anymore, since LLMContext contains a universal format
@@ -154,7 +157,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 continue
 
             # Convert standard format to Google format
-            converted = self._from_standard_message(message)
+            converted = self._from_universal_context_message(message)
             if isinstance(converted, Content):
                 # Regular (non-system) message
                 messages.append(converted)
@@ -180,15 +183,15 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return self.ConvertedMessages(messages=messages, system_instruction=system_instruction)
 
-    def _from_standard_message(self, message: LLMContextMessage) -> Content | str:
-        """Convert standard format message to Google Content object.
+    def _from_universal_context_message(self, message: LLMContextMessage) -> Content | str:
+        """Convert universal context message to Google Content object.
 
         Handles conversion of text, images, and function calls to Google's
         format.
         System instructions are returned as a plain string.
 
         Args:
-            message: Message in standard format.
+            message: Message in universal context format.
 
         Returns:
             Content object with role and parts, or a plain string for system
