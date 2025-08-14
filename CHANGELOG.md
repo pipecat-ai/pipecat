@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `FrameProcessor` properties `processors`, `next` and `previous`.
+
 - `ElevenLabsTTSService` now supports additional runtime changes to the `model`,
   `language`, and `voice_settings` parameters.
 
