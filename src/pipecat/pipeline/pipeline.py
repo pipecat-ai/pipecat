@@ -98,7 +98,7 @@ class Pipeline(BasePipeline):
         Args:
             processors: List of frame processors to connect in sequence.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
 
         # Add a source and a sink queue so we can forward frames upstream and
         # downstream outside of the pipeline.
