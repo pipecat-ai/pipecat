@@ -43,6 +43,7 @@ from pipecat.observers.base_observer import BaseObserver
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.utils.asyncio.task_manager import (
@@ -244,7 +245,6 @@ class PipelineTask(BasePipelineTask):
                 will be logged if the watchdog timer is not reset before this timeout.
         """
         super().__init__()
-        self._pipeline = pipeline
         self._params = params or PipelineParams()
         self._additional_span_attributes = additional_span_attributes or {}
         self._cancel_on_idle_timeout = cancel_on_idle_timeout
@@ -311,17 +311,13 @@ class PipelineTask(BasePipelineTask):
         # StopFrame) has been received in the down queue.
         self._pipeline_end_event = asyncio.Event()
 
-        # This is a source processor that we connect to the provided
-        # pipeline. This source processor allows up to receive and react to
-        # upstream frames.
-        self._source = PipelineTaskSource(self._up_queue)
-        self._source.link(pipeline)
-
-        # This is a sink processor that we connect to the provided
-        # pipeline. This sink processor allows up to receive and react to
-        # downstream frames.
-        self._sink = PipelineTaskSink(self._down_queue)
-        pipeline.link(self._sink)
+        # This is the final pipeline. It is composed of a source processor,
+        # followed by the user pipeline, and ending with a sink processor. The
+        # source allows us to receive and react to upstream frames, and the sink
+        # allows us to receive and react to downstream frames.
+        source = PipelineTaskSource(self._up_queue)
+        sink = PipelineTaskSink(self._down_queue)
+        self._pipeline = Pipeline([source, pipeline, sink])
 
         # The task observer acts as a proxy to the provided observers. This way,
         # we only need to pass a single observer (using the StartFrame) which
@@ -494,7 +490,7 @@ class PipelineTask(BasePipelineTask):
             # Make sure everything is cleaned up downstream. This is sent
             # out-of-band from the main streaming task which is what we want since
             # we want to cancel right away.
-            await self._source.push_frame(CancelFrame())
+            await self._pipeline.queue_frame(CancelFrame())
             # Wait for CancelFrame to make it throught the pipeline.
             await self._wait_for_pipeline_end()
             # Only cancel the push task, we don't want to be able to process any
@@ -606,9 +602,7 @@ class PipelineTask(BasePipelineTask):
             observer=self._observer,
             watchdog_timers_enabled=self._enable_watchdog_timers,
         )
-        await self._source.setup(setup)
         await self._pipeline.setup(setup)
-        await self._sink.setup(setup)
 
     async def _cleanup(self, cleanup_pipeline: bool):
         """Clean up the pipeline task and processors."""
@@ -620,10 +614,8 @@ class PipelineTask(BasePipelineTask):
             self._turn_trace_observer.end_conversation_tracing()
 
         # Cleanup pipeline processors.
-        await self._source.cleanup()
         if cleanup_pipeline:
             await self._pipeline.cleanup()
-        await self._sink.cleanup()
 
     async def _process_push_queue(self):
         """Process frames from the push queue and send them through the pipeline.
@@ -647,16 +639,16 @@ class PipelineTask(BasePipelineTask):
             interruption_strategies=self._params.interruption_strategies,
         )
         start_frame.metadata = self._params.start_metadata
-        await self._source.queue_frame(start_frame, FrameDirection.DOWNSTREAM)
+        await self._pipeline.queue_frame(start_frame)
 
         if self._params.enable_metrics and self._params.send_initial_empty_metrics:
-            await self._source.queue_frame(self._initial_metrics_frame(), FrameDirection.DOWNSTREAM)
+            await self._pipeline.queue_frame(self._initial_metrics_frame())
 
         running = True
         cleanup_pipeline = True
         while running:
             frame = await self._push_queue.get()
-            await self._source.queue_frame(frame, FrameDirection.DOWNSTREAM)
+            await self._pipeline.queue_frame(frame)
             if isinstance(frame, (CancelFrame, EndFrame, StopFrame)):
                 await self._wait_for_pipeline_end()
             running = not isinstance(frame, (CancelFrame, EndFrame, StopFrame))
@@ -741,7 +733,7 @@ class PipelineTask(BasePipelineTask):
             # Don't use `queue_frame()` because if an EndFrame is queued the
             # task will just stop waiting for the pipeline to finish not
             # allowing more frames to be pushed.
-            await self._source.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
+            await self._pipeline.queue_frame(HeartbeatFrame(timestamp=self._clock.get_time()))
             await asyncio.sleep(self._params.heartbeats_period_secs)
 
     async def _heartbeat_monitor_handler(self):

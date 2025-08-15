@@ -132,14 +132,12 @@ class ParallelPipeline(BasePipeline):
             Exception: If no processor lists are provided.
             TypeError: If any argument is not a list of processors.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
 
         if len(args) == 0:
             raise Exception(f"ParallelPipeline needs at least one argument")
 
         self._args = args
-        self._sources = []
-        self._sinks = []
         self._pipelines = []
 
         self._seen_ids = set()
@@ -185,30 +183,23 @@ class ParallelPipeline(BasePipeline):
             if not isinstance(processors, list):
                 raise TypeError(f"ParallelPipeline argument {processors} is not a list")
 
-            # We will add a source before the pipeline and a sink after.
+            # We add a source before the pipeline and a sink after so we control
+            # the frames that are pushed upstream and downstream.
             source = ParallelPipelineSource(self._up_queue, self._parallel_push_frame)
             sink = ParallelPipelineSink(self._down_queue, self._pipeline_sink_push_frame)
-            self._sources.append(source)
-            self._sinks.append(sink)
 
             # Create pipeline
-            pipeline = Pipeline(processors)
-            source.link(pipeline)
-            pipeline.link(sink)
+            pipeline = Pipeline([source] + processors + [sink])
             self._pipelines.append(pipeline)
 
         logger.debug(f"Finished creating {self} pipelines")
 
-        await asyncio.gather(*[s.setup(setup) for s in self._sources])
         await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
-        await asyncio.gather(*[s.setup(setup) for s in self._sinks])
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all its branches."""
         await super().cleanup()
-        await asyncio.gather(*[s.cleanup() for s in self._sources])
         await asyncio.gather(*[p.cleanup() for p in self._pipelines])
-        await asyncio.gather(*[s.cleanup() for s in self._sinks])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through all parallel branches with lifecycle coordination.
@@ -226,12 +217,9 @@ class ParallelPipeline(BasePipeline):
         elif isinstance(frame, CancelFrame):
             await self._cancel()
 
-        if direction == FrameDirection.UPSTREAM:
-            # If we get an upstream frame we process it in each sink.
-            await asyncio.gather(*[s.queue_frame(frame, direction) for s in self._sinks])
-        elif direction == FrameDirection.DOWNSTREAM:
-            # If we get a downstream frame we process it in each source.
-            await asyncio.gather(*[s.queue_frame(frame, direction) for s in self._sources])
+        # Process frames in each of the sub-pipelines.
+        for p in self._pipelines:
+            await p.queue_frame(frame, direction)
 
         # Handle interruptions after everything has been cancelled.
         if isinstance(frame, StartInterruptionFrame):
