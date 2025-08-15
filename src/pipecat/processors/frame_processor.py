@@ -339,6 +339,17 @@ class FrameProcessor(BaseObject):
             raise Exception(f"{self} TaskManager is still not initialized.")
         return self._task_manager
 
+    def processors_with_metrics(self):
+        """Return processors that can generate metrics.
+
+        Recursively collects all processors that support metrics generation,
+        including those from nested processors.
+
+        Returns:
+            List of frame processors that can generate metrics.
+        """
+        return []
+
     def can_generate_metrics(self) -> bool:
         """Check if this processor can generate metrics.
 

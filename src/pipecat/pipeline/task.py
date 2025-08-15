@@ -41,7 +41,6 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
 from pipecat.observers.turn_tracking_observer import TurnTrackingObserver
-from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.task_observer import TaskObserver
@@ -197,7 +196,7 @@ class PipelineTask(BasePipelineTask):
 
     def __init__(
         self,
-        pipeline: BasePipeline,
+        pipeline: FrameProcessor,
         *,
         params: Optional[PipelineParams] = None,
         additional_span_attributes: Optional[dict] = None,

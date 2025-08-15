@@ -149,7 +149,7 @@ class ParallelPipeline(BasePipeline):
         self._down_task = None
 
     #
-    # BasePipeline
+    # Frame processor
     #
 
     def processors_with_metrics(self) -> List[FrameProcessor]:
@@ -159,10 +159,6 @@ class ParallelPipeline(BasePipeline):
             List of frame processors that support metrics collection from all branches.
         """
         return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
-
-    #
-    # Frame processor
-    #
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the parallel pipeline and all its branches.
