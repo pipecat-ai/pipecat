@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any, List, Optional, TypedDict
 
 from loguru import logger
+from openai import NotGiven
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
@@ -41,7 +42,7 @@ class GeminiLLMInvocationParams(TypedDict):
 
     system_instruction: Optional[str]
     messages: List[Content]
-    tools: List[Any]
+    tools: List[Any] | NotGiven
 
 
 class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
