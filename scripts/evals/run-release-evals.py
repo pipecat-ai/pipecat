@@ -113,6 +113,7 @@ TESTS_14 = [
     ("14q-function-calling-qwen.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14r-function-calling-aws.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("14v-function-calling-openai.py", PROMPT_WEATHER, EVAL_WEATHER),
+    ("14w-function-calling-mistral.py", PROMPT_WEATHER, EVAL_WEATHER),
     # Currently not working.
     # ("14c-function-calling-together.py", PROMPT_WEATHER, EVAL_WEATHER),
     # ("14k-function-calling-cerebras.py", PROMPT_WEATHER, EVAL_WEATHER),
@@ -127,6 +128,7 @@ TESTS_15 = [
 TESTS_19 = [
     ("19-openai-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER),
     ("19a-azure-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER),
+    ("19b-openai-realtime-beta-text.py", PROMPT_WEATHER, EVAL_WEATHER),
 ]
 
 TESTS_21 = [

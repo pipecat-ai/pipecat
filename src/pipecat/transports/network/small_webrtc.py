@@ -226,6 +226,7 @@ class SmallWebRTCClient:
         self._audio_in_channels = None
         self._in_sample_rate = None
         self._out_sample_rate = None
+        self._leave_counter = 0
 
         # We are always resampling it for 16000 if the sample_rate that we receive is bigger than that.
         # otherwise we face issues with Silero VAD
@@ -395,6 +396,7 @@ class SmallWebRTCClient:
         self._in_sample_rate = _params.audio_in_sample_rate or frame.audio_in_sample_rate
         self._out_sample_rate = _params.audio_out_sample_rate or frame.audio_out_sample_rate
         self._params = _params
+        self._leave_counter += 1
 
     async def connect(self):
         """Establish the WebRTC connection."""
@@ -407,6 +409,10 @@ class SmallWebRTCClient:
 
     async def disconnect(self):
         """Disconnect from the WebRTC peer."""
+        self._leave_counter -= 1
+        if self._leave_counter > 0:
+            return
+
         if self.is_connected and not self.is_closing:
             logger.info(f"Disconnecting to Small WebRTC")
             self._closing = True

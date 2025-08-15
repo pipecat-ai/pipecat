@@ -137,7 +137,7 @@ You have access to the following tools:
 - get_current_weather: Get the current weather for a given location.
 - get_restaurant_recommendation: Get a restaurant recommendation for a given location.
 
-Remember, your responses should be short. Just one or two sentences, usually.""",
+Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
     llm = OpenAIRealtimeBetaLLMService(
@@ -158,16 +158,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
         [{"role": "user", "content": "Say hello!"}],
-        # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
-        #     [
-        #         {
-        #             "role": "user",
-        #             "content": [
-        #                 {"type": "text", "text": "Say"},
-        #                 {"type": "text", "text": "yo what's up!"},
-        #             ],
-        #         }
-        #     ],
         tools,
     )
 
