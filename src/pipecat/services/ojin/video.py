@@ -372,6 +372,7 @@ class OjinPersonaFSM:
                     logger.debug(f"Pushing idle frame: {self._last_frame_idx}")
 
                 idle_frame = self._playback_loop.get_current_frame()
+                assert idle_frame is not None
                 image_frame = OutputImageRawFrame(
                     image=idle_frame.image,
                     size=self._settings.image_size,
@@ -539,9 +540,7 @@ class OjinPersonaService(FrameProcessor):
     async def _generate_and_send_silence(self, duration: float):
         num_samples = int(duration * OJIN_PERSONA_SAMPLE_RATE)
         silence_audio = b"\x00\x00" * num_samples
-        logger.debug(
-            f"Sending {duration}s of silence to initialize persona"
-        )
+        logger.debug(f"Sending {duration}s of silence to initialize persona")
         assert (
             self._interaction is not None
             and self._interaction.audio_input_queue is not None
@@ -559,7 +558,6 @@ class OjinPersonaService(FrameProcessor):
                 },
             )
         )
-        
 
     async def _on_state_changed(
         self, old_state: PersonaState, new_state: PersonaState
@@ -580,7 +578,6 @@ class OjinPersonaService(FrameProcessor):
             assert self._interaction is not None
             self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
             self.should_generate_silence = True
-
 
         if old_state == PersonaState.INITIALIZING and new_state == PersonaState.IDLE:
             await self.push_frame(
@@ -757,7 +754,9 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.set_state(InteractionState.ACTIVE)
             if self.should_generate_silence:
                 self.should_generate_silence = False
-                await self._generate_and_send_silence(self._settings.idle_sequence_duration)
+                await self._generate_and_send_silence(
+                    self._settings.idle_sequence_duration
+                )
 
         elif isinstance(message, ErrorResponseMessage):
             is_fatal = False
