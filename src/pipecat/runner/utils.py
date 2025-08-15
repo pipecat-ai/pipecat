@@ -233,12 +233,15 @@ async def maybe_capture_participant_camera(
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
     try:
+        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
         from pipecat.transports.services.daily import DailyTransport
 
         if isinstance(transport, DailyTransport):
             await transport.capture_participant_video(
                 client["id"], framerate=framerate, video_source="camera"
             )
+        elif isinstance(transport, SmallWebRTCTransport):
+            await transport.capture_participant_video(video_source="camera")
     except ImportError:
         pass
 
@@ -254,12 +257,16 @@ async def maybe_capture_participant_screen(
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
     try:
+        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
         from pipecat.transports.services.daily import DailyTransport
 
         if isinstance(transport, DailyTransport):
             await transport.capture_participant_video(
                 client["id"], framerate=framerate, video_source="screenVideo"
             )
+        elif isinstance(transport, SmallWebRTCTransport):
+            await transport.capture_participant_video(video_source="screenVideo")
+
     except ImportError:
         pass
 

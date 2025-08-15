@@ -221,6 +221,7 @@ class SmallWebRTCClient:
         self._video_output_track = None
         self._audio_input_track: Optional[AudioStreamTrack] = None
         self._video_input_track: Optional[VideoStreamTrack] = None
+        self._screen_video_track: Optional[VideoStreamTrack] = None
 
         self._params = None
         self._audio_in_channels = None
@@ -274,22 +275,28 @@ class SmallWebRTCClient:
 
         return cv2.cvtColor(frame_array, conversion_code)
 
-    async def read_video_frame(self):
+    async def read_video_frame(self, video_source: str):
         """Read video frames from the WebRTC connection.
 
         Reads a video frame from the given MediaStreamTrack, converts it to RGB,
         and creates an InputImageRawFrame.
 
+        Args:
+            video_source: Video source to capture ("camera" or "screenVideo").
+
         Yields:
             UserImageRawFrame objects containing video data from the peer.
         """
         while True:
-            if self._video_input_track is None:
+            video_track = (
+                self._video_input_track if video_source == "camera" else self._screen_video_track
+            )
+            if video_track is None:
                 await asyncio.sleep(0.01)
                 continue
 
             try:
-                frame = await asyncio.wait_for(self._video_input_track.recv(), timeout=2.0)
+                frame = await asyncio.wait_for(video_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
                 if self._webrtc_connection.is_connected():
                     logger.warning("Timeout: No video frame received within the specified time.")
@@ -315,6 +322,7 @@ class SmallWebRTCClient:
                 size=(frame.width, frame.height),
                 format="RGB",
             )
+            image_frame.transport_source = video_source
 
             yield image_frame
 
@@ -436,6 +444,7 @@ class SmallWebRTCClient:
 
         self._audio_input_track = self._webrtc_connection.audio_input_track()
         self._video_input_track = self._webrtc_connection.video_input_track()
+        self._screen_video_track = self._webrtc_connection.screen_video_input_track()
         if self._params.audio_out_enabled:
             self._audio_output_track = RawAudioTrack(sample_rate=self._out_sample_rate)
             self._webrtc_connection.replace_audio_track(self._audio_output_track)
@@ -452,6 +461,7 @@ class SmallWebRTCClient:
         """Handle peer disconnection cleanup."""
         self._audio_input_track = None
         self._video_input_track = None
+        self._screen_video_track = None
         self._audio_output_track = None
         self._video_output_track = None
 
@@ -459,6 +469,7 @@ class SmallWebRTCClient:
         """Handle client connection closure."""
         self._audio_input_track = None
         self._video_input_track = None
+        self._screen_video_track = None
         self._audio_output_track = None
         self._video_output_track = None
         await self._callbacks.on_client_disconnected(self._webrtc_connection)
@@ -515,6 +526,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._params = params
         self._receive_audio_task = None
         self._receive_video_task = None
+        self._receive_screen_video_task = None
         self._image_requests = {}
 
         # Whether we have seen a StartFrame already.
@@ -547,11 +559,11 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
         await self._client.setup(self._params, frame)
         await self._client.connect()
+        await self.set_transport_ready(frame)
         if not self._receive_audio_task and self._params.audio_in_enabled:
             self._receive_audio_task = self.create_task(self._receive_audio())
         if not self._receive_video_task and self._params.video_in_enabled:
-            self._receive_video_task = self.create_task(self._receive_video())
-        await self.set_transport_ready(frame)
+            self._receive_video_task = self.create_task(self._receive_video("camera"))
 
     async def _stop_tasks(self):
         """Stop all background tasks."""
@@ -595,10 +607,14 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
-    async def _receive_video(self):
-        """Background task for receiving video frames from WebRTC."""
+    async def _receive_video(self, video_source: str):
+        """Background task for receiving video frames from WebRTC.
+
+        Args:
+            video_source: Video source to capture ("camera" or "screenVideo").
+        """
         try:
-            video_iterator = self._client.read_video_frame()
+            video_iterator = self._client.read_video_frame(video_source)
             async for video_frame in WatchdogAsyncIterator(
                 video_iterator, manager=self.task_manager
             ):
@@ -608,18 +624,20 @@ class SmallWebRTCInputTransport(BaseInputTransport):
                     # Check if there are any pending image requests and create UserImageRawFrame
                     if self._image_requests:
                         for req_id, request_frame in list(self._image_requests.items()):
-                            # Create UserImageRawFrame using the current video frame
-                            image_frame = UserImageRawFrame(
-                                user_id=request_frame.user_id,
-                                request=request_frame,
-                                image=video_frame.image,
-                                size=video_frame.size,
-                                format=video_frame.format,
-                            )
-                            # Push the frame to the pipeline
-                            await self.push_video_frame(image_frame)
-                            # Remove from pending requests
-                            del self._image_requests[req_id]
+                            if request_frame.video_source == video_source:
+                                # Create UserImageRawFrame using the current video frame
+                                image_frame = UserImageRawFrame(
+                                    user_id=request_frame.user_id,
+                                    request=request_frame,
+                                    image=video_frame.image,
+                                    size=video_frame.size,
+                                    format=video_frame.format,
+                                )
+                                image_frame.transport_source = video_source
+                                # Push the frame to the pipeline
+                                await self.push_video_frame(image_frame)
+                                # Remove from pending requests
+                                del self._image_requests[req_id]
 
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
@@ -651,9 +669,48 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         self._image_requests[request_id] = frame
 
         # If we're not already receiving video, try to get a frame now
-        if not self._receive_video_task and self._params.video_in_enabled:
+        if (
+            frame.video_source == "camera"
+            and not self._receive_video_task
+            and self._params.video_in_enabled
+        ):
             # Start video reception if it's not already running
-            self._receive_video_task = self.create_task(self._receive_video())
+            self._receive_video_task = self.create_task(self._receive_video("camera"))
+        elif (
+            frame.video_source == "screenVideo"
+            and not self._receive_screen_video_task
+            and self._params.video_in_enabled
+        ):
+            # Start screen video reception if it's not already running
+            self._receive_screen_video_task = self.create_task(self._receive_video("screenVideo"))
+
+    async def capture_participant_media(
+        self,
+        source: str = "camera",
+    ):
+        """Capture media from a specific participant.
+
+        Args:
+            source: Media source to capture from. ("camera", "microphone", or "screenVideo")
+        """
+        # If we're not already receiving video, try to get a frame now
+        if (
+            source == "microphone"
+            and not self._receive_audio_task
+            and self._params.audio_in_enabled
+        ):
+            # Start audio reception if it's not already running
+            self._receive_audio_task = self.create_task(self._receive_audio())
+        elif source == "camera" and not self._receive_video_task and self._params.video_in_enabled:
+            # Start video reception if it's not already running
+            self._receive_video_task = self.create_task(self._receive_video("camera"))
+        elif (
+            source == "screenVideo"
+            and not self._receive_screen_video_task
+            and self._params.video_in_enabled
+        ):
+            # Start screen video reception if it's not already running
+            self._receive_screen_video_task = self.create_task(self._receive_video("screenVideo"))
 
 
 class SmallWebRTCOutputTransport(BaseOutputTransport):
@@ -840,3 +897,37 @@ class SmallWebRTCTransport(BaseTransport):
     async def _on_client_disconnected(self, webrtc_connection):
         """Handle client disconnection events."""
         await self._call_event_handler("on_client_disconnected", webrtc_connection)
+
+    async def capture_participant_video(
+        self,
+        participant_id: str = None,
+        framerate: int = 30,
+        video_source: str = "camera",
+        color_format: str = "RGB",
+    ):
+        """Capture video from a specific participant.
+
+        Args:
+            participant_id: Unused parameter, kept for compatibility.
+            framerate: Unused parameter, kept for compatibility.
+            video_source: Video source to capture from.
+            color_format: Unused parameter, kept for compatibility.
+        """
+        if self._input:
+            await self._input.capture_participant_media(source=video_source)
+
+    async def capture_participant_audio(
+        self,
+        participant_id: str = None,
+        audio_source: str = "microphone",
+        sample_rate: int = 16000,
+    ):
+        """Capture audio from a specific participant.
+
+        Args:
+            participant_id: Unused parameter, kept for compatibility.
+            audio_source: Audio source to capture from. (currently, "microphone" is the only supported option)
+            sample_rate: Unused parameter, kept for compatibility.
+        """
+        if self._input:
+            await self._input.capture_participant_media(source=audio_source)
