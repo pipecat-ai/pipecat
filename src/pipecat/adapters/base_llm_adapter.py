@@ -16,7 +16,7 @@ from typing import Any, Generic, List, TypeVar, Union, cast
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
 
 # Should be a TypedDict
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=dict[str, Any])
@@ -75,8 +75,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         """
         pass
 
-    # TODO: should this also be able to return NotGiven?
-    def from_standard_tools(self, tools: Any) -> List[Any]:
+    def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
         """Convert tools from standard format to provider format.
 
         Args:
