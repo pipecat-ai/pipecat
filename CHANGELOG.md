@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `pipecat.utils.voicemail`, a module for detecting voicemail vs. live
+  conversation, primarily intended for use in outbound calling scenarios.
+
 - Added `MistralLLMService`, using Mistral's chat completion API.
 
 - For `OpenAILLMService` and its subclasses, added the ability to retry
