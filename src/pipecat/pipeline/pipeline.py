@@ -111,7 +111,7 @@ class Pipeline(BasePipeline):
         self._link_processors()
 
     #
-    # BasePipeline
+    # Frame processor
     #
 
     def processors_with_metrics(self):
@@ -124,16 +124,11 @@ class Pipeline(BasePipeline):
             List of frame processors that can generate metrics.
         """
         services = []
-        for p in self._processors:
-            if isinstance(p, BasePipeline):
-                services.extend(p.processors_with_metrics())
-            elif p.can_generate_metrics():
+        for p in self.processors:
+            if p.can_generate_metrics():
                 services.append(p)
+            services.extend(p.processors_with_metrics())
         return services
-
-    #
-    # Frame processor
-    #
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the pipeline and all contained processors.

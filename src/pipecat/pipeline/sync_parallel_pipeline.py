@@ -134,7 +134,7 @@ class SyncParallelPipeline(BasePipeline):
         self._pipelines = []
 
     #
-    # BasePipeline
+    # Frame processor
     #
 
     def processors_with_metrics(self) -> List[FrameProcessor]:
@@ -144,10 +144,6 @@ class SyncParallelPipeline(BasePipeline):
             List of frame processors that support metrics collection from all parallel paths.
         """
         return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
-
-    #
-    # Frame processor
-    #
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the parallel pipeline and all contained processors.
