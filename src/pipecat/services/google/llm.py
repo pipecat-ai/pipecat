@@ -421,7 +421,14 @@ class GoogleLLMContext(OpenAILLMContext):
         role = message["role"]
         content = message.get("content", [])
         if role == "system":
-            self.system_message = content
+            # System instructions are returned as plain text
+            if isinstance(content, str):
+                self.system_message = content
+            elif isinstance(content, list):
+                # If content is a list, we assume it's a list of text parts, per the standard
+                self.system_message = " ".join(
+                    part["text"] for part in content if part.get("type") == "text"
+                )
             return None
         elif role == "assistant":
             role = "model"
