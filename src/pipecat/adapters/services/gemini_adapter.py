@@ -15,7 +15,12 @@ from loguru import logger
 
 from pipecat.adapters.base_llm_adapter import BaseLLMAdapter
 from pipecat.adapters.schemas.tools_schema import AdapterType, ToolsSchema
-from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage
+from pipecat.processors.aggregators.llm_context import (
+    LLMContext,
+    LLMContextMessage,
+    LLMSpecificMessage,
+    LLMStandardMessage,
+)
 
 try:
     from google.genai.types import (
@@ -118,10 +123,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
     @dataclass
     class ConvertedMessages:
-        """Container for converted messages.
-
-        Holds the converted messages in a format suitable for Gemini's API.
-        """
+        """Container for Google-formatted messages converted from universal context."""
 
         messages: List[Content]
         system_instruction: Optional[str] = None
@@ -150,14 +152,13 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         # Process each message, preserving Google-formatted messages and converting others
         for message in universal_context_messages:
-            if isinstance(message, Content):
-                # Keep existing Google-formatted messages (e.g., function calls/responses)
-                # TODO: this branch is probably not needed anymore, since LLMContext contains a universal format
-                messages.append(message)
+            if isinstance(message, LLMSpecificMessage):
+                # Assume that LLMSpecificMessage wraps a message in Google format
+                messages.append(message.message)
                 continue
 
             # Convert standard format to Google format
-            converted = self._from_universal_context_message(message)
+            converted = self._from_standard_message(message)
             if isinstance(converted, Content):
                 # Regular (non-system) message
                 messages.append(converted)
@@ -183,7 +184,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return self.ConvertedMessages(messages=messages, system_instruction=system_instruction)
 
-    def _from_universal_context_message(self, message: LLMContextMessage) -> Content | str:
+    def _from_standard_message(self, message: LLMStandardMessage) -> Content | str:
         """Convert universal context message to Google Content object.
 
         Handles conversion of text, images, and function calls to Google's
