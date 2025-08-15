@@ -591,7 +591,7 @@ class OjinPersonaService(FrameProcessor):
             )
 
         if new_state == PersonaState.SPEECH and self._audio_output_task is None:
-            await self._start_pushing_audio_output()
+            self._start_pushing_audio_output()
 
         if new_state == PersonaState.IDLE:
             logger.debug("PersonaState.IDLE reached - closing interaction")
@@ -985,7 +985,7 @@ class OjinPersonaService(FrameProcessor):
             if self._interaction.pending_first_input:
                 start_frame_idx = self._interaction.start_frame_idx
             else:
-                start_frame_idx = None
+                start_frame_idx = 0
 
             await self._interaction.audio_input_queue.put(
                 OjinPersonaInteractionInputMessage(
