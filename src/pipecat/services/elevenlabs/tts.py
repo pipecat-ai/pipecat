@@ -495,6 +495,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 if self._context_id:
                     await self._websocket.send(json.dumps({"close_socket": True}))
                 await self._websocket.close()
+                logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
         finally:
