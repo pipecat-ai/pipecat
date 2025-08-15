@@ -114,6 +114,10 @@ class Pipeline(BasePipeline):
     # Frame processor
     #
 
+    @property
+    def processors(self):
+        return self._processors
+
     def processors_with_metrics(self):
         """Return processors that can generate metrics.
 

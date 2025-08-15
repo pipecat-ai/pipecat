@@ -152,6 +152,18 @@ class ParallelPipeline(BasePipeline):
     # Frame processor
     #
 
+    @property
+    def processors(self):
+        """Return the list of sub-processors contained within this processor.
+
+        Only compound processors (e.g. pipelines and parallel pipelines) have
+        sub-processors. Non-compound processors will return an empty list.
+
+        Returns:
+            The list of sub-processors if this is a compound processor.
+        """
+        return self._pipelines
+
     def processors_with_metrics(self) -> List[FrameProcessor]:
         """Collect processors that can generate metrics from all parallel branches.
 
