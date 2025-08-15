@@ -11,7 +11,7 @@ in sequence and manages frame flow between them, along with helper classes
 for pipeline source and sink operations.
 """
 
-from typing import Callable, Coroutine, List
+from typing import Callable, Coroutine, List, Optional
 
 from pipecat.frames.frames import Frame
 from pipecat.pipeline.base_pipeline import BasePipeline
@@ -97,6 +97,8 @@ class Pipeline(BasePipeline):
 
         Args:
             processors: List of frame processors to connect in sequence.
+            source: An optional custom source processor.
+            sink: An optional custom sink processor.
         """
         super().__init__(enable_direct_mode=True)
 
