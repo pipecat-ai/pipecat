@@ -238,8 +238,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         content = message.get("content", [])
         if role == "system":
             # System instructions are returned as plain text
-            # TODO: here we've always assumed that system instructions are plain text...is that a safe assumption?
-            return content
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                # If content is a list, we assume it's a list of text parts, per the standard
+                return " ".join(part["text"] for part in content if part.get("type") == "text")
         elif role == "assistant":
             role = "model"
 
