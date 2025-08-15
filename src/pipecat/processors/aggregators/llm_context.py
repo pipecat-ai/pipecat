@@ -79,9 +79,8 @@ class LLMContext:
             tool_choice: Tool selection strategy for the LLM.
         """
         self._messages: List[LLMContextMessage] = messages if messages else []
-        self._tools: ToolsSchema | NotGiven = tools
+        self._tools: ToolsSchema | NotGiven = LLMContext._normalize_and_validate_tools(tools)
         self._tool_choice: LLMContextToolChoice | NotGiven = tool_choice
-        self._validate_tools()
 
     def get_messages(self, llm_specific_filter: Optional[str] = None) -> List[LLMContextMessage]:
         """Get the current messages list.
@@ -156,9 +155,7 @@ class LLMContext:
         Args:
             tools: A ToolsSchema or NOT_GIVEN to disable tools.
         """
-        # TODO: convert empty ToolsSchema to NOT_GIVEN if needed?
-        self._tools = tools
-        self._validate_tools()
+        self._tools = LLMContext._normalize_and_validate_tools(tools)
 
     def set_tool_choice(self, tool_choice: LLMContextToolChoice | NotGiven):
         """Set the tool choice configuration.
@@ -262,11 +259,20 @@ class LLMContext:
         header.extend(data_size.to_bytes(4, "little"))  # Subchunk2Size
         return header
 
-    def _validate_tools(self):
-        """Validate the tools schema.
+    @staticmethod
+    def _normalize_and_validate_tools(tools: ToolsSchema | NotGiven) -> ToolsSchema | NotGiven:
+        """Normalize and validate the given tools.
 
         Raises:
             TypeError: If tools are not a ToolsSchema or NotGiven.
         """
-        if self._tools is not NOT_GIVEN and not isinstance(self._tools, ToolsSchema):
-            raise TypeError("In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN.")
+        if isinstance(tools, ToolsSchema):
+            if not tools.standard_tools and not tools.custom_tools:
+                return NOT_GIVEN
+            return tools
+        elif tools is NOT_GIVEN:
+            return NOT_GIVEN
+        else:
+            raise TypeError(
+                "In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN.",
+            )
