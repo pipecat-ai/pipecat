@@ -333,6 +333,9 @@ class TTSService(AIService):
         elif isinstance(frame, TTSUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, BotStoppedSpeakingFrame):
+            logger.warning(
+                f"[TTS_RESUME] {self.__class__.__name__} received BotStoppedSpeakingFrame"
+            )
             await self._maybe_resume_frame_processing()
             await self.push_frame(frame, direction)
         else:
@@ -376,11 +379,15 @@ class TTSService(AIService):
 
     async def _maybe_pause_frame_processing(self):
         if self._processing_text and self._pause_frame_processing:
+            logger.warning(f"[TTS_PAUSE] {self.__class__.__name__} pausing frame processing")
             await self.pause_processing_frames()
 
     async def _maybe_resume_frame_processing(self):
         if self._pause_frame_processing:
+            logger.warning(f"[TTS_RESUME] {self.__class__.__name__} resuming frame processing")
             await self.resume_processing_frames()
+        else:
+            logger.debug(f"[TTS_RESUME] {self.__class__.__name__} resume called but not paused")
 
     async def _process_text_frame(self, frame: TextFrame):
         text: Optional[str] = None

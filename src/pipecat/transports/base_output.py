@@ -503,6 +503,9 @@ class BaseOutputTransport(FrameProcessor):
                     num_channels=frame.num_channels,
                 )
                 chunk.transport_destination = self._destination
+                logger.debug(
+                    f"[AUDIO_QUEUE] Putting {chunk.__class__.__name__} with {len(chunk.audio)} bytes into audio queue"
+                )
                 await self._audio_queue.put(chunk)
                 self._audio_buffer = self._audio_buffer[self._audio_chunk_size :]
 
@@ -582,15 +585,18 @@ class BaseOutputTransport(FrameProcessor):
         async def _bot_stopped_speaking(self):
             """Handle bot stopped speaking event."""
             if self._bot_speaking:
-                logger.debug(
-                    f"Bot{f' [{self._destination}]' if self._destination else ''} stopped speaking"
+                logger.warning(
+                    f"[BOT_STOPPED] Bot stopped speaking - sending BotStoppedSpeakingFrame upstream"
                 )
 
                 downstream_frame = BotStoppedSpeakingFrame()
                 downstream_frame.transport_destination = self._destination
                 upstream_frame = BotStoppedSpeakingFrame()
                 upstream_frame.transport_destination = self._destination
+
+                logger.debug(f"[BOT_STOPPED] Pushing downstream BotStoppedSpeakingFrame")
                 await self._transport.push_frame(downstream_frame)
+                logger.debug(f"[BOT_STOPPED] Pushing upstream BotStoppedSpeakingFrame")
                 await self._transport.push_frame(upstream_frame, FrameDirection.UPSTREAM)
 
                 self._bot_speaking = False
@@ -598,6 +604,8 @@ class BaseOutputTransport(FrameProcessor):
                 # Clean audio buffer (there could be tiny left overs if not multiple
                 # to our output chunk size).
                 self._audio_buffer = bytearray()
+            else:
+                logger.debug(f"[BOT_STOPPED] _bot_stopped_speaking called but bot was not speaking")
 
         async def _handle_frame(self, frame: Frame):
             """Handle various frame types with appropriate processing.
@@ -624,12 +632,24 @@ class BaseOutputTransport(FrameProcessor):
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 while True:
                     try:
+                        logger.debug(
+                            f"[AUDIO_QUEUE] Waiting for audio frame (timeout={vad_stop_secs}s)"
+                        )
+                        start_time = time.time()
                         frame = await asyncio.wait_for(
                             self._audio_queue.get(), timeout=vad_stop_secs
+                        )
+                        wait_time = time.time() - start_time
+                        logger.debug(
+                            f"[AUDIO_QUEUE] Got frame {frame.__class__.__name__} after {wait_time:.3f}s"
                         )
                         self._transport.reset_watchdog()
                         yield frame
                     except asyncio.TimeoutError:
+                        wait_time = time.time() - start_time
+                        logger.warning(
+                            f"[AUDIO_QUEUE] TIMEOUT after {wait_time:.3f}s - triggering bot_stopped_speaking"
+                        )
                         self._transport.reset_watchdog()
                         # Notify the bot stopped speaking upstream if necessary.
                         await self._bot_stopped_speaking()

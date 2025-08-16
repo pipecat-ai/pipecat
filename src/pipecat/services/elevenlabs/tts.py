@@ -616,6 +616,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     )
 
                 frame = TTSAudioRawFrame(audio, self.sample_rate, 1)
+                logger.debug(
+                    f"[ELEVENLABS_AUDIO] Creating TTSAudioRawFrame with {len(audio)} bytes for context {received_ctx_id}"
+                )
                 await self.append_to_audio_context(received_ctx_id, frame)
 
             if msg.get("alignment"):
@@ -1027,6 +1030,9 @@ class ElevenLabsHttpTTSService(WordTTSService):
                         if data and "audio_base64" in data:
                             await self.stop_ttfb_metrics()
                             audio = base64.b64decode(data["audio_base64"])
+                            logger.debug(
+                                f"[ELEVENLABS_AUDIO] Yielding TTSAudioRawFrame with {len(audio)} bytes"
+                            )
                             yield TTSAudioRawFrame(audio, self.sample_rate, 1)
 
                         # Process alignment if present
