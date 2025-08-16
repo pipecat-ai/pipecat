@@ -74,13 +74,19 @@ class BaseOpenAILLMService(LLMService):
             default_factory=lambda: NOT_GIVEN, ge=-2.0, le=2.0
         )
         seed: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
-        temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0)
+        temperature: Optional[float] = Field(
+            default_factory=lambda: NOT_GIVEN, ge=0.0, le=2.0
+        )
         # Note: top_k is currently not supported by the OpenAI client library,
         # so top_k is ignored right now.
         top_k: Optional[int] = Field(default=None, ge=0)
-        top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
+        top_p: Optional[float] = Field(
+            default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0
+        )
         max_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
-        max_completion_tokens: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=1)
+        max_completion_tokens: Optional[int] = Field(
+            default_factory=lambda: NOT_GIVEN, ge=1
+        )
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     def __init__(
@@ -95,6 +101,10 @@ class BaseOpenAILLMService(LLMService):
         params: Optional[InputParams] = None,
         retry_timeout_secs: Optional[float] = 5.0,
         retry_on_timeout: Optional[bool] = False,
+        caching_enabled: bool = False,
+        cache_database: Optional[Any] = None,
+        cache_vectorizer: Optional[Any] = None,
+        cache_middlewares: Optional[List[Any]] = None,
         **kwargs,
     ):
         """Initialize the BaseOpenAILLMService.
@@ -127,6 +137,9 @@ class BaseOpenAILLMService(LLMService):
         }
         self._retry_timeout_secs = retry_timeout_secs
         self._retry_on_timeout = retry_on_timeout
+        self._caching_enabled = caching_enabled
+        self._cache_database = cache_database
+        self._cache_middlewares = cache_middlewares or []
         self.set_model_name(model)
         self._client = self.create_client(
             api_key=api_key,
@@ -159,18 +172,50 @@ class BaseOpenAILLMService(LLMService):
         Returns:
             Configured AsyncOpenAI client instance.
         """
-        return AsyncOpenAI(
+        async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url,
             organization=organization,
             project=project,
             http_client=DefaultAsyncHttpxClient(
                 limits=httpx.Limits(
-                    max_keepalive_connections=100, max_connections=1000, keepalive_expiry=None
+                    max_keepalive_connections=100,
+                    max_connections=1000,
+                    keepalive_expiry=None,
                 )
             ),
             default_headers=default_headers,
         )
+        if self._caching_enabled:
+            try:
+                from cachelm.adaptors.openai.async_openai import AsyncOpenAIAdaptor
+                from cachelm.databases.database import Database
+                from cachelm.middlewares.middleware import Middleware
+
+                if not isinstance(self._cache_database, Database):
+                    raise ValueError(
+                        f"{self}: cache_database must be an instance of cachelm.databases.Database"
+                    )
+                for mw in self._cache_middlewares:
+                    if not isinstance(mw, Middleware):
+                        raise ValueError(
+                            f"{self}: all cache_middlewares must be instances of cachelm.middlewares.Middleware"
+                        )
+
+                adapted_client = AsyncOpenAIAdaptor(
+                    client=async_client,
+                    database=self._cache_database,
+                    middlewares=self._cache_middlewares,
+                )
+                return adapted_client.get_adapted()
+            except ImportError:
+                logger.warning(
+                    f"{self}: cachelm is not installed, please install pipecat[cache] to enable caching."
+                )
+            except Exception as e:
+                logger.error(f"{self}: Error setting up cachelm: {e}")
+
+        return async_client
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -197,7 +242,8 @@ class BaseOpenAILLMService(LLMService):
         if self._retry_on_timeout:
             try:
                 chunks = await asyncio.wait_for(
-                    self._client.chat.completions.create(**params), timeout=self._retry_timeout_secs
+                    self._client.chat.completions.create(**params),
+                    timeout=self._retry_timeout_secs,
                 )
                 return chunks
             except (APITimeoutError, asyncio.TimeoutError):
@@ -252,7 +298,9 @@ class BaseOpenAILLMService(LLMService):
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
+                encoded_image = base64.b64encode(message["data"].getvalue()).decode(
+                    "utf-8"
+                )
                 text = message["content"]
                 message["content"] = [
                     {"type": "text", "text": text},
@@ -280,11 +328,13 @@ class BaseOpenAILLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
-            context
+        chunk_stream: AsyncStream[ChatCompletionChunk] = (
+            await self._stream_chat_completions(context)
         )
 
-        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
+        async for chunk in WatchdogAsyncIterator(
+            chunk_stream, manager=self.task_manager
+        ):
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
@@ -333,10 +383,12 @@ class BaseOpenAILLMService(LLMService):
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm
             # we need to get LLMTextFrame for the transcript
-            elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[0].delta.audio.get(
-                "transcript"
-            ):
-                await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
+            elif hasattr(chunk.choices[0].delta, "audio") and chunk.choices[
+                0
+            ].delta.audio.get("transcript"):
+                await self.push_frame(
+                    LLMTextFrame(chunk.choices[0].delta.audio["transcript"])
+                )
 
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
