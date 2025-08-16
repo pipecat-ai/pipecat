@@ -642,7 +642,7 @@ class BaseOutputTransport(FrameProcessor):
                         self._transport.reset_watchdog()
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await self._mixer.mix(frame.audio)
-                        last_frame_time = time.time()
+                            last_frame_time = time.time()
                         yield frame
                     except asyncio.QueueEmpty:
                         self._transport.reset_watchdog()
