@@ -116,7 +116,29 @@ class Pipeline(BasePipeline):
 
     @property
     def processors(self):
+        """Return the list of sub-processors contained within this processor.
+
+        Only compound processors (e.g. pipelines and parallel pipelines) have
+        sub-processors. Non-compound processors will return an empty list.
+
+        Returns:
+            The list of sub-processors if this is a compound processor.
+        """
         return self._processors
+
+    @property
+    def entry_processors(self) -> List["FrameProcessor"]:
+        """Return the list of entry processors for this processor.
+
+        Entry processors are the first processors in a compound processor
+        (e.g. pipelines, parallel pipelines). Note that pipelines can also be an
+        entry processor as pipelines are processors themselves. Non-compound
+        processors will simply return an empty list.
+
+        Returns:
+            The list of entry processors.
+        """
+        return [self._source]
 
     def processors_with_metrics(self):
         """Return processors that can generate metrics.

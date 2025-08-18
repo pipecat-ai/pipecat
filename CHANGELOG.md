@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `FrameProcessor.entry_processor()` method. This allows you to access
+  the first non-compound processor in a pipeline.
+
 - Added `FrameProcessor` properties `processors`, `next` and `previous`.
 
 - `ElevenLabsTTSService` now supports additional runtime changes to the `model`,
