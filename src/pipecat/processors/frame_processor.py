@@ -34,7 +34,7 @@ from pipecat.frames.frames import (
     SystemFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
-from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
@@ -594,6 +594,16 @@ class FrameProcessor(BaseObject):
             frame: The frame to process.
             direction: The direction of frame flow.
         """
+        if self._observer:
+            timestamp = self._clock.get_time() if self._clock else 0
+            data = FrameProcessed(
+                processor=self,
+                frame=frame,
+                direction=direction,
+                timestamp=timestamp,
+            )
+            await self._observer.on_process_frame(data)
+
         if isinstance(frame, StartFrame):
             await self.__start(frame)
         elif isinstance(frame, StartInterruptionFrame):
