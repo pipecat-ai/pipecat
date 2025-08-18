@@ -795,38 +795,25 @@ class LLMAssistantAggregator(LLMContextAggregator):
         asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())
 
 
-@dataclass
 class LLMContextAggregatorPair:
-    """Pair of LLM context aggregators for user and assistant messages.
+    """Pair of LLM context aggregators for updating context with user and assistant messages."""
 
-    Parameters:
-        _user: User context aggregator for processing user messages.
-        _assistant: Assistant context aggregator for processing assistant messages.
-    """
-
-    _user: LLMUserAggregator
-    _assistant: LLMAssistantAggregator
-
-    @staticmethod
-    def create(
+    def __init__(
+        self,
         context: LLMContext,
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> "LLMContextAggregatorPair":
-        """Factory method to create an LLMContextAggregatorPair.
+    ):
+        """Initialize the LLM context aggregator pair.
 
         Args:
-            context: The context managed by the aggregators.
+            context: The context to be managed by the aggregators.
             user_params: Parameters for the user context aggregator.
             assistant_params: Parameters for the assistant context aggregator.
-
-        Returns:
-            LLMContextAggregatorPair: A new instance with configured aggregators.
         """
-        user = LLMUserAggregator(context, params=user_params)
-        assistant = LLMAssistantAggregator(context, params=assistant_params)
-        return LLMContextAggregatorPair(_user=user, _assistant=assistant)
+        self._user = LLMUserAggregator(context, params=user_params)
+        self._assistant = LLMAssistantAggregator(context, params=assistant_params)
 
     def user(self) -> LLMUserAggregator:
         """Get the user context aggregator.

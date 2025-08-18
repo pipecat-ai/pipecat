@@ -172,7 +172,7 @@ indicate you should use the get_image tool are:
     ]
 
     context = LLMContext(messages, tools)
-    context_aggregator = LLMContextAggregatorPair.create(context)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
