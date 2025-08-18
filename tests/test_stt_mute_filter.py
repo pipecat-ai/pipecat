@@ -124,14 +124,14 @@ class TestSTTMuteFilter(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             # Bot speaking - should mute
             BotStartedSpeakingFrame(),
-            SleepFrame(sleep=0.1),  # Wait for StartedSpeaking to process
+            SleepFrame(),  # Wait for StartedSpeaking to process
             InterimTranscriptionFrame(
                 user_id="user1", text="This should be suppressed", timestamp="1234567890"
             ),
             TranscriptionFrame(
                 user_id="user1", text="This should be suppressed", timestamp="1234567890"
             ),
-            SleepFrame(sleep=0.1),  # Wait for transcription frames to queue
+            SleepFrame(),  # Wait for transcription frames to queue
             BotStoppedSpeakingFrame(),
             # Bot not speaking - should pass through
             InterimTranscriptionFrame(
