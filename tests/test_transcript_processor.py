@@ -151,8 +151,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             TTSTextFrame,
             TTSTextFrame,
             TTSTextFrame,
-            BotStoppedSpeakingFrame,
             TranscriptionUpdateFrame,
+            BotStoppedSpeakingFrame,
         ]
 
         # Run test
@@ -179,7 +179,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(message.timestamp)
 
         # All frames should be passed through in order, with update at end
-        downstream_update = cast(TranscriptionUpdateFrame, received_frames[-1])
+        downstream_update = cast(TranscriptionUpdateFrame, received_frames[-2])
         self.assertEqual(downstream_update.messages[0].content, "Hello world! How are you?")
 
     async def test_empty_text_handling(self):
@@ -257,8 +257,8 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "New"
             TTSTextFrame,  # "response"
-            BotStoppedSpeakingFrame,
             TranscriptionUpdateFrame,  # Second message
+            BotStoppedSpeakingFrame,
         ]
 
         # Run test
