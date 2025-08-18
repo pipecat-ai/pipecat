@@ -53,9 +53,9 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             InputDTMFFrame(button=KeypadEntry.ONE),
             InputDTMFFrame(button=KeypadEntry.TWO),
-            SleepFrame(sleep=0.2),  # This should trigger timeout
+            SleepFrame(),  # This should trigger timeout
             InputDTMFFrame(button=KeypadEntry.THREE),
-            SleepFrame(sleep=0.2),  # This should trigger another timeout
+            SleepFrame(),  # This should trigger another timeout
         ]
         expected_down_frames = [
             InputDTMFFrame,
@@ -86,10 +86,10 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
             InputDTMFFrame(button=KeypadEntry.ONE),
             InputDTMFFrame(button=KeypadEntry.TWO),
             InputDTMFFrame(button=KeypadEntry.POUND),  # First sequence
-            SleepFrame(sleep=0.1),
+            SleepFrame(),
             InputDTMFFrame(button=KeypadEntry.FOUR),
             InputDTMFFrame(button=KeypadEntry.FIVE),
-            SleepFrame(sleep=0.3),  # Second sequence via timeout
+            SleepFrame(),  # Second sequence via timeout
         ]
         expected_down_frames = [
             InputDTMFFrame,
@@ -120,7 +120,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         frames_to_send = [
             InputDTMFFrame(button=KeypadEntry.ONE),
             InputDTMFFrame(button=KeypadEntry.TWO),
-            SleepFrame(sleep=0.1),  # Allow time for aggregation
+            SleepFrame(),  # Allow time for aggregation
             EndFrame(),
         ]
         expected_down_frames = [
