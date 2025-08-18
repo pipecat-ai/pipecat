@@ -22,7 +22,6 @@ from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
 TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=dict[str, Any])
 
 
-# TODO: fix everywhere we subclass BaseLLMAdapter...
 class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     """Abstract base class for LLM provider adapters.
 
