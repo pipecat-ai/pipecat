@@ -29,7 +29,9 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
+    StopFrame,
     StopInterruptionFrame,
+    StopTaskFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -45,33 +47,33 @@ from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
 
 
-class ClassifierGate(FrameProcessor):
-    """Gate processor that controls frame flow based on classification decisions.
+class NotifierGate(FrameProcessor):
+    """Base gate processor that controls frame flow based on notifier signals.
 
-    The gate starts open to allow initial classification processing and closes
-    permanently once a classification decision is made (CONVERSATION or VOICEMAIL).
-    This ensures the classifier only runs until a definitive decision is reached,
-    preventing unnecessary LLM calls and maintaining system efficiency.
+    This base class provides common gate functionality for processors that need to
+    start open and close permanently when a notifier signals. Subclasses define
+    which frames are allowed through when the gate is closed.
 
-    The gate allows all frames to pass through while open, but once closed, only
-    allows system frames and user speaking frames to continue. Speaking frames
-    are needed for voicemail timing control.
+    The gate starts open to allow initial processing and closes permanently once
+    the notifier signals. This ensures controlled frame flow based on external
+    decisions or events.
     """
 
-    def __init__(self, gate_notifier: BaseNotifier):
-        """Initialize the classifier gate.
+    def __init__(self, notifier: BaseNotifier, task_name: str = "gate"):
+        """Initialize the notifier gate.
 
         Args:
-            gate_notifier: Notifier that signals when a classification decision has
-                been made and the gate should close.
+            notifier: Notifier that signals when the gate should close.
+            task_name: Name for the notification waiting task (for debugging).
         """
         super().__init__()
-        self._gate_notifier = gate_notifier
+        self._notifier = notifier
+        self._task_name = task_name
         self._gate_opened = True
         self._gate_task: Optional[asyncio.Task] = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames and control gate state based on classification decisions.
+        """Process frames and control gate state based on notifier signals.
 
         Args:
             frame: The frame to process.
@@ -89,51 +91,78 @@ class ClassifierGate(FrameProcessor):
                 await self.cancel_task(self._gate_task)
                 self._gate_task = None
 
-        # Gate logic: open gate allows all frames, closed gate only allows specific system frames
+        # Gate logic: open gate allows all frames, closed gate filters frames
         if self._gate_opened:
             await self.push_frame(frame, direction)
-        elif not self._gate_opened and isinstance(
+        elif isinstance(
             frame,
             (
                 BotInterruptionFrame,
+                CancelFrame,
+                CancelTaskFrame,
                 EndTaskFrame,
                 EndFrame,
-                CancelTaskFrame,
-                CancelFrame,
-                UserStartedSpeakingFrame,
-                UserStoppedSpeakingFrame,
                 StartInterruptionFrame,
                 StopInterruptionFrame,
+                StopFrame,
+                StopTaskFrame,
+                UserStartedSpeakingFrame,
+                UserStoppedSpeakingFrame,
             ),
         ):
             await self.push_frame(frame, direction)
 
     async def _wait_for_notification(self):
-        """Wait for classification decision notification and close the gate.
+        """Wait for notifier signal and close the gate.
 
-        This method blocks until the ClassificationProcessor makes a classification
-        decision and signals through the notifier. Once notified, the gate
-        closes permanently to stop further classification processing.
+        This method blocks until the notifier signals, then closes the gate
+        permanently to change frame filtering behavior.
         """
         try:
-            await self._gate_notifier.wait()
+            await self._notifier.wait()
 
             if self._gate_opened:
                 self._gate_opened = False
         except asyncio.CancelledError:
-            logger.debug(f"{self}: Gate task was cancelled")
+            logger.debug(f"{self}: {self._task_name} task was cancelled")
             raise
         except Exception as e:
-            logger.exception(f"{self}: Error in gate task: {e}")
+            logger.exception(f"{self}: Error in {self._task_name} task: {e}")
             raise
 
 
-class ConversationGate(FrameProcessor):
+class ClassifierGate(NotifierGate):
+    """Gate processor that controls frame flow based on classification decisions.
+
+    Inherits from NotifierGate and starts open to allow initial classification
+    processing. Closes permanently once a classification decision is made
+    (CONVERSATION or VOICEMAIL). This ensures the classifier only runs until a
+    definitive decision is reached, preventing unnecessary LLM calls and maintaining
+    system efficiency.
+
+    When closed, only allows system frames and user speaking frames to continue.
+    Speaking frames are needed for voicemail timing control.
+    """
+
+    def __init__(self, gate_notifier: BaseNotifier):
+        """Initialize the classifier gate.
+
+        Args:
+            gate_notifier: Notifier that signals when a classification decision has
+                been made and the gate should close.
+        """
+        super().__init__(gate_notifier, task_name="classifier_gate")
+
+
+class ConversationGate(NotifierGate):
     """Gate processor that blocks conversation flow when voicemail is detected.
 
-    This gate starts open to allow normal conversation processing but closes
-    permanently when voicemail is detected. This prevents the main conversation
-    LLM from processing additional input after voicemail classification.
+    Inherits from NotifierGate and starts open to allow normal conversation
+    processing. Closes permanently when voicemail is detected to prevent the
+    main conversation LLM from processing additional input after voicemail
+    classification.
+
+    When closed, only allows system frames and user speaking frames to continue.
     """
 
     def __init__(self, voicemail_notifier: BaseNotifier):
@@ -143,68 +172,7 @@ class ConversationGate(FrameProcessor):
             voicemail_notifier: Notifier that signals when voicemail has been
                 detected and the conversation should be blocked.
         """
-        super().__init__()
-        self._voicemail_notifier = voicemail_notifier
-        self._gate_opened = True
-        self._voicemail_task: Optional[asyncio.Task] = None
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames and control gate state based on voicemail detection.
-
-        Args:
-            frame: The frame to process.
-            direction: The direction of frame flow in the pipeline.
-        """
-        await super().process_frame(frame, direction)
-
-        if isinstance(frame, StartFrame):
-            # Start the notification waiting task immediately
-            self._voicemail_task = self.create_task(self._wait_for_voicemail())
-
-        elif isinstance(frame, (EndFrame, CancelFrame)):
-            # Clean up the task when pipeline ends or is cancelled
-            if self._voicemail_task:
-                await self.cancel_task(self._voicemail_task)
-                self._voicemail_task = None
-
-        # Gate logic: open gate allows all frames, closed gate blocks everything
-        if self._gate_opened:
-            await self.push_frame(frame, direction)
-        elif not self._gate_opened and isinstance(
-            frame,
-            (
-                BotInterruptionFrame,
-                EndTaskFrame,
-                EndFrame,
-                CancelTaskFrame,
-                CancelFrame,
-                UserStartedSpeakingFrame,
-                UserStoppedSpeakingFrame,
-                StartInterruptionFrame,
-                StopInterruptionFrame,
-            ),
-        ):
-            # Only allow system frames and user speaking frames through when closed
-            await self.push_frame(frame, direction)
-        # When closed, don't push any frames (complete conversation blocking)
-
-    async def _wait_for_voicemail(self):
-        """Wait for voicemail detection notification and close the gate.
-
-        This method blocks until voicemail is detected, then closes the gate
-        permanently to prevent any further conversation processing.
-        """
-        try:
-            await self._voicemail_notifier.wait()
-
-            if self._gate_opened:
-                self._gate_opened = False
-        except asyncio.CancelledError:
-            logger.debug(f"{self}: Conversation gate task was cancelled")
-            raise
-        except Exception as e:
-            logger.exception(f"{self}: Error in conversation gate task: {e}")
-            raise
+        super().__init__(voicemail_notifier, task_name="conversation_gate")
 
 
 class ClassificationProcessor(FrameProcessor):
