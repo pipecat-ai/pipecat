@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -343,6 +344,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self.reset_conversation()
             # Run the LLM at next opportunity
             await self._create_response()
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for OpenAI Realtime."
+            )
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)

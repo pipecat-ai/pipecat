@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -1044,6 +1045,8 @@ class AWSBedrockLLMService(LLMService):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context = AWSBedrockLLMContext.upgrade_to_bedrock(frame.context)
+        if isinstance(frame, LLMContextFrame):
+            raise NotImplementedError("Universal LLMContext is not yet supported for AWS Bedrock.")
         elif isinstance(frame, LLMMessagesFrame):
             context = AWSBedrockLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
