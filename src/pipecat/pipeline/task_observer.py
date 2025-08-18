@@ -13,11 +13,11 @@ the main pipeline execution.
 
 import asyncio
 import inspect
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from attr import dataclass
 
-from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
@@ -120,14 +120,21 @@ class TaskObserver(BaseObserver):
         for proxy in self._proxies.values():
             await self._task_manager.cancel_task(proxy.task)
 
+    async def on_process_frame(self, data: FramePushed):
+        """Queue frame data for all managed observers.
+
+        Args:
+            data: The frame push event data to distribute to observers.
+        """
+        await self._send_to_proxy(data)
+
     async def on_push_frame(self, data: FramePushed):
         """Queue frame data for all managed observers.
 
         Args:
             data: The frame push event data to distribute to observers.
         """
-        for proxy in self._proxies.values():
-            await proxy.queue.put(data)
+        await self._send_to_proxy(data)
 
     def _started(self) -> bool:
         """Check if the task observer has been started."""
@@ -151,6 +158,10 @@ class TaskObserver(BaseObserver):
             proxies[observer] = proxy
         return proxies
 
+    async def _send_to_proxy(self, data: Any):
+        for proxy in self._proxies.values():
+            await proxy.queue.put(data)
+
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):
         """Handle frame processing for a single observer."""
         on_push_frame_deprecated = False
@@ -169,11 +180,15 @@ class TaskObserver(BaseObserver):
 
         while True:
             data = await queue.get()
-            if on_push_frame_deprecated:
-                await observer.on_push_frame(
-                    data.src, data.dst, data.frame, data.direction, data.timestamp
-                )
-            else:
-                await observer.on_push_frame(data)
+
+            if isinstance(data, FramePushed):
+                if on_push_frame_deprecated:
+                    await observer.on_push_frame(
+                        data.src, data.dst, data.frame, data.direction, data.timestamp
+                    )
+                else:
+                    await observer.on_push_frame(data)
+            elif isinstance(data, FrameProcessed):
+                await observer.on_process_frame(data)
 
             queue.task_done()

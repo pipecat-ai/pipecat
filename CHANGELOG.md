@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new `on_process_frame()` observer method which makes it possible to know
+  when a frame is being processed.
+
 - Added new `FrameProcessor.entry_processor()` method. This allows you to access
   the first non-compound processor in a pipeline.
 
