@@ -3,6 +3,7 @@
 import asyncio
 import math
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Awaitable, Callable, Optional, Tuple
@@ -18,7 +19,6 @@ from ojin.ojin_persona_messages import (
     OjinPersonaInteractionResponseMessage,
     OjinPersonaSessionReadyMessage,
     StartInteractionMessage,
-    StartInteractionResponseMessage,
 )
 from pydantic import BaseModel
 
@@ -141,6 +141,7 @@ class OjinPersonaFSM:
         self._waiting_for_image_frames = False
         self._last_frame: Optional[OutputImageRawFrame] = None
         self.on_state_changed_callback = on_state_changed_callback
+        self.last_update_time: float = -1.0
 
     async def start(self):
         await self.set_state(PersonaState.INITIALIZING)
@@ -272,6 +273,8 @@ class OjinPersonaFSM:
         detect when speech has ended, and push frames to the output pipeline.
 
         """
+
+        self.last_update_time = time.perf_counter()
         while self._playback_task is not None:
             delta_time = time.perf_counter() - self.last_update_time
             self._playback_loop.step(delta_time)
@@ -535,9 +538,8 @@ class OjinPersonaService(FrameProcessor):
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
 
         self._resampler = create_default_resampler()
-        self.should_generate_silence: bool = False
 
-    async def _generate_and_send_silence(self, duration: float):
+    async def _generate_and_send_silence(self, duration: float, is_last_input: bool):
         num_samples = int(duration * OJIN_PERSONA_SAMPLE_RATE)
         silence_audio = b"\x00\x00" * num_samples
         logger.debug(f"Sending {duration}s of silence to initialize persona")
@@ -550,7 +552,7 @@ class OjinPersonaService(FrameProcessor):
             OjinPersonaInteractionInputMessage(
                 audio_int16_bytes=silence_audio,
                 interaction_id=self._interaction.interaction_id,
-                is_last_input=True,
+                is_last_input=is_last_input,
                 params={
                     "start_frame_idx": self._interaction.start_frame_idx,
                     "filter_amount": self._interaction.filter_amount,
@@ -577,7 +579,9 @@ class OjinPersonaService(FrameProcessor):
             await self._start_interaction(is_speech=False)
             assert self._interaction is not None
             self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
-            self.should_generate_silence = True
+            await self._generate_and_send_silence(
+                self._settings.idle_sequence_duration, True
+            )
 
         if old_state == PersonaState.INITIALIZING and new_state == PersonaState.IDLE:
             await self.push_frame(
@@ -748,16 +752,6 @@ class OjinPersonaService(FrameProcessor):
             if self._fsm is not None:
                 await self._fsm.start()
 
-        elif isinstance(message, StartInteractionResponseMessage):
-            assert self._interaction is not None
-            self._interaction.interaction_id = message.interaction_id
-            self._interaction.set_state(InteractionState.ACTIVE)
-            if self.should_generate_silence:
-                self.should_generate_silence = False
-                await self._generate_and_send_silence(
-                    self._settings.idle_sequence_duration
-                )
-
         elif isinstance(message, ErrorResponseMessage):
             is_fatal = False
             if message.payload.code == "NO_BACKEND_SERVER_AVAILABLE":
@@ -878,6 +872,11 @@ class OjinPersonaService(FrameProcessor):
 
             self._close_interaction()
 
+    async def _set_interaction_id(self, interaction_id: str):
+        assert self._interaction is not None
+        self._interaction.interaction_id = interaction_id
+        self._interaction.set_state(InteractionState.ACTIVE)
+
     async def _start_interaction(
         self,
         new_interaction: Optional[OjinPersonaInteraction] = None,
@@ -909,14 +908,19 @@ class OjinPersonaService(FrameProcessor):
                 )
                 self._interaction.start_frame_idx = self._fsm.get_transition_frame_idx()
                 self._interaction.frame_idx = self._fsm.get_transition_frame_idx()
+                self._interaction.pending_first_input = True
         else:
             self._interaction.filter_amount = IDLE_FILTER_AMOUNT
             self._interaction.mouth_opening_scale = IDLE_MOUTH_OPENING_SCALE
             self._interaction.start_frame_idx = 0
             self._interaction.frame_idx = 0
 
+        interaction_id = str(uuid.uuid4())
         logger.debug("Sending StartInteractionMessage")
-        await self.push_ojin_message(StartInteractionMessage())
+        await self.push_ojin_message(
+            StartInteractionMessage(interaction_id=interaction_id)
+        )
+        await self._set_interaction_id(interaction_id=interaction_id)
 
     async def _end_interaction(self):
         """End the current interaction.
@@ -981,11 +985,11 @@ class OjinPersonaService(FrameProcessor):
                 and self._interaction.audio_input_queue is not None
             )
             # Queue the audio for later processing
+            start_frame_idx = 0
             if self._interaction.pending_first_input:
-                start_frame_idx = self._interaction.start_frame_idx
-            else:
-                start_frame_idx = 0
+                start_frame_idx = self._interaction.start_frame_idx or 0
 
+            logger.info(f"start index: {start_frame_idx}")
             await self._interaction.audio_input_queue.put(
                 OjinPersonaInteractionInputMessage(
                     interaction_id=self._interaction.interaction_id,
@@ -1265,6 +1269,13 @@ def mirror_index(index: int, size: int) -> int:
         int: The mirrored index that creates the ping-pong effect
 
     """
+    turn = index // size
+    res = index % size
+    if turn % 2 == 0:
+        return res
+    else:
+        return size - res - 1
+
     # Calculate period length (going up and down)
     period = (size - 1) * 2
 
