@@ -36,7 +36,7 @@ class OpenAILLMInvocationParams(TypedDict):
     tool_choice: ChatCompletionToolChoiceOptionParam | OpenAINotGiven
 
 
-class OpenAILLMAdapter(BaseLLMAdapter):
+class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
     """OpenAI-specific adapter for Pipecat.
 
     Handles:
