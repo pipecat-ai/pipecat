@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -322,6 +323,10 @@ class AWSNovaSonicLLMService(LLMService):
 
         if isinstance(frame, OpenAILLMContextFrame):
             await self._handle_context(frame.context)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for AWS Nova Sonic."
+            )
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
