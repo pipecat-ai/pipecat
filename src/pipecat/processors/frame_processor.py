@@ -263,6 +263,20 @@ class FrameProcessor(BaseObject):
         return []
 
     @property
+    def entry_processors(self) -> List["FrameProcessor"]:
+        """Return the list of entry processors for this processor.
+
+        Entry processors are the first processors in a compound processor
+        (e.g. pipelines, parallel pipelines). Note that pipelines can also be an
+        entry processor as pipelines are processors themselves. Non-compound
+        processors will simply return an empty list.
+
+        Returns:
+            The list of entry processors.
+        """
+        return []
+
+    @property
     def next(self) -> Optional["FrameProcessor"]:
         """Get the next processor.
 
