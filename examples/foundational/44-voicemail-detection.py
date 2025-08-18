@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.extensions.voicemail.voicemail_detector import VoicemailDetector
 from pipecat.frames.frames import EndTaskFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -24,7 +25,6 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
-from pipecat.utils.voicemail.voicemail_detector import VoicemailDetector
 
 load_dotenv(override=True)
 
