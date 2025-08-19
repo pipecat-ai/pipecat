@@ -375,25 +375,44 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         prev_voice = self._voice_id
         prev_model = self.model_name
         prev_language = self._settings.get("language")
+        # Create snapshot of current voice settings to detect changes after update
+        prev_voice_settings = self._voice_settings.copy() if self._voice_settings else None
 
         await super()._update_settings(settings)
 
         # Update voice settings for the next context creation
         self._voice_settings = self._set_voice_settings()
 
-        # Check if any key connection-level settings changed
-        settings_changed = (
+        # Check if URL-level settings changed (these require reconnection)
+        url_changed = (
             prev_voice != self._voice_id
             or prev_model != self.model_name
             or prev_language != self._settings.get("language")
         )
 
-        if settings_changed:
+        # Check if only voice settings changed (speed, stability, etc.)
+        voice_settings_changed = prev_voice_settings != self._voice_settings
+
+        if url_changed:
+            # These settings are in the WebSocket URL, so we need to reconnect
             logger.debug(
-                f"Connection-level setting changed (voice/model/language), reconnecting WebSocket"
+                f"URL-level setting changed (voice/model/language), reconnecting WebSocket"
             )
             await self._disconnect()
             await self._connect()
+        elif voice_settings_changed and self._context_id:
+            # Voice settings can be updated by closing current context
+            # so new one gets created with updated voice settings
+            logger.debug(f"Voice settings changed, closing current context to apply changes")
+            try:
+                if self._websocket:
+                    await self._websocket.send(
+                        json.dumps({"context_id": self._context_id, "close_context": True})
+                    )
+            except Exception as e:
+                logger.warning(f"Error closing context for voice settings update: {e}")
+            self._context_id = None
+            self._started = False
 
     async def start(self, frame: StartFrame):
         """Start the ElevenLabs TTS service.
