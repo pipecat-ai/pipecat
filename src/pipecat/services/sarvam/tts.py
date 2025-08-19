@@ -9,6 +9,7 @@
 import asyncio
 import base64
 import json
+import warnings
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
@@ -110,11 +111,11 @@ class SarvamHttpTTSService(TTSService):
         self,
         *,
         api_key: str,
+        aiohttp_session: aiohttp.ClientSession,
         voice_id: str = "anushka",
         model: str = "bulbul:v2",
         base_url: str = "https://api.sarvam.ai",
         sample_rate: Optional[int] = None,
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         params: Optional[InputParams] = None,
         **kwargs,
     ):
@@ -122,12 +123,11 @@ class SarvamHttpTTSService(TTSService):
 
         Args:
             api_key: Sarvam AI API subscription key.
+            aiohttp_session: Shared aiohttp session for making requests.
             voice_id: Speaker voice ID (e.g., "anushka", "meera"). Defaults to "anushka".
             model: TTS model to use ("bulbul:v1" or "bulbul:v2"). Defaults to "bulbul:v2".
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000). If None, uses default.
-            aiohttp_session: Optional shared aiohttp session for making requests.
-                If None, a new session will be created. Defaults to None.
             params: Additional voice and preprocessing parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
@@ -137,8 +137,7 @@ class SarvamHttpTTSService(TTSService):
 
         self._api_key = api_key
         self._base_url = base_url
-        self._session = aiohttp_session or aiohttp.ClientSession()
-        self._session_owner = aiohttp_session is None
+        self._session = aiohttp_session
 
         self._settings = {
             "language": (
@@ -180,26 +179,6 @@ class SarvamHttpTTSService(TTSService):
         """
         await super().start(frame)
         self._settings["sample_rate"] = self.sample_rate
-
-    async def stop(self, frame: EndFrame):
-        """Stop the Sarvam HTTP TTS service and cleanup resources.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        if self._session_owner and self._session:
-            await self._session.close()
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the Sarvam HTTP TTS service and cleanup resources.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        if self._session_owner and self._session:
-            await self._session.close()
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -354,6 +333,8 @@ class SarvamTTSService(InterruptibleTTSService):
             voice_id: Voice identifier for synthesis (default "anushka").
             url: WebSocket URL for connecting to the TTS backend (default production URL).
             aiohttp_session: Optional shared aiohttp session. To maintain backward compatibility.
+                .. deprecated:: 0.0.81
+                    aiohttp_session is no longer used. This parameter will be removed in a future version.
             aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
             sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
             params: Optional input parameters to override global configuration.
@@ -374,7 +355,12 @@ class SarvamTTSService(InterruptibleTTSService):
             **kwargs,
         )
         params = params or SarvamTTSService.InputParams()
-
+        if aiohttp_session is not None:
+            warnings.warn(
+                "The 'aiohttp_session' parameter is deprecated and will be removed in a future version. ",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         # WebSocket endpoint URL
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key
