@@ -570,9 +570,6 @@ class SarvamTTSService(InterruptibleTTSService):
 
                     await self.push_frame(ErrorFrame(f"TTS Error: {error_msg}"))
 
-                elif msg.get("type") == "pong":
-                    logger.debug("Received pong message")
-
     async def _keepalive_task_handler(self):
         """Handle keepalive messages to maintain WebSocket connection."""
         KEEPALIVE_SLEEP = 20
