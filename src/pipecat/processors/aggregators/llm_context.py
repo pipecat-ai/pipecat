@@ -274,5 +274,5 @@ class LLMContext:
             return NOT_GIVEN
         else:
             raise TypeError(
-                "In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN.",
+                f"In LLMContext, tools must be a ToolsSchema object or NOT_GIVEN. Got type: {type(tools)}",
             )
