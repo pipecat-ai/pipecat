@@ -190,12 +190,13 @@ class BaseOpenAILLMService(LLMService):
 
         Args:
             params_from_context: Parameters, derived from the LLM context, to
-                use for the chat completion. Contains messages, tools, and tool choice.
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
             Async stream of chat completion chunks.
         """
-        params = self.build_chat_completion_params(context, messages)
+        params = self.build_chat_completion_params(params_from_context)
 
         if self._retry_on_timeout:
             try:
@@ -213,7 +214,7 @@ class BaseOpenAILLMService(LLMService):
             return chunks
 
     def build_chat_completion_params(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+        self, params_from_context: OpenAILLMInvocationParams
     ) -> dict:
         """Build parameters for chat completion request.
 
@@ -245,7 +246,7 @@ class BaseOpenAILLMService(LLMService):
         params.update(self._settings["extra"])
         return params
 
-    async def _stream_chat_completions(
+    async def _stream_chat_completions_specific_context(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
         logger.debug(
@@ -303,7 +304,7 @@ class BaseOpenAILLMService(LLMService):
 
         # Generate chat completions using either OpenAILLMContext or universal LLMContext
         chunk_stream = await (
-            self._stream_chat_completions(context)
+            self._stream_chat_completions_specific_context(context)
             if isinstance(context, OpenAILLMContext)
             else self._stream_chat_completions_universal_context(context)
         )
@@ -389,6 +390,18 @@ class BaseOpenAILLMService(LLMService):
 
             await self.run_function_calls(function_calls)
 
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            Whether service supports universal LLMContext.
+        """
+        # Return True in subclasses that support universal LLMContext
+        # This property lets us gradually roll out support for universal
+        # LLMContext to OpenAI-like services in a controlled manner.
+        return False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
@@ -408,7 +421,12 @@ class BaseOpenAILLMService(LLMService):
             context = frame.context
         elif isinstance(frame, LLMContextFrame):
             # Handle universal (LLM-agnostic) LLM context frames
-            context = frame.context
+            if self.supports_universal_context:
+                context = frame.context
+            else:
+                raise NotImplementedError(
+                    f"Universal LLMContext is not yet supported for {self.__class__.__name__}."
+                )
         elif isinstance(frame, LLMMessagesFrame):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
