@@ -190,3 +190,12 @@ class GrokLLMService(OpenAILLMService):
         user = OpenAIUserContextAggregator(context, params=user_params)
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
         return GrokContextAggregatorPair(_user=user, _assistant=assistant)
+
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as GrokLLMService does not yet support universal LLMContext.
+        """
+        return False
