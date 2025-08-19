@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     Frame,
     LLMFullResponseEndFrame,
     StartFrame,
+    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -441,6 +442,17 @@ class SarvamTTSService(InterruptibleTTSService):
             msg = {"type": "flush"}
             await self._websocket.send(json.dumps(msg))
 
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Push a frame downstream with special handling for stop conditions.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction to push the frame.
+        """
+        await super().push_frame(frame, direction)
+        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+            self._started = False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process a frame and flush audio if it's the end of a full response."""
         if isinstance(frame, LLMFullResponseEndFrame):
@@ -454,21 +466,6 @@ class SarvamTTSService(InterruptibleTTSService):
         if not prev_voice == self._voice_id:
             logger.info(f"Switching TTS voice to: [{self._voice_id}]")
             await self._send_config()
-
-    async def _flush_and_reconnect(self):
-        """Flush current synthesis and reconnect WebSocket to clear stale requests."""
-        try:
-            if self._websocket:
-                # Send flush message if supported
-                msg = {"type": "flush"}
-                await self._websocket.send(json.dumps(msg))
-
-            # Disconnect and reconnect to clear any pending synthesis
-            await self._disconnect()
-            await self._connect()
-
-        except Exception as e:
-            logger.error(f"Error during TTS flush and reconnect: {e}")
 
     async def _connect(self):
         """Connect to Sarvam WebSocket and start background tasks."""
