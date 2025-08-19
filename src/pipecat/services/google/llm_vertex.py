@@ -139,3 +139,12 @@ class GoogleVertexLLMService(OpenAILLMService):
         creds.refresh(Request())  # Ensure token is up-to-date, lifetime is 1 hour.
 
         return creds.token
+
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as GoogleVertexLLMService does not yet support universal LLMContext.
+        """
+        return False

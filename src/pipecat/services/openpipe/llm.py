@@ -13,9 +13,8 @@ enabling integration with OpenPipe's fine-tuning and monitoring capabilities.
 from typing import Dict, List, Optional
 
 from loguru import logger
-from openai.types.chat import ChatCompletionMessageParam
 
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.llm import OpenAILLMService
 
 try:
@@ -86,22 +85,21 @@ class OpenPipeLLMService(OpenAILLMService):
         )
         return client
 
-    def build_chat_completion_params(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for OpenPipe chat completion request.
 
         Adds OpenPipe-specific logging and tagging parameters.
 
         Args:
-            context: The LLM context containing tools and configuration.
-            messages: List of chat completion messages to send.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
             Dictionary of parameters for the chat completion request.
         """
         # Start with base parameters
-        params = super().build_chat_completion_params(context, messages)
+        params = super().build_chat_completion_params(params_from_context)
 
         # Add OpenPipe-specific parameters
         params["openpipe"] = {
@@ -110,3 +108,12 @@ class OpenPipeLLMService(OpenAILLMService):
         }
 
         return params
+
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as OpenPipeLLMService does not yet support universal LLMContext.
+        """
+        return False
