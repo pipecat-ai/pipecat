@@ -128,7 +128,6 @@ class SarvamHttpTTSService(TTSService):
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000). If None, uses default.
             aiohttp_session: Optional shared aiohttp session for making requests.
                 If None, a new session will be created. Defaults to None.
-
             params: Additional voice and preprocessing parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
