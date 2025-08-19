@@ -95,17 +95,20 @@ class MistralLLMService(OpenAILLMService):
         Mistral and OpenAI have different function call detection patterns:
 
         OpenAI (Stream-based detection):
+
         - Detects function calls only from streaming chunks as the LLM generates them
         - Second LLM completion doesn't re-detect existing tool_calls in message history
         - Function calls execute exactly once
 
         Mistral (Message-based detection):
+
         - Detects function calls from the complete message history on each completion
         - Second LLM completion with the response re-detects the same tool_calls from
           previous messages
         - Without filtering, function calls would execute twice
 
         This method prevents duplicate execution by:
+
         1. Checking message history for existing tool result messages
         2. Filtering out function calls that already have corresponding results
         3. Only executing function calls that haven't been completed yet
