@@ -25,7 +25,7 @@ DEFAULT_WS_PORT: int = 8765
 PCM16_SAMPLE_WIDTH_BYTES: int = 2  # 16-bit PCM
 
 
-class VonageWebsocketServerTransport(WebsocketServerTransport):
+class VonageAudioConnectorTransport(WebsocketServerTransport):
     """WebSocket server transport that paces by sleeping once per audio chunk."""
 
     def __init__(
@@ -51,11 +51,11 @@ class VonageWebsocketServerTransport(WebsocketServerTransport):
     def output(self) -> WebsocketServerOutputTransport:
         """Return the output transport used to send data to clients."""
         if not self._output:
-            self._output = VonageWebsocketServerOutputTransport(self, self._params)
+            self._output = VonageAudioConnectorOutputTransport(self, self._params)
         return self._output
 
 
-class VonageWebsocketServerOutputTransport(WebsocketServerOutputTransport):
+class VonageAudioConnectorOutputTransport(WebsocketServerOutputTransport):
     """Output transport that sends each serializer-produced chunk and sleeps between sends."""
 
     def __init__(self, transport: BaseTransport, params: WebsocketServerParams, **kwargs) -> None:

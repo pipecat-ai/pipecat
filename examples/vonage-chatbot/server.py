@@ -17,7 +17,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.serializers.vonage import VonageFrameSerializer
 from pipecat.services.openai import OpenAILLMService, OpenAISTTService, OpenAITTSService
 from pipecat.transports.network.websocket_server import WebsocketServerParams
-from pipecat.transports.services.vonage import VonageWebsocketServerTransport
+from pipecat.transports.services.vonage import VonageAudioConnectorTransport
 
 # ---- Constants ---------------------------------------------------------------
 
@@ -40,7 +40,7 @@ load_dotenv()
 async def run_bot_websocket_server() -> None:
     serializer = VonageFrameSerializer()
 
-    ws_transport = VonageWebsocketServerTransport(
+    ws_transport = VonageAudioConnectorTransport(
         host=WS_HOST,
         port=WS_PORT,
         params=WebsocketServerParams(
