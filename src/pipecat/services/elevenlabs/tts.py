@@ -370,11 +370,28 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         await self._connect()
 
     async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice changed."""
+        """Update service settings and reconnect if voice, model, or language changed."""
+        # Track previous values for settings that require reconnection
         prev_voice = self._voice_id
+        prev_model = self.model_name
+        prev_language = self._settings.get("language")
+
         await super()._update_settings(settings)
-        if not prev_voice == self._voice_id:
-            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+
+        # Update voice settings for the next context creation
+        self._voice_settings = self._set_voice_settings()
+
+        # Check if any key connection-level settings changed
+        settings_changed = (
+            prev_voice != self._voice_id
+            or prev_model != self.model_name
+            or prev_language != self._settings.get("language")
+        )
+
+        if settings_changed:
+            logger.debug(
+                f"Connection-level setting changed (voice/model/language), reconnecting WebSocket"
+            )
             await self._disconnect()
             await self._connect()
 
