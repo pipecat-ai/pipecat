@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `MistralLLMService`, using Mistral's chat completion API.
 
-- For `OpenAILLMService` and its subclasses, added the ability to retry
-  executing a chat completion after a timeout period. The new args are
+- Added the ability to retry executing a chat completion after a timeout period
+  for `OpenAILLMService` and its subclasses, `AnthropicLLMService`, and
+  `AWSBedrockLLMService`. The LLM services accept new args:
   `retry_timeout_secs` and `retry_on_timeout`. This feature is disabled by
   default.
 
