@@ -248,7 +248,7 @@ class HeyGenClient:
         if event_type == "agent.state":
             logger.debug(f"HeyGenClient ws received agent status: {event}")
         else:
-            logger.error(f"HeyGenClient ws received unknown event: {event_type}")
+            logger.trace(f"HeyGenClient ws received unknown event: {event_type}")
 
     async def _ws_disconnect(self) -> None:
         """Disconnect from HeyGen websocket endpoint."""
