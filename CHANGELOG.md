@@ -16,6 +16,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a new "universal" (LLM-agnostic) `LLMContext` and accompanying
+  `LLMContextAggregatorPair`, which will eventually replace `OpenAILLMContext`
+  (and the other under-the-hood contexts) and the other context aggregators.
+  The new universal `LLMContext` machinery allows a single context to be shared
+  between different LLMs, enabling scenarios like LLM failover.
+
+  From the developer's point of view, switching to using the new universal
+  context machinery will usually be a matter of going from this:
+
+  ```python
+  context = OpenAILLMContext(messages, tools)
+  context_aggregator = llm.create_context_aggregator(context)
+  ```
+
+  To this:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(context)
+  ```
+
+  To start, the universal `LLMContext` is supported with the following LLM
+  services:
+
+  - `OpenAILLMService`
+  - `GoogleLLMService`
+
 - Added `pipecat.extensions.voicemail`, a module for detecting voicemail vs.
   live conversation, primarily intended for use in outbound calling scenarios.
   The voicemail module is optimized for text LLMs only.
