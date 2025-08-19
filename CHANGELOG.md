@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `14w-function-calling-mistal.py` using `MistralLLMService`.
 
+- Added `13j-azure-transcription.py` using `AzureSTTService`.
+
 ## [0.0.80] - 2025-08-13
 
 ### Added
