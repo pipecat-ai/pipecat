@@ -213,16 +213,15 @@ class BaseOpenAILLMService(LLMService):
             chunks = await self._client.chat.completions.create(**params)
             return chunks
 
-    def build_chat_completion_params(
-        self, params_from_context: OpenAILLMInvocationParams
-    ) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for chat completion request.
 
         Subclasses can override this to customize parameters for different providers.
 
         Args:
-            context: The LLM context containing tools and configuration.
-            messages: List of chat completion messages to send.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
             Dictionary of parameters for the chat completion request.
