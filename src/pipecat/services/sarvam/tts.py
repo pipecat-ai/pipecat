@@ -112,9 +112,9 @@ class SarvamHttpTTSService(TTSService):
         api_key: str,
         voice_id: str = "anushka",
         model: str = "bulbul:v2",
-        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         base_url: str = "https://api.sarvam.ai",
         sample_rate: Optional[int] = None,
+        aiohttp_session: Optional[aiohttp.ClientSession] = None,
         params: Optional[InputParams] = None,
         **kwargs,
     ):
@@ -124,10 +124,11 @@ class SarvamHttpTTSService(TTSService):
             api_key: Sarvam AI API subscription key.
             voice_id: Speaker voice ID (e.g., "anushka", "meera"). Defaults to "anushka".
             model: TTS model to use ("bulbul:v1" or "bulbul:v2"). Defaults to "bulbul:v2".
-            aiohttp_session: Optional shared aiohttp session for making requests.
-                If None, a new session will be created. Defaults to None.
             base_url: Sarvam AI API base URL. Defaults to "https://api.sarvam.ai".
             sample_rate: Audio sample rate in Hz (8000, 16000, 22050, 24000). If None, uses default.
+            aiohttp_session: Optional shared aiohttp session for making requests.
+                If None, a new session will be created. Defaults to None.
+
             params: Additional voice and preprocessing parameters. If None, uses defaults.
             **kwargs: Additional arguments passed to parent TTSService.
         """
