@@ -76,6 +76,7 @@ from loguru import logger
 
 from pipecat.runner.types import (
     DailyRunnerArguments,
+    SmallWebRTCPrebuiltArguments,
     SmallWebRTCRunnerArguments,
     WebSocketRunnerArguments,
 )
@@ -151,7 +152,11 @@ async def _run_telephony_bot(websocket: WebSocket):
 
 
 def _create_server_app(
-    transport_type: str, host: str = "localhost", proxy: str = None, esp32_mode: bool = False
+    transport_type: str,
+    host: str = "localhost",
+    proxy: str = None,
+    esp32_mode: bool = False,
+    prebuilt_ui_config: SmallWebRTCPrebuiltArguments = None,
 ):
     """Create FastAPI app with transport-specific routes."""
     app = FastAPI()
@@ -166,9 +171,9 @@ def _create_server_app(
 
     # Set up transport-specific routes
     if transport_type == "webrtc":
-        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host)
+        _setup_webrtc_routes(app, esp32_mode=esp32_mode, host=host, prebuilt_ui_config=prebuilt_ui_config)
     elif transport_type == "daily":
-        _setup_daily_routes(app)
+        _setup_daily_routes(app, prebuilt_ui_config=prebuilt_ui_config)
     elif transport_type in ["twilio", "telnyx", "plivo", "exotel"]:
         _setup_telephony_routes(app, transport_type, proxy)
     else:
@@ -177,7 +182,12 @@ def _create_server_app(
     return app
 
 
-def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "localhost"):
+def _setup_webrtc_routes(
+    app: FastAPI,
+    esp32_mode: bool = False,
+    host: str = "localhost",
+    prebuilt_ui_config: SmallWebRTCPrebuiltArguments = None,
+):
     """Set up WebRTC-specific routes."""
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
@@ -191,7 +201,7 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
     pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
     # Mount the frontend
-    app.mount("/client", SmallWebRTCPrebuiltUI)
+    app.mount("/client", SmallWebRTCPrebuiltUI(config=prebuilt_ui_config))
 
     @app.get("/", include_in_schema=False)
     async def root_redirect():
@@ -435,7 +445,7 @@ def _validate_and_clean_proxy(proxy: str) -> str:
     return proxy
 
 
-def main():
+def main(prebuilt_ui_config: SmallWebRTCPrebuiltArguments = None):
     """Start the Pipecat development runner.
 
     Parses command-line arguments and starts a FastAPI server configured
@@ -533,7 +543,7 @@ def main():
         print()
 
     # Create the app with transport-specific setup
-    app = _create_server_app(args.transport, args.host, args.proxy, args.esp32)
+    app = _create_server_app(args.transport, args.host, args.proxy, args.esp32, prebuilt_ui_config)
 
     # Run the server
     uvicorn.run(app, host=args.host, port=args.port)
