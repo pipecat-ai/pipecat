@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ElevenLabsTTSService` now supports additional runtime changes to the `model`,
   `language`, and `voice_settings` parameters.
 
+- Added `apply_text_normalization` support to `ElevenLabsTTSService` and
+  `ElevenLabsHttpTTSService`.
+
 - Added `MistralLLMService`, using Mistral's chat completion API.
 
 - Added the ability to retry executing a chat completion after a timeout period
