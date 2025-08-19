@@ -122,9 +122,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions_specific_context(
-            context
-        )
+        chunk_stream: AsyncStream[
+            ChatCompletionChunk
+        ] = await self._stream_chat_completions_specific_context(context)
 
         async for chunk in chunk_stream:
             if chunk.usage:
