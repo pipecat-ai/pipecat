@@ -9,7 +9,7 @@
 import base64
 import json
 from dataclasses import dataclass
-from typing import Any, List, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from loguru import logger
 from openai import NotGiven
@@ -71,7 +71,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             "tools": self.from_standard_tools(context.tools),
         }
 
-    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Any]:
+    def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Dict[str, Any]]:
         """Convert tool schemas to Gemini's function-calling format.
 
         Args:
@@ -139,11 +139,13 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         System messages are added back to the context as user messages when needed.
 
         The final message order is preserved as:
+
         1. Function calls (from model)
         2. Function responses (from user)
         3. Text messages (converted from system messages)
 
-        Note:
+        Note::
+
             System messages are only added back when there are no regular text
             messages in the context, ensuring proper conversation continuity
             after function calls.

@@ -40,6 +40,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
     """OpenAI-specific adapter for Pipecat.
 
     Handles:
+
     - Extracting parameters for OpenAI's ChatCompletion API from a universal
       LLM context
     - Converting Pipecat's standardized tools schema to OpenAI's function-calling format.
