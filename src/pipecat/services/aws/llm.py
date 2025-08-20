@@ -840,24 +840,27 @@ class AWSBedrockLLMService(LLMService):
 
             request_params["system"] = [{"text": summary_prompt}]
 
-            # Call Bedrock without streaming
-            response = self._client.converse(**request_params)
+            async with self._aws_session.client(
+                service_name="bedrock-runtime", **self._aws_params
+            ) as client:
+                # Call Bedrock without streaming
+                response = await client.converse(**request_params)
 
-            # Extract the response text
-            if (
-                "output" in response
-                and "message" in response["output"]
-                and "content" in response["output"]["message"]
-            ):
-                content = response["output"]["message"]["content"]
-                if isinstance(content, list):
-                    for item in content:
-                        if item.get("text"):
-                            return item["text"]
-                elif isinstance(content, str):
-                    return content
+                # Extract the response text
+                if (
+                    "output" in response
+                    and "message" in response["output"]
+                    and "content" in response["output"]["message"]
+                ):
+                    content = response["output"]["message"]["content"]
+                    if isinstance(content, list):
+                        for item in content:
+                            if item.get("text"):
+                                return item["text"]
+                    elif isinstance(content, str):
+                        return content
 
-            return None
+                return None
 
         except Exception as e:
             logger.error(f"Bedrock summary generation failed: {e}", exc_info=True)
