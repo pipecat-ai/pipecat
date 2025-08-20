@@ -18,7 +18,7 @@ from ojin.ojin_persona_messages import (
     OjinPersonaInteractionInputMessage,
     OjinPersonaInteractionResponseMessage,
     OjinPersonaSessionReadyMessage,
-    StartInteractionMessage,
+    StartInteractionResponseMessage,
 )
 from pydantic import BaseModel
 
@@ -917,7 +917,8 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.frame_idx = 0
 
         logger.debug("Sending StartInteractionMessage")
-        await self._handle_ojin_message(await self._client.start_interaction())
+        response = await self._client.start_interaction()
+        self._interaction.interaction_id = response.interaction_id
 
     async def _end_interaction(self):
         """End the current interaction.
