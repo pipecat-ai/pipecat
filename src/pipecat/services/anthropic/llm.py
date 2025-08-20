@@ -53,6 +53,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
@@ -185,9 +186,7 @@ class AnthropicLLMService(LLMService):
         """
         if self._retry_on_timeout:
             try:
-                response = await asyncio.wait_for(
-                    api_call(**params), timeout=self._retry_timeout_secs
-                )
+                response = await wait_for(api_call(**params), timeout=self._retry_timeout_secs)
                 return response
             except (APITimeoutError, asyncio.TimeoutError):
                 # Retry, this time without a timeout so we get a response

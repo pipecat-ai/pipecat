@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.timeout import wait_for
 
 
 @dataclass
@@ -124,7 +125,7 @@ class WatchdogPriorityQueue(asyncio.PriorityQueue):
         """Get item from queue while periodically resetting watchdog timer."""
         while True:
             try:
-                item = await asyncio.wait_for(super().get(), timeout=self._timeout)
+                item = await wait_for(super().get(), timeout=self._timeout)
                 self._manager.task_reset_watchdog()
                 return item
             except asyncio.TimeoutError:

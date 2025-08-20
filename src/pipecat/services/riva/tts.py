@@ -14,6 +14,7 @@ import asyncio
 import os
 from typing import AsyncGenerator, Mapping, Optional
 
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # Suppress gRPC fork warnings
@@ -168,7 +169,7 @@ class RivaTTSService(TTSService):
             await asyncio.to_thread(read_audio_responses, queue)
 
             # Wait for the thread to start.
-            resp = await asyncio.wait_for(queue.get(), RIVA_TTS_TIMEOUT_SECS)
+            resp = await wait_for(queue.get(), timeout=RIVA_TTS_TIMEOUT_SECS)
             while resp:
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
@@ -177,7 +178,7 @@ class RivaTTSService(TTSService):
                     num_channels=1,
                 )
                 yield frame
-                resp = await asyncio.wait_for(queue.get(), RIVA_TTS_TIMEOUT_SECS)
+                resp = await wait_for(queue.get(), timeout=RIVA_TTS_TIMEOUT_SECS)
         except asyncio.TimeoutError:
             logger.error(f"{self} timeout waiting for audio response")
 
