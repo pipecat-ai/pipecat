@@ -258,7 +258,7 @@ class TTSService(AIService):
                     self._settings[key] = self.language_to_service_language(value)
             elif key == "model":
                 self.set_model_name(value)
-            elif key == "voice":
+            elif key == "voice" or key == "voice_id":
                 self.set_voice(value)
             elif key == "text_filter":
                 for filter in self._text_filters:
