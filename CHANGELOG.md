@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `FrameProcessor.pause_processing_system_frames()` and
+  `FrameProcessor.resume_processing_system_frames()`. These allow to pause and
+  resume the processing of system frame.
+
 - Added new `on_process_frame()` observer method which makes it possible to know
   when a frame is being processed.
 
