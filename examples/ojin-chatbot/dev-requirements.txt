@@ -1,4 +1,5 @@
 -e ../../[openai,elevenlabs,deepgram,ojin]
+-e ../../../ojin/managed-models/avatar/services
 textual==1.0.0
 pydantic-settings>=2.7.1
 pyaudio==0.2.14

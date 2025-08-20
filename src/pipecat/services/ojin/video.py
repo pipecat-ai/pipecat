@@ -917,9 +917,7 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.frame_idx = 0
 
         logger.debug("Sending StartInteractionMessage")
-        await self.push_ojin_message(
-            StartInteractionMessage()
-        )
+        await self._handle_ojin_message(await self._client.start_interaction())
 
     async def _end_interaction(self):
         """End the current interaction.
