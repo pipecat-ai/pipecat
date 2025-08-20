@@ -394,7 +394,8 @@ class OjinPersonaFSM:
 
                 if frame is None:
                     self._num_frames_missed += 1
-                    logger.debug(f"Frames missed {self._num_frames_missed}")
+                    if self._num_frames_missed % 100 == 0:
+                        logger.debug(f"Frames missed {self._num_frames_missed}")
 
                     if self._previous_speech_frame is not None:
                         return self._previous_speech_frame
@@ -539,6 +540,9 @@ class OjinPersonaService(FrameProcessor):
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
 
         self._resampler = create_default_resampler()
+        self.should_generate_silence: bool = False
+        self._last_frame_msg: int | None = None
+        self._stopping = False
 
     async def _generate_and_send_silence(self, duration: float, is_last_input: bool):
         num_samples = int(duration * OJIN_PERSONA_SAMPLE_RATE)
@@ -622,6 +626,30 @@ class OjinPersonaService(FrameProcessor):
         # Create tasks to process audio and video
         self._audio_input_task = self.create_task(self._process_queued_audio())
         self._receive_task = self.create_task(self._receive_messages())
+        self._handle_incomming_frame_task = self.create_task(self._incomming_frame_task())
+
+    async def _incomming_frame_task(self):
+        while True:
+            if self._fsm is not None:
+                if self._fsm._state == PersonaState.SPEECH and self._last_frame_msg is not None:
+                    last_received_frame_time = time.time() - self._last_frame_msg
+
+                    if last_received_frame_time > 1.5 and not self._stopping:
+                        self._stopping = True
+                        logger.info("Ending interaction")
+                        await self.push_ojin_message(
+                            OjinPersonaCancelInteractionMessage(
+                                interaction_id=self._interaction.interaction_id,
+                            )
+                        )
+                        await self._fsm.on_conversation_signal(
+                            ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
+                        )
+                        self._last_frame_msg = None
+                        self._stopping = False
+                        
+            
+            await asyncio.sleep(0.01)
 
     async def _stop(self):
         """Stop the persona service and clean up resources.
@@ -737,6 +765,7 @@ class OjinPersonaService(FrameProcessor):
                 await self.push_frame(image_frame)
 
             self._interaction.next_frame()
+            self._last_frame_msg = time.time()
             if message.is_final_response:
                 logger.debug("No more video frames expected")
                 if self._fsm is not None:
@@ -1059,19 +1088,22 @@ class OjinPersonaService(FrameProcessor):
                 should_finish_task = True
             except asyncio.QueueEmpty:
                 should_finish_task = False
-                if is_final_message:
-                    logger.warning("Pushing final message with empty audio")
-                    silence_duration = 0.1
-                    num_samples = int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
-                    silence_audio = b"\x00\x00" * num_samples
-                    message = OjinPersonaInteractionInputMessage(
-                        interaction_id=self._interaction.interaction_id,
-                        audio_int16_bytes=silence_audio,
-                    )
-                else:
-                    logger.error(
-                        f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}"
-                    )
+                # if is_final_message:
+                    # logger.warning("Pushing final message with empty audio")
+                    # await self._fsm.on_conversation_signal(
+                    #     ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
+                    # )
+                    # silence_duration = 0.1
+                    # num_samples = int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
+                    # silence_audio = b"\x00\x00" * num_samples
+                    # message = OjinPersonaInteractionInputMessage(
+                    #     interaction_id=self._interaction.interaction_id,
+                    #     audio_int16_bytes=silence_audio,
+                    # )
+                # else:
+                    # logger.error(
+                        # f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}"
+                    # )
 
             if is_final_message:
                 self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
@@ -1080,7 +1112,8 @@ class OjinPersonaService(FrameProcessor):
             logger.debug(
                 f"Sending audio int16: {len(message.audio_int16_bytes)} is_final: {message.is_last_input}"
             )
-            await self.push_ojin_message(message)
+            if not is_final_message:
+                await self.push_ojin_message(message)
             await self.enqueue_audio_output(message.audio_int16_bytes)
 
             if should_finish_task:
