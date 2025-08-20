@@ -15,6 +15,7 @@ import asyncio
 from typing import AsyncIterator, Optional
 
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.timeout import wait_for
 
 
 class WatchdogAsyncIterator:
@@ -77,9 +78,8 @@ class WatchdogAsyncIterator:
                 if not self._current_anext_task:
                     self._current_anext_task = asyncio.create_task(self._iter.__anext__())
 
-                item = await asyncio.wait_for(
-                    asyncio.shield(self._current_anext_task),
-                    timeout=self._timeout,
+                item = await wait_for(
+                    asyncio.shield(self._current_anext_task), timeout=self._timeout
                 )
 
                 self._manager.task_reset_watchdog()

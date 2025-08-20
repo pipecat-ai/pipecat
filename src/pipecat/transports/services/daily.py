@@ -49,6 +49,7 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 try:
@@ -694,7 +695,7 @@ class DailyTransportClient(EventHandler):
             },
         )
 
-        return await asyncio.wait_for(future, timeout=10)
+        return await wait_for(future, timeout=10)
 
     async def leave(self):
         """Leave the Daily room and cleanup resources."""
@@ -735,7 +736,7 @@ class DailyTransportClient(EventHandler):
         """Execute the actual room leave operation."""
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
-        return await asyncio.wait_for(future, timeout=10)
+        return await wait_for(future, timeout=10)
 
     def _cleanup(self):
         """Cleanup the Daily client instance."""

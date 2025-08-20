@@ -49,6 +49,8 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
+from pipecat.utils.asyncio.timeout import wait_for
+from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 AUDIO_INPUT_TIMEOUT_SECS = 0.5
 
@@ -395,7 +397,7 @@ class BaseInputTransport(FrameProcessor):
     def _create_audio_task(self):
         """Create the audio processing task if audio input is enabled."""
         if not self._audio_task and self._params.audio_in_enabled:
-            self._audio_in_queue = asyncio.Queue()
+            self._audio_in_queue = WatchdogQueue(self.task_manager)
             self._audio_task = self.create_task(self._audio_task_handler())
 
     async def _cancel_audio_task(self):
@@ -474,7 +476,7 @@ class BaseInputTransport(FrameProcessor):
         vad_state: VADState = VADState.QUIET
         while True:
             try:
-                frame: InputAudioRawFrame = await asyncio.wait_for(
+                frame: InputAudioRawFrame = await wait_for(
                     self._audio_in_queue.get(), timeout=AUDIO_INPUT_TIMEOUT_SECS
                 )
 

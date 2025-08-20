@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -219,10 +220,7 @@ class AssemblyAISTTService(STTService):
                 await self._websocket.send(json.dumps({"type": "Terminate"}))
 
                 try:
-                    await asyncio.wait_for(
-                        self._termination_event.wait(),
-                        timeout=5.0,
-                    )
+                    await wait_for(self._termination_event.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     logger.warning("Timed out waiting for termination message from server")
 
@@ -247,7 +245,7 @@ class AssemblyAISTTService(STTService):
         try:
             while self._connected:
                 try:
-                    message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                    message = await wait_for(self._websocket.recv(), timeout=1.0)
                     data = json.loads(message)
                     await self._handle_message(data)
                 except asyncio.TimeoutError:

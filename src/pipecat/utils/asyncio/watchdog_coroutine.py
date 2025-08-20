@@ -16,6 +16,7 @@ from typing import Optional
 
 from pipecat.pipeline import task
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.timeout import wait_for
 
 
 class WatchdogCoroutine:
@@ -59,9 +60,8 @@ class WatchdogCoroutine:
                 if not self._current_coro_task:
                     self._current_coro_task = asyncio.create_task(self._coroutine)
 
-                result = await asyncio.wait_for(
-                    asyncio.shield(self._current_coro_task),
-                    timeout=self._timeout,
+                result = await wait_for(
+                    asyncio.shield(self._current_coro_task), timeout=self._timeout
                 )
 
                 self._manager.task_reset_watchdog()

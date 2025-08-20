@@ -20,6 +20,8 @@ from typing import Coroutine, Dict, Optional, Sequence
 
 from loguru import logger
 
+from pipecat.utils.asyncio.timeout import wait_for
+
 WATCHDOG_TIMEOUT = 5.0
 
 
@@ -285,7 +287,7 @@ class TaskManager(BaseTaskManager):
         name = task.get_name()
         try:
             if timeout:
-                await asyncio.wait_for(task, timeout=timeout)
+                await wait_for(task, timeout=timeout)
             else:
                 await task
         except asyncio.TimeoutError:
@@ -315,7 +317,7 @@ class TaskManager(BaseTaskManager):
             # Make sure to reset watchdog if a task is cancelled.
             self.reset_watchdog(task)
             if timeout:
-                await asyncio.wait_for(task, timeout=timeout)
+                await wait_for(task, timeout=timeout)
             else:
                 await task
         except asyncio.TimeoutError:
@@ -402,7 +404,7 @@ class TaskManager(BaseTaskManager):
                     break
 
                 start_time = time.time()
-                await asyncio.wait_for(timer.wait(), timeout=watchdog_timeout)
+                await wait_for(timer.wait(), timeout=watchdog_timeout)
                 total_time = time.time() - start_time
                 if enable_watchdog_logging:
                     logger.debug(f"{name} time between watchdog timer resets: {total_time:.20f}")
