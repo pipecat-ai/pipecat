@@ -28,6 +28,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     Provides a standard interface for converting to provider-specific formats.
 
     Handles:
+
     - Extracting provider-specific parameters for LLM invocation from a
       universal LLM context
     - Converting standardized tools schema to provider-specific tool formats.
