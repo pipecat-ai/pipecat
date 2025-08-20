@@ -49,7 +49,6 @@ from pipecat.frames.frames import (
 from pipecat.metrics.metrics import MetricsData
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 AUDIO_INPUT_TIMEOUT_SECS = 0.5
@@ -476,7 +475,7 @@ class BaseInputTransport(FrameProcessor):
         vad_state: VADState = VADState.QUIET
         while True:
             try:
-                frame: InputAudioRawFrame = await wait_for(
+                frame: InputAudioRawFrame = await asyncio.wait_for(
                     self._audio_in_queue.get(), timeout=AUDIO_INPUT_TIMEOUT_SECS
                 )
 

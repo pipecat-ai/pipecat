@@ -46,7 +46,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
@@ -624,7 +623,9 @@ class BaseOutputTransport(FrameProcessor):
             async def without_mixer(vad_stop_secs: float) -> AsyncGenerator[Frame, None]:
                 while True:
                     try:
-                        frame = await wait_for(self._audio_queue.get(), timeout=vad_stop_secs)
+                        frame = await asyncio.wait_for(
+                            self._audio_queue.get(), timeout=vad_stop_secs
+                        )
                         self._transport.reset_watchdog()
                         yield frame
                     except asyncio.TimeoutError:

@@ -40,7 +40,6 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
@@ -290,7 +289,7 @@ class SmallWebRTCClient:
                 continue
 
             try:
-                frame = await wait_for(self._video_input_track.recv(), timeout=2.0)
+                frame = await asyncio.wait_for(self._video_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
                 if self._webrtc_connection.is_connected():
                     logger.warning("Timeout: No video frame received within the specified time.")
@@ -333,7 +332,7 @@ class SmallWebRTCClient:
                 continue
 
             try:
-                frame = await wait_for(self._audio_input_track.recv(), timeout=2.0)
+                frame = await asyncio.wait_for(self._audio_input_track.recv(), timeout=2.0)
             except asyncio.TimeoutError:
                 if self._webrtc_connection.is_connected():
                     logger.warning("Timeout: No audio frame received within the specified time.")
