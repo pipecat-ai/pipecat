@@ -245,6 +245,54 @@ class BaseOpenAILLMService(LLMService):
         params.update(self._settings["extra"])
         return params
 
+    async def generate_summary(
+        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    ) -> Optional[str]:
+        """Generate a conversation summary from the given LLM context.
+
+        Args:
+            summary_prompt: The prompt to use to guide generating the summary.
+            context: The LLM context containing conversation history.
+
+        Returns:
+            The generated summary, or None if generation failed.
+        """
+        try:
+            if isinstance(context, LLMContext):
+                # Not sure if it's strictly necessary to adapt messages here
+                # since they'll just be a string in the prompt, but erring on
+                # the side of putting them in the format the LLM would expect
+                # if consuming them directly (i.e. assuming greater LLM
+                # familiarity with its own format).
+                adapter = self.get_llm_adapter()
+                params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
+                messages = params["messages"]
+            else:
+                messages = context.messages
+            prompt_messages = [
+                {
+                    "role": "system",
+                    "content": summary_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": f"Conversation history: {messages}",
+                },
+            ]
+
+            # LLM completion
+            response = await self._client.chat.completions.create(
+                model=self.model_name,
+                messages=prompt_messages,
+                stream=False,
+            )
+
+            return response.choices[0].message.content
+
+        except Exception as e:
+            logger.error(f"OpenAI summary generation failed: {e}", exc_info=True)
+            return None
+
     async def _stream_chat_completions_specific_context(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:

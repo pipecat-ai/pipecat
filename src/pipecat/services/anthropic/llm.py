@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
@@ -197,6 +198,56 @@ class AnthropicLLMService(LLMService):
         else:
             response = await api_call(**params)
             return response
+
+    async def generate_summary(
+        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    ) -> Optional[str]:
+        """Generate a conversation summary from the given LLM context.
+
+        Args:
+            summary_prompt: The prompt to use to guide generating the summary.
+            context: The LLM context containing conversation history.
+
+        Returns:
+            The generated summary, or None if generation failed.
+        """
+        try:
+            if isinstance(context, LLMContext):
+                # Not sure if it's strictly necessary to adapt messages here
+                # since they'll just be a string in the prompt, but erring on
+                # the side of putting them in the format the LLM would expect
+                # if consuming them directly (i.e. assuming greater LLM
+                # familiarity with its own format).
+                # adapter = self.get_llm_adapter()
+                # params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(context)
+                # messages = params["messages"]
+                raise NotImplementedError(
+                    "Universal LLMContext is not yet supported for Anthropic."
+                )
+            else:
+                messages = context.messages
+
+            prompt_messages = [
+                {
+                    "role": "user",
+                    "content": f"Conversation history: {messages}",
+                },
+            ]
+
+            # LLM completion
+            response = await self._client.messages.create(
+                model=self.model_name,
+                messages=prompt_messages,
+                system=summary_prompt,
+                max_tokens=8192,
+                stream=False,
+            )
+
+            return response.content[0].text
+
+        except Exception as e:
+            logger.error(f"Anthropic summary generation failed: {e}", exc_info=True)
+            return None
 
     @property
     def enable_prompt_caching_beta(self) -> bool:

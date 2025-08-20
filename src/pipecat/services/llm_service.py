@@ -14,6 +14,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    List,
     Mapping,
     Optional,
     Protocol,
@@ -189,6 +190,20 @@ class LLMService(AIService):
             The adapter instance used for LLM communication.
         """
         return self._adapter
+
+    async def generate_summary(
+        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    ) -> Optional[str]:
+        """Generate a conversation summary from the given LLM context.
+
+        Args:
+            summary_prompt: The prompt to use to guide generating the summary.
+            context: The LLM context containing conversation history.
+
+        Returns:
+            The generated summary, or None if generation failed.
+        """
+        raise NotImplementedError(f"generate_summary() not supported by {self.__class__.__name__}")
 
     def create_context_aggregator(
         self,
