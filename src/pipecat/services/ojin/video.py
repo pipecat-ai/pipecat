@@ -339,6 +339,11 @@ class OjinPersonaFSM:
                 self._waiting_for_image_frames = True
 
             case PersonaState.IDLE:
+                # If we have a previous speech frame we seek to it to syncrhonize perfectly the following idle frame
+                if self._previous_speech_frame is not None:                    
+                    self._playback_loop.seek_frame(self._previous_speech_frame.pts + 1)
+                    self._previous_speech_frame = None
+
                 if old_state == PersonaState.INITIALIZING:
                     self._start_playback()
 
