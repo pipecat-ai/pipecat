@@ -26,13 +26,14 @@ class PipelineSource(FrameProcessor):
     provided upstream handler function.
     """
 
-    def __init__(self, upstream_push_frame: Callable[[Frame, FrameDirection], Coroutine]):
+    def __init__(self, upstream_push_frame: Callable[[Frame, FrameDirection], Coroutine], **kwargs):
         """Initialize the pipeline source.
 
         Args:
             upstream_push_frame: Coroutine function to handle upstream frames.
+            **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(enable_direct_mode=True)
+        super().__init__(enable_direct_mode=True, **kwargs)
         self._upstream_push_frame = upstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -59,13 +60,16 @@ class PipelineSink(FrameProcessor):
     provided downstream handler function.
     """
 
-    def __init__(self, downstream_push_frame: Callable[[Frame, FrameDirection], Coroutine]):
+    def __init__(
+        self, downstream_push_frame: Callable[[Frame, FrameDirection], Coroutine], **kwargs
+    ):
         """Initialize the pipeline sink.
 
         Args:
             downstream_push_frame: Coroutine function to handle downstream frames.
+            **kwargs: Additional arguments passed to parent class.
         """
-        super().__init__(enable_direct_mode=True)
+        super().__init__(enable_direct_mode=True, **kwargs)
         self._downstream_push_frame = downstream_push_frame
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -92,20 +96,26 @@ class Pipeline(BasePipeline):
     provides metrics collection from contained processors.
     """
 
-    def __init__(self, processors: List[FrameProcessor]):
+    def __init__(
+        self,
+        processors: List[FrameProcessor],
+        *,
+        source: Optional[FrameProcessor] = None,
+        sink: Optional[FrameProcessor] = None,
+    ):
         """Initialize the pipeline with a list of processors.
 
         Args:
             processors: List of frame processors to connect in sequence.
-            source: An optional custom source processor.
-            sink: An optional custom sink processor.
+            source: An optional pipeline source processor.
+            sink: An optional pipeline sink processor.
         """
         super().__init__(enable_direct_mode=True)
 
         # Add a source and a sink queue so we can forward frames upstream and
         # downstream outside of the pipeline.
-        self._source = PipelineSource(self.push_frame)
-        self._sink = PipelineSink(self.push_frame)
+        self._source = source or PipelineSource(self.push_frame, name=f"{self}::Source")
+        self._sink = sink or PipelineSink(self.push_frame, name=f"{self}::Sink")
         self._processors: List[FrameProcessor] = [self._source] + processors + [self._sink]
 
         self._link_processors()

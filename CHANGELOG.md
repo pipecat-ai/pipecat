@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Allow passing custom pipeline sink and source processors to a
+  `Pipeline`. Pipeline source and sink processors are used to know and control
+  what's coming in and out of a `Pipeline` processor.
+
 - Added `FrameProcessor.pause_processing_system_frames()` and
   `FrameProcessor.resume_processing_system_frames()`. These allow to pause and
   resume the processing of system frame.
