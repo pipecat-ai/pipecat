@@ -51,6 +51,7 @@ from pipecat.utils.asyncio.task_manager import (
     TaskManager,
     TaskManagerParams,
 )
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
@@ -654,7 +655,7 @@ class PipelineTask(BasePipelineTask):
         wait_time = HEARTBEAT_MONITOR_SECONDS
         while True:
             try:
-                frame = await asyncio.wait_for(self._heartbeat_queue.get(), timeout=wait_time)
+                frame = await wait_for(self._heartbeat_queue.get(), timeout=wait_time)
                 process_time = (self._clock.get_time() - frame.timestamp) / 1_000_000_000
                 logger.trace(f"{self}: heartbeat frame processed in {process_time} seconds")
                 self._heartbeat_queue.task_done()
@@ -677,9 +678,7 @@ class PipelineTask(BasePipelineTask):
 
         while running:
             try:
-                frame = await asyncio.wait_for(
-                    self._idle_queue.get(), timeout=self._idle_timeout_secs
-                )
+                frame = await wait_for(self._idle_queue.get(), timeout=self._idle_timeout_secs)
 
                 if not isinstance(frame, InputAudioRawFrame):
                     frame_buffer.append(frame)

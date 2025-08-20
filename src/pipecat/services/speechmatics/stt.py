@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
@@ -576,7 +577,7 @@ class SpeechmaticsSTTService(STTService):
         # Disconnect the client
         try:
             if self._client:
-                await asyncio.wait_for(self._client.close(), timeout=1.0)
+                await wait_for(self._client.close(), timeout=1.0)
         except asyncio.TimeoutError:
             logger.warning("Timeout while closing Speechmatics client connection")
         except Exception as e:

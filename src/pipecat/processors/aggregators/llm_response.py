@@ -60,6 +60,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -670,7 +671,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                         if self._vad_params
                         else self._params.turn_emulated_vad_timeout
                     )
-                await asyncio.wait_for(self._aggregation_event.wait(), timeout)
+                await wait_for(self._aggregation_event.wait(), timeout=timeout)
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
