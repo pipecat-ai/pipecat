@@ -178,7 +178,6 @@ class LLMContext:
         """
         buffer = io.BytesIO()
         Image.frombytes(format, size, image).save(buffer, format="JPEG")
-        # TODO: we might not want the universal format to be base64 encoded, since encoding is not needed by all LLM services; today, te Gemini adapter has to decode from base64, which is less than ideal.
         encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
         content = []
