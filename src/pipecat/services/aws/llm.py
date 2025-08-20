@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
@@ -789,6 +790,78 @@ class AWSBedrockLLMService(LLMService):
             True if metrics generation is supported.
         """
         return True
+
+    async def generate_summary(
+        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    ) -> Optional[str]:
+        """Generate a conversation summary from the given LLM context.
+
+        Args:
+            summary_prompt: The prompt to use to guide generating the summary.
+            context: The LLM context containing conversation history.
+
+        Returns:
+            The generated summary, or None if generation failed.
+        """
+        try:
+            if isinstance(context, LLMContext):
+                # Not sure if it's strictly necessary to adapt messages here
+                # since they'll just be a string in the prompt, but erring on
+                # the side of putting them in the format the LLM would expect
+                # if consuming them directly (i.e. assuming greater LLM
+                # familiarity with its own format).
+                # adapter = self.get_llm_adapter()
+                # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+                # messages = params["messages"]
+                raise NotImplementedError(
+                    "Universal LLMContext is not yet supported for AWS Bedrock."
+                )
+            else:
+                messages = context.messages
+
+            # Determine if we're using Claude or Nova based on model ID
+            model_id = self.model_name
+
+            # Prepare request parameters
+            request_params = {
+                "modelId": model_id,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"text": f"Conversation history: {messages}"}],
+                    },
+                ],
+                "inferenceConfig": {
+                    "maxTokens": 8192,
+                    "temperature": 0.7,
+                    "topP": 0.9,
+                },
+            }
+
+            request_params["system"] = [{"text": summary_prompt}]
+
+            # Call Bedrock without streaming
+            response = self._client.converse(**request_params)
+
+            # Extract the response text
+            if (
+                "output" in response
+                and "message" in response["output"]
+                and "content" in response["output"]["message"]
+            ):
+                content = response["output"]["message"]["content"]
+                if isinstance(content, list):
+                    for item in content:
+                        if item.get("text"):
+                            return item["text"]
+                elif isinstance(content, str):
+                    return content
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Bedrock summary generation failed: {e}", exc_info=True)
+            return None
 
     async def _create_converse_stream(self, client, request_params):
         """Create converse stream with optional timeout and retry.
