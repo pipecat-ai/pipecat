@@ -25,6 +25,7 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -136,7 +137,7 @@ class DTMFAggregator(FrameProcessor):
         """Background task that handles timeout-based flushing."""
         while True:
             try:
-                await asyncio.wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
+                await wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
                 self._digit_event.clear()
             except asyncio.TimeoutError:
                 self.reset_watchdog()

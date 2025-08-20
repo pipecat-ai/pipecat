@@ -31,6 +31,7 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.heygen.api import HeyGenApi, HeyGenSession, NewSessionRequest
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
+from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 try:
@@ -231,7 +232,7 @@ class HeyGenClient:
         """Handle incoming WebSocket messages."""
         while self._connected:
             try:
-                message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                message = await wait_for(self._websocket.recv(), timeout=1.0)
                 parsed_message = json.loads(message)
                 await self._handle_ws_server_event(parsed_message)
             except asyncio.TimeoutError:
