@@ -17,12 +17,13 @@ remainig issues, specially in Python 3.10, in `async.wait_for()`.
 See https://github.com/python/cpython/pull/98518
 """
 
-import asyncio
 import sys
 
-import wait_for2
-
 if sys.version_info >= (3, 12):
+    import asyncio
+
     wait_for = asyncio.wait_for
 else:
+    import wait_for2
+
     wait_for = wait_for2.wait_for
