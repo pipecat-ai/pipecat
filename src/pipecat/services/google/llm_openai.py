@@ -39,6 +39,10 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
     Note: This service includes a workaround for a Google API bug where function
     call indices may be incorrectly set to None, resulting in empty function names.
 
+    .. deprecated:: 0.0.81
+        GoogleLLMOpenAIBetaService is deprecated and will be removed in a future version.
+        Use GoogleLLMService instead for better integration with Google's native API.
+
     Reference:
         https://ai.google.dev/gemini-api/docs/openai
     """
@@ -59,6 +63,15 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
             model: Google model name to use (e.g., "gemini-2.0-flash").
             **kwargs: Additional arguments passed to the parent OpenAILLMService.
         """
+        import warnings
+
+        warnings.warn(
+            "GoogleLLMOpenAIBetaService is deprecated and will be removed in a future version. "
+            "Use GoogleLLMService instead for better integration with Google's native API.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
     @property
