@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new frames to the `idle_timeout_frames` arg: `TranscriptionFrame`,
+  `InterimTranscriptionFrame`, `UserStartedSpeakingFrame`, and
+  `UserStoppedSpeakingFrame`. These additions serve as indicators of user
+  activity in the pipeline idle detection logic.
+
 - Allow passing custom pipeline sink and source processors to a
   `Pipeline`. Pipeline source and sink processors are used to know and control
   what's coming in and out of a `Pipeline` processor.
