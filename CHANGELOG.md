@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Allow passing custom pipeline sink and source processors to a
+  `Pipeline`. Pipeline source and sink processors are used to know and control
+  what's coming in and out of a `Pipeline` processor.
+
+- Added `FrameProcessor.pause_processing_system_frames()` and
+  `FrameProcessor.resume_processing_system_frames()`. These allow to pause and
+  resume the processing of system frame.
+
+- Added new `on_process_frame()` observer method which makes it possible to know
+  when a frame is being processed.
+
+- Added new `FrameProcessor.entry_processor()` method. This allows you to access
+  the first non-compound processor in a pipeline.
+
+- Added `FrameProcessor` properties `processors`, `next` and `previous`.
+
 - `ElevenLabsTTSService` now supports additional runtime changes to the `model`,
   `language`, and `voice_settings` parameters.
 
@@ -23,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `retry_timeout_secs` and `retry_on_timeout`. This feature is disabled by
   default.
 
+### Removed
+
+- Removed unused `FrameProcessor.set_parent()` and
+  `FrameProcessor.get_parent()`.
+
 ### Fixed
 
 - Fixed an `AudioBufferProcessor` issues that would cause audio overlap when
@@ -30,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where `AsyncAITTSService` had very high latency in responding
   by adding `force=true` when sending the flush command.
+
+### Performance
+
+- Improve `PipelineTask` performance by using direct mode processors and by
+  removing unnecessary tasks.
+
+- Improve `ParallelPipeline` performance by using direct mode, by not
+  creating a task for each frame and every sub-pipeline and also by removing
+  other unnecessary tasks.
+
+- `Pipeline` performance improvements by using direct mode.
 
 ### Other
 

@@ -134,8 +134,34 @@ class SyncParallelPipeline(BasePipeline):
         self._pipelines = []
 
     #
-    # BasePipeline
+    # Frame processor
     #
+
+    @property
+    def processors(self):
+        """Return the list of sub-processors contained within this processor.
+
+        Only compound processors (e.g. pipelines and parallel pipelines) have
+        sub-processors. Non-compound processors will return an empty list.
+
+        Returns:
+            The list of sub-processors if this is a compound processor.
+        """
+        return self._pipelines
+
+    @property
+    def entry_processors(self) -> List["FrameProcessor"]:
+        """Return the list of entry processors for this processor.
+
+        Entry processors are the first processors in a compound processor
+        (e.g. pipelines, parallel pipelines). Note that pipelines can also be an
+        entry processor as pipelines are processors themselves. Non-compound
+        processors will simply return an empty list.
+
+        Returns:
+            The list of entry processors.
+        """
+        return self._sources
 
     def processors_with_metrics(self) -> List[FrameProcessor]:
         """Collect processors that can generate metrics from all parallel pipelines.
@@ -144,10 +170,6 @@ class SyncParallelPipeline(BasePipeline):
             List of frame processors that support metrics collection from all parallel paths.
         """
         return list(chain.from_iterable(p.processors_with_metrics() for p in self._pipelines))
-
-    #
-    # Frame processor
-    #
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the parallel pipeline and all contained processors.
@@ -171,29 +193,23 @@ class SyncParallelPipeline(BasePipeline):
             source = SyncParallelPipelineSource(up_queue)
             sink = SyncParallelPipelineSink(down_queue)
 
-            # Create pipeline
-            pipeline = Pipeline(processors)
-            source.link(pipeline)
-            pipeline.link(sink)
-            self._pipelines.append(pipeline)
-
             # Keep track of sources and sinks. We also keep the output queue of
             # the source and the sinks so we can use it later.
             self._sources.append({"processor": source, "queue": down_queue})
             self._sinks.append({"processor": sink, "queue": up_queue})
 
+            # Create pipeline
+            pipeline = Pipeline(processors, source=source, sink=sink)
+            self._pipelines.append(pipeline)
+
         logger.debug(f"Finished creating {self} pipelines")
 
-        await asyncio.gather(*[s["processor"].setup(setup) for s in self._sources])
         await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
-        await asyncio.gather(*[s["processor"].setup(setup) for s in self._sinks])
 
     async def cleanup(self):
         """Clean up the parallel pipeline and all contained processors."""
         await super().cleanup()
-        await asyncio.gather(*[s["processor"].cleanup() for s in self._sources])
         await asyncio.gather(*[p.cleanup() for p in self._pipelines])
-        await asyncio.gather(*[s["processor"].cleanup() for s in self._sinks])
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through all parallel pipelines with synchronization.
