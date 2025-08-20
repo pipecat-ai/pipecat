@@ -29,7 +29,7 @@ from openai.types.chat import (
 from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.frames.frames import AudioRawFrame, Frame
+from pipecat.frames.frames import AudioRawFrame
 
 # "Re-export" types from OpenAI that we're using as universal context types.
 # NOTE: if universal message types need to someday diverge from OpenAI's, we
