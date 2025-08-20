@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- Improve `PipelineTask` performance by using direct mode processors and by
+  removing unnecessary tasks.
+
 - Improve `ParallelPipeline` performance by using direct mode, by not
   creating a task for each frame and every sub-pipeline and also by removing
   other unnecessary tasks.
