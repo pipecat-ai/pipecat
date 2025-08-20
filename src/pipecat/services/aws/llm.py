@@ -52,7 +52,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -802,7 +801,7 @@ class AWSBedrockLLMService(LLMService):
         """
         if self._retry_on_timeout:
             try:
-                response = await wait_for(
+                response = await asyncio.wait_for(
                     await client.converse_stream(**request_params), timeout=self._retry_timeout_secs
                 )
                 return response

@@ -11,7 +11,6 @@ from typing import Awaitable, Callable, List, Optional
 
 from pipecat.frames.frames import Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 
 
@@ -86,7 +85,7 @@ class IdleFrameProcessor(FrameProcessor):
         """Handle idle timeout monitoring and callback execution."""
         while True:
             try:
-                await wait_for(self._idle_event.wait(), timeout=self._timeout)
+                await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 await self._callback(self)
             finally:

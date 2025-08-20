@@ -14,7 +14,6 @@ watchdog timeouts during legitimate waiting periods.
 import asyncio
 
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.timeout import wait_for
 
 
 class WatchdogEvent(asyncio.Event):
@@ -56,7 +55,7 @@ class WatchdogEvent(asyncio.Event):
         """Wait for event while periodically resetting watchdog timer."""
         while True:
             try:
-                await wait_for(super().wait(), timeout=self._timeout)
+                await asyncio.wait_for(super().wait(), timeout=self._timeout)
                 self._manager.task_reset_watchdog()
                 return True
             except asyncio.TimeoutError:

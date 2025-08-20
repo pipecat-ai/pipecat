@@ -43,7 +43,6 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.services.daily import DailyParams, DailyTransport
-from pipecat.utils.asyncio.timeout import wait_for
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -123,7 +122,7 @@ class EvalRunner:
             logger.error(f"ERROR: Unable to run {example_file}: {e}")
 
         try:
-            result = await wait_for(self._queue.get(), timeout=1.0)
+            result = await asyncio.wait_for(self._queue.get(), timeout=1.0)
         except asyncio.TimeoutError:
             result = False
 

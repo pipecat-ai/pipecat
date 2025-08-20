@@ -9,9 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `pipecat.utils.timeout.wait_for()` which uses `wait_for2` package to
-  avoid `asyncio.wait_for()` issues in Python < 3.12.
-
 - Allow passing custom pipeline sink and source processors to a
   `Pipeline`. Pipeline source and sink processors are used to know and control
   what's coming in and out of a `Pipeline` processor.
@@ -49,9 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Replaced `asyncio.wait_for()` for Pipecat's `wait_for()`. In Python 3.10,
-  `asyncio.wait_for()` has issues regarding task cancellation (i.e. cancellation
-  is never propagated).
+- Replaced `asyncio.wait_for()` for `wait_for2.wait_for()` for Python <
+  3.12. because of issues regarding task cancellation (i.e. cancellation is
+  never propagated).
   See https://bugs.python.org/issue42130
 
 - Fixed an `AudioBufferProcessor` issues that would cause audio overlap when
