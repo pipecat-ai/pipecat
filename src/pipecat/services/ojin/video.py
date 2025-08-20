@@ -379,7 +379,7 @@ class OjinPersonaFSM:
 
         match self._state:
             case PersonaState.IDLE | PersonaState.IDLE_TO_SPEECH:
-                if self._current_frame_idx % 1 == 0:
+                if self._current_frame_idx % 50 == 0:
                     logger.debug(f"Pushing idle frame: {self._current_frame_idx}")
 
                 idle_frame = self._playback_loop.get_current_idle_frame()
