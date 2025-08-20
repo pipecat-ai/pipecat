@@ -387,6 +387,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
         self._receive_task = None
         self._keepalive_task = None
+        self._disconnecting = False
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -482,15 +483,29 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _disconnect(self):
         """Disconnect from Sarvam WebSocket and clean up tasks."""
-        if self._receive_task:
-            await self.cancel_task(self._receive_task)
-            self._receive_task = None
+        try:
+            # First, set a flag to prevent new operations
+            self._disconnecting = True
 
-        if self._keepalive_task:
-            await self.cancel_task(self._keepalive_task)
-            self._keepalive_task = None
+            # Cancel background tasks BEFORE closing websocket
+            if self._receive_task:
+                await self.cancel_task(self._receive_task, timeout=2.0)
+                self._receive_task = None
 
-        await self._disconnect_websocket()
+            if self._keepalive_task:
+                await self.cancel_task(self._keepalive_task, timeout=2.0)
+                self._keepalive_task = None
+
+            # Now close the websocket
+            await self._disconnect_websocket()
+
+        except Exception as e:
+            logger.error(f"Error during disconnect: {e}")
+        finally:
+            # Reset state only after everything is cleaned up
+            self._started = False
+            self._websocket = None
+            self._disconnecting = False
 
     async def _connect_websocket(self):
         """Establish WebSocket connection to Sarvam API."""
@@ -538,9 +553,6 @@ class SarvamTTSService(InterruptibleTTSService):
                 await self._websocket.close()
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
-        finally:
-            self._started = False
-            self._websocket = None
 
     def _get_websocket(self):
         if self._websocket:
@@ -580,16 +592,24 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _send_keepalive(self):
         """Send keepalive message to maintain connection."""
-        if self._websocket:
-            # Send empty text for keepalive
+        if self._disconnecting:
+            return
+
+        if self._websocket and self._websocket.state == State.OPEN:
             msg = {"type": "ping"}
             await self._websocket.send(json.dumps(msg))
 
     async def _send_text(self, text: str):
-        """Send text to Neuphonic WebSocket for synthesis."""
-        if self._websocket:
+        """Send text to Sarvam WebSocket for synthesis."""
+        if self._disconnecting:
+            logger.warning("Service is disconnecting, ignoring text send")
+            return
+
+        if self._websocket and self._websocket.state == State.OPEN:
             msg = {"type": "text", "data": {"text": text}}
             await self._websocket.send(json.dumps(msg))
+        else:
+            logger.warning("WebSocket not ready, cannot send text")
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
