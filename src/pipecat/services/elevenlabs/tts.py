@@ -245,6 +245,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             auto_mode: Whether to enable automatic mode optimization.
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs logging.
+            apply_text_normalization: Text normalization mode ("auto", "on", "off").
         """
 
         language: Optional[Language] = None
@@ -256,6 +257,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         auto_mode: Optional[bool] = True
         enable_ssml_parsing: Optional[bool] = None
         enable_logging: Optional[bool] = None
+        apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
 
     def __init__(
         self,
@@ -320,6 +322,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             "auto_mode": str(params.auto_mode).lower(),
             "enable_ssml_parsing": params.enable_ssml_parsing,
             "enable_logging": params.enable_logging,
+            "apply_text_normalization": params.apply_text_normalization,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -500,6 +503,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             if self._settings["enable_logging"]:
                 url += f"&enable_logging={self._settings['enable_logging']}"
+
+            if self._settings["apply_text_normalization"] is not None:
+                url += f"&apply_text_normalization={self._settings['apply_text_normalization']}"
 
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
@@ -732,6 +738,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             style: Style control for voice expression (0.0 to 1.0).
             use_speaker_boost: Whether to use speaker boost enhancement.
             speed: Voice speed control (0.25 to 4.0).
+            apply_text_normalization: Text normalization mode ("auto", "on", "off").
         """
 
         language: Optional[Language] = None
@@ -741,6 +748,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
+        apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
 
     def __init__(
         self,
@@ -791,6 +799,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
             "speed": params.speed,
+            "apply_text_normalization": params.apply_text_normalization,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -974,6 +983,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
         }
         if self._settings["optimize_streaming_latency"] is not None:
             params["optimize_streaming_latency"] = self._settings["optimize_streaming_latency"]
+        if self._settings["apply_text_normalization"] is not None:
+            params["apply_text_normalization"] = self._settings["apply_text_normalization"]
 
         try:
             await self.start_ttfb_metrics()
