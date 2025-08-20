@@ -549,7 +549,7 @@ class OjinPersonaService(FrameProcessor):
             and self._interaction.audio_input_queue is not None
         )
 
-        await self._interaction.audio_input_queue.put(
+        await self.push_ojin_message(
             OjinPersonaInteractionInputMessage(
                 audio_int16_bytes=silence_audio,
                 interaction_id=self._interaction.interaction_id,
@@ -873,11 +873,6 @@ class OjinPersonaService(FrameProcessor):
 
             self._close_interaction()
 
-    async def _set_interaction_id(self, interaction_id: str):
-        assert self._interaction is not None
-        self._interaction.interaction_id = interaction_id
-        self._interaction.set_state(InteractionState.ACTIVE)
-
     async def _start_interaction(
         self,
         new_interaction: Optional[OjinPersonaInteraction] = None,
@@ -916,12 +911,10 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.start_frame_idx = 0
             self._interaction.frame_idx = 0
 
-        interaction_id = str(uuid.uuid4())
         logger.debug("Sending StartInteractionMessage")
         await self.push_ojin_message(
-            StartInteractionMessage(interaction_id=interaction_id)
+            StartInteractionMessage()
         )
-        await self._set_interaction_id(interaction_id=interaction_id)
 
     async def _end_interaction(self):
         """End the current interaction.
