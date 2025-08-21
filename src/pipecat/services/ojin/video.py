@@ -160,10 +160,7 @@ class OjinPersonaFSM:
         await self.on_state_changed_callback(old_state, new_state)
 
     def get_transition_frame_idx(self) -> int:
-        logger.debug(
-            f"get_transition_frame_idx: {self._transition_time} frame {int(self._transition_time * 25)}"
-        )
-        return int(self._transition_time * 25)
+        return math.ceil(self._transition_time * 25)
 
     def get_state(self) -> PersonaState:
         """Get the current state of the persona FSM.
@@ -282,12 +279,6 @@ class OjinPersonaFSM:
                 self.last_update_time = time.perf_counter()
 
                 if (
-                    self._state == PersonaState.IDLE_TO_SPEECH
-                    and self._playback_loop.get_playback_time() >= self._transition_time
-                ):
-                    await self.set_state(PersonaState.SPEECH)
-
-                if (
                     not self._waiting_for_image_frames
                     and self._speech_frames.empty()
                     and (
@@ -352,9 +343,10 @@ class OjinPersonaFSM:
 
             case PersonaState.IDLE_TO_SPEECH:
                 self._waiting_for_image_frames = True
+                # We substract 0.04 seconds to ensure we are ready to deliver speech frame just after last idle frame
                 self._transition_time = (
                     self._playback_loop.get_playback_time()
-                    + self._settings.idle_to_speech_seconds
+                    + self._settings.idle_to_speech_seconds - 0.02
                 )
 
             case _:
@@ -374,8 +366,12 @@ class OjinPersonaFSM:
         # Wait until current frame idx is different than the last one (frame steps of 25 fps)
         if self._current_frame_idx == self._playback_loop.get_current_frame_idx():
             return None
-
+        
         self._current_frame_idx = self._playback_loop.get_current_frame_idx()
+
+        # Transition to speech as soon as we reach the transition frame
+        if self._current_frame_idx == self.get_transition_frame_idx():
+            await self.set_state(PersonaState.SPEECH)
 
         match self._state:
             case PersonaState.IDLE | PersonaState.IDLE_TO_SPEECH:

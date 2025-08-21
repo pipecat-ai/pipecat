@@ -90,13 +90,13 @@ async def main():
         {
             "audio_sequence": [                
                 ("./mock/assets/long_audio_16k.wav", 20),
-                #("./mock/assets/long_audio_16k.wav", 23),
+                ("./mock/assets/long_audio_16k.wav", 23),
             ],
             "event_sequence": [                
                 ("user_started_speaking", 18),
                 ("user_stopped_speaking", 19),
-                #("user_started_speaking", 21),
-                #("user_stopped_speaking", 22),
+                ("user_started_speaking", 21),
+                ("user_stopped_speaking", 22),
             ],
             "chunk_size": 600000,
             "chunk_delay": 0.2,
