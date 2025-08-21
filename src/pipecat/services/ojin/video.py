@@ -330,6 +330,8 @@ class OjinPersonaFSM:
                 self._waiting_for_image_frames = True
 
             case PersonaState.IDLE:
+                # abort transition
+                self._transition_time = -1
                 # If we have a previous speech frame we seek to it to syncrhonize perfectly the following idle frame
                 if self._previous_speech_frame is not None:                    
                     self._playback_loop.seek_frame(self._previous_speech_frame.pts + 1)
@@ -339,14 +341,14 @@ class OjinPersonaFSM:
                     self._start_playback()
 
             case PersonaState.SPEECH:
+                self._transition_time = -1
                 pass
 
             case PersonaState.IDLE_TO_SPEECH:
                 self._waiting_for_image_frames = True
-                # We substract 0.04 seconds to ensure we are ready to deliver speech frame just after last idle frame
                 self._transition_time = (
                     self._playback_loop.get_playback_time()
-                    + self._settings.idle_to_speech_seconds - 0.02
+                    + self._settings.idle_to_speech_seconds
                 )
 
             case _:
