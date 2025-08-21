@@ -4,15 +4,10 @@ Run your first Pipecat bot in under 5 minutes. This example creates a voice AI b
 
 ## Prerequisites
 
-### Python 3.10+
+### Environment
 
-Pipecat requires Python 3.10 or newer. Check your version:
-
-```bash
-python --version
-```
-
-If you need to upgrade Python, we recommend using a version manager like `uv` or `pyenv`.
+- Python 3.10 or later
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager installed
 
 ### AI Service API keys
 
@@ -26,26 +21,21 @@ Have your API keys ready. We'll add them to your `.env` shortly.
 
 ## Setup
 
-1. Set up a virtual environment
+### Set up your environment and dependencies
 
-From the `examples/quickstart` directory, run:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-> Using `uv`? Create your venv using: `uv venv && source .venv/bin/activate`.
-
-2. Install dependencies
+From `examples/quickstart`, run:
 
 ```bash
-pip install -r requirements.txt
+uv sync --extra webrtc \
+    --extra daily \
+    --extra silero \
+    --extra deepgram \
+    --extra openai \
+    --extra cartesia \
+    --extra runner
 ```
 
-> Using `uv`? Install requirements using: `uv pip install -r requirements.txt`.
-
-3. Configure environment variables
+### Configure environment variables
 
 Create a `.env` file:
 
@@ -55,25 +45,110 @@ cp env.example .env
 
 Then, add your API keys:
 
-```
+```ini
 DEEPGRAM_API_KEY=your_deepgram_api_key
 OPENAI_API_KEY=your_openai_api_key
 CARTESIA_API_KEY=your_cartesia_api_key
 ```
 
-4. Run the example
-
-Run your bot using:
+## Run your bot locally
 
 ```bash
-python bot.py
+uv run bot.py
 ```
-
-> Using `uv`? Run your bot using: `uv run bot.py`.
 
 **Open http://localhost:7860 in your browser** and click `Connect` to start talking to your bot.
 
-> 💡 First run note: The initial startup may take ~10 seconds as Pipecat downloads required models, like the Silero VAD model.
+> 💡 First run note: The initial startup may take ~20 seconds as Pipecat downloads required models and imports.
+
+## Deploy to Pipecat Cloud (Optional)
+
+Pipecat Cloud is a managed platform for hosting and scaling your Pipecat bots in production.
+
+[Sign up](https://pipecat.daily.co/sign-up) for a Pipecat Cloud account and deploy your bot in minutes.
+
+### Setup
+
+#### Install `pipecatcloud`
+
+The `pipecatcloud` CLI manages your Pipecat deployments, secrets, and organization. Install in your virtual enviroment:
+
+```bash
+uv add pipecatcloud
+```
+
+> 💡 Tip: You can run the `pipecatcloud` CLI using the `pcc` alias.
+
+#### Docker
+
+Pipecat Cloud expects a built Docker image that includes the agent code and all dependencies. You need to:
+
+1. Install [Docker](https://www.docker.com/) on your system.
+2. Create a container registry account. We'll use [Docker Hub](https://hub.docker.com/) in this example.
+
+### Configure pcc-deploy.toml
+
+The `pcc-deploy.toml` file is the spec for your Pipecat Cloud deployment.
+
+```ini
+agent_name = "quickstart"
+image = "your_username/quickstart:0.1"
+secret_set = "quickstart-secrets"
+
+[scaling]
+	min_agents = 1
+```
+
+Details:
+
+- `agent_name`: the name of your Pipecat Cloud agent
+- `image`: your Docker Hub username and image tag (image_name:version) to run
+- `secret_set`: environment variable secrets that you can use in your bot file
+- `min_agents`: the number of reserve instances you'll run. We'll start with 1 to ensure you get an instant start
+
+> 💡 Tip: [Set up `image_credentials`](https://docs.pipecat.ai/deployment/pipecat-cloud/fundamentals/secrets#image-pull-secrets) in your TOML file for authenticated image pulls
+
+### Configure secrets
+
+Store your secrets in Pipecat Cloud and use the environment variable keys in your bot file. To create secrets, run:
+
+```bash
+uv run pcc secrets set quickstart-secrets --file .env
+```
+
+This command creates a new secret set called `quickstart-secrets`. This value must match the `secret_set` in your TOML file. The `--file` arg points your `.env` file. This will add all environment variables from the file to the secret set.
+
+## Build and push your Docker image
+
+Pipecat Cloud expects a built Docker image that includes the agent code and all dependencies. You can build, tag, and push your Docker image using the included `build.sh` shell script:
+
+1. Login to Docker Hub:
+
+   ```bash
+   docker login
+   ```
+
+2. Update the `VERSION`, `DOCKER_USERNAME`, and `AGENT_NAME` to match your TOML file.
+3. Run the script:
+
+   ```bash
+   ./build.sh
+   ```
+
+## Deploy your agent
+
+You're ready to deploy your agent. Use the following command to deploy your agent according to the spec in your `pcc-deploy.toml` file:
+
+```bash
+uv run pcc deploy
+```
+
+## Connect to your agent
+
+The Pipecat Cloud dashboard has a Sandbox which makes it easy to talk to your agent. In your [Pipecat Cloud dashboard](https://pipecat.daily.co/), select your `quickstart` agent > Sandbox.
+
+- Accept the browser prompt for device access.
+- Click `Connect` to start your agent.
 
 ## Troubleshooting
 
