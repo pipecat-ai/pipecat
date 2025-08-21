@@ -1,0 +1,5 @@
+pipecat-ai[openai,silero]
+python-dotenv
+loguru
+pydub>=0.25
+websockets==11.0.3
