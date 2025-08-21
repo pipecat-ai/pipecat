@@ -32,11 +32,15 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
+    InterimTranscriptionFrame,
     LLMFullResponseEndFrame,
     MetricsFrame,
     StartFrame,
     StopFrame,
     StopTaskFrame,
+    TranscriptionFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import ProcessingMetricsData, TTFBMetricsData
 from pipecat.observers.base_observer import BaseObserver
@@ -146,7 +150,11 @@ class PipelineTask(BasePipelineTask):
         enable_watchdog_timers: bool = False,
         idle_timeout_frames: Tuple[Type[Frame], ...] = (
             BotSpeakingFrame,
+            InterimTranscriptionFrame,
             LLMFullResponseEndFrame,
+            TranscriptionFrame,
+            UserStartedSpeakingFrame,
+            UserStoppedSpeakingFrame,
         ),
         idle_timeout_secs: Optional[float] = 300,
         observers: Optional[List[BaseObserver]] = None,
