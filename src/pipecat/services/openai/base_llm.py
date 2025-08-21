@@ -39,7 +39,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
@@ -197,7 +196,7 @@ class BaseOpenAILLMService(LLMService):
 
         if self._retry_on_timeout:
             try:
-                chunks = await wait_for(
+                chunks = await asyncio.wait_for(
                     self._client.chat.completions.create(**params), timeout=self._retry_timeout_secs
                 )
                 return chunks

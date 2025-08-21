@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 
 
@@ -192,7 +191,7 @@ class UserIdleProcessor(FrameProcessor):
         """
         while True:
             try:
-                await wait_for(self._idle_event.wait(), timeout=self._timeout)
+                await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._interrupted:
                     self._retry_count += 1

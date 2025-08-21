@@ -40,7 +40,6 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.heygen.api import NewSessionRequest
 from pipecat.services.heygen.client import HEY_GEN_SAMPLE_RATE, HeyGenCallbacks, HeyGenClient
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 # Using the same values that we do in the BaseOutputTransport
@@ -321,7 +320,7 @@ class HeyGenVideoService(AIService):
 
         while True:
             try:
-                frame = await wait_for(self._queue.get(), timeout=AVATAR_VAD_STOP_SECS)
+                frame = await asyncio.wait_for(self._queue.get(), timeout=AVATAR_VAD_STOP_SECS)
                 if self._is_interrupting:
                     break
                 if isinstance(frame, TTSAudioRawFrame):
