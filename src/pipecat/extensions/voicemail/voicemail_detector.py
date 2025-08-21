@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
-    StartFrame,
     StartInterruptionFrame,
     StopFrame,
     StopInterruptionFrame,
@@ -204,10 +203,10 @@ class ClassificationProcessor(FrameProcessor):
         Args:
             gate_notifier: Notifier to signal the ClassifierGate about classification
                 decisions so it can close and stop processing.
-            conversation_notifier: Notifier to signal the TTSBuffer to release
-                all buffered TTS frames for normal conversation flow.
-            voicemail_notifier: Notifier to signal the TTSBuffer to clear
-                buffered TTS frames since voicemail was detected.
+            conversation_notifier: Notifier to signal the TTSGate to release
+                all gated TTS frames for normal conversation flow.
+            voicemail_notifier: Notifier to signal the TTSGate to clear
+                gated TTS frames since voicemail was detected.
             voicemail_response_delay: Delay in seconds after user stops speaking
                 before triggering the voicemail event handler. This ensures the voicemail
                 greeting or user message is complete before responding.
@@ -352,35 +351,35 @@ class ClassificationProcessor(FrameProcessor):
 
 
 class TTSGate(FrameProcessor):
-    """Buffers TTS frames until voicemail classification decision is made.
+    """Gates TTS frames until voicemail classification decision is made.
 
-    This processor holds TTS output frames in a buffer while the voicemail
+    This processor holds TTS output frames in a gate while the voicemail
     classification is in progress. This prevents audio from being played
     to the caller before determining if they're human or a voicemail system.
 
-    The buffer operates in two modes based on the classification result:
+    The gate operates in two modes based on the classification result:
 
-    - CONVERSATION: Releases all buffered frames to continue normal dialogue
-    - VOICEMAIL: Clears buffered frames since they're not needed for voicemail
+    - CONVERSATION: Opens the gate to release all held frames for normal dialogue
+    - VOICEMAIL: Clears held frames since they're not needed for voicemail
 
-    The buffering only applies to TTS-related frames (TTSTextFrame, TTSAudioRawFrame).
+    The gating only applies to TTS-related frames (TTSTextFrame, TTSAudioRawFrame).
     All other frames pass through immediately to maintain proper pipeline flow.
     """
 
     def __init__(self, conversation_notifier: BaseNotifier, voicemail_notifier: BaseNotifier):
-        """Initialize the voicemail buffer.
+        """Initialize the TTS gate.
 
         Args:
             conversation_notifier: Notifier that signals when a conversation is
-                detected and buffered frames should be released for playback.
+                detected and gated frames should be released for playback.
             voicemail_notifier: Notifier that signals when voicemail is detected
-                and buffered frames should be cleared (not played).
+                and gated frames should be cleared (not played).
         """
         super().__init__()
         self._conversation_notifier = conversation_notifier
         self._voicemail_notifier = voicemail_notifier
         self._frame_buffer: List[tuple[Frame, FrameDirection]] = []
-        self._buffering_active = True
+        self._gating_active = True
         self._conversation_task: Optional[asyncio.Task] = None
         self._voicemail_task: Optional[asyncio.Task] = None
 
@@ -406,10 +405,10 @@ class TTSGate(FrameProcessor):
             self._voicemail_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
-        """Process frames and handle buffering logic based on frame type.
+        """Process frames and handle gating logic based on frame type.
 
-        TTS frames are buffered while classification is active. All other frames
-        pass through immediately. The buffering state is controlled by the
+        TTS frames are gated while classification is active. All other frames
+        pass through immediately. The gating state is controlled by the
         classification notifications.
 
         Args:
@@ -418,43 +417,43 @@ class TTSGate(FrameProcessor):
         """
         await super().process_frame(frame, direction)
 
-        # Core buffering logic: hold TTS frames, pass everything else through
-        if self._buffering_active and isinstance(
+        # Core gating logic: hold TTS frames, pass everything else through
+        if self._gating_active and isinstance(
             frame, (TTSStartedFrame, TTSStoppedFrame, TTSTextFrame, TTSAudioRawFrame)
         ):
-            # Buffer TTS frames while waiting for classification decision
+            # Gate TTS frames while waiting for classification decision
             self._frame_buffer.append((frame, direction))
         else:
             # Pass through all non-TTS frames immediately
             await self.push_frame(frame, direction)
 
     async def _wait_for_conversation(self):
-        """Wait for conversation detection notification and release buffered frames.
+        """Wait for conversation detection notification and release gated frames.
 
-        When a conversation is detected, all buffered TTS frames are released
+        When a conversation is detected, all gated TTS frames are released
         in order to continue normal dialogue flow. This allows the bot to
         respond naturally to the human caller.
         """
         await self._conversation_notifier.wait()
 
-        # Release all buffered frames in original order
-        self._buffering_active = False
+        # Release all gated frames in original order
+        self._gating_active = False
         for frame, direction in self._frame_buffer:
             await self.push_frame(frame, direction)
         self._frame_buffer.clear()
 
     async def _wait_for_voicemail(self):
-        """Wait for voicemail detection notification and clear buffered frames.
+        """Wait for voicemail detection notification and clear gated frames.
 
-        When voicemail is detected, all buffered TTS frames are discarded
+        When voicemail is detected, all gated TTS frames are discarded
         since they were intended for human conversation and are not appropriate
         for voicemail systems. The developer event handlers will handle voicemail-
         specific audio output.
         """
         await self._voicemail_notifier.wait()
 
-        # Clear buffered frames without playing them
-        self._buffering_active = False
+        # Clear gated frames without playing them
+        self._gating_active = False
         self._frame_buffer.clear()
 
 
@@ -472,7 +471,7 @@ class VoicemailDetector(ParallelPipeline):
     - Classification branch: Contains the LLM classifier and decision logic
 
     The system uses a gate mechanism to control when classification runs and
-    a buffering system to prevent TTS output until classification is complete.
+    a gating system to prevent TTS output until classification is complete.
     Once a decision is made, the appropriate action is taken:
 
     - CONVERSATION: Continue normal bot dialogue
@@ -494,7 +493,7 @@ class VoicemailDetector(ParallelPipeline):
             context_aggregator.user(),
             llm,
             tts,
-            detector.gate(),            # TTS buffering
+            detector.gate(),              # TTS gating
             transport.output(),
             context_aggregator.assistant(),
         ])
@@ -633,13 +632,13 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
         return self
 
     def gate(self) -> TTSGate:
-        """Get the buffer processor for placement after TTS in the main pipeline.
+        """Get the gate processor for placement after TTS in the main pipeline.
 
         This should be placed after the TTS service and before the transport
-        output to enable TTS frame buffering during classification.
+        output to enable TTS frame gating during classification.
 
         Returns:
-            The TTSBuffer processor instance.
+            The TTSGate processor instance.
         """
         return self._voicemail_gate
 
