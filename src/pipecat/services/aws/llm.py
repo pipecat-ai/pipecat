@@ -954,8 +954,6 @@ class AWSBedrockLLMService(LLMService):
                 function_calls = []
 
                 async for event in response["stream"]:
-                    self.reset_watchdog()
-
                     # Handle text content
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]

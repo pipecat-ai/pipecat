@@ -24,7 +24,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.stt_service import SegmentedSTTService, STTService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -239,13 +238,13 @@ class RivaSTTService(STTService):
         riva.client.add_custom_configuration_to_config(config, self._custom_configuration)
 
         self._config = config
-        self._queue = WatchdogQueue(self.task_manager)
+        self._queue = asyncio.Queue()
 
         if not self._thread_task:
             self._thread_task = self.create_task(self._thread_task_handler())
 
         if not self._response_task:
-            self._response_queue = WatchdogQueue(self.task_manager)
+            self._response_queue = asyncio.Queue()
             self._response_task = self.create_task(self._response_task_handler())
 
     async def stop(self, frame: EndFrame):

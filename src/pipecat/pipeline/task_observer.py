@@ -19,7 +19,6 @@ from attr import dataclass
 
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 @dataclass
@@ -86,7 +85,7 @@ class TaskObserver(BaseObserver):
 
         # If we already started, create a new proxy for the observer.
         # Otherwise, it will be created in start().
-        if self._started():
+        if self._proxies:
             proxy = self._create_proxy(observer)
             self._proxies[observer] = proxy
 
@@ -97,7 +96,7 @@ class TaskObserver(BaseObserver):
             observer: The observer to remove.
         """
         # If the observer has a proxy, remove it.
-        if observer in self._proxies:
+        if self._proxies and observer in self._proxies:
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
@@ -136,13 +135,9 @@ class TaskObserver(BaseObserver):
         """
         await self._send_to_proxy(data)
 
-    def _started(self) -> bool:
-        """Check if the task observer has been started."""
-        return self._proxies is not None
-
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
         """Create a proxy for a single observer."""
-        queue = WatchdogQueue(self._task_manager)
+        queue = asyncio.Queue()
         task = self._task_manager.create_task(
             self._proxy_task_handler(queue, observer),
             f"TaskObserver::{observer}::_proxy_task_handler",

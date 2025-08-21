@@ -40,7 +40,6 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.heygen.api import NewSessionRequest
 from pipecat.services.heygen.client import HEY_GEN_SAMPLE_RATE, HeyGenCallbacks, HeyGenClient
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 # Using the same values that we do in the BaseOutputTransport
 AVATAR_VAD_STOP_SECS = 0.35
@@ -278,21 +277,14 @@ class HeyGenVideoService(AIService):
         await self._client.stop()
 
     async def _create_send_task(self):
-        """Create the audio sending task if it doesn't exist.
-
-        Initializes a new WatchdogQueue and creates a task for handling audio sending.
-        """
+        """Create the audio sending task if it doesn't exist."""
         if not self._send_task:
-            self._queue = WatchdogQueue(self.task_manager)
+            self._queue = asyncio.Queue()
             self._send_task = self.create_task(self._send_task_handler())
 
     async def _cancel_send_task(self):
-        """Cancel the audio sending task if it exists.
-
-        Cancels and cleans up the audio sending task and associated queue.
-        """
+        """Cancel the audio sending task if it exists."""
         if self._send_task:
-            self._queue.cancel()
             await self.cancel_task(self._send_task)
             self._send_task = None
 

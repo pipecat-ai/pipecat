@@ -49,13 +49,7 @@ from pipecat.pipeline.base_task import BasePipelineTask, PipelineTaskParams
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.pipeline.task_observer import TaskObserver
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.utils.asyncio.task_manager import (
-    WATCHDOG_TIMEOUT,
-    BaseTaskManager,
-    TaskManager,
-    TaskManagerParams,
-)
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.utils.asyncio.task_manager import BaseTaskManager, TaskManager, TaskManagerParams
 from pipecat.utils.tracing.setup import is_tracing_available
 from pipecat.utils.tracing.turn_trace_observer import TurnTraceObserver
 
@@ -146,8 +140,6 @@ class PipelineTask(BasePipelineTask):
         conversation_id: Optional[str] = None,
         enable_tracing: bool = False,
         enable_turn_tracking: bool = True,
-        enable_watchdog_logging: bool = False,
-        enable_watchdog_timers: bool = False,
         idle_timeout_frames: Tuple[Type[Frame], ...] = (
             BotSpeakingFrame,
             InterimTranscriptionFrame,
@@ -159,7 +151,6 @@ class PipelineTask(BasePipelineTask):
         idle_timeout_secs: Optional[float] = 300,
         observers: Optional[List[BaseObserver]] = None,
         task_manager: Optional[BaseTaskManager] = None,
-        watchdog_timeout_secs: float = WATCHDOG_TIMEOUT,
     ):
         """Initialize the PipelineTask.
 
@@ -175,8 +166,6 @@ class PipelineTask(BasePipelineTask):
             conversation_id: Optional custom ID for the conversation.
             enable_tracing: Whether to enable tracing.
             enable_turn_tracking: Whether to enable turn tracking.
-            enable_watchdog_logging: Whether to print task processing times.
-            enable_watchdog_timers: Whether to enable task watchdog timers.
             idle_timeout_frames: A tuple with the frames that should trigger an idle
                 timeout if not received within `idle_timeout_seconds`.
             idle_timeout_secs: Timeout (in seconds) to consider pipeline idle or
@@ -184,8 +173,6 @@ class PipelineTask(BasePipelineTask):
                 automatically.
             observers: List of observers for monitoring pipeline execution.
             task_manager: Optional task manager for handling asyncio tasks.
-            watchdog_timeout_secs: Watchdog timer timeout (in seconds). A warning
-                will be logged if the watchdog timer is not reset before this timeout.
         """
         super().__init__()
         self._params = params or PipelineParams()
@@ -196,11 +183,8 @@ class PipelineTask(BasePipelineTask):
         self._conversation_id = conversation_id
         self._enable_tracing = enable_tracing and is_tracing_available()
         self._enable_turn_tracking = enable_turn_tracking
-        self._enable_watchdog_logging = enable_watchdog_logging
-        self._enable_watchdog_timers = enable_watchdog_timers
         self._idle_timeout_frames = idle_timeout_frames
         self._idle_timeout_secs = idle_timeout_secs
-        self._watchdog_timeout_secs = watchdog_timeout_secs
         if self._params.observers:
             import warnings
 
@@ -232,17 +216,17 @@ class PipelineTask(BasePipelineTask):
         self._task_manager = task_manager or TaskManager()
 
         # This queue is the queue used to push frames to the pipeline.
-        self._push_queue = WatchdogQueue(self._task_manager)
+        self._push_queue = asyncio.Queue()
         self._process_push_task: Optional[asyncio.Task] = None
         # This is the heartbeat queue. When a heartbeat frame is received in the
         # down queue we add it to the heartbeat queue for processing.
-        self._heartbeat_queue = WatchdogQueue(self._task_manager)
+        self._heartbeat_queue = asyncio.Queue()
         self._heartbeat_push_task: Optional[asyncio.Task] = None
         self._heartbeat_monitor_task: Optional[asyncio.Task] = None
         # This is the idle queue. When frames are received downstream they are
         # put in the queue. If no frame is received the pipeline is considered
         # idle.
-        self._idle_queue = WatchdogQueue(self._task_manager)
+        self._idle_queue = asyncio.Queue()
         self._idle_monitor_task: Optional[asyncio.Task] = None
         # This event is used to indicate a finalize frame (e.g. EndFrame,
         # StopFrame) has been received in the down queue.
@@ -491,7 +475,6 @@ class PipelineTask(BasePipelineTask):
     async def _maybe_cancel_idle_task(self):
         """Cancel idle monitoring task if it is running."""
         if self._idle_timeout_secs and self._idle_monitor_task:
-            self._idle_queue.cancel()
             await self._task_manager.cancel_task(self._idle_monitor_task)
             self._idle_monitor_task = None
 
@@ -511,19 +494,13 @@ class PipelineTask(BasePipelineTask):
 
     async def _setup(self, params: PipelineTaskParams):
         """Set up the pipeline task and all processors."""
-        mgr_params = TaskManagerParams(
-            loop=params.loop,
-            enable_watchdog_logging=self._enable_watchdog_logging,
-            enable_watchdog_timers=self._enable_watchdog_timers,
-            watchdog_timeout=self._watchdog_timeout_secs,
-        )
+        mgr_params = TaskManagerParams(loop=params.loop)
         self._task_manager.setup(mgr_params)
 
         setup = FrameProcessorSetup(
             clock=self._clock,
             task_manager=self._task_manager,
             observer=self._observer,
-            watchdog_timers_enabled=self._enable_watchdog_timers,
         )
         await self._pipeline.setup(setup)
 

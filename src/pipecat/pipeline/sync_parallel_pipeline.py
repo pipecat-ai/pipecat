@@ -22,7 +22,6 @@ from pipecat.frames.frames import ControlFrame, EndFrame, Frame, SystemFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 @dataclass
@@ -128,10 +127,34 @@ class SyncParallelPipeline(BasePipeline):
         if len(args) == 0:
             raise Exception(f"SyncParallelPipeline needs at least one argument")
 
-        self._args = args
         self._sinks = []
         self._sources = []
         self._pipelines = []
+
+        self._up_queue = asyncio.Queue()
+        self._down_queue = asyncio.Queue()
+
+        logger.debug(f"Creating {self} pipelines")
+        for processors in args:
+            if not isinstance(processors, list):
+                raise TypeError(f"SyncParallelPipeline argument {processors} is not a list")
+
+            # We add a source at the beginning of the pipeline and a sink at the end.
+            up_queue = asyncio.Queue()
+            down_queue = asyncio.Queue()
+            source = SyncParallelPipelineSource(up_queue)
+            sink = SyncParallelPipelineSink(down_queue)
+
+            # Keep track of sources and sinks. We also keep the output queue of
+            # the source and the sinks so we can use it later.
+            self._sources.append({"processor": source, "queue": down_queue})
+            self._sinks.append({"processor": sink, "queue": up_queue})
+
+            # Create pipeline
+            pipeline = Pipeline(processors, source=source, sink=sink)
+            self._pipelines.append(pipeline)
+
+        logger.debug(f"Finished creating {self} pipelines")
 
     #
     # Frame processor
@@ -178,32 +201,6 @@ class SyncParallelPipeline(BasePipeline):
             setup: Configuration for frame processor setup.
         """
         await super().setup(setup)
-
-        self._up_queue = WatchdogQueue(setup.task_manager)
-        self._down_queue = WatchdogQueue(setup.task_manager)
-
-        logger.debug(f"Creating {self} pipelines")
-        for processors in self._args:
-            if not isinstance(processors, list):
-                raise TypeError(f"SyncParallelPipeline argument {processors} is not a list")
-
-            # We add a source at the beginning of the pipeline and a sink at the end.
-            up_queue = asyncio.Queue()
-            down_queue = asyncio.Queue()
-            source = SyncParallelPipelineSource(up_queue)
-            sink = SyncParallelPipelineSink(down_queue)
-
-            # Keep track of sources and sinks. We also keep the output queue of
-            # the source and the sinks so we can use it later.
-            self._sources.append({"processor": source, "queue": down_queue})
-            self._sinks.append({"processor": sink, "queue": up_queue})
-
-            # Create pipeline
-            pipeline = Pipeline(processors, source=source, sink=sink)
-            self._pipelines.append(pipeline)
-
-        logger.debug(f"Finished creating {self} pipelines")
-
         await asyncio.gather(*[p.setup(setup) for p in self._pipelines])
 
     async def cleanup(self):

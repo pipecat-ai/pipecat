@@ -20,7 +20,6 @@ from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -127,7 +126,7 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             context
         )
 
-        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
+        async for chunk in chunk_stream:
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

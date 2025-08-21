@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -536,9 +535,8 @@ class GladiaSTTService(STTService):
     async def _keepalive_task_handler(self):
         """Send periodic empty audio chunks to keep the connection alive."""
         try:
-            KEEPALIVE_SLEEP = 20 if self.task_manager.task_watchdog_enabled else 3
+            KEEPALIVE_SLEEP = 20
             while self._connection_active:
-                self.reset_watchdog()
                 # Send keepalive (Gladia times out after 30 seconds)
                 await asyncio.sleep(KEEPALIVE_SLEEP)
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -555,7 +553,7 @@ class GladiaSTTService(STTService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
+            async for message in self._websocket:
                 content = json.loads(message)
 
                 # Handle audio chunk acknowledgments
@@ -613,8 +611,6 @@ class GladiaSTTService(STTService):
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
-
-                self.reset_watchdog()
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection
             pass
