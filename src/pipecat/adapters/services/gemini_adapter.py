@@ -161,7 +161,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                 continue
 
             # Convert standard format to Google format
-            converted = self._from_standard_message(message)
+            converted = self._from_standard_message(
+                message, already_have_system_instruction=bool(system_instruction)
+            )
             if isinstance(converted, Content):
                 # Regular (non-system) message
                 messages.append(converted)
@@ -187,7 +189,9 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return self.ConvertedMessages(messages=messages, system_instruction=system_instruction)
 
-    def _from_standard_message(self, message: LLMStandardMessage) -> Content | str:
+    def _from_standard_message(
+        self, message: LLMStandardMessage, already_have_system_instruction: bool
+    ) -> Content | str:
         """Convert universal context message to Google Content object.
 
         Handles conversion of text, images, and function calls to Google's
@@ -196,6 +200,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         Args:
             message: Message in universal context format.
+            already_have_system_instruction: Whether we already have a system instruction
 
         Returns:
             Content object with role and parts, or a plain string for system
@@ -240,12 +245,15 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         role = message["role"]
         content = message.get("content", [])
         if role == "system":
-            # System instructions are returned as plain text
-            if isinstance(content, str):
-                return content
-            elif isinstance(content, list):
-                # If content is a list, we assume it's a list of text parts, per the standard
-                return " ".join(part["text"] for part in content if part.get("type") == "text")
+            if already_have_system_instruction:
+                role = "user"  # Convert system message to user role if we already have a system instruction
+            else:
+                # System instructions are returned as plain text
+                if isinstance(content, str):
+                    return content
+                elif isinstance(content, list):
+                    # If content is a list, we assume it's a list of text parts, per the standard
+                    return " ".join(part["text"] for part in content if part.get("type") == "text")
         elif role == "assistant":
             role = "model"
 
