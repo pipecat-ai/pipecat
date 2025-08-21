@@ -65,14 +65,8 @@ class AICFilter(BaseAudioFilter):
         self._aic_ready = False
         self._frames_per_block = 0
         self._audio_buffer = bytearray()
-        # Create model and configure it
-        try:
-            self._aic = Model(model_type=self._model_type, license_key=self._license_key)
-        except Exception as e:  # noqa: BLE001 - surfacing SDK initialization errors
-            logger.error(f"AIC model creation failed: {e}")
-            self._aic = None
-            self._aic_ready = False
-            return
+        # Model will be created in start() since the API now requires sample_rate
+        self._aic = None
 
     async def start(self, sample_rate: int):
         """Initialize the filter with the transport's sample rate.
@@ -86,7 +80,10 @@ class AICFilter(BaseAudioFilter):
         self._sample_rate = sample_rate
 
         try:
-            self._aic.initialize(
+            # Create model with required runtime parameters
+            self._aic = Model(
+                model_type=self._model_type,
+                license_key=self._license_key or None,
                 sample_rate=self._sample_rate,
                 channels=1,
             )
