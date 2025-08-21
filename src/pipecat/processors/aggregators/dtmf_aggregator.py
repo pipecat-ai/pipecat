@@ -25,7 +25,6 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
-from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -63,12 +62,8 @@ class DTMFAggregator(FrameProcessor):
         self._termination_digit = termination_digit
         self._prefix = prefix
 
+        self._digit_event = asyncio.Event()
         self._aggregation_task: Optional[asyncio.Task] = None
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Setup resources."""
-        await super().setup(setup)
-        self._digit_event = WatchdogEvent(setup.task_manager)
 
     async def cleanup(self) -> None:
         """Clean up resources."""
@@ -137,7 +132,6 @@ class DTMFAggregator(FrameProcessor):
                 await asyncio.wait_for(self._digit_event.wait(), timeout=self._idle_timeout)
                 self._digit_event.clear()
             except asyncio.TimeoutError:
-                self.reset_watchdog()
                 if self._aggregation:
                     await self._flush_aggregation()
 

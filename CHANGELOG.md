@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Watchdog timers have been removed. They were introduced in 0.0.72 to help
+  diagnose pipeline freezes. Unfortunately, they proved ineffective since they
+  required developers to use Pipecat-specific queues, iterators, and events to
+  correctly reset the timer, which limited their usefulness and added friction.
+
 - Removed unused `FrameProcessor.set_parent()` and
   `FrameProcessor.get_parent()`.
 
