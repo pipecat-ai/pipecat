@@ -24,7 +24,6 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.filters.identity_filter import IdentityFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import HeartbeatsObserver, run_test
-from pipecat.utils.asyncio.timeout import wait_for
 
 
 class TestPipeline(unittest.IsolatedAsyncioTestCase):
@@ -251,7 +250,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         await task.queue_frame(TextFrame(text="Hello Downstream!"))
 
         try:
-            await wait_for(
+            await asyncio.wait_for(
                 asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
                 timeout=1.0,
             )
@@ -287,7 +286,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
 
         await task.queue_frame(TextFrame(text="Hello!"))
         try:
-            await wait_for(
+            await asyncio.wait_for(
                 asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
                 timeout=1.0,
             )
@@ -307,7 +306,7 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, idle_timeout_secs=0.2, cancel_on_idle_timeout=False)
         try:
-            await wait_for(
+            await asyncio.wait_for(
                 asyncio.shield(task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))),
                 timeout=0.3,
             )

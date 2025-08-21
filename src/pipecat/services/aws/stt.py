@@ -31,7 +31,6 @@ from pipecat.frames.frames import (
 from pipecat.services.aws.utils import build_event_message, decode_event, get_presigned_url
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
@@ -481,7 +480,7 @@ class AWSTranscribeSTTService(STTService):
                 break
 
             try:
-                response = await wait_for(self._ws_client.recv(), timeout=1.0)
+                response = await asyncio.wait_for(self._ws_client.recv(), timeout=1.0)
 
                 headers, payload = decode_event(response)
 

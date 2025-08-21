@@ -37,7 +37,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.timeout import wait_for
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
@@ -428,7 +427,7 @@ class TTSService(AIService):
         has_started = False
         while True:
             try:
-                frame = await wait_for(
+                frame = await asyncio.wait_for(
                     self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
                 )
                 if isinstance(frame, TTSStartedFrame):
@@ -859,7 +858,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         running = True
         while running:
             try:
-                frame = await wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
+                frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
                 self.reset_watchdog()
                 if frame:
                     await self.push_frame(frame)
