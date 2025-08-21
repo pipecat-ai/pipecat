@@ -44,12 +44,12 @@ wheels = [
 
 [[package]]
 name = "aic-sdk"
-version = "0.6.1"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8a/40/a307063543a59be1ebec640027666d1180ccf3434f69d890e33f55f78066/aic_sdk-0.6.1.tar.gz", hash = "sha256:9b4a48e0dcdb3ad0ef702c64b5930c5ce1c34e11235861b3ba4a8aaa337bb777", size = 29368, upload-time = "2025-08-18T16:24:05.348Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/4d/80accf25333ec53d9f2c1bee03f17ddea31096ddb2f10d59c12c3c62c8a8/aic_sdk-1.0.1.tar.gz", hash = "sha256:7526e391e664c1cafabd404c396baff0f2555b01413684f3c08923711516a073", size = 32076, upload-time = "2025-08-21T15:54:17.063Z" }
 
 [[package]]
 name = "aioboto3"
@@ -4407,7 +4407,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'moondream'", specifier = "~=1.10.0" },
-    { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=0.6.1" },
+    { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=1.0.1" },
     { name = "aioboto3", marker = "extra == 'aws'", specifier = "~=15.0.0" },
     { name = "aiohttp", specifier = ">=3.11.12,<4" },
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = "~=1.11.0" },
