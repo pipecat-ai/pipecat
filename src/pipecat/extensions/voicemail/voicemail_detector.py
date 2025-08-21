@@ -10,6 +10,9 @@ This module provides voicemail detection capabilities using parallel pipeline
 processing to classify incoming calls as either voicemail messages or live
 conversations. It's specifically designed for outbound calling scenarios where
 a bot needs to determine if a human answered or if the call went to voicemail.
+
+Note:
+    The voicemail module is optimized for text LLMs only.
 """
 
 import asyncio

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `pipecat.extensions.voicemail`, a module for detecting voicemail vs.
   live conversation, primarily intended for use in outbound calling scenarios.
+  The voicemail module is optimized for text LLMs only.
 
 - Added new frames to the `idle_timeout_frames` arg: `TranscriptionFrame`,
   `InterimTranscriptionFrame`, `UserStartedSpeakingFrame`, and
