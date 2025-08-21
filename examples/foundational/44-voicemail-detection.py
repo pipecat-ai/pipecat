@@ -83,7 +83,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             context_aggregator.user(),
             llm,
             tts,
-            voicemail.buffer(),  # TTS buffering — Immediately after the TTS service
+            voicemail.gate(),  # TTS buffering — Immediately after the TTS service
             transport.output(),
             context_aggregator.assistant(),
         ]
