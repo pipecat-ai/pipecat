@@ -35,11 +35,13 @@ class MarkdownTextFilter(BaseTextFilter):
             enable_text_filter: Whether to apply Markdown filtering. Defaults to True.
             filter_code: Whether to remove code blocks from the text. Defaults to False.
             filter_tables: Whether to remove table content from the text. Defaults to False.
+            preserve_tags: List of HTML tag names to preserve during filtering. Defaults to empty list.
         """
 
         enable_text_filter: Optional[bool] = True
         filter_code: Optional[bool] = False
         filter_tables: Optional[bool] = False
+        preserve_tags: Optional[list[str]] = []
 
     def __init__(self, params: Optional[InputParams] = None, **kwargs):
         """Initialize the Markdown text filter.
@@ -105,6 +107,11 @@ class MarkdownTextFilter(BaseTextFilter):
             if self._settings.filter_tables:
                 filtered_text = self.remove_tables(filtered_text)
 
+            # Preserve specified tags before removing HTML tags
+            preserved_content = {}
+            if self._settings.preserve_tags:
+                filtered_text, preserved_content = self._preserve_tags(filtered_text)
+
             # Remove HTML tags
             filtered_text = re.sub("<[^<]+?>", "", filtered_text)
 
@@ -136,6 +143,10 @@ class MarkdownTextFilter(BaseTextFilter):
 
             ## Make links more readable
             filtered_text = re.sub(r"https?://", "", filtered_text)
+
+            # Restore preserved tags
+            if preserved_content:
+                filtered_text = self._restore_tags(filtered_text, preserved_content)
 
             return filtered_text
         else:
@@ -267,3 +278,57 @@ class MarkdownTextFilter(BaseTextFilter):
             return text[: match.start()].strip()
 
         return text.strip()
+
+    #
+    # Tag preservation methods
+    #
+
+    def _preserve_tags(self, text: str) -> tuple[str, dict[str, str]]:
+        """Preserve specified HTML tags and their content before filtering.
+
+        Args:
+            text: The input text containing HTML tags.
+
+        Returns:
+            A tuple of (modified_text, preserved_content_dict) where the text
+            has placeholders for preserved tags and the dict maps placeholders
+            to original tag content.
+        """
+        preserved_content = {}
+        modified_text = text
+        
+        for tag in self._settings.preserve_tags:
+            # Create pattern to match opening and closing tags with content
+            pattern = rf"<{re.escape(tag)}(?:\s[^>]*)?>(.*?)</{re.escape(tag)}>"
+            
+            # Replace each occurrence with a unique placeholder
+            def replace_match(match_obj):
+                full_match = match_obj.group(0)
+                placeholder = f"__PRESERVE_{tag.upper()}_{len(preserved_content)}__"
+                preserved_content[placeholder] = full_match
+                return placeholder
+            
+            modified_text = re.sub(
+                pattern, 
+                replace_match, 
+                modified_text, 
+                flags=re.DOTALL | re.IGNORECASE
+            )
+        
+        return modified_text, preserved_content
+
+    def _restore_tags(self, text: str, preserved_content: dict[str, str]) -> str:
+        """Restore preserved HTML tags back into the text.
+
+        Args:
+            text: The filtered text containing placeholders.
+            preserved_content: Dictionary mapping placeholders to original content.
+
+        Returns:
+            The text with preserved tags restored.
+        """
+        restored_text = text
+        for placeholder, original_content in preserved_content.items():
+            restored_text = restored_text.replace(placeholder, original_content)
+        
+        return restored_text
