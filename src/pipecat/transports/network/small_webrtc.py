@@ -51,6 +51,10 @@ except ModuleNotFoundError as e:
     logger.error("In order to use the SmallWebRTC, you need to `pip install pipecat-ai[webrtc]`.")
     raise Exception(f"Missing module: {e}")
 
+CAM_VIDEO_SOURCE = "camera"
+SCREEN_VIDEO_SOURCE = "screenVideo"
+MIC_AUDIO_SOURCE = "microphone"
+
 
 class SmallWebRTCCallbacks(BaseModel):
     """Callback handlers for SmallWebRTC events.
@@ -288,7 +292,9 @@ class SmallWebRTCClient:
         """
         while True:
             video_track = (
-                self._video_input_track if video_source == "camera" else self._screen_video_track
+                self._video_input_track
+                if video_source == CAM_VIDEO_SOURCE
+                else self._screen_video_track
             )
             if video_track is None:
                 await asyncio.sleep(0.01)
@@ -562,7 +568,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         if not self._receive_audio_task and self._params.audio_in_enabled:
             self._receive_audio_task = self.create_task(self._receive_audio())
         if not self._receive_video_task and self._params.video_in_enabled:
-            self._receive_video_task = self.create_task(self._receive_video("camera"))
+            self._receive_video_task = self.create_task(self._receive_video(CAM_VIDEO_SOURCE))
 
     async def _stop_tasks(self):
         """Stop all background tasks."""
@@ -665,23 +671,27 @@ class SmallWebRTCInputTransport(BaseInputTransport):
 
         # If we're not already receiving video, try to get a frame now
         if (
-            frame.video_source == "camera"
+            frame.video_source == CAM_VIDEO_SOURCE
             and not self._receive_video_task
             and self._params.video_in_enabled
         ):
             # Start video reception if it's not already running
-            self._receive_video_task = self.create_task(self._receive_video("camera"))
+            self._receive_video_task = self.create_task(self._receive_video(CAM_VIDEO_SOURCE))
         elif (
-            frame.video_source == "screenVideo"
+            frame.video_source == SCREEN_VIDEO_SOURCE
             and not self._receive_screen_video_task
             and self._params.video_in_enabled
         ):
+            print(f"Starting screen video task in request_participant_image")
+
             # Start screen video reception if it's not already running
-            self._receive_screen_video_task = self.create_task(self._receive_video("screenVideo"))
+            self._receive_screen_video_task = self.create_task(
+                self._receive_video(SCREEN_VIDEO_SOURCE)
+            )
 
     async def capture_participant_media(
         self,
-        source: str = "camera",
+        source: str = CAM_VIDEO_SOURCE,
     ):
         """Capture media from a specific participant.
 
@@ -690,22 +700,29 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         """
         # If we're not already receiving video, try to get a frame now
         if (
-            source == "microphone"
+            source == MIC_AUDIO_SOURCE
             and not self._receive_audio_task
             and self._params.audio_in_enabled
         ):
             # Start audio reception if it's not already running
             self._receive_audio_task = self.create_task(self._receive_audio())
-        elif source == "camera" and not self._receive_video_task and self._params.video_in_enabled:
-            # Start video reception if it's not already running
-            self._receive_video_task = self.create_task(self._receive_video("camera"))
         elif (
-            source == "screenVideo"
+            source == CAM_VIDEO_SOURCE
+            and not self._receive_video_task
+            and self._params.video_in_enabled
+        ):
+            # Start video reception if it's not already running
+            self._receive_video_task = self.create_task(self._receive_video(CAM_VIDEO_SOURCE))
+        elif (
+            source == SCREEN_VIDEO_SOURCE
             and not self._receive_screen_video_task
             and self._params.video_in_enabled
         ):
             # Start screen video reception if it's not already running
-            self._receive_screen_video_task = self.create_task(self._receive_video("screenVideo"))
+            print(f"Starting screen video task in capture_participant_media")
+            self._receive_screen_video_task = self.create_task(
+                self._receive_video(SCREEN_VIDEO_SOURCE)
+            )
 
 
 class SmallWebRTCOutputTransport(BaseOutputTransport):
@@ -895,34 +912,24 @@ class SmallWebRTCTransport(BaseTransport):
 
     async def capture_participant_video(
         self,
-        participant_id: str = None,
-        framerate: int = 30,
-        video_source: str = "camera",
-        color_format: str = "RGB",
+        video_source: str = CAM_VIDEO_SOURCE,
     ):
         """Capture video from a specific participant.
 
         Args:
-            participant_id: Unused parameter, kept for compatibility.
-            framerate: Unused parameter, kept for compatibility.
-            video_source: Video source to capture from.
-            color_format: Unused parameter, kept for compatibility.
+            video_source: Video source to capture from ("camera" or "screenVideo").
         """
         if self._input:
             await self._input.capture_participant_media(source=video_source)
 
     async def capture_participant_audio(
         self,
-        participant_id: str = None,
-        audio_source: str = "microphone",
-        sample_rate: int = 16000,
+        audio_source: str = MIC_AUDIO_SOURCE,
     ):
         """Capture audio from a specific participant.
 
         Args:
-            participant_id: Unused parameter, kept for compatibility.
             audio_source: Audio source to capture from. (currently, "microphone" is the only supported option)
-            sample_rate: Unused parameter, kept for compatibility.
         """
         if self._input:
             await self._input.capture_participant_media(source=audio_source)
