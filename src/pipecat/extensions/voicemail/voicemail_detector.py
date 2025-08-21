@@ -280,11 +280,13 @@ class ClassificationProcessor(FrameProcessor):
 
         elif isinstance(frame, UserStartedSpeakingFrame):
             # User started speaking - set the voicemail event
-            self._voicemail_event.set()
+            if self._voicemail_detected:
+                self._voicemail_event.set()
 
         elif isinstance(frame, UserStoppedSpeakingFrame):
             # User stopped speaking - clear the voicemail event
-            self._voicemail_event.clear()
+            if self._voicemail_detected:
+                self._voicemail_event.clear()
 
         else:
             # Pass all non-LLM frames through
