@@ -22,18 +22,13 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     BotInterruptionFrame,
-    CancelFrame,
-    CancelTaskFrame,
     EndFrame,
-    EndTaskFrame,
     Frame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
-    StartInterruptionFrame,
     StopFrame,
-    StopInterruptionFrame,
-    StopTaskFrame,
+    SystemFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -104,19 +99,7 @@ class NotifierGate(FrameProcessor):
             await self.push_frame(frame, direction)
         elif isinstance(
             frame,
-            (
-                BotInterruptionFrame,
-                CancelFrame,
-                CancelTaskFrame,
-                EndTaskFrame,
-                EndFrame,
-                StartInterruptionFrame,
-                StopInterruptionFrame,
-                StopFrame,
-                StopTaskFrame,
-                UserStartedSpeakingFrame,
-                UserStoppedSpeakingFrame,
-            ),
+            (SystemFrame, EndFrame, StopFrame),
         ):
             await self.push_frame(frame, direction)
 
