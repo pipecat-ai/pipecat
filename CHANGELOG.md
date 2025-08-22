@@ -56,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Added `SpeechmaticsSTTService` exception handling on connection and sending.
+
 - Replaced `asyncio.wait_for()` for `wait_for2.wait_for()` for Python <
   3.12. because of issues regarding task cancellation (i.e. cancellation is
   never propagated).
