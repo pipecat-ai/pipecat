@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `daily-python` to 0.19.7.
 
+### Deprecated
+
+- `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or `await
+  asyncio.wait_for(task, timeout)` instead.
+
 ### Removed
 
 - Watchdog timers have been removed. They were introduced in 0.0.72 to help

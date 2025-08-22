@@ -794,7 +794,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
             # Indicate no more audio contexts are available. this will end the
             # task cleanly after all contexts have been processed.
             await self._contexts_queue.put(None)
-            await self.wait_for_task(self._audio_context_task)
+            await self._audio_context_task
             self._audio_context_task = None
 
     async def cancel(self, frame: CancelFrame):

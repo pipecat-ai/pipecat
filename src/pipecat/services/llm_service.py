@@ -487,7 +487,7 @@ class LLMService(AIService):
             self._function_call_tasks[task] = runner_item
             # Since we run tasks sequentially we don't need to call
             # task.add_done_callback(self._function_call_task_finished).
-            await self.wait_for_task(task)
+            await task
             del self._function_call_tasks[task]
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
@@ -616,7 +616,3 @@ class LLMService(AIService):
     def _function_call_task_finished(self, task: asyncio.Task):
         if task in self._function_call_tasks:
             del self._function_call_tasks[task]
-            # The task is finished so this should exit immediately. We need to
-            # do this because otherwise the task manager would report a dangling
-            # task if we don't remove it.
-            asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())

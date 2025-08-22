@@ -208,7 +208,7 @@ class SonioxSTTService(STTService):
         if self._receive_task:
             # Task cannot cancel itself. If task called _cleanup() we expect it to cancel itself.
             if self._receive_task != asyncio.current_task():
-                await self.wait_for_task(self._receive_task)
+                await self._receive_task
             self._receive_task = None
 
     async def stop(self, frame: EndFrame):
