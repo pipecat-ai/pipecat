@@ -125,17 +125,66 @@ class ClassifierGate(NotifierGate):
     system efficiency.
 
     When closed, only allows system frames and user speaking frames to continue.
-    Speaking frames are needed for voicemail timing control.
+    Speaking frames are needed for voicemail timing control, but not for conversation.
     """
 
-    def __init__(self, gate_notifier: BaseNotifier):
+    def __init__(self, gate_notifier: BaseNotifier, conversation_notifier: BaseNotifier):
         """Initialize the classifier gate.
 
         Args:
             gate_notifier: Notifier that signals when a classification decision has
                 been made and the gate should close.
+            conversation_notifier: Notifier that signals when conversation is detected.
         """
         super().__init__(gate_notifier, task_name="classifier_gate")
+        self._conversation_notifier = conversation_notifier
+        self._conversation_detected = False
+        self._conversation_task: Optional[asyncio.Task] = None
+
+    async def setup(self, setup: FrameProcessorSetup):
+        """Set up the processor with required components.
+
+        Args:
+            setup: Configuration object containing setup parameters.
+        """
+        await super().setup(setup)
+        self._conversation_task = self.create_task(self._wait_for_conversation())
+
+    async def cleanup(self):
+        """Clean up the processor resources."""
+        await super().cleanup()
+        if self._conversation_task:
+            await self.cancel_task(self._conversation_task)
+            self._conversation_task = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and control gate state based on notifier signals.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        await FrameProcessor.process_frame(self, frame, direction)
+
+        # Gate logic: open gate allows all frames, closed gate filters frames
+        if self._gate_opened:
+            await self.push_frame(frame, direction)
+        elif isinstance(frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)):
+            # Only allow speaking frames if conversation was NOT detected (i.e., voicemail case)
+            # This prevents the UserContextAggregator from issuing a warning about no aggregation
+            # to push.
+            if not self._conversation_detected:
+                await self.push_frame(frame, direction)
+        elif isinstance(frame, (SystemFrame, EndFrame, StopFrame)):
+            # Always allow system frames through
+            # This includes the UserStartedSpeakingFrame and UserStoppedSpeakingFrame
+            # which are used to detect voicemail timing.
+            await self.push_frame(frame, direction)
+
+    async def _wait_for_conversation(self):
+        """Wait for conversation detection notification and mark conversation detected."""
+        await self._conversation_notifier.wait()
+        self._conversation_detected = True
 
 
 class ConversationGate(NotifierGate):
@@ -575,7 +624,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         self._voicemail_notifier = EventNotifier()  # Signals voicemail detected
 
         # Create the processor components
-        self._classifier_gate = ClassifierGate(self._gate_notifier)
+        self._classifier_gate = ClassifierGate(self._gate_notifier, self._conversation_notifier)
         self._conversation_gate = ConversationGate(self._voicemail_notifier)
         self._classification_processor = ClassificationProcessor(
             gate_notifier=self._gate_notifier,
