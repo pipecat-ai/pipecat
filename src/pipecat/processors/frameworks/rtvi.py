@@ -72,11 +72,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
-from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "1.0.0"
@@ -1315,10 +1313,10 @@ class RTVIProcessor(FrameProcessor):
     async def _start(self, frame: StartFrame):
         """Start the RTVI processor tasks."""
         if not self._action_task:
-            self._action_queue = WatchdogQueue(self.task_manager)
+            self._action_queue = asyncio.Queue()
             self._action_task = self.create_task(self._action_task_handler())
         if not self._message_task:
-            self._message_queue = WatchdogQueue(self.task_manager)
+            self._message_queue = asyncio.Queue()
             self._message_task = self.create_task(self._message_task_handler())
         await self._call_event_handler("on_bot_started")
 
@@ -1333,12 +1331,10 @@ class RTVIProcessor(FrameProcessor):
     async def _cancel_tasks(self):
         """Cancel all running tasks."""
         if self._action_task:
-            self._action_queue.cancel()
             await self.cancel_task(self._action_task)
             self._action_task = None
 
         if self._message_task:
-            self._message_queue.cancel()
             await self.cancel_task(self._message_task)
             self._message_task = None
 

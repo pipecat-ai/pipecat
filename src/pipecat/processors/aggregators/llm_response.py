@@ -684,7 +684,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
                     )
                     self._emulating_vad = False
             finally:
-                self.reset_watchdog()
                 self._aggregation_event.clear()
 
     async def _maybe_emulate_user_speaking(self):

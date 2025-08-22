@@ -37,7 +37,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
@@ -438,8 +437,6 @@ class TTSService(AIService):
                 if has_started:
                     await self.push_frame(TTSStoppedFrame())
                     has_started = False
-            finally:
-                self.reset_watchdog()
 
 
 class WordTTSService(TTSService):
@@ -526,7 +523,7 @@ class WordTTSService(TTSService):
 
     def _create_words_task(self):
         if not self._words_task:
-            self._words_queue = WatchdogQueue(self.task_manager)
+            self._words_queue = asyncio.Queue()
             self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
@@ -816,13 +813,12 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._contexts_queue = WatchdogQueue(self.task_manager)
+            self._contexts_queue = asyncio.Queue()
             self._contexts: Dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
         if self._audio_context_task:
-            self._contexts_queue.cancel()
             await self.cancel_task(self._audio_context_task)
             self._audio_context_task = None
 
@@ -859,12 +855,10 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
         while running:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
-                self.reset_watchdog()
                 if frame:
                     await self.push_frame(frame)
                 running = frame is not None
             except asyncio.TimeoutError:
-                self.reset_watchdog()
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break

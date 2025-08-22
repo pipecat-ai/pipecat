@@ -53,7 +53,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -290,7 +289,7 @@ class AnthropicLLMService(LLMService):
             json_accumulator = ""
 
             function_calls = []
-            async for event in WatchdogAsyncIterator(response, manager=self.task_manager):
+            async for event in response:
                 # Aggregate streaming content, create frames, trigger events
 
                 if event.type == "content_block_delta":
