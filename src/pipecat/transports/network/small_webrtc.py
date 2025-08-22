@@ -669,6 +669,9 @@ class SmallWebRTCInputTransport(BaseInputTransport):
         request_id = f"{frame.function_name}:{frame.tool_call_id}"
         self._image_requests[request_id] = frame
 
+        # Default to camera if no source specified
+        if frame.video_source is None:
+            frame.video_source = CAM_VIDEO_SOURCE
         # If we're not already receiving video, try to get a frame now
         if (
             frame.video_source == CAM_VIDEO_SOURCE
@@ -682,8 +685,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             and not self._receive_screen_video_task
             and self._params.video_in_enabled
         ):
-            print(f"Starting screen video task in request_participant_image")
-
             # Start screen video reception if it's not already running
             self._receive_screen_video_task = self.create_task(
                 self._receive_video(SCREEN_VIDEO_SOURCE)
@@ -719,7 +720,6 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             and self._params.video_in_enabled
         ):
             # Start screen video reception if it's not already running
-            print(f"Starting screen video task in capture_participant_media")
             self._receive_screen_video_task = self.create_task(
                 self._receive_video(SCREEN_VIDEO_SOURCE)
             )
