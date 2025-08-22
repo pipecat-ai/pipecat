@@ -503,13 +503,23 @@ class VoicemailDetector(ParallelPipeline):
             context_aggregator.assistant(),
         ])
 
+        # For custom prompts, append the required response instruction:
+        custom_prompt = "Your custom classification logic here. " + VoicemailDetector.CLASSIFIER_RESPONSE_INSTRUCTION
+
     Events:
         on_voicemail_detected: Triggered when voicemail is detected after the configured
             delay. The event handler receives one argument: the ClassificationProcessor
             instance which can be used to push frames.
+
+    Constants:
+        CLASSIFIER_RESPONSE_INSTRUCTION: The exact text that must be included in custom
+            system prompts to ensure proper classification functionality.
     """
 
-    DEFAULT_SYSTEM_PROMPT = """You are a voicemail detection classifier for an OUTBOUND calling system. A bot has called a phone number and you need to determine if a human answered or if the call went to voicemail based on the provided text.
+    CLASSIFIER_RESPONSE_INSTRUCTION = 'Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it\'s voicemail/recording.'
+
+    DEFAULT_SYSTEM_PROMPT = (
+        """You are a voicemail detection classifier for an OUTBOUND calling system. A bot has called a phone number and you need to determine if a human answered or if the call went to voicemail based on the provided text.
 
 HUMAN ANSWERED - LIVE CONVERSATION (respond "CONVERSATION"):
 - Personal greetings: "Hello?", "Hi", "Yeah?", "John speaking"
@@ -529,14 +539,16 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
 - Carrier system messages: "mailbox is full", "has not been set up"
 - Business hours messages: "our office is currently closed"
 
-Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's voicemail/recording."""
+"""
+        + CLASSIFIER_RESPONSE_INSTRUCTION
+    )
 
     def __init__(
         self,
         *,
         llm: LLMService,
         voicemail_response_delay: float = 2.0,
-        system_prompt: Optional[str] = None,
+        custom_system_prompt: Optional[str] = None,
     ):
         """Initialize the voicemail detector with classification and buffering components.
 
@@ -547,18 +559,20 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
                 before triggering the voicemail event handler. This allows voicemail
                 responses to be played back after a short delay to ensure the response
                 occurs during the voicemail recording. Default is 2.0 seconds.
-            system_prompt: Optional custom system prompt for classification. If None,
+            custom_system_prompt: Optional custom system prompt for classification. If None,
                 uses the default prompt optimized for outbound calling scenarios.
                 Custom prompts should instruct the LLM to respond with exactly
                 "CONVERSATION" or "VOICEMAIL" for proper detection functionality.
         """
         self._classifier_llm = llm
-        self._prompt = system_prompt if system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
+        self._prompt = (
+            custom_system_prompt if custom_system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
+        )
         self._voicemail_response_delay = voicemail_response_delay
 
         # Validate custom prompts to ensure they work with the detection logic
-        if system_prompt is not None:
-            self._validate_prompt(system_prompt)
+        if custom_system_prompt is not None:
+            self._validate_prompt(custom_system_prompt)
 
         # Set up the LLM context with the classification prompt
         self._messages = [
@@ -622,7 +636,8 @@ Respond with ONLY "CONVERSATION" if a person answered, or "VOICEMAIL" if it's vo
             logger.warning(
                 "Custom system prompt should instruct the LLM to respond with exactly "
                 '"CONVERSATION" or "VOICEMAIL" for proper detection functionality. '
-                'Example: "Respond with ONLY \\"CONVERSATION\\" if a person answered, or \\"VOICEMAIL\\" if it\'s voicemail/recording."'
+                f"Consider appending VoicemailDetector.CLASSIFIER_RESPONSE_INSTRUCTION to your prompt: "
+                f'"{self.CLASSIFIER_RESPONSE_INSTRUCTION}"'
             )
 
     def detector(self) -> "VoicemailDetector":
