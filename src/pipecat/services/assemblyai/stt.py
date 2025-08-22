@@ -244,11 +244,9 @@ class AssemblyAISTTService(STTService):
         try:
             while self._connected:
                 try:
-                    message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                    message = await self._websocket.recv()
                     data = json.loads(message)
                     await self._handle_message(data)
-                except asyncio.TimeoutError:
-                    self.reset_watchdog()
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:

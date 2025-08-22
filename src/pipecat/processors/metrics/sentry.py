@@ -9,7 +9,6 @@
 from loguru import logger
 
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 try:
     import sentry_sdk
@@ -51,7 +50,7 @@ class SentryMetrics(FrameProcessorMetrics):
         """
         await super().setup(task_manager)
         if self._sentry_available:
-            self._sentry_queue = WatchdogQueue(task_manager)
+            self._sentry_queue = asyncio.Queue()
             self._sentry_task = self.task_manager.create_task(
                 self._sentry_task_handler(), name=f"{self}::_sentry_task_handler"
             )

@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -276,9 +275,7 @@ class AsyncAITTSService(InterruptibleTTSService):
             self._started = False
 
     async def _receive_messages(self):
-        async for message in WatchdogAsyncIterator(
-            self._get_websocket(), manager=self.task_manager
-        ):
+        async for message in self._get_websocket():
             msg = json.loads(message)
             if not msg:
                 continue
@@ -301,9 +298,8 @@ class AsyncAITTSService(InterruptibleTTSService):
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10 if self.task_manager.task_watchdog_enabled else 3
+        KEEPALIVE_SLEEP = 3
         while True:
-            self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
