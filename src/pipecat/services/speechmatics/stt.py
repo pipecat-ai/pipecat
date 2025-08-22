@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -463,8 +464,14 @@ class SpeechmaticsSTTService(STTService):
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Adds audio to the audio buffer and yields None."""
-        await self._client.send_audio(audio)
-        yield None
+        try:
+            if self._client:
+                await self._client.send_audio(audio)
+            yield None
+        except Exception as e:
+            logger.error(f"Speechmatics error: {e}")
+            yield ErrorFrame(f"Speechmatics error: {e}", fatal=False)
+            await self._disconnect()
 
     def update_params(
         self,
@@ -520,7 +527,7 @@ class SpeechmaticsSTTService(STTService):
         )
 
         # Log the event
-        logger.debug("Connected to Speechmatics STT service")
+        logger.debug(f"{self} Connecting to Speechmatics STT service")
 
         # Recognition started event
         @self._client.on(ServerMessageType.RECOGNITION_STARTED)
@@ -562,30 +569,35 @@ class SpeechmaticsSTTService(STTService):
                 )
 
         # Start session
-        await self._client.start_session(
-            transcription_config=self._transcription_config,
-            audio_format=AudioFormat(
-                encoding=self._params.audio_encoding,
-                sample_rate=self.sample_rate,
-                chunk_size=self._params.chunk_size,
-            ),
-        )
+        try:
+            await self._client.start_session(
+                transcription_config=self._transcription_config,
+                audio_format=AudioFormat(
+                    encoding=self._params.audio_encoding,
+                    sample_rate=self.sample_rate,
+                    chunk_size=self._params.chunk_size,
+                ),
+            )
+            logger.debug(f"{self} Connected to Speechmatics STT service")
+        except Exception as e:
+            logger.error(f"{self} Error connecting to Speechmatics: {e}")
+        finally:
+            self._client = None
 
     async def _disconnect(self) -> None:
         """Disconnect from the STT service."""
         # Disconnect the client
+        logger.debug(f"{self} Disconnecting from Speechmatics STT service")
         try:
             if self._client:
-                await asyncio.wait_for(self._client.close(), timeout=1.0)
+                await asyncio.wait_for(self._client.close(), timeout=5.0)
+                logger.debug(f"{self} Disconnected from Speechmatics STT service")
         except asyncio.TimeoutError:
-            logger.warning("Timeout while closing Speechmatics client connection")
+            logger.warning(f"{self} Timeout while closing Speechmatics client connection")
         except Exception as e:
-            logger.error(f"Error closing Speechmatics client: {e}")
+            logger.error(f"{self} Error closing Speechmatics client: {e}")
         finally:
             self._client = None
-
-        # Log the event
-        logger.debug("Disconnected from Speechmatics STT service")
 
     def _process_config(self) -> None:
         """Create a formatted STT transcription config.
