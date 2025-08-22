@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `retry_timeout_secs` and `retry_on_timeout`. This feature is disabled by
   default.
 
+### Changed
+
+- Updated `daily-python` to 0.19.7.
+
 ### Removed
 
 - Watchdog timers have been removed. They were introduced in 0.0.72 to help
