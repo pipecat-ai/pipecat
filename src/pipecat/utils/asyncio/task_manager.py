@@ -70,21 +70,6 @@ class BaseTaskManager(ABC):
         pass
 
     @abstractmethod
-    async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
-        """Wait for an asyncio.Task to complete with optional timeout handling.
-
-        This function awaits the specified asyncio.Task and handles scenarios for
-        timeouts, cancellations, and other exceptions. It also ensures that the task
-        is removed from the set of registered tasks upon completion or failure.
-
-        Args:
-            task: The asyncio Task to wait for.
-            timeout: The maximum number of seconds to wait for the task to complete.
-                If None, waits indefinitely.
-        """
-        pass
-
-    @abstractmethod
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Cancels the given asyncio Task and awaits its completion with an optional timeout.
 
@@ -188,35 +173,6 @@ class TaskManager(BaseTaskManager):
         self._add_task(TaskData(task=task))
         logger.trace(f"{name}: task created")
         return task
-
-    async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
-        """Wait for an asyncio.Task to complete with optional timeout handling.
-
-        This function awaits the specified asyncio.Task and handles scenarios for
-        timeouts, cancellations, and other exceptions. It also ensures that the task
-        is removed from the set of registered tasks upon completion or failure.
-
-        Args:
-            task: The asyncio Task to wait for.
-            timeout: The maximum number of seconds to wait for the task to complete.
-                If None, waits indefinitely.
-        """
-        name = task.get_name()
-        try:
-            if timeout:
-                await asyncio.wait_for(task, timeout=timeout)
-            else:
-                await task
-        except asyncio.TimeoutError:
-            logger.warning(f"{name}: timed out waiting for task to finish")
-        except asyncio.CancelledError:
-            logger.trace(f"{name}: unexpected task cancellation (maybe Ctrl-C?)")
-            raise
-        except Exception as e:
-            logger.exception(f"{name}: unexpected exception while stopping task: {e}")
-        except BaseException as e:
-            logger.critical(f"{name}: fatal base exception while stopping task: {e}")
-            raise
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Cancels the given asyncio Task and awaits its completion with an optional timeout.
