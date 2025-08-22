@@ -461,7 +461,7 @@ class LLMUserAggregator(LLMContextAggregator):
                         if self._vad_params
                         else self._params.turn_emulated_vad_timeout
                     )
-                await asyncio.wait_for(self._aggregation_event.wait(), timeout)
+                await asyncio.wait_for(self._aggregation_event.wait(), timeout=timeout)
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
@@ -475,7 +475,6 @@ class LLMUserAggregator(LLMContextAggregator):
                     )
                     self._emulating_vad = False
             finally:
-                self.reset_watchdog()
                 self._aggregation_event.clear()
 
     async def _maybe_emulate_user_speaking(self):
