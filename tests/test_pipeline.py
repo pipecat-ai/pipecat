@@ -298,8 +298,11 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         identity = IdentityFilter()
         pipeline = Pipeline([identity])
         task = PipelineTask(pipeline, idle_timeout_secs=0.2)
-        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
-        assert True
+        try:
+            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+            assert False
+        except asyncio.CancelledError:
+            assert True
 
     async def test_no_idle_task(self):
         identity = IdentityFilter()
@@ -326,8 +329,11 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             ),
             idle_timeout_secs=0.3,
         )
-        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
-        assert True
+        try:
+            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+            assert False
+        except asyncio.CancelledError:
+            assert True
 
     async def test_idle_task_event_handler_no_frames(self):
         identity = IdentityFilter()
@@ -342,8 +348,11 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             idle_timeout = True
             await task.cancel()
 
-        await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
-        assert idle_timeout
+        try:
+            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+            assert False
+        except asyncio.CancelledError:
+            assert idle_timeout
 
     async def test_idle_task_event_handler_quiet_user(self):
         identity = IdentityFilter()
