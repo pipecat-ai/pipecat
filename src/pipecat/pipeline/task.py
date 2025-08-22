@@ -370,11 +370,9 @@ class PipelineTask(BasePipelineTask):
             # We have already cleaned up the pipeline inside the task.
             cleanup_pipeline = False
         except asyncio.CancelledError:
-            # We are awaiting on the push task and it might be cancelled
-            # (e.g. Ctrl-C). This means we will get a CancelledError here as
-            # well, because you get a CancelledError in every place you are
-            # awaiting a task.
-            pass
+            # Raise exception back to the pipeline runner so it can cancel this
+            # task properly.
+            raise
         finally:
             await self._cancel_tasks()
             await self._cleanup(cleanup_pipeline)
