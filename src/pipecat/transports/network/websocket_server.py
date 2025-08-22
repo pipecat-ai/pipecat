@@ -154,7 +154,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
             await self.cancel_task(self._monitor_task)
             self._monitor_task = None
         if self._server_task:
-            await self.wait_for_task(self._server_task)
+            await self._server_task
             self._server_task = None
 
     async def cancel(self, frame: CancelFrame):

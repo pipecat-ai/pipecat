@@ -363,9 +363,9 @@ class PipelineTask(BasePipelineTask):
 
             # Create all main tasks and wait of the main push task. This is the
             # task that pushes frames to the very beginning of our pipeline (our
-            # controlled PipelineTaskSource processor).
+            # controlled source processor).
             push_task = await self._create_tasks()
-            await self._task_manager.wait_for_task(push_task)
+            await push_task
 
             # We have already cleaned up the pipeline inside the task.
             cleanup_pipeline = False

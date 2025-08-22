@@ -442,11 +442,27 @@ class FrameProcessor(BaseObject):
     async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Wait for a task to complete.
 
+        .. deprecated:: 0.0.81
+            This function is deprecated, use `await task` or
+            `await asyncio.wait_for(task, timeout) instead.
+
         Args:
             task: The task to wait for.
             timeout: Optional timeout for waiting.
         """
-        await self.task_manager.wait_for_task(task, timeout)
+        import warnings
+
+        warnings.warn(
+            "`FrameProcessor.wait_for_task()` is deprecated. "
+            "Use `await task` or `await asyncio.wait_for(task, timeout)` instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+        if timeout:
+            await asyncio.wait_for(task, timeout)
+        else:
+            await task
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.

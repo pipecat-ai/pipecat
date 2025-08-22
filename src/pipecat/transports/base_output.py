@@ -435,9 +435,9 @@ class BaseOutputTransport(FrameProcessor):
             # also need to wait for these tasks before cancelling the video task
             # because it might be still rendering.
             if self._audio_task:
-                await self._transport.wait_for_task(self._audio_task)
+                await self._audio_task
             if self._clock_task:
-                await self._transport.wait_for_task(self._clock_task)
+                await self._clock_task
 
             # Stop audio mixer.
             if self._mixer:

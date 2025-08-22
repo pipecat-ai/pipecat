@@ -63,7 +63,7 @@ class SentryMetrics(FrameProcessorMetrics):
         await super().cleanup()
         if self._sentry_task:
             await self._sentry_queue.put(None)
-            await self.task_manager.wait_for_task(self._sentry_task)
+            await self._sentry_task
             self._sentry_task = None
             logger.trace(f"{self} Flushing Sentry metrics")
             sentry_sdk.flush(timeout=5.0)
