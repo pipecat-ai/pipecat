@@ -23,17 +23,12 @@ jobs:
           token: ${{ secrets.QUICKSTART_SYNC_TOKEN }}
           path: quickstart-repo
 
-      - name: Sync files (excluding READMEs)
+      - name: Sync files (excluding uv.lock and README.md)
         run: |
-          # Copy code files only, skip READMEs
-          cp examples/quickstart/bot.py quickstart-repo/
-          cp examples/quickstart/requirements.txt quickstart-repo/
-          cp examples/quickstart/env.example quickstart-repo/
-
-          # Copy any other files that aren't README.md
+          # Copy all files except uv.lock and README.md
           find examples/quickstart -type f \
             -not -name "README.md" \
-            -not -name "*.md" \
+            -not -name "uv.lock" \
             -exec cp {} quickstart-repo/ \;
 
       - name: Commit and push changes

@@ -10,12 +10,12 @@ Build and deploy your first voice AI bot in under 10 minutes. Develop locally, t
 
 ### Prerequisites
 
-### Environment
+#### Environment
 
 - Python 3.10 or later
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager installed
 
-### AI Service API keys
+#### AI Service API keys
 
 You'll need API keys from three services:
 
@@ -32,13 +32,7 @@ Navigate to the quickstart directory and set up your environment.
 1. Install dependencies:
 
    ```bash
-   uv sync --extra webrtc \
-       --extra daily \
-       --extra silero \
-       --extra deepgram \
-       --extra openai \
-       --extra cartesia \
-       --extra runner
+   uv sync
    ```
 
 2. Configure your API keys:
@@ -75,11 +69,11 @@ uv run bot.py
 
 Transform your local bot into a production-ready service. Pipecat Cloud handles scaling, monitoring, and global deployment.
 
-[Sign up for Pipecat Cloud](https://pipecat.daily.co/sign-up).
-
 ### Prerequisites
 
-1. Install the Pipecat Cloud CLI:
+1. [Sign up for Pipecat Cloud](https://pipecat.daily.co/sign-up).
+
+2. Install the Pipecat Cloud CLI:
 
    ```bash
    uv add pipecatcloud
@@ -87,7 +81,7 @@ Transform your local bot into a production-ready service. Pipecat Cloud handles 
 
 > 💡 Tip: You can run the `pipecatcloud` CLI using the `pcc` alias.
 
-2. Set up Docker for building your bot image:
+3. Set up Docker for building your bot image:
 
    - **Install [Docker](https://www.docker.com/)** on your system
    - **Create a [Docker Hub](https://hub.docker.com/) account**
@@ -99,9 +93,7 @@ Transform your local bot into a production-ready service. Pipecat Cloud handles 
 
 ### Configure your deployment
 
-#### Understanding pcc-deploy.toml
-
-The `pcc-deploy.toml` file tells Pipecat Cloud how to run your bot. Let's look at what each setting does:
+The `pcc-deploy.toml` file tells Pipecat Cloud how to run your bot. **Update the image field** with your Docker Hub username by editing `pcc-deploy.toml`.
 
 ```ini
 agent_name = "quickstart"
@@ -112,9 +104,7 @@ secret_set = "quickstart-secrets"
 	min_agents = 1
 ```
 
-> ✋ **Update the image field** with your Docker Hub username by editing pcc-deploy.toml.
-
-**Key settings:**
+**Understanding the TOML file settings:**
 
 - `agent_name`: Your bot's name in Pipecat Cloud
 - `image`: The Docker image to deploy (format: `username/image:version`)
