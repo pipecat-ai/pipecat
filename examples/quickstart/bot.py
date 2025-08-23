@@ -7,18 +7,16 @@
 """Pipecat Quickstart Example.
 
 The example runs a simple voice AI bot that you can connect to using your
-browser and speak with it.
+browser and speak with it. You can also deploy this bot to Pipecat Cloud.
 
 Required AI services:
 - Deepgram (Speech-to-Text)
 - OpenAI (LLM)
 - Cartesia (Text-to-Speech)
 
-The example connects between client and server using a P2P WebRTC connection.
-
 Run the bot using::
 
-    python bot.py
+    uv run bot.py
 """
 
 import os
@@ -27,7 +25,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 print("🚀 Starting Pipecat bot...")
-print("⏳ Loading AI models (30-40 seconds first run, <2 seconds after)\n")
+print("⏳ Loading models and imports (20 seconds first run only)\n")
 
 logger.info("Loading Silero VAD model...")
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -40,15 +38,12 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
-logger.info("✅ Pipeline components loaded")
-
-logger.info("Loading WebRTC transport...")
-from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+from pipecat.transports.services.daily import DailyParams
 
 logger.info("✅ All components loaded successfully!")
 
@@ -121,14 +116,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 async def bot(runner_args: RunnerArguments):
     """Main bot entry point for the bot starter."""
 
-    transport = SmallWebRTCTransport(
-        params=TransportParams(
+    transport_params = {
+        "daily": lambda: DailyParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
             vad_analyzer=SileroVADAnalyzer(),
         ),
-        webrtc_connection=runner_args.webrtc_connection,
-    )
+        "webrtc": lambda: TransportParams(
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            vad_analyzer=SileroVADAnalyzer(),
+        ),
+    }
+
+    transport = await create_transport(runner_args, transport_params)
 
     await run_bot(transport, runner_args)
 

@@ -1,87 +1,159 @@
 # Pipecat Quickstart
 
-Run your first Pipecat bot in under 5 minutes. This example creates a voice AI bot that you can talk to in your browser.
+Build and deploy your first voice AI bot in under 10 minutes. Develop locally, then scale to production on Pipecat Cloud.
 
-## Prerequisites
+**Two steps**: [🏠 Local Development](#run-your-bot-locally) → [☁️ Production Deployment](#deploy-to-production)
 
-### Python 3.10+
+> 🎯 Quick start: Local bot in 5 minutes, production deployment in 5 more
 
-Pipecat requires Python 3.10 or newer. Check your version:
+## Step 1: Local Development (5 min)
 
-```bash
-python --version
-```
+### Prerequisites
 
-If you need to upgrade Python, we recommend using a version manager like `uv` or `pyenv`.
+#### Environment
 
-### AI Service API keys
+- Python 3.10 or later
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager installed
 
-Pipecat orchestrates different AI services in a pipeline, ensuring low latency communication. In this quickstart example, we'll use:
+#### AI Service API keys
 
-- [Deepgram](https://console.deepgram.com/signup) for Speech-to-Text transcriptions
+You'll need API keys from three services:
+
+- [Deepgram](https://console.deepgram.com/signup) for Speech-to-Text
 - [OpenAI](https://auth.openai.com/create-account) for LLM inference
-- [Cartesia](https://play.cartesia.ai/sign-up) for Text-to-Speech audio generation
+- [Cartesia](https://play.cartesia.ai/sign-up) for Text-to-Speech
 
-Have your API keys ready. We'll add them to your `.env` shortly.
+> 💡 **Tip**: Sign up for all three now. You'll need them for both local and cloud deployment.
 
-## Setup
+### Setup
 
-1. Set up a virtual environment
+Navigate to the quickstart directory and set up your environment.
 
-From the `examples/quickstart` directory, run:
+1. Install dependencies:
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
+   ```bash
+   uv sync
+   ```
 
-> Using `uv`? Create your venv using: `uv venv && source .venv/bin/activate`.
+2. Configure your API keys:
 
-2. Install dependencies
+   Create a `.env` file:
 
-```bash
-pip install -r requirements.txt
-```
+   ```bash
+   cp env.example .env
+   ```
 
-> Using `uv`? Install requirements using: `uv pip install -r requirements.txt`.
+   Then, add your API keys:
 
-3. Configure environment variables
+   ```ini
+   DEEPGRAM_API_KEY=your_deepgram_api_key
+   OPENAI_API_KEY=your_openai_api_key
+   CARTESIA_API_KEY=your_cartesia_api_key
+   ```
 
-Create a `.env` file:
-
-```bash
-cp env.example .env
-```
-
-Then, add your API keys:
-
-```
-DEEPGRAM_API_KEY=your_deepgram_api_key
-OPENAI_API_KEY=your_openai_api_key
-CARTESIA_API_KEY=your_cartesia_api_key
-```
-
-4. Run the example
-
-Run your bot using:
+### Run your bot locally
 
 ```bash
-python bot.py
+uv run bot.py
 ```
-
-> Using `uv`? Run your bot using: `uv run bot.py`.
 
 **Open http://localhost:7860 in your browser** and click `Connect` to start talking to your bot.
 
-> 💡 First run note: The initial startup may take ~10 seconds as Pipecat downloads required models, like the Silero VAD model.
+> 💡 First run note: The initial startup may take ~20 seconds as Pipecat downloads required models and imports.
 
-## Troubleshooting
+🎉 **Success!** Your bot is running locally. Now let's deploy it to production so others can use it.
 
-- **Browser permissions**: Make sure to allow microphone access when prompted by your browser.
-- **Connection issues**: If the WebRTC connection fails, first try a different browser. If that fails, make sure you don't have a VPN or firewall rules blocking traffic. WebRTC uses UDP to communicate.
-- **Audio issues**: Check that your microphone and speakers are working and not muted.
+---
 
-## Next Steps
+## Step 2: Deploy to Production (5 min)
 
-- **Read the docs**: Check out [Pipecat's docs](https://docs.pipecat.ai/) for guides and reference information.
-- **Join Discord**: Join [Pipecat's Discord server](https://discord.gg/pipecat) to get help and learn about what others are building.
+Transform your local bot into a production-ready service. Pipecat Cloud handles scaling, monitoring, and global deployment.
+
+### Prerequisites
+
+1. [Sign up for Pipecat Cloud](https://pipecat.daily.co/sign-up).
+
+2. Install the Pipecat Cloud CLI:
+
+   ```bash
+   uv add pipecatcloud
+   ```
+
+> 💡 Tip: You can run the `pipecatcloud` CLI using the `pcc` alias.
+
+3. Set up Docker for building your bot image:
+
+   - **Install [Docker](https://www.docker.com/)** on your system
+   - **Create a [Docker Hub](https://hub.docker.com/) account**
+   - **Login to Docker Hub:**
+
+     ```bash
+     docker login
+     ```
+
+### Configure your deployment
+
+The `pcc-deploy.toml` file tells Pipecat Cloud how to run your bot. **Update the image field** with your Docker Hub username by editing `pcc-deploy.toml`.
+
+```ini
+agent_name = "quickstart"
+image = "YOUR_DOCKERHUB_USERNAME/quickstart:0.1"  # 👈 Update this line
+secret_set = "quickstart-secrets"
+
+[scaling]
+	min_agents = 1
+```
+
+**Understanding the TOML file settings:**
+
+- `agent_name`: Your bot's name in Pipecat Cloud
+- `image`: The Docker image to deploy (format: `username/image:version`)
+- `secret_set`: Where your API keys are stored securely
+- `min_agents`: Number of bot instances to keep ready (1 = instant start)
+
+> 💡 Tip: [Set up `image_credentials`](https://docs.pipecat.ai/deployment/pipecat-cloud/fundamentals/secrets#image-pull-secrets) in your TOML file for authenticated image pulls
+
+### Configure secrets
+
+Upload your API keys to Pipecat Cloud's secure storage:
+
+```bash
+uv run pcc secrets set quickstart-secrets --file .env
+```
+
+This creates a secret set called `quickstart-secrets` (matching your TOML file) and uploads all your API keys from `.env`.
+
+### Build and deploy
+
+Build your Docker image and push to Docker Hub:
+
+```bash
+# Update build.sh with your Docker Hub username, then:
+./build.sh
+```
+
+Deploy to Pipecat Cloud:
+
+```bash
+uv run pcc deploy
+```
+
+### Connect to your agent
+
+1. Open your [Pipecat Cloud dashboard](https://pipecat.daily.co/)
+2. Select your `quickstart` agent → **Sandbox**
+3. Allow microphone access and click **Connect**
+
+---
+
+## What's Next?
+
+**🔧 Customize your bot**: Modify `bot.py` to change personality, add functions, or integrate with your data  
+**📚 Learn more**: Check out [Pipecat's docs](https://docs.pipecat.ai/) for advanced features  
+**💬 Get help**: Join [Pipecat's Discord](https://discord.gg/pipecat) to connect with the community
+
+### Troubleshooting
+
+- **Browser permissions**: Allow microphone access when prompted
+- **Connection issues**: Try a different browser or check VPN/firewall settings
+- **Audio issues**: Verify microphone and speakers are working and not muted
