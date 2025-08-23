@@ -30,6 +30,7 @@ BOT_SPEAKS_FIRST = False
 
 # Math
 PROMPT_SIMPLE_MATH = "A simple math addition."
+EVAL_SIMPLE_MATH = "Correct math addition."
 
 # Weather
 PROMPT_WEATHER = "What's the weather in San Francisco?"
@@ -43,7 +44,7 @@ EVAL_ONLINE_SEARCH = f"Today is {datetime.now(timezone.utc).strftime('%B %d, %Y'
 
 # Switch language
 PROMPT_SWITCH_LANGUAGE = "Say something in Spanish."
-EVAL_SWITCH_LANGUAGE = "Check if the user is now talking in Spanish."
+EVAL_SWITCH_LANGUAGE = "The user is now talking in Spanish."
 
 # Vision
 PROMPT_VISION = ("What do you see?", Image.open(ASSETS_DIR / "cat.jpg"))
@@ -57,45 +58,55 @@ EVAL_CONVERSATION = "A start of a conversation, not a voicemail."
 
 TESTS_07 = [
     # 07 series
-    ("07-interruptible.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07-interruptible-cartesia-http.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07a-interruptible-speechmatics.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07aa-interruptible-soniox.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07ab-interruptible-inworld-http.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07ac-interruptible-asyncai.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07ac-interruptible-asyncai-http.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07b-interruptible-langchain.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07c-interruptible-deepgram.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07d-interruptible-elevenlabs.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07d-interruptible-elevenlabs-http.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07e-interruptible-playht.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07e-interruptible-playht-http.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07f-interruptible-azure.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07g-interruptible-openai.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07h-interruptible-openpipe.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07j-interruptible-gladia.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07k-interruptible-lmnt.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07l-interruptible-groq.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07m-interruptible-aws.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07n-interruptible-gemini.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07n-interruptible-google.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07o-interruptible-assemblyai.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07q-interruptible-rime.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07q-interruptible-rime-http.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07r-interruptible-riva-nim.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07s-interruptible-google-audio-in.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07t-interruptible-fish.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07v-interruptible-neuphonic.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07v-interruptible-neuphonic-http.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07w-interruptible-fal.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07y-interruptible-minimax.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("07z-interruptible-sarvam.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    ("07-interruptible.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07-interruptible-cartesia-http.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07a-interruptible-speechmatics.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07aa-interruptible-soniox.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07ab-interruptible-inworld-http.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07ac-interruptible-asyncai.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07ac-interruptible-asyncai-http.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07b-interruptible-langchain.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07c-interruptible-deepgram.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07d-interruptible-elevenlabs.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    (
+        "07d-interruptible-elevenlabs-http.py",
+        PROMPT_SIMPLE_MATH,
+        EVAL_SIMPLE_MATH,
+        BOT_SPEAKS_FIRST,
+    ),
+    ("07e-interruptible-playht.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07e-interruptible-playht-http.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07f-interruptible-azure.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07g-interruptible-openai.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07h-interruptible-openpipe.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07j-interruptible-gladia.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07k-interruptible-lmnt.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07l-interruptible-groq.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07m-interruptible-aws.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07n-interruptible-gemini.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07n-interruptible-google.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07o-interruptible-assemblyai.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07q-interruptible-rime.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07q-interruptible-rime-http.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07r-interruptible-riva-nim.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    (
+        "07s-interruptible-google-audio-in.py",
+        PROMPT_SIMPLE_MATH,
+        EVAL_SIMPLE_MATH,
+        BOT_SPEAKS_FIRST,
+    ),
+    ("07t-interruptible-fish.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07v-interruptible-neuphonic.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07v-interruptible-neuphonic-http.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07w-interruptible-fal.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07y-interruptible-minimax.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07z-interruptible-sarvam.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     # Needs a local XTTS docker instance running.
-    # ("07i-interruptible-xtts.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    # ("07i-interruptible-xtts.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     # Needs a Krisp license.
-    # ("07p-interruptible-krisp.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    # ("07p-interruptible-krisp.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     # Needs GPU resources.
-    # ("07u-interruptible-ultravox.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    # ("07u-interruptible-ultravox.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
 ]
 
 TESTS_12 = [
@@ -141,19 +152,24 @@ TESTS_19 = [
 ]
 
 TESTS_21 = [
-    ("21a-tavus-video-service.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    ("21a-tavus-video-service.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
 ]
 
 TESTS_26 = [
-    ("26-gemini-multimodal-live.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
-    ("26a-gemini-multimodal-live-transcription.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    ("26-gemini-multimodal-live.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    (
+        "26a-gemini-multimodal-live-transcription.py",
+        PROMPT_SIMPLE_MATH,
+        EVAL_SIMPLE_MATH,
+        BOT_SPEAKS_FIRST,
+    ),
     (
         "26b-gemini-multimodal-live-function-calling.py",
         PROMPT_WEATHER,
         EVAL_WEATHER,
         BOT_SPEAKS_FIRST,
     ),
-    ("26c-gemini-multimodal-live-video.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    ("26c-gemini-multimodal-live-video.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     (
         "26e-gemini-multimodal-google-search.py",
         PROMPT_ONLINE_SEARCH,
@@ -161,19 +177,19 @@ TESTS_26 = [
         BOT_SPEAKS_FIRST,
     ),
     # Currently not working.
-    # ("26d-gemini-multimodal-live-text.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    # ("26d-gemini-multimodal-live-text.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
 ]
 
 TESTS_27 = [
-    ("27-simli-layer.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    ("27-simli-layer.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
 ]
 
 TESTS_40 = [
-    ("40-aws-nova-sonic.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    ("40-aws-nova-sonic.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
 ]
 
 TESTS_43 = [
-    ("43a-heygen-video-service.py", PROMPT_SIMPLE_MATH, None, BOT_SPEAKS_FIRST),
+    ("43a-heygen-video-service.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
 ]
 
 TESTS_44 = [
