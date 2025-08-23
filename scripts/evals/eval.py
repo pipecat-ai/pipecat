@@ -93,7 +93,7 @@ class EvalRunner:
         self,
         example_file: str,
         prompt: EvalPrompt,
-        eval: Optional[str] = None,
+        eval: str,
         user_speaks_first: bool = False,
     ):
         if not re.match(self._pattern, example_file):
@@ -203,7 +203,7 @@ async def run_eval_pipeline(
     eval_runner: EvalRunner,
     example_file: str,
     prompt: EvalPrompt,
-    eval: Optional[str],
+    eval: str,
     user_speaks_first: bool = False,
 ):
     logger.info(f"Starting eval bot")
@@ -266,15 +266,12 @@ async def run_eval_pipeline(
     elif isinstance(prompt, tuple):
         example_prompt, example_image = prompt
 
-    # See if we need to include an eval prompt.
-    eval_prompt = ""
-    if eval:
-        if user_speaks_first:
-            eval_prompt = f"After the user responds, evaluate if their response is appropriate for the context and matches: [{eval}]."
-            system_prompt = f"You will start the conversation by saying: '{prompt}'. {eval_prompt} Then call the eval function with your assessment."
-        else:
-            eval_prompt = f"The answer is correct if the user says [{eval}]."
-            system_prompt = f"You are an LLM eval, be extremly brief. Your goal is to only ask one question: {example_prompt}. Call the eval function only if the user answers the question and check if the answer is correct (words as numbers are valid). {eval_prompt}"
+    eval_prompt = f"The answer is correct if it's appropriate for the context and matches: {eval}."
+    common_system_prompt = f"Call the eval function with your assessment only if the user answers the question. {eval_prompt}"
+    if user_speaks_first:
+        system_prompt = f"You are an LLM eval, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+    else:
+        system_prompt = f"You are an LLM eval, be extremly brief. Your goal is to first ask one question: {example_prompt}. {common_system_prompt}"
 
     messages = [
         {
