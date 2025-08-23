@@ -16,7 +16,7 @@ Required AI services:
 
 Run the bot using::
 
-    python bot.py
+    uv run bot.py
 """
 
 import os
