@@ -341,6 +341,8 @@ async def run_eval_pipeline(
     async def on_pipeline_idle_timeout(task):
         await eval_runner.assert_eval_false()
 
-    runner = PipelineRunner()
+    # TODO(aleix): We should handle SIGINT and SIGTERM so we can cancel both the
+    # eval and the example.
+    runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)
