@@ -30,8 +30,7 @@ from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
-from utils.frame_metrics import FrameMetricsProcessor, get_fps_history, get_current_fps
-from utils.tk_overlay import create_fps_overlay, start_tk_updater_with_fps
+from utils.tk_overlay import create_fps_overlay, start_tk_fps_udpater, start_tk_updater
 
 load_dotenv(override=True)
 
@@ -102,10 +101,6 @@ async def main():
     tk_root.attributes('-topmost', True)
     tk_root.after_idle(tk_root.attributes, '-topmost', False)
     tk_root.focus_force()
-    
-    # Create FPS overlay and start Tk updater
-    fps_canvas = create_fps_overlay(tk_root, x=8, y=8, width=160, height=60)
-    tk_update_task = start_tk_updater_with_fps(tk_root, fps_canvas, interval_ms=10)
 
     tk_transport = TkLocalTransport(
         tk_root,
@@ -158,10 +153,16 @@ async def main():
         push_bot_stopped_speaking_frames=False,
     ))    
 
-    frame_metrics = FrameMetricsProcessor()
     # Create image format converter
     image_converter = ImageFormatConverter()
     
+    # Create FPS overlay and start Tk updater    
+    fps_server_canvas = create_fps_overlay(tk_root, x=8, y=8, width=1280, height=120)
+    fps_canvas = create_fps_overlay(tk_root, x=8, y=128, width=1280, height=120)
+    tk_update_task = start_tk_updater(tk_root, interval_ms=10)
+    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona.fsm_fps_tracker, fps_canvas, interval_ms=80)    
+    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona.server_fps_tracker, fps_server_canvas, interval_ms=80)    
+
     pipeline = Pipeline(
         [
             audio_transport.input(),
@@ -170,7 +171,6 @@ async def main():
             llm,  # LLM
             tts,  # TTS
             persona,
-            frame_metrics,
             image_converter,  # Convert image format from BGR to PPM
             tk_transport.output(),  # Transport video output
             audio_transport.output(),  # Transport audio output            

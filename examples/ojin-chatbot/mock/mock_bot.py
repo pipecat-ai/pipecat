@@ -31,7 +31,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from utils.frame_metrics import FrameMetricsProcessor
-from utils.tk_overlay import create_fps_overlay, start_tk_updater_with_fps
+from utils.tk_overlay import create_fps_overlay, start_tk_fps_udpater, start_tk_updater
 
 load_dotenv(override=True)
 
@@ -96,14 +96,14 @@ async def main():
     input = MockTTSProcessor(
         {
             "audio_sequence": [                
-                ("./mock/assets/long_audio_16k.wav", 20),
-                ("./mock/assets/long_audio_16k.wav", 23),
+                ("./mock/assets/long_audio_16k.wav", 14),
+                #("./mock/assets/long_audio_16k.wav", 23),
             ],
             "event_sequence": [                
-                ("user_started_speaking", 18),
-                ("user_stopped_speaking", 19),
-                ("user_started_speaking", 21),
-                ("user_stopped_speaking", 22),
+                ("user_started_speaking", 12),
+                ("user_stopped_speaking", 13),
+                #("user_started_speaking", 21),
+                #("user_stopped_speaking", 22),
             ],
             "chunk_size": 600000,
             "chunk_delay": 0.2,
@@ -122,10 +122,6 @@ async def main():
     tk_root.after_idle(tk_root.attributes, '-topmost', False)
     tk_root.focus_force()
     
-    # Create FPS overlay and start Tk updater
-    fps_canvas = create_fps_overlay(tk_root, x=8, y=8, width=320, height=120)
-    tk_update_task = start_tk_updater_with_fps(tk_root, fps_canvas, interval_ms=10)
-
     tk_transport = TkLocalTransport(
         tk_root,
         TkTransportParams(
@@ -146,11 +142,18 @@ async def main():
         api_key=os.getenv("OJIN_API_KEY", ""),
         persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),        
         image_size=(1280, 720),
-        idle_to_speech_seconds=1.5,
+        idle_to_speech_seconds=1.0,
         idle_sequence_duration=5,
         tts_audio_passthrough=False,
         push_bot_stopped_speaking_frames=False,
     ))    
+
+    # Create FPS overlay and start Tk updater    
+    fps_server_canvas = create_fps_overlay(tk_root, x=8, y=8, width=1280, height=240)
+    fps_canvas = create_fps_overlay(tk_root, x=8, y=248, width=1280, height=240)
+    tk_update_task = start_tk_updater(tk_root, interval_ms=10)
+    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona.fsm_fps_tracker, fps_canvas, interval_ms=80)    
+    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona.server_fps_tracker, fps_server_canvas, interval_ms=80)    
 
     # Frame metrics and image format converter
     frame_metrics = FrameMetricsProcessor()
@@ -184,12 +187,11 @@ async def main():
         await runner.run(task)
     finally:
         # Clean up the Tkinter update task
-        if 'tk_update_task' in locals():
+        if tk_update_task:
             tk_update_task.cancel()
-            try:
-                await tk_update_task
-            except asyncio.CancelledError:
-                pass
+        if tk_fps_update_task:
+            tk_fps_update_task.cancel()
+  
 
 
 if __name__ == "__main__":    
