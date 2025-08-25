@@ -6,49 +6,29 @@
 
 """LLM switcher for switching between different LLMs at runtime, with different switching strategies."""
 
-from typing import Any, Generic, List, Optional, Type, TypeVar
+from typing import Any, List, Optional, Type
 
-from pipecat.pipeline.parallel_pipeline import ParallelPipeline
+from pipecat.pipeline.service_switcher import ServiceSwitcher, StrategyType
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.filters.function_filter import FunctionFilter
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 
 
-class LLMSwitcherStrategy:
-    """Base class for LLM switching strategies."""
-
-    def __init__(self, llms: List[LLMService]):
-        """Initialize the LLM switcher strategy with a list of LLM services."""
-        self.llms = llms
-        self.active_llm: Optional[LLMService] = None
-
-    def is_active(self, llm: LLMService) -> bool:
-        """Determine if the given LLM is the currently active one.
-
-        This method should be overridden by subclasses to implement specific logic.
-
-        Args:
-            llm: The LLM service to check.
-
-        Returns:
-            True if the given LLM is the active one, False otherwise.
-        """
-        raise NotImplementedError("Subclasses must implement this method.")
-
-
-StrategyType = TypeVar("StrategyType", bound=LLMSwitcherStrategy)
-
-
-class LLMSwitcher(ParallelPipeline, Generic[StrategyType]):
+class LLMSwitcher(ServiceSwitcher[StrategyType]):
     """A pipeline that switches between different LLMs at runtime."""
 
     def __init__(self, llms: List[LLMService], strategy_type: Type[StrategyType]):
-        """Initialize the LLM switcher with a list of LLM services and a switching strategy."""
-        strategy = strategy_type(llms)
-        super().__init__(*LLMSwitcher._make_pipeline_definitions(llms, strategy))
-        self.llms = llms
-        self.strategy = strategy
+        """Initialize the service switcher with a list of LLMs and a switching strategy."""
+        super().__init__(llms, strategy_type)
+
+    @property
+    def llms(self) -> List[LLMService]:
+        """Get the list of LLMs managed by this switcher."""
+        return self.services
+
+    @property
+    def active_llm(self) -> Optional[LLMService]:
+        """Get the currently active LLM, if any."""
+        return self.strategy.active_service
 
     async def run_inference(
         self, context: LLMContext, system_instruction: Optional[str] = None
@@ -65,8 +45,8 @@ class LLMSwitcher(ParallelPipeline, Generic[StrategyType]):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        if self.strategy.active_llm:
-            return await self.strategy.active_llm.run_inference(
+        if self.active_llm:
+            return await self.active_llm.run_inference(
                 context=context, system_instruction=system_instruction
             )
         return None
@@ -102,60 +82,3 @@ class LLMSwitcher(ParallelPipeline, Generic[StrategyType]):
                 start_callback=start_callback,
                 cancel_on_interruption=cancel_on_interruption,
             )
-
-    @staticmethod
-    def _make_pipeline_definitions(
-        llms: List[LLMService], strategy: LLMSwitcherStrategy
-    ) -> List[Any]:
-        pipelines = []
-        for llm in llms:
-            pipelines.append(LLMSwitcher._make_pipeline_definition(llm, strategy))
-        return pipelines
-
-    @staticmethod
-    def _make_pipeline_definition(llm: LLMService, strategy: LLMSwitcherStrategy) -> Any:
-        async def filter(frame) -> bool:
-            # frame is intentionally unused, but required by the interface
-            _ = frame
-            return strategy.is_active(llm)
-
-        return [
-            FunctionFilter(filter, direction=FrameDirection.DOWNSTREAM),
-            llm,
-            FunctionFilter(filter, direction=FrameDirection.UPSTREAM),
-        ]
-
-
-class LLMSwitcherStrategyManual(LLMSwitcherStrategy):
-    """A strategy for switching between LLMs manually.
-
-    This strategy allows the user to manually select which LLM is active.
-    The initial active LLM is the first one in the list.
-    """
-
-    def __init__(self, llms: List[LLMService]):
-        """Initialize the manual LLM switcher strategy with a list of LLM services."""
-        super().__init__(llms)
-        self.active_llm = llms[0] if llms else None
-
-    def is_active(self, llm: LLMService) -> bool:
-        """Check if the given LLM is the currently active one.
-
-        Args:
-            llm: The LLM service to check.
-
-        Returns:
-            True if the given LLM is the active one, False otherwise.
-        """
-        return llm == self.active_llm
-
-    def set_active(self, llm: LLMService):
-        """Set the active LLM to the given one.
-
-        Args:
-            llm: The LLM service to set as active.
-        """
-        if llm in self.llms:
-            self.active_llm = llm
-        else:
-            raise ValueError(f"LLM {llm} is not in the list of available LLMs.")
