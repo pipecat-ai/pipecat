@@ -185,16 +185,6 @@ class AWSPollyTTSService(TTSService):
             "region_name": region or os.getenv("AWS_REGION", "us-east-1"),
         }
 
-        # Validate that we have the required credentials
-        if (
-            not self._aws_params["aws_access_key_id"]
-            or not self._aws_params["aws_secret_access_key"]
-        ):
-            raise ValueError(
-                "AWS credentials not found. Please provide them either through constructor parameters "
-                "or set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY environment variables."
-            )
-
         self._aws_session = aioboto3.Session()
         self._settings = {
             "engine": params.engine,

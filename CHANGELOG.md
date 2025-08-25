@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Added support to `AWSBedrockLLMService` for setting authentication
+  credentials through environment variables.
+
 ### Fixed
+
+- Fixed `AWSPollyTTSService` to support AWS credential provider chain (IAM
+  roles, IRSA, instance profiles) instead of requiring explicit environment
+  variables.
 
 - Fixed a `CartesiaTTSService` issue that was causing the application to hang
   after Cartesia's 5 minutes timed out.
@@ -61,8 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or `await
-  asyncio.wait_for(task, timeout)` instead.
+- `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or
+  `await asyncio.wait_for(task, timeout)` instead.
 
 ### Removed
 
