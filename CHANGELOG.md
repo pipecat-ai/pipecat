@@ -5,6 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed a `CartesiaTTSService` issue that was causing the application to hang
+  after Cartesia's 5 minutes timed out.
+
 ## [0.0.81] - 2025-08-25
 
 ### Added
