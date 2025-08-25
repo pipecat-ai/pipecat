@@ -39,7 +39,7 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
     Note: This service includes a workaround for a Google API bug where function
     call indices may be incorrectly set to None, resulting in empty function names.
 
-    .. deprecated:: 0.0.81
+    .. deprecated:: 0.0.82
         GoogleLLMOpenAIBetaService is deprecated and will be removed in a future version.
         Use GoogleLLMService instead for better integration with Google's native API.
 
