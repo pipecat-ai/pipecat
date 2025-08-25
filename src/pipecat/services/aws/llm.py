@@ -16,6 +16,7 @@ import base64
 import copy
 import io
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -761,10 +762,10 @@ class AWSBedrockLLMService(LLMService):
 
         # Store AWS session parameters for creating client in async context
         self._aws_params = {
-            "aws_access_key_id": aws_access_key,
-            "aws_secret_access_key": aws_secret_key,
-            "aws_session_token": aws_session_token,
-            "region_name": aws_region,
+            "aws_access_key_id": aws_access_key or os.getenv("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": aws_secret_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
+            "region_name": aws_region or os.getenv("AWS_REGION", "us-east-1"),
             "config": client_config,
         }
 
