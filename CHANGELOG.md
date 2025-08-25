@@ -160,6 +160,10 @@ asyncio.wait_for(task, timeout)` instead.
 
 ### Fixed
 
+- Fixed `AWSPollyTTSService` to support AWS credential provider chain (IAM
+  roles, IRSA, instance profiles) instead of requiring explicit environment
+  variables.
+
 - Fixed an issue that would cause `PipelineRunner` and `PipelineTask` to not
   handle external asyncio task cancellation properly.
 
