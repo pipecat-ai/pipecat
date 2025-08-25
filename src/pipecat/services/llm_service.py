@@ -191,19 +191,23 @@ class LLMService(AIService):
         """
         return self._adapter
 
-    async def generate_summary(
-        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
     ) -> Optional[str]:
-        """Generate a conversation summary from the given LLM context.
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Must be implemented by subclasses.
 
         Args:
-            summary_prompt: The prompt to use to guide generating the summary.
             context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context.
 
         Returns:
-            The generated summary, or None if generation failed.
+            The LLM's response as a string, or None if no response is generated.
         """
-        raise NotImplementedError(f"generate_summary() not supported by {self.__class__.__name__}")
+        raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
 
     def create_context_aggregator(
         self,

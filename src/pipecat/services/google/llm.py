@@ -733,57 +733,49 @@ class GoogleLLMService(LLMService):
     def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
         self._client = genai.Client(api_key=api_key, http_options=http_options)
 
-    async def generate_summary(
-        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
     ) -> Optional[str]:
-        """Generate a conversation summary from the given LLM context.
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
-            summary_prompt: The prompt to use to guide generating the summary.
             context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
 
         Returns:
-            The generated summary, or None if generation failed.
+            The LLM's response as a string, or None if no response is generated.
         """
-        try:
-            if isinstance(context, LLMContext):
-                # Not sure if it's strictly necessary to adapt messages here
-                # since they'll just be a string in the prompt, but erring on
-                # the side of putting them in the format the LLM would expect
-                # if consuming them directly (i.e. assuming greater LLM
-                # familiarity with its own format).
-                adapter = self.get_llm_adapter()
-                params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
-                messages = params["messages"]
-            else:
-                messages = context.messages
+        messages = []
+        system = []
+        if isinstance(context, LLMContext):
+            adapter = self.get_llm_adapter()
+            params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            messages = params["messages"]
+            system = params["system_instruction"]
+        else:
+            context = GoogleLLMContext.upgrade_to_google(context)
+            messages = context.messages
+            system = getattr(context, "system_message", None) or system_instruction
 
-            # Format conversation history as user message
-            contents = [
-                Content(role="user", parts=[Part(text=f"Conversation history: {messages}")])
-            ]
+        generation_config = GenerateContentConfig(system_instruction=system)
 
-            # Use summary_prompt as system instruction
-            generation_config = GenerateContentConfig(system_instruction=summary_prompt)
+        # Use the new google-genai client's async method
+        response = await self._client.aio.models.generate_content(
+            model=self._model_name,
+            contents=messages,
+            config=generation_config,
+        )
 
-            # Use the new google-genai client's async method
-            response = await self._client.aio.models.generate_content(
-                model=self._model_name,
-                contents=contents,
-                config=generation_config,
-            )
+        # Extract text from response
+        if response.candidates and response.candidates[0].content:
+            for part in response.candidates[0].content.parts:
+                if part.text:
+                    return part.text
 
-            # Extract text from response
-            if response.candidates and response.candidates[0].content:
-                for part in response.candidates[0].content.parts:
-                    if part.text:
-                        return part.text
-
-            return None
-
-        except Exception as e:
-            logger.error(f"Google summary generation failed: {e}", exc_info=True)
-            return None
+        return None
 
     def needs_mcp_alternate_schema(self) -> bool:
         """Check if this LLM service requires alternate MCP schema.

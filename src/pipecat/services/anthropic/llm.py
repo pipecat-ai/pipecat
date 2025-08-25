@@ -199,55 +199,45 @@ class AnthropicLLMService(LLMService):
             response = await api_call(**params)
             return response
 
-    async def generate_summary(
-        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
     ) -> Optional[str]:
-        """Generate a conversation summary from the given LLM context.
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
-            summary_prompt: The prompt to use to guide generating the summary.
             context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
 
         Returns:
-            The generated summary, or None if generation failed.
+            The LLM's response as a string, or None if no response is generated.
         """
-        try:
-            if isinstance(context, LLMContext):
-                # Not sure if it's strictly necessary to adapt messages here
-                # since they'll just be a string in the prompt, but erring on
-                # the side of putting them in the format the LLM would expect
-                # if consuming them directly (i.e. assuming greater LLM
-                # familiarity with its own format).
-                # adapter = self.get_llm_adapter()
-                # params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(context)
-                # messages = params["messages"]
-                raise NotImplementedError(
-                    "Universal LLMContext is not yet supported for Anthropic."
-                )
-            else:
-                messages = context.messages
+        messages = []
+        system = []
+        if isinstance(context, LLMContext):
+            # Future code will be something like this:
+            # adapter = self.get_llm_adapter()
+            # params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            # messages = params["messages"]
+            # system = params["system_instruction"]
+            raise NotImplementedError("Universal LLMContext is not yet supported for Anthropic.")
+        else:
+            context = AnthropicLLMContext.upgrade_to_anthropic(context)
+            messages = context.messages
+            system = getattr(context, "system", None) or system_instruction
 
-            prompt_messages = [
-                {
-                    "role": "user",
-                    "content": f"Conversation history: {messages}",
-                },
-            ]
+        # LLM completion
+        response = await self._client.messages.create(
+            model=self.model_name,
+            messages=messages,
+            system=system,
+            max_tokens=8192,
+            stream=False,
+        )
 
-            # LLM completion
-            response = await self._client.messages.create(
-                model=self.model_name,
-                messages=prompt_messages,
-                system=summary_prompt,
-                max_tokens=8192,
-                stream=False,
-            )
-
-            return response.content[0].text
-
-        except Exception as e:
-            logger.error(f"Anthropic summary generation failed: {e}", exc_info=True)
-            return None
+        return response.content[0].text
 
     @property
     def enable_prompt_caching_beta(self) -> bool:
