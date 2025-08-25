@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   await task.queue_frames([ManuallySwitchServiceFrame(service=llm_google)])
   ```
 
+- Added an `LLMService.run_inference()` method to LLM services to enable
+  direct, out-of-band (i.e. out-of-pipeline) inference.
+
 ### Fixed
 
 - Fixed a `CartesiaTTSService` issue that was causing the application to hang
