@@ -386,7 +386,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         await self._websocket.send(msg)
         self._context_id = None
 
-    async def _receive_messages(self):
+    async def _process_messages(self):
         async for message in self._get_websocket():
             msg = json.loads(message)
             if not msg or not self.audio_context_available(msg["context_id"]):
@@ -418,6 +418,14 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 self._context_id = None
             else:
                 logger.error(f"{self} error, unknown message type: {msg}")
+
+    async def _receive_messages(self):
+        while True:
+            await self._process_messages()
+            # Cartesia times out after 5 minutes of innactivity (no keepalive
+            # mechanism is available). So, we try to reconnect.
+            logger.debug(f"{self} Cartesia connection was disconnected (timeout?), reconnecting")
+            await self._connect_websocket()
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
