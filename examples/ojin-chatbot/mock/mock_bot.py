@@ -25,6 +25,13 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
 from mock_tts import MockTTSProcessor
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
+# Ensure we can import sibling 'utils' package when running from the 'mock' subdir
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from utils.frame_metrics import FrameMetricsProcessor
+from utils.tk_overlay import create_fps_overlay, start_tk_updater_with_fps
 
 load_dotenv(override=True)
 
@@ -115,21 +122,9 @@ async def main():
     tk_root.after_idle(tk_root.attributes, '-topmost', False)
     tk_root.focus_force()
     
-    # Make Tkinter responsive by processing events periodically
-    async def update_tk_periodically():
-        while True:
-            try:
-                tk_root.update_idletasks()
-                tk_root.update()
-                await asyncio.sleep(0.01)  # 10ms delay
-            except tk.TclError:
-                break  # Window was closed
-            except Exception as e:
-                logger.error(f"Error updating Tkinter: {e}")
-                break
-    
-    # Start the periodic updater as a background task
-    tk_update_task = asyncio.create_task(update_tk_periodically())
+    # Create FPS overlay and start Tk updater
+    fps_canvas = create_fps_overlay(tk_root, x=8, y=8, width=320, height=120)
+    tk_update_task = start_tk_updater_with_fps(tk_root, fps_canvas, interval_ms=10)
 
     tk_transport = TkLocalTransport(
         tk_root,
@@ -157,13 +152,15 @@ async def main():
         push_bot_stopped_speaking_frames=False,
     ))    
 
-    # Create image format converter
+    # Frame metrics and image format converter
+    frame_metrics = FrameMetricsProcessor()
     image_converter = ImageFormatConverter()
     
     pipeline = Pipeline(
         [
             input,
             persona,
+            frame_metrics,
             image_converter,  # Convert image format from BGR to PPM
             tk_transport.output(),  # Transport video output
         ]

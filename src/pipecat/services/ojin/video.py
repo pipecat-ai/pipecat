@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
+from ojin.profiling_utils import FPSTracker
 
 class OjinPersonaInitializedFrame(Frame):
     """Frame indicating that the persona has been initialized and can now output frames."""
@@ -142,6 +142,7 @@ class OjinPersonaFSM:
         self._previous_speech_frame: Optional[OutputImageRawFrame] = None
         self.on_state_changed_callback = on_state_changed_callback
         self.last_update_time: float = -1.0
+        self._fps_tracker = FPSTracker("OjinPersonaFSM")
 
     async def start(self):
         await self.set_state(PersonaState.INITIALIZING)
@@ -331,6 +332,7 @@ class OjinPersonaFSM:
 
             case PersonaState.IDLE:
                 # abort transition
+                self._fps_tracker.stop()
                 self._transition_time = -1
                 # If we have a previous speech frame we seek to it to syncrhonize perfectly the following idle frame
                 if self._previous_speech_frame is not None:                    
@@ -341,6 +343,7 @@ class OjinPersonaFSM:
                     self._start_playback()
 
             case PersonaState.SPEECH:
+                self._fps_tracker.start()
                 self._transition_time = -1
                 pass
 
@@ -416,6 +419,7 @@ class OjinPersonaFSM:
 
                 else:
                     self._previous_speech_frame = frame
+                    self._fps_tracker.update(1)
                     if frame.pts % 1 == 0:
                         logger.debug(
                             f"Pushing speech frame: {frame.pts} ==? {self._current_frame_idx}"
