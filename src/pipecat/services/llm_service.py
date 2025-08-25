@@ -14,6 +14,7 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
+    List,
     Mapping,
     Optional,
     Protocol,
@@ -40,6 +41,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     UserImageRequestFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -88,7 +90,7 @@ class FunctionCallParams:
     tool_call_id: str
     arguments: Mapping[str, Any]
     llm: "LLMService"
-    context: OpenAILLMContext
+    context: OpenAILLMContext | LLMContext
     result_callback: FunctionCallResultCallback
 
 
@@ -129,7 +131,7 @@ class FunctionCallRunnerItem:
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
-    context: OpenAILLMContext
+    context: OpenAILLMContext | LLMContext
     run_llm: Optional[bool] = None
 
 
@@ -188,6 +190,24 @@ class LLMService(AIService):
             The adapter instance used for LLM communication.
         """
         return self._adapter
+
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Must be implemented by subclasses.
+
+        Args:
+            context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
 
     def create_context_aggregator(
         self,
@@ -432,7 +452,9 @@ class LLMService(AIService):
             else:
                 await self._sequential_runner_queue.put(runner_item)
 
-    async def _call_start_function(self, context: OpenAILLMContext, function_name: str):
+    async def _call_start_function(
+        self, context: OpenAILLMContext | LLMContext, function_name: str
+    ):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():

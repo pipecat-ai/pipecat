@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Base OpenAI LLM service implementation."""
+"""Base LLM service implementation for services that use the AsyncOpenAI client."""
 
 import asyncio
 import base64
@@ -23,8 +23,10 @@ from openai import (
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 from pydantic import BaseModel, Field
 
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -33,6 +35,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -45,10 +48,11 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 class BaseOpenAILLMService(LLMService):
     """Base class for all services that use the AsyncOpenAI client.
 
-    This service consumes OpenAILLMContextFrame frames, which contain a reference
-    to an OpenAILLMContext object. The context defines what is sent to the LLM for
-    completion, including user, assistant, and system messages, as well as tool
-    choices and function call configurations.
+    This service consumes OpenAILLMContextFrame or LLMContextFrame frames,
+    which contain a reference to an OpenAILLMContext or LLMContext object. The
+    context defines what is sent to the LLM for completion, including user,
+    assistant, and system messages, as well as tool choices and function call
+    configurations.
     """
 
     class InputParams(BaseModel):
@@ -180,18 +184,19 @@ class BaseOpenAILLMService(LLMService):
         return True
 
     async def get_chat_completions(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
+        self, params_from_context: OpenAILLMInvocationParams
     ) -> AsyncStream[ChatCompletionChunk]:
         """Get streaming chat completions from OpenAI API with optional timeout and retry.
 
         Args:
-            context: The LLM context containing tools and configuration.
-            messages: List of chat completion messages to send.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
             Async stream of chat completion chunks.
         """
-        params = self.build_chat_completion_params(context, messages)
+        params = self.build_chat_completion_params(params_from_context)
 
         if self._retry_on_timeout:
             try:
@@ -208,16 +213,15 @@ class BaseOpenAILLMService(LLMService):
             chunks = await self._client.chat.completions.create(**params)
             return chunks
 
-    def build_chat_completion_params(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for chat completion request.
 
         Subclasses can override this to customize parameters for different providers.
 
         Args:
-            context: The LLM context containing tools and configuration.
-            messages: List of chat completion messages to send.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
             Dictionary of parameters for the chat completion request.
@@ -225,9 +229,6 @@ class BaseOpenAILLMService(LLMService):
         params = {
             "model": self.model_name,
             "stream": True,
-            "messages": messages,
-            "tools": context.tools,
-            "tool_choice": context.tool_choice,
             "stream_options": {"include_usage": True},
             "frequency_penalty": self._settings["frequency_penalty"],
             "presence_penalty": self._settings["presence_penalty"],
@@ -238,13 +239,48 @@ class BaseOpenAILLMService(LLMService):
             "max_completion_tokens": self._settings["max_completion_tokens"],
         }
 
+        # Messages, tools, tool_choice
+        params.update(params_from_context)
+
         params.update(self._settings["extra"])
         return params
 
-    async def _stream_chat_completions(
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Args:
+            context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        if isinstance(context, LLMContext):
+            adapter = self.get_llm_adapter()
+            params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
+            messages = params["messages"]
+        else:
+            messages = context.messages
+
+        # LLM completion
+        response = await self._client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            stream=False,
+        )
+
+        return response.choices[0].message.content
+
+    async def _stream_chat_completions_specific_context(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(f"{self}: Generating chat [{context.get_messages_for_logging()}]")
+        logger.debug(
+            f"{self}: Generating chat from OpenAI context [{context.get_messages_for_logging()}]"
+        )
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
@@ -263,12 +299,28 @@ class BaseOpenAILLMService(LLMService):
                 del message["data"]
                 del message["mime_type"]
 
-        chunks = await self.get_chat_completions(context, messages)
+        params = OpenAILLMInvocationParams(
+            messages=messages, tools=context.tools, tool_choice=context.tool_choice
+        )
+        chunks = await self.get_chat_completions(params)
+
+        return chunks
+
+    async def _stream_chat_completions_universal_context(
+        self, context: LLMContext
+    ) -> AsyncStream[ChatCompletionChunk]:
+        adapter = self.get_llm_adapter()
+        logger.debug(
+            f"{self}: Generating chat from universal context [{adapter.get_messages_for_logging(context)}]"
+        )
+
+        params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)
+        chunks = await self.get_chat_completions(params)
 
         return chunks
 
     @traced_llm
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: OpenAILLMContext | LLMContext):
         functions_list = []
         arguments_list = []
         tool_id_list = []
@@ -279,8 +331,11 @@ class BaseOpenAILLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
-            context
+        # Generate chat completions using either OpenAILLMContext or universal LLMContext
+        chunk_stream = await (
+            self._stream_chat_completions_specific_context(context)
+            if isinstance(context, OpenAILLMContext)
+            else self._stream_chat_completions_universal_context(context)
         )
 
         async for chunk in chunk_stream:
@@ -364,11 +419,24 @@ class BaseOpenAILLMService(LLMService):
 
             await self.run_function_calls(function_calls)
 
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            Whether service supports universal LLMContext.
+        """
+        # Return True in subclasses that support universal LLMContext
+        # This property lets us gradually roll out support for universal
+        # LLMContext to OpenAI-like services in a controlled manner.
+        return False
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
-        Handles OpenAILLMContextFrame, LLMMessagesFrame, VisionImageRawFrame,
-        and LLMUpdateSettingsFrame to trigger LLM completions and manage settings.
+        Handles OpenAILLMContextFrame, LLMContextFrame, LLMMessagesFrame,
+        VisionImageRawFrame, and LLMUpdateSettingsFrame to trigger LLM
+        completions and manage settings.
 
         Args:
             frame: The frame to process.
@@ -378,10 +446,26 @@ class BaseOpenAILLMService(LLMService):
 
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAILLMContext = frame.context
+            # Handle OpenAI-specific context frames
+            context = frame.context
+        elif isinstance(frame, LLMContextFrame):
+            # Handle universal (LLM-agnostic) LLM context frames
+            if self.supports_universal_context:
+                context = frame.context
+            else:
+                raise NotImplementedError(
+                    f"Universal LLMContext is not yet supported for {self.__class__.__name__}."
+                )
         elif isinstance(frame, LLMMessagesFrame):
+            # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
+            # LLMContext with it
             context = OpenAILLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
+            # This is only useful in very simple pipelines because it creates
+            # a new context. Generally we want a context manager to catch
+            # UserImageRawFrames coming through the pipeline and add them
+            # to the context.
+            # TODO: support the newer universal LLMContext with a VisionImageRawFrame equivalent?
             context = OpenAILLMContext()
             context.add_image_frame_message(
                 format=frame.format, size=frame.size, image=frame.image, text=frame.text

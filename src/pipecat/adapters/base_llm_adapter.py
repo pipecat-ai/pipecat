@@ -11,20 +11,44 @@ adapters that handle tool format conversion and standardization.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Union, cast
+from typing import Any, Generic, List, TypeVar, Union, cast
 
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
+
+# Should be a TypedDict
+TLLMInvocationParams = TypeVar("TLLMInvocationParams", bound=dict[str, Any])
 
 
-class BaseLLMAdapter(ABC):
+class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     """Abstract base class for LLM provider adapters.
 
-    Provides a standard interface for converting between Pipecat's standardized
-    tool schemas and provider-specific tool formats. Subclasses must implement
-    provider-specific conversion logic.
+    Provides a standard interface for converting to provider-specific formats.
+
+    Handles:
+
+    - Extracting provider-specific parameters for LLM invocation from a
+      universal LLM context
+    - Converting standardized tools schema to provider-specific tool formats.
+    - Extracting messages from the LLM context for the purposes of logging
+      about the specific provider.
+
+    Subclasses must implement provider-specific conversion logic.
     """
+
+    @abstractmethod
+    def get_llm_invocation_params(self, context: LLMContext) -> TLLMInvocationParams:
+        """Get provider-specific LLM invocation parameters from a universal LLM context.
+
+        Args:
+            context: The LLM context containing messages, tools, etc.
+
+        Returns:
+            Provider-specific parameters for invoking the LLM.
+        """
+        pass
 
     @abstractmethod
     def to_provider_tools_format(self, tools_schema: ToolsSchema) -> List[Any]:
@@ -38,7 +62,20 @@ class BaseLLMAdapter(ABC):
         """
         pass
 
-    def from_standard_tools(self, tools: Any) -> List[Any]:
+    @abstractmethod
+    def get_messages_for_logging(self, context: LLMContext) -> List[dict[str, Any]]:
+        """Get messages from a universal LLM context in a format ready for logging about this provider.
+
+        Args:
+            context: The LLM context containing messages.
+
+        Returns:
+            List of messages in a format ready for logging about this
+            provider.
+        """
+        pass
+
+    def from_standard_tools(self, tools: Any) -> List[Any] | NotGiven:
         """Convert tools from standard format to provider format.
 
         Args:

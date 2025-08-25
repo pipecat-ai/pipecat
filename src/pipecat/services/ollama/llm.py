@@ -43,3 +43,12 @@ class OLLamaLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating Ollama client with api {base_url}")
         return super().create_client(base_url=base_url, **kwargs)
+
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as OLLamaLLMService does not yet support universal LLMContext.
+        """
+        return False

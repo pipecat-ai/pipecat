@@ -9,9 +9,8 @@
 from typing import List
 
 from loguru import logger
-from openai.types.chat import ChatCompletionMessageParam
 
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.services.openai.llm import OpenAILLMService
 
 
@@ -54,19 +53,22 @@ class DeepSeekLLMService(OpenAILLMService):
         logger.debug(f"Creating DeepSeek client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    def _build_chat_completion_params(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> dict:
+    def _build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for DeepSeek chat completion request.
 
         DeepSeek doesn't support some OpenAI parameters like seed and max_completion_tokens.
+
+        Args:
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
+
+        Returns:
+            Dictionary of parameters for the chat completion request.
         """
         params = {
             "model": self.model_name,
             "stream": True,
-            "messages": messages,
-            "tools": context.tools,
-            "tool_choice": context.tool_choice,
             "stream_options": {"include_usage": True},
             "frequency_penalty": self._settings["frequency_penalty"],
             "presence_penalty": self._settings["presence_penalty"],
@@ -75,5 +77,17 @@ class DeepSeekLLMService(OpenAILLMService):
             "max_tokens": self._settings["max_tokens"],
         }
 
+        # Messages, tools, tool_choice
+        params.update(params_from_context)
+
         params.update(self._settings["extra"])
         return params
+
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as DeepSeekLLMService does not yet support universal LLMContext.
+        """
+        return False
