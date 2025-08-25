@@ -702,29 +702,11 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
-class AudioContextWordTTSService(WebsocketWordTTSService):
-    """Websocket-based TTS service with word timestamps and audio context management.
+class _AudioContextContainer:
+    """A container for audio contexts."""
 
-    This is a base class for websocket-based TTS services that support word
-    timestamps and also allow correlating the generated audio with the requested
-    text.
-
-    Each request could be multiple sentences long which are grouped by
-    context. For this to work, the TTS service needs to support handling
-    multiple requests at once (i.e. multiple simultaneous contexts).
-
-    The audio received from the TTS will be played in context order. That is, if
-    we requested audio for a context "A" and then audio for context "B", the
-    audio from context ID "A" will be played first.
-    """
-
-    def __init__(self, **kwargs):
-        """Initialize the Audio Context Word TTS service.
-
-        Args:
-            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
-        """
-        super().__init__(**kwargs)
+    def __init__(self):
+        """Initialize the container."""
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
 
@@ -776,43 +758,6 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
             True if the context exists and is available.
         """
         return context_id in self._contexts
-
-    async def start(self, frame: StartFrame):
-        """Start the audio context TTS service.
-
-        Args:
-            frame: The start frame containing initialization parameters.
-        """
-        await super().start(frame)
-        self._create_audio_context_task()
-
-    async def stop(self, frame: EndFrame):
-        """Stop the audio context TTS service.
-
-        Args:
-            frame: The end frame.
-        """
-        await super().stop(frame)
-        if self._audio_context_task:
-            # Indicate no more audio contexts are available. this will end the
-            # task cleanly after all contexts have been processed.
-            await self._contexts_queue.put(None)
-            await self.wait_for_task(self._audio_context_task)
-            self._audio_context_task = None
-
-    async def cancel(self, frame: CancelFrame):
-        """Cancel the audio context TTS service.
-
-        Args:
-            frame: The cancel frame.
-        """
-        await super().cancel(frame)
-        await self._stop_audio_context_task()
-
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
-        await super()._handle_interruption(frame, direction)
-        await self._stop_audio_context_task()
-        self._create_audio_context_task()
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
@@ -868,3 +813,128 @@ class AudioContextWordTTSService(WebsocketWordTTSService):
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break
+
+
+class AudioContextTTSService(WebsocketTTSService, _AudioContextContainer):
+    """Websocket-based TTS service with audio context management.
+
+    This is a base class for websocket-based TTS services that allow correlating
+    the generated audio with the requested text.
+
+    Each request could be multiple sentences long which are grouped by
+    context. For this to work, the TTS service needs to support handling
+    multiple requests at once (i.e. multiple simultaneous contexts).
+
+    The audio received from the TTS will be played in context order. That is, if
+    we requested audio for a context "A" and then audio for context "B", the
+    audio from context ID "A" will be played first.
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the Audio Context TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent WebsocketTTSService.
+        """
+        WebSocketTTSService.__init__(self, **kwargs)
+        _AudioContextContainer.__init__(self)
+
+    async def start(self, frame: StartFrame):
+        """Start the audio context TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        self._create_audio_context_task()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the audio context TTS service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        if self._audio_context_task:
+            # Indicate no more audio contexts are available. this will end the
+            # task cleanly after all contexts have been processed.
+            await self._contexts_queue.put(None)
+            await self.wait_for_task(self._audio_context_task)
+            self._audio_context_task = None
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the audio context TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._stop_audio_context_task()
+
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
+        await self._stop_audio_context_task()
+        self._create_audio_context_task()
+
+
+class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextContainer):
+    """Websocket-based TTS service with word timestamps and audio context management.
+
+    This is a base class for websocket-based TTS services that support word
+    timestamps and also allow correlating the generated audio with the requested
+    text.
+
+    Each request could be multiple sentences long which are grouped by
+    context. For this to work, the TTS service needs to support handling
+    multiple requests at once (i.e. multiple simultaneous contexts).
+
+    The audio received from the TTS will be played in context order. That is, if
+    we requested audio for a context "A" and then audio for context "B", the
+    audio from context ID "A" will be played first.
+    """
+
+    def __init__(self, **kwargs):
+        """Initialize the Audio Context Word TTS service.
+
+        Args:
+            **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
+        """
+        WebSocketTTSService.__init__(self, **kwargs)
+        _AudioContextContainer.__init__(self)
+
+    async def start(self, frame: StartFrame):
+        """Start the audio context TTS service.
+
+        Args:
+            frame: The start frame containing initialization parameters.
+        """
+        await super().start(frame)
+        self._create_audio_context_task()
+
+    async def stop(self, frame: EndFrame):
+        """Stop the audio context TTS service.
+
+        Args:
+            frame: The end frame.
+        """
+        await super().stop(frame)
+        if self._audio_context_task:
+            # Indicate no more audio contexts are available. this will end the
+            # task cleanly after all contexts have been processed.
+            await self._contexts_queue.put(None)
+            await self.wait_for_task(self._audio_context_task)
+            self._audio_context_task = None
+
+    async def cancel(self, frame: CancelFrame):
+        """Cancel the audio context TTS service.
+
+        Args:
+            frame: The cancel frame.
+        """
+        await super().cancel(frame)
+        await self._stop_audio_context_task()
+
+    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+        await super()._handle_interruption(frame, direction)
+        await self._stop_audio_context_task()
+        self._create_audio_context_task()
