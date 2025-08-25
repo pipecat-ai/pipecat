@@ -7,13 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed a `CartesiaTTSService` issue that was causing the application to hang
-  after Cartesia's 5 minutes timed out.
-
-## [0.0.81] - 2025-08-25
-
 ### Added
 
 - Added a new "universal" (LLM-agnostic) `LLMContext` and accompanying
@@ -42,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   - `OpenAILLMService`
   - `GoogleLLMService`
+
+### Fixed
+
+- Fixed a `CartesiaTTSService` issue that was causing the application to hang
+  after Cartesia's 5 minutes timed out.
+
+## [0.0.81] - 2025-08-25
+
+### Added
 
 - Added `pipecat.extensions.voicemail`, a module for detecting voicemail vs.
   live conversation, primarily intended for use in outbound calling scenarios.
@@ -89,7 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 - `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or `await
-  asyncio.wait_for(task, timeout)` instead.
+asyncio.wait_for(task, timeout)` instead.
 
 ### Removed
 
