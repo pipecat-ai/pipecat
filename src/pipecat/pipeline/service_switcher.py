@@ -6,11 +6,20 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
+from dataclasses import dataclass
 from typing import Any, Generic, List, Optional, Type, TypeVar
 
+from pipecat.frames.frames import ControlFrame, Frame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+
+@dataclass
+class ServiceSwitcherFrame(ControlFrame):
+    """A base class for frames that control service switching."""
+
+    pass
 
 
 class ServiceSwitcherStrategy:
@@ -33,6 +42,28 @@ class ServiceSwitcherStrategy:
             True if the given service is the active one, False otherwise.
         """
         raise NotImplementedError("Subclasses must implement this method.")
+
+    def handle_frame(self, frame: ServiceSwitcherFrame, direction: FrameDirection):
+        """Handle a frame that controls service switching.
+
+        This method can be overridden by subclasses to implement specific logic
+        for handling frames that control service switching.
+
+        Args:
+            frame: The frame to handle.
+            direction: The direction of the frame (upstream or downstream).
+        """
+        raise NotImplementedError("Subclasses must implement this method.")
+
+
+@dataclass
+class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
+    """A frame to signal a manual switch in the active service in a ServiceSwitcher.
+
+    Handled by ServiceSwitcherStrategyManual to switch the active service.
+    """
+
+    service: FrameProcessor
 
 
 class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
@@ -58,7 +89,19 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
         """
         return service == self.active_service
 
-    def set_active(self, service: FrameProcessor):
+    def handle_frame(self, frame: ServiceSwitcherFrame, direction: FrameDirection):
+        """Handle a frame that controls service switching.
+
+        Args:
+            frame: The frame to handle.
+            direction: The direction of the frame (upstream or downstream).
+        """
+        if isinstance(frame, ManuallySwitchServiceFrame):
+            self._set_active(frame.service)
+        else:
+            raise ValueError(f"Unsupported frame type: {type(frame)}")
+
+    def _set_active(self, service: FrameProcessor):
         """Set the active service to the given one.
 
         Args:
@@ -105,3 +148,15 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             service,
             FunctionFilter(filter, direction=FrameDirection.UPSTREAM),
         ]
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process a frame, handling frames which affect service switching.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of the frame (upstream or downstream).
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, ServiceSwitcherFrame):
+            self.strategy.handle_frame(frame, direction)
