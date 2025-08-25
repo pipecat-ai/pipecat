@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.0.81] - 2025-08-25
+## [Unreleased]
 
 ### Added
 
@@ -35,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   - `OpenAILLMService`
   - `GoogleLLMService`
+
+## [0.0.81] - 2025-08-25
+
+### Added
 
 - Added `pipecat.extensions.voicemail`, a module for detecting voicemail vs.
   live conversation, primarily intended for use in outbound calling scenarios.
@@ -82,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 - `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or `await
-  asyncio.wait_for(task, timeout)` instead.
+asyncio.wait_for(task, timeout)` instead.
 
 ### Removed
 
