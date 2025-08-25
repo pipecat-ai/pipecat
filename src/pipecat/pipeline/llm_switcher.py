@@ -50,19 +50,24 @@ class LLMSwitcher(ParallelPipeline, Generic[StrategyType]):
         self.llms = llms
         self.strategy = strategy
 
-    async def generate_summary(self, summary_prompt: str, context: LLMContext) -> Optional[str]:
-        """Generate a conversation summary from the given LLM context, using the currently active LLM.
+    async def run_inference(
+        self, context: LLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context, using the currently active LLM.
 
         Args:
-            summary_prompt: The prompt to use to guide generating the summary.
             context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
 
         Returns:
-            The generated summary, or None if generation failed.
+            The LLM's response as a string, or None if no response is generated.
         """
         if self.strategy.active_llm:
-            return await self.strategy.active_llm.generate_summary(
-                summary_prompt=summary_prompt, context=context
+            return await self.strategy.active_llm.run_inference(
+                context=context, system_instruction=system_instruction
             )
         return None
 
