@@ -87,11 +87,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `SarvamTTSService` to use WebSocket streaming for real-time audio 
-  generation with multiple Indian languages, with HTTP support still available 
+- Added support to `AWSBedrockLLMService` for setting authentication
+  credentials through environment variables.
+
+- Updated `SarvamTTSService` to use WebSocket streaming for real-time audio
+  generation with multiple Indian languages, with HTTP support still available
   via `SarvamHttpTTSService`.
 
 ### Fixed
+
+- Fixed `AWSPollyTTSService` to support AWS credential provider chain (IAM
+  roles, IRSA, instance profiles) instead of requiring explicit environment
+  variables.
 
 - Fixed a `CartesiaTTSService` issue that was causing the application to hang
   after Cartesia's 5 minutes timed out.
@@ -145,8 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or `await
-asyncio.wait_for(task, timeout)` instead.
+- `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or
+  `await asyncio.wait_for(task, timeout)` instead.
 
 ### Removed
 
@@ -159,10 +166,6 @@ asyncio.wait_for(task, timeout)` instead.
   `FrameProcessor.get_parent()`.
 
 ### Fixed
-
-- Fixed `AWSPollyTTSService` to support AWS credential provider chain (IAM
-  roles, IRSA, instance profiles) instead of requiring explicit environment
-  variables.
 
 - Fixed an issue that would cause `PipelineRunner` and `PipelineTask` to not
   handle external asyncio task cancellation properly.
