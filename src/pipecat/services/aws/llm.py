@@ -791,33 +791,37 @@ class AWSBedrockLLMService(LLMService):
         """
         return True
 
-    async def generate_summary(
-        self, summary_prompt: str, context: LLMContext | OpenAILLMContext
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
     ) -> Optional[str]:
-        """Generate a conversation summary from the given LLM context.
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
-            summary_prompt: The prompt to use to guide generating the summary.
             context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
 
         Returns:
-            The generated summary, or None if generation failed.
+            The LLM's response as a string, or None if no response is generated.
         """
         try:
+            messages = []
+            system = []
             if isinstance(context, LLMContext):
-                # Not sure if it's strictly necessary to adapt messages here
-                # since they'll just be a string in the prompt, but erring on
-                # the side of putting them in the format the LLM would expect
-                # if consuming them directly (i.e. assuming greater LLM
-                # familiarity with its own format).
+                # Future code will be something like this:
                 # adapter = self.get_llm_adapter()
                 # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
                 # messages = params["messages"]
+                # system = params["system_instruction"]
                 raise NotImplementedError(
                     "Universal LLMContext is not yet supported for AWS Bedrock."
                 )
             else:
+                context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
                 messages = context.messages
+                system = getattr(context, "system", None) or system_instruction
 
             # Determine if we're using Claude or Nova based on model ID
             model_id = self.model_name
@@ -825,12 +829,7 @@ class AWSBedrockLLMService(LLMService):
             # Prepare request parameters
             request_params = {
                 "modelId": model_id,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [{"text": f"Conversation history: {messages}"}],
-                    },
-                ],
+                "messages": messages,
                 "inferenceConfig": {
                     "maxTokens": 8192,
                     "temperature": 0.7,
@@ -838,7 +837,8 @@ class AWSBedrockLLMService(LLMService):
                 },
             }
 
-            request_params["system"] = [{"text": summary_prompt}]
+            if system:
+                request_params["system"] = [{"text": system}]
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
