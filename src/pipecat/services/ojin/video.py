@@ -717,7 +717,7 @@ class OjinPersonaService(FrameProcessor):
         """
         assert self._client is not None
         if hasattr(message, "interaction_id"):
-            logger.info(f"interaction {message.interaction_id}")
+            logger.info(f"Sending message type {type(message)} with interaction {message.interaction_id}")
 
         await self._client.send_message(message)
 
@@ -933,10 +933,11 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.mouth_opening_scale = IDLE_MOUTH_OPENING_SCALE
             self._interaction.start_frame_idx = 0
             self._interaction.frame_idx = 0
-
-        logger.debug("Sending StartInteractionMessage")
+        
         response = await self._client.start_interaction()
+        logger.debug(f"Started interaction with id: {response.interaction_id}")
         self._interaction.interaction_id = response.interaction_id
+        self._interaction.set_state(InteractionState.ACTIVE)
 
     async def _end_interaction(self):
         """End the current interaction.
