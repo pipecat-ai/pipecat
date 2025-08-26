@@ -1,5 +1,4 @@
 .vscode
-!examples/ojin-chatbot/.vscode/launch.json
 env/
 __pycache__/
 *~
