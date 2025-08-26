@@ -296,7 +296,9 @@ class TTSService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if (
+        if isinstance(frame, TextFrame) and frame.skip_tts:
+            await self.push_frame(frame, direction)
+        elif (
             isinstance(frame, TextFrame)
             and not isinstance(frame, InterimTranscriptionFrame)
             and not isinstance(frame, TranscriptionFrame)

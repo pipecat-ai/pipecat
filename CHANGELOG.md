@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `skip_tts` field to `TextFrame`. This lets a text frame bypass TTS while
+  still being included in the LLM context. Useful for cases like structured text
+  that isn’t meant to be spoken but should still contribute to context.
+
 - Added a `cancel_timeout_secs` argument to `PipelineTask` which defines how
   long the pipeline has to complete cancellation. When `PipelineTask.cancel()`
   is called, a `CancelFrame` is pushed through the pipeline and must reach the
