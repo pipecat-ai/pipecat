@@ -31,7 +31,6 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import InterruptibleTTSService, TTSService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 try:
@@ -478,7 +477,6 @@ class SarvamTTSService(InterruptibleTTSService):
         if self._websocket and not self._keepalive_task:
             self._keepalive_task = self.create_task(
                 self._keepalive_task_handler(),
-                watchdog_timeout_secs=25,
             )
 
     async def _disconnect(self):
@@ -561,9 +559,7 @@ class SarvamTTSService(InterruptibleTTSService):
 
     async def _receive_messages(self):
         """Receive and process messages from Sarvam WebSocket."""
-        async for message in WatchdogAsyncIterator(
-            self._get_websocket(), manager=self.task_manager
-        ):
+        async for message in self._get_websocket():
             if isinstance(message, str):
                 msg = json.loads(message)
                 if msg.get("type") == "audio":
@@ -586,7 +582,6 @@ class SarvamTTSService(InterruptibleTTSService):
         """Handle keepalive messages to maintain WebSocket connection."""
         KEEPALIVE_SLEEP = 20
         while True:
-            self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
             await self._send_keepalive()
 
