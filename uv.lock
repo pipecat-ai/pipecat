@@ -4337,6 +4337,9 @@ runner = [
     { name = "python-dotenv" },
     { name = "uvicorn" },
 ]
+sarvam = [
+    { name = "websockets" },
+]
 sentry = [
     { name = "sentry-sdk" },
 ]
@@ -4491,10 +4494,11 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'openai'", specifier = ">=13.1,<15.0" },
     { name = "websockets", marker = "extra == 'playht'", specifier = ">=13.1,<15.0" },
     { name = "websockets", marker = "extra == 'rime'", specifier = ">=13.1,<15.0" },
+    { name = "websockets", marker = "extra == 'sarvam'", specifier = ">=13.1,<15.0" },
     { name = "websockets", marker = "extra == 'soniox'", specifier = ">=13.1,<15.0" },
     { name = "websockets", marker = "extra == 'websocket'", specifier = ">=13.1,<15.0" },
 ]
-provides-extras = ["anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sentry", "local-smart-turn", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "whisper"]
+provides-extras = ["anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
