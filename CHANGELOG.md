@@ -52,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
   # Instantiate a switcher
-  # (ServiceSwitcherStrategyManual default to OpenAI, as it's first in the list)
+  # (ServiceSwitcherStrategyManual defaults to OpenAI, as it's first in the list)
   llm_switcher = LLMSwitcher(
       llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
   )
