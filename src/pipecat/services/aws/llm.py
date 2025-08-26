@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -40,6 +41,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
@@ -789,6 +791,81 @@ class AWSBedrockLLMService(LLMService):
         """
         return True
 
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Args:
+            context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        try:
+            messages = []
+            system = []
+            if isinstance(context, LLMContext):
+                # Future code will be something like this:
+                # adapter = self.get_llm_adapter()
+                # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+                # messages = params["messages"]
+                # system = params["system_instruction"]
+                raise NotImplementedError(
+                    "Universal LLMContext is not yet supported for AWS Bedrock."
+                )
+            else:
+                context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
+                messages = context.messages
+                system = getattr(context, "system", None) or system_instruction
+
+            # Determine if we're using Claude or Nova based on model ID
+            model_id = self.model_name
+
+            # Prepare request parameters
+            request_params = {
+                "modelId": model_id,
+                "messages": messages,
+                "inferenceConfig": {
+                    "maxTokens": 8192,
+                    "temperature": 0.7,
+                    "topP": 0.9,
+                },
+            }
+
+            if system:
+                request_params["system"] = [{"text": system}]
+
+            async with self._aws_session.client(
+                service_name="bedrock-runtime", **self._aws_params
+            ) as client:
+                # Call Bedrock without streaming
+                response = await client.converse(**request_params)
+
+                # Extract the response text
+                if (
+                    "output" in response
+                    and "message" in response["output"]
+                    and "content" in response["output"]["message"]
+                ):
+                    content = response["output"]["message"]["content"]
+                    if isinstance(content, list):
+                        for item in content:
+                            if item.get("text"):
+                                return item["text"]
+                    elif isinstance(content, str):
+                        return content
+
+                return None
+
+        except Exception as e:
+            logger.error(f"Bedrock summary generation failed: {e}", exc_info=True)
+            return None
+
     async def _create_converse_stream(self, client, request_params):
         """Create converse stream with optional timeout and retry.
 
@@ -1044,6 +1121,8 @@ class AWSBedrockLLMService(LLMService):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context = AWSBedrockLLMContext.upgrade_to_bedrock(frame.context)
+        if isinstance(frame, LLMContextFrame):
+            raise NotImplementedError("Universal LLMContext is not yet supported for AWS Bedrock.")
         elif isinstance(frame, LLMMessagesFrame):
             context = AWSBedrockLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):

@@ -7,12 +7,13 @@
 """SambaNova LLM service implementation using OpenAI-compatible interface."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 from openai import AsyncStream
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionChunk
 
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     LLMTextFrame,
 )
@@ -67,17 +68,16 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         logger.debug(f"Creating SambaNova client with API {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    def build_chat_completion_params(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for SambaNova chat completion request.
 
         SambaNova doesn't support some OpenAI parameters like frequency_penalty,
         presence_penalty, and seed.
 
         Args:
-            context: The LLM context containing tools and configuration.
-            messages: List of chat completion messages to send.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
             Dictionary of parameters for the chat completion request.
@@ -85,15 +85,15 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         params = {
             "model": self.model_name,
             "stream": True,
-            "messages": messages,
-            "tools": context.tools,
-            "tool_choice": context.tool_choice,
             "stream_options": {"include_usage": True},
             "temperature": self._settings["temperature"],
             "top_p": self._settings["top_p"],
             "max_tokens": self._settings["max_tokens"],
             "max_completion_tokens": self._settings["max_completion_tokens"],
         }
+
+        # Messages, tools, tool_choice
+        params.update(params_from_context)
 
         params.update(self._settings["extra"])
         return params
@@ -122,9 +122,9 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
-            context
-        )
+        chunk_stream: AsyncStream[
+            ChatCompletionChunk
+        ] = await self._stream_chat_completions_specific_context(context)
 
         async for chunk in chunk_stream:
             if chunk.usage:
@@ -210,3 +210,12 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
                 )
 
             await self.run_function_calls(function_calls)
+
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as SambaNovaLLMService does not yet support universal LLMContext.
+        """
+        return False

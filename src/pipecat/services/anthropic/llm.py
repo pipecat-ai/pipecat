@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -41,6 +42,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
@@ -196,6 +198,46 @@ class AnthropicLLMService(LLMService):
         else:
             response = await api_call(**params)
             return response
+
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Args:
+            context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        messages = []
+        system = []
+        if isinstance(context, LLMContext):
+            # Future code will be something like this:
+            # adapter = self.get_llm_adapter()
+            # params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            # messages = params["messages"]
+            # system = params["system_instruction"]
+            raise NotImplementedError("Universal LLMContext is not yet supported for Anthropic.")
+        else:
+            context = AnthropicLLMContext.upgrade_to_anthropic(context)
+            messages = context.messages
+            system = getattr(context, "system", None) or system_instruction
+
+        # LLM completion
+        response = await self._client.messages.create(
+            model=self.model_name,
+            messages=messages,
+            system=system,
+            max_tokens=8192,
+            stream=False,
+        )
+
+        return response.content[0].text
 
     @property
     def enable_prompt_caching_beta(self) -> bool:
@@ -408,6 +450,8 @@ class AnthropicLLMService(LLMService):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context: "AnthropicLLMContext" = AnthropicLLMContext.upgrade_to_anthropic(frame.context)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError("Universal LLMContext is not yet supported for Anthropic.")
         elif isinstance(frame, LLMMessagesFrame):
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):

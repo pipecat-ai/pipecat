@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added a new "universal" (LLM-agnostic) `LLMContext` and accompanying
+  `LLMContextAggregatorPair`, which will eventually replace `OpenAILLMContext`
+  (and the other under-the-hood contexts) and the other context aggregators.
+  The new universal `LLMContext` machinery allows a single context to be shared
+  between different LLMs, enabling runtime LLM switching and scenarios like
+  failover.
+
+  From the developer's point of view, switching to using the new universal
+  context machinery will usually be a matter of going from this:
+
+  ```python
+  context = OpenAILLMContext(messages, tools)
+  context_aggregator = llm.create_context_aggregator(context)
+  ```
+
+  To this:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(context)
+  ```
+
+  To start, the universal `LLMContext` is supported with the following LLM
+  services:
+
+  - `OpenAILLMService`
+  - `GoogleLLMService`
+
+- Added a new `LLMSwitcher` class to enable runtime LLM switching, built atop a
+  new generic `ServiceSwitcher`.
+
+  Switchers take a switching strategy. The first available strategy is
+  `ServiceSwitcherStrategyManual`.
+
+  To switch LLMs at runtime, the LLMs must be sharing one instance of the new
+  universal `LLMContext` (see above bullet).
+
+  ```python
+  # Instantiate your LLM services
+  llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+  llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+
+  # Instantiate a switcher
+  # (ServiceSwitcherStrategyManual defaults to OpenAI, as it's first in the list)
+  llm_switcher = LLMSwitcher(
+      llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
+  )
+
+  # Create your pipeline
+  pipeline = Pipeline(
+    [
+        transport.input(),
+        stt,
+        context_aggregator.user(),
+        llm_switcher,
+        tts,
+        transport.output(),
+        context_aggregator.assistant(),
+    ]
+  )
+  task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+
+  # ...
+  # Whenever is appropriate, switch LLMs!
+  await task.queue_frames([ManuallySwitchServiceFrame(service=llm_google)])
+  ```
+
+- Added an `LLMService.run_inference()` method to LLM services to enable
+  direct, out-of-band (i.e. out-of-pipeline) inference.
+
 ### Fixed
 
 - Fixed a `CartesiaTTSService` issue that was causing the application to hang
@@ -62,7 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 - `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or `await
-  asyncio.wait_for(task, timeout)` instead.
+asyncio.wait_for(task, timeout)` instead.
 
 ### Removed
 
