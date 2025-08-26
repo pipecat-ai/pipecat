@@ -27,6 +27,7 @@ from typing import (
     Tuple,
 )
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -36,7 +37,7 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
-    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.processors.aggregators.llm_context import LLMContext, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
 
 
@@ -576,7 +577,7 @@ class LLMSetToolsFrame(DataFrame):
         tools: List of tool/function definitions for the LLM.
     """
 
-    tools: List[dict]
+    tools: List[dict] | ToolsSchema | "NotGiven"
 
 
 @dataclass
