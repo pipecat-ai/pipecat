@@ -142,8 +142,13 @@ class OjinPersonaFSM:
         self._previous_speech_frame: Optional[OutputImageRawFrame] = None
         self.on_state_changed_callback = on_state_changed_callback
         self.last_update_time: float = -1.0
+<<<<<<< HEAD
         self._transition_timestamp: float = -1.0
         self.fps_tracker = FPSTracker("OjinPersonaFSM")
+=======
+        self.fps_tracker = FPSTracker("OjinPersonaFSM")
+        self._transition_timestamp: float = -1.0
+>>>>>>> cc0f8759f8c10a8b54260707981fa431d552cc3f
 
     async def start(self):
         await self.set_state(PersonaState.INITIALIZING)
@@ -550,10 +555,17 @@ class OjinPersonaService(FrameProcessor):
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
 
         self._resampler = create_default_resampler()
+<<<<<<< HEAD
         self.should_generate_silence: bool = False
         self._last_frame_msg: int | None = None
         self._stopping = False
         self._server_fps_tracker = FPSTracker("OjinPersonaService")
+=======
+        self._server_fps_tracker = FPSTracker("OjinPersonaService")
+        self.should_generate_silence: bool = False
+        self._last_frame_msg: int | None = None
+        self._stopping = False
+>>>>>>> cc0f8759f8c10a8b54260707981fa431d552cc3f
 
     async def _generate_and_send_silence(self, duration: float, is_last_input: bool):
         num_samples = int(duration * OJIN_PERSONA_SAMPLE_RATE)
