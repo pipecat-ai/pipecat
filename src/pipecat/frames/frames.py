@@ -608,6 +608,21 @@ class LLMEnablePromptCachingFrame(DataFrame):
 
 
 @dataclass
+class LLMConfigureOutputFrame(DataFrame):
+    """Frame to configure LLM output.
+
+    This frame is used to configure how the LLM produces output. For example, it
+    can tell the LLM to generate tokens that should be added to the context but
+    not spoken by the TTS service (if one is present in the pipeline).
+
+    Parameters:
+        skip_tts: Whether LLM tokens should skip the TTS service (if any).
+    """
+
+    skip_tts: bool
+
+
+@dataclass
 class TTSSpeakFrame(DataFrame):
     """Frame containing text that should be spoken by TTS.
 

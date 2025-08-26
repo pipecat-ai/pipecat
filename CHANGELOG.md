@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for switching between audio+text to text-only modes within the
+  same pipeline. This is done by pushing
+  `LLMConfigureOutputFrame(skip_tts=True)` to enter text-only mode, and
+  disabling it to return to audio+text. The LLM will still generate tokens and
+  add them to the context, but they will not be sent to TTS.
+
 - Added `skip_tts` field to `TextFrame`. This lets a text frame bypass TTS while
   still being included in the LLM context. Useful for cases like structured text
   that isn’t meant to be spoken but should still contribute to context.
