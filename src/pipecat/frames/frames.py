@@ -1465,3 +1465,20 @@ class MixerEnableFrame(MixerControlFrame):
     """
 
     enable: bool
+
+
+@dataclass
+class ServiceSwitcherFrame(ControlFrame):
+    """A base class for frames that control ServiceSwitcher behavior."""
+
+    pass
+
+
+@dataclass
+class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
+    """A frame to request a manual switch in the active service in a ServiceSwitcher.
+
+    Handled by ServiceSwitcherStrategyManual to switch the active service.
+    """
+
+    service: "FrameProcessor"

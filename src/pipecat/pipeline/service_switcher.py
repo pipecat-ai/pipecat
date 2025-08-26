@@ -6,20 +6,12 @@
 
 """Service switcher for switching between different services at runtime, with different switching strategies."""
 
-from dataclasses import dataclass
 from typing import Any, Generic, List, Optional, Type, TypeVar
 
-from pipecat.frames.frames import ControlFrame, Frame
+from pipecat.frames.frames import Frame, ManuallySwitchServiceFrame, ServiceSwitcherFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
-
-@dataclass
-class ServiceSwitcherFrame(ControlFrame):
-    """A base class for frames that control service switching."""
-
-    pass
 
 
 class ServiceSwitcherStrategy:
@@ -54,16 +46,6 @@ class ServiceSwitcherStrategy:
             direction: The direction of the frame (upstream or downstream).
         """
         raise NotImplementedError("Subclasses must implement this method.")
-
-
-@dataclass
-class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
-    """A frame to signal a manual switch in the active service in a ServiceSwitcher.
-
-    Handled by ServiceSwitcherStrategyManual to switch the active service.
-    """
-
-    service: FrameProcessor
 
 
 class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
