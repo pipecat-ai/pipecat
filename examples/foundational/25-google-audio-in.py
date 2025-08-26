@@ -16,6 +16,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     LLMFullResponseEndFrame,
+    LLMRunFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -368,7 +369,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
