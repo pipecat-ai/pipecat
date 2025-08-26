@@ -8,7 +8,7 @@
 
 import copy
 import json
-from typing import Any, List, TypedDict
+from typing import Any, Dict, List, TypedDict
 
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
 from openai._types import NotGiven as OpenAINotGiven
@@ -79,7 +79,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             for func in functions_schema
         ]
 
-    def get_messages_for_logging(self, context: LLMContext) -> List[dict[str, Any]]:
+    def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about OpenAI.
 
         Removes or truncates sensitive data like image content for safe logging.
@@ -102,7 +102,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             if "mime_type" in msg and msg["mime_type"].startswith("image/"):
                 msg["data"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs, ensure_ascii=False)
+        return msgs
 
     def _get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
         return context.get_messages("openai")

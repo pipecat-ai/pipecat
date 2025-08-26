@@ -295,7 +295,7 @@ class AnthropicLLMService(LLMService):
             await self.start_processing_metrics()
 
             logger.debug(
-                f"{self}: Generating chat [{context.system}] | [{context.get_messages_for_logging()}]"
+                f"{self}: Generating chat [{context.system}] | {context.get_messages_for_logging()}"
             )
 
             messages = context.messages
@@ -933,13 +933,13 @@ class AnthropicLLMContext(OpenAILLMContext):
             messages.insert(0, {"role": "system", "content": self.system})
         return messages
 
-    def get_messages_for_logging(self) -> str:
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get messages formatted for logging with sensitive data redacted.
 
         Replaces image data with placeholder text for cleaner logs.
 
         Returns:
-            JSON string representation of messages for logging.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -950,7 +950,7 @@ class AnthropicLLMContext(OpenAILLMContext):
                         if item["type"] == "image":
                             item["source"]["data"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs)
+        return msgs
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):
