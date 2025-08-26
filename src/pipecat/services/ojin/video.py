@@ -643,6 +643,9 @@ class OjinPersonaService(FrameProcessor):
                 if self._fsm._state == PersonaState.SPEECH and self._last_frame_msg is not None:
                     last_received_frame_time = time.perf_counter() - self._last_frame_msg
 
+                    # We send the Cancel interaction message because we don't send the "last_audio" flag
+                    # to the server, therefore the server won't be able to send the last frame and reset the model
+                    # Cancelation message resets the model instead.
                     if last_received_frame_time > 1.5:
                         logger.info("Ending interaction")
                         await self.push_ojin_message(
@@ -654,7 +657,7 @@ class OjinPersonaService(FrameProcessor):
                             ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
                         )
                         self._last_frame_msg = None
-                    
+                #We send the cancel Interaction message to reset the state even when we didn't receive any frame
                 elif self._fsm._state == PersonaState.SPEECH and time_since_transition > 2.5:
                     logger.warning("No Frames received from the server, stopping interaction by timeout")
                     await self.push_ojin_message(
