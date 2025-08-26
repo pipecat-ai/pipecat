@@ -9,7 +9,9 @@ import time
 import unittest
 
 from pipecat.frames.frames import (
+    CancelFrame,
     EndFrame,
+    Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
     StartFrame,
@@ -418,3 +420,33 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
         diff_time = time.time() - start_time
 
         self.assertGreater(diff_time, sleep_time_secs * 3)
+
+    async def test_task_cancel_timeout(self):
+        class CancelFilter(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if not isinstance(frame, CancelFrame):
+                    await self.push_frame(frame, direction)
+
+        pipeline = Pipeline([CancelFilter()])
+        task = PipelineTask(pipeline, cancel_timeout_secs=0.2)
+
+        cancelled = False
+
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task: PipelineTask, frame: StartFrame):
+            await task.cancel()
+
+        @task.event_handler("on_pipeline_cancelled")
+        async def on_pipeline_cancelled(task: PipelineTask, frame: CancelFrame):
+            nonlocal cancelled
+            cancelled = True
+
+        try:
+            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        except asyncio.CancelledError:
+            assert cancelled
