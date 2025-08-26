@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a `cancel_timeout_secs` argument to `PipelineTask` which defines how
+  long the pipeline has to complete cancellation. When `PipelineTask.cancel()`
+  is called, a `CancelFrame` is pushed through the pipeline and must reach the
+  end. If it does not reach the end within the specified time, a warning is
+  shown and the wait is aborted.
+
 - Added a new "universal" (LLM-agnostic) `LLMContext` and accompanying
   `LLMContextAggregatorPair`, which will eventually replace `OpenAILLMContext`
   (and the other under-the-hood contexts) and the other context aggregators.
