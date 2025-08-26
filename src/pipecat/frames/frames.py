@@ -305,6 +305,11 @@ class TextFrame(DataFrame):
     """
 
     text: str
+    skip_tts: bool = field(init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.skip_tts = False
 
     def __str__(self):
         pts = format_pts(self.pts)
