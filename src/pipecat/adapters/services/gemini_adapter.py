@@ -91,7 +91,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
 
         return formatted_standard_tools + custom_gemini_tools
 
-    def get_messages_for_logging(self, context: LLMContext) -> List[dict[str, Any]]:
+    def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about Gemini.
 
         Removes or truncates sensitive data like image content for safe logging.

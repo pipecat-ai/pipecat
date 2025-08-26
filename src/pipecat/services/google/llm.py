@@ -292,11 +292,11 @@ class GoogleLLMContext(OpenAILLMContext):
         # Add the converted messages to our existing messages
         self._messages.extend(converted_messages)
 
-    def get_messages_for_logging(self):
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get messages formatted for logging with sensitive data redacted.
 
         Returns:
-            List of message dictionaries with inline data redacted.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -858,8 +858,8 @@ class GoogleLLMService(LLMService):
         self, context: OpenAILLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         logger.debug(
-            # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
-            f"{self}: Generating chat from OpenAI context [{context.get_messages_for_logging()}]"
+            # f"{self}: Generating chat [{self._system_instruction}] | {context.get_messages_for_logging()}"
+            f"{self}: Generating chat from OpenAI context {context.get_messages_for_logging()}"
         )
 
         params = GeminiLLMInvocationParams(
@@ -875,8 +875,8 @@ class GoogleLLMService(LLMService):
     ) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
         logger.debug(
-            # f"{self}: Generating chat [{self._system_instruction}] | [{context.get_messages_for_logging()}]"
-            f"{self}: Generating chat from universal context [{adapter.get_messages_for_logging(context)}]"
+            # f"{self}: Generating chat [{self._system_instruction}] | {context.get_messages_for_logging()}"
+            f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
         )
 
         params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)

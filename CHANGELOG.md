@@ -96,6 +96,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed some `get_messages_for_logging()` that were returning a JSON string
+  instead of a list.
+
 - Fixed a `DailyTransport` issue that prevented DTMF tones from being sent.
 
 - Fixed a missing import in `SentryMetrics`.
