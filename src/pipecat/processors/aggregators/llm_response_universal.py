@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Literal, Optional, Set
 
 from loguru import logger
 
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -57,6 +58,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMSpecificMessage,
+    NotGiven,
 )
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
@@ -148,7 +150,7 @@ class LLMContextAggregator(FrameProcessor):
         """
         self._context.set_messages(messages)
 
-    def set_tools(self, tools: List):
+    def set_tools(self, tools: ToolsSchema | NotGiven):
         """Set tools in the context.
 
         Args:
