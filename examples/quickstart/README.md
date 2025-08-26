@@ -83,7 +83,7 @@ Transform your local bot into a production-ready service. Pipecat Cloud handles 
 
 3. Set up Docker for building your bot image:
 
-   - **Install [Docker](https://www.docker.com/)** on your system
+   - **Install [Docker Desktop](https://www.docker.com/)** on your system
    - **Create a [Docker Hub](https://hub.docker.com/) account**
    - **Login to Docker Hub:**
 
