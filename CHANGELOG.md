@@ -85,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an `LLMService.run_inference()` method to LLM services to enable
   direct, out-of-band (i.e. out-of-pipeline) inference.
 
+### Changed
+
+- Updated `SarvamTTSService` to use WebSocket streaming for real-time audio 
+  generation with multiple Indian languages, with HTTP support still available 
+  via `SarvamHttpTTSService`.
+
 ### Fixed
 
 - Fixed a `CartesiaTTSService` issue that was causing the application to hang
