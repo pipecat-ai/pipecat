@@ -142,6 +142,7 @@ class OjinPersonaFSM:
         self._previous_speech_frame: Optional[OutputImageRawFrame] = None
         self.on_state_changed_callback = on_state_changed_callback
         self.last_update_time: float = -1.0
+        self._transition_timestamp: float = -1.0
 
     async def start(self):
         await self.set_state(PersonaState.INITIALIZING)
@@ -352,6 +353,7 @@ class OjinPersonaFSM:
 
             case PersonaState.IDLE_TO_SPEECH:
                 self._waiting_for_image_frames = True
+                self._transition_timestamp = time.perf_counter()
                 self._transition_time = (
                     self._playback_loop.get_playback_time()
                     + self._settings.idle_to_speech_seconds
@@ -636,11 +638,12 @@ class OjinPersonaService(FrameProcessor):
     async def _incomming_frame_task(self):
         while True:
             if self._fsm is not None:
-                if self._fsm._state == PersonaState.SPEECH and self._last_frame_msg is not None:
-                    last_received_frame_time = time.time() - self._last_frame_msg
+                time_since_transition = time.perf_counter() - self._fsm._transition_timestamp
 
-                    if last_received_frame_time > 1.5 and not self._stopping:
-                        self._stopping = True
+                if self._fsm._state == PersonaState.SPEECH and self._last_frame_msg is not None:
+                    last_received_frame_time = time.perf_counter() - self._last_frame_msg
+
+                    if last_received_frame_time > 1.5:
                         logger.info("Ending interaction")
                         await self.push_ojin_message(
                             OjinPersonaCancelInteractionMessage(
@@ -651,8 +654,17 @@ class OjinPersonaService(FrameProcessor):
                             ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
                         )
                         self._last_frame_msg = None
-                        self._stopping = False
-                        
+                    
+                elif self._fsm._state == PersonaState.SPEECH and time_since_transition > 2.5:
+                    logger.warning("No Frames received from the server, stopping interaction by timeout")
+                    await self.push_ojin_message(
+                        OjinPersonaCancelInteractionMessage(
+                            interaction_id=self._interaction.interaction_id,
+                        )
+                    )
+                    await self._fsm.on_conversation_signal(
+                        ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
+                    )
             
             await asyncio.sleep(0.01)
 
@@ -770,7 +782,7 @@ class OjinPersonaService(FrameProcessor):
                 await self.push_frame(image_frame)
 
             self._interaction.next_frame()
-            self._last_frame_msg = time.time()
+            self._last_frame_msg = time.perf_counter()
             if message.is_final_response:
                 logger.debug("No more video frames expected")
                 if self._fsm is not None:
