@@ -14,7 +14,6 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
@@ -38,6 +37,8 @@ from pipecat.frames.frames import (
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
     LLMConfigureOutputFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -285,7 +286,7 @@ class LLMService(AIService):
             frame: The frame to push.
             direction: The direction of frame pushing.
         """
-        if isinstance(frame, LLMTextFrame):
+        if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
             frame.skip_tts = self._skip_tts
 
         await super().push_frame(frame, direction)
