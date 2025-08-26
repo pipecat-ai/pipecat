@@ -36,7 +36,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-
+from ojin.profiling_utils import FPSTracker
 
 class OjinPersonaInitializedFrame(Frame):
     """Frame indicating that the persona has been initialized and can now output frames."""
@@ -142,7 +142,13 @@ class OjinPersonaFSM:
         self._previous_speech_frame: Optional[OutputImageRawFrame] = None
         self.on_state_changed_callback = on_state_changed_callback
         self.last_update_time: float = -1.0
+<<<<<<< HEAD
         self._transition_timestamp: float = -1.0
+        self.fps_tracker = FPSTracker("OjinPersonaFSM")
+=======
+        self.fps_tracker = FPSTracker("OjinPersonaFSM")
+        self._transition_timestamp: float = -1.0
+>>>>>>> cc0f8759f8c10a8b54260707981fa431d552cc3f
 
     async def start(self):
         await self.set_state(PersonaState.INITIALIZING)
@@ -161,10 +167,7 @@ class OjinPersonaFSM:
         await self.on_state_changed_callback(old_state, new_state)
 
     def get_transition_frame_idx(self) -> int:
-        logger.debug(
-            f"get_transition_frame_idx: {self._transition_time} frame {int(self._transition_time * 25)}"
-        )
-        return int(self._transition_time * 25)
+        return math.ceil(self._transition_time * 25)
 
     def get_state(self) -> PersonaState:
         """Get the current state of the persona FSM.
@@ -283,12 +286,6 @@ class OjinPersonaFSM:
                 self.last_update_time = time.perf_counter()
 
                 if (
-                    self._state == PersonaState.IDLE_TO_SPEECH
-                    and self._playback_loop.get_playback_time() >= self._transition_time
-                ):
-                    await self.set_state(PersonaState.SPEECH)
-
-                if (
                     not self._waiting_for_image_frames
                     and self._speech_frames.empty()
                     and (
@@ -337,9 +334,13 @@ class OjinPersonaFSM:
         """
         match new_state:
             case PersonaState.INITIALIZING:
+                self.fps_tracker.start()
                 self._waiting_for_image_frames = True
 
             case PersonaState.IDLE:
+                # abort transition
+                #self.fps_tracker.stop()
+                self._transition_time = -1
                 # If we have a previous speech frame we seek to it to syncrhonize perfectly the following idle frame
                 if self._previous_speech_frame is not None:                    
                     self._playback_loop.seek_frame(self._previous_speech_frame.pts + 1)
@@ -348,7 +349,9 @@ class OjinPersonaFSM:
                 if old_state == PersonaState.INITIALIZING:
                     self._start_playback()
 
-            case PersonaState.SPEECH:
+            case PersonaState.SPEECH:      
+                self.fps_tracker.start()          
+                self._transition_time = -1
                 pass
 
             case PersonaState.IDLE_TO_SPEECH:
@@ -376,8 +379,12 @@ class OjinPersonaFSM:
         # Wait until current frame idx is different than the last one (frame steps of 25 fps)
         if self._current_frame_idx == self._playback_loop.get_current_frame_idx():
             return None
-
+        
         self._current_frame_idx = self._playback_loop.get_current_frame_idx()
+
+        # Transition to speech as soon as we reach the transition frame
+        if self._current_frame_idx == self.get_transition_frame_idx():
+            await self.set_state(PersonaState.SPEECH)
 
         match self._state:
             case PersonaState.IDLE | PersonaState.IDLE_TO_SPEECH:
@@ -421,6 +428,7 @@ class OjinPersonaFSM:
 
                 else:
                     self._previous_speech_frame = frame
+                    self.fps_tracker.update(1)
                     if frame.pts % 1 == 0:
                         logger.debug(
                             f"Pushing speech frame: {frame.pts} ==? {self._current_frame_idx}"
@@ -547,9 +555,17 @@ class OjinPersonaService(FrameProcessor):
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
 
         self._resampler = create_default_resampler()
+<<<<<<< HEAD
         self.should_generate_silence: bool = False
         self._last_frame_msg: int | None = None
         self._stopping = False
+        self._server_fps_tracker = FPSTracker("OjinPersonaService")
+=======
+        self._server_fps_tracker = FPSTracker("OjinPersonaService")
+        self.should_generate_silence: bool = False
+        self._last_frame_msg: int | None = None
+        self._stopping = False
+>>>>>>> cc0f8759f8c10a8b54260707981fa431d552cc3f
 
     async def _generate_and_send_silence(self, duration: float, is_last_input: bool):
         num_samples = int(duration * OJIN_PERSONA_SAMPLE_RATE)
@@ -587,6 +603,7 @@ class OjinPersonaService(FrameProcessor):
 
         """
         if new_state == PersonaState.INITIALIZING:
+            self._server_fps_tracker.start()
             # Send silence to persona with idle_sequence_duration
             await self._start_interaction(is_speech=False)
             assert self._interaction is not None
@@ -595,6 +612,9 @@ class OjinPersonaService(FrameProcessor):
                 self._settings.idle_sequence_duration, True
             )
 
+        if new_state == PersonaState.IDLE_TO_SPEECH:
+            self._server_fps_tracker.start()
+            
         if old_state == PersonaState.INITIALIZING and new_state == PersonaState.IDLE:
             await self.push_frame(
                 OjinPersonaInitializedFrame(), direction=FrameDirection.DOWNSTREAM
@@ -603,12 +623,13 @@ class OjinPersonaService(FrameProcessor):
                 OjinPersonaInitializedFrame(), direction=FrameDirection.UPSTREAM
             )
 
-        if new_state == PersonaState.SPEECH and self._audio_output_task is None:
-            self._start_pushing_audio_output()
+        if new_state == PersonaState.SPEECH and self._audio_output_task is None:            
+            self._start_pushing_audio_output()            
 
         if new_state == PersonaState.IDLE:
             logger.debug("PersonaState.IDLE reached - closing interaction")
             self._close_interaction()
+            #self._server_fps_tracker.stop()
             if self._audio_output_task is not None:
                 logger.debug("Stopping audio output")
                 await self._stop_pushing_audio_output()
@@ -698,6 +719,14 @@ class OjinPersonaService(FrameProcessor):
 
         logger.debug(f"OjinPersonaService {self._settings.persona_config_id} stopped")
 
+    @property
+    def fsm_fps_tracker(self):
+        return self._fsm.fps_tracker
+
+    @property
+    def server_fps_tracker(self):
+        return self._server_fps_tracker
+    
     def _start_pushing_audio_output(self):
         logger.warning("Start pushing audio output")
         self._audio_output_task = self.create_task(self._push_audio_output())
@@ -743,7 +772,7 @@ class OjinPersonaService(FrameProcessor):
         """
         assert self._client is not None
         if hasattr(message, "interaction_id"):
-            logger.info(f"interaction {message.interaction_id}")
+            logger.info(f"Sending message type {type(message)} with interaction {message.interaction_id}")
 
         await self._client.send_message(message)
 
@@ -764,6 +793,7 @@ class OjinPersonaService(FrameProcessor):
                 logger.warning("No interaction in progress when receiving video frame")
                 return
 
+            self._server_fps_tracker.update(1)
             logger.debug(f"Received video frame fame_idx: {self._interaction.frame_idx}, interactionId: {message.interaction_id}, currentInteractionId: {self._interaction.interaction_id}")            
             # logger.info(f"Video frame received: {self._interaction.frame_idx} isFinal: {message.is_final_response}")
             # Create and push the image frame
@@ -959,10 +989,11 @@ class OjinPersonaService(FrameProcessor):
             self._interaction.mouth_opening_scale = IDLE_MOUTH_OPENING_SCALE
             self._interaction.start_frame_idx = 0
             self._interaction.frame_idx = 0
-
-        logger.debug("Sending StartInteractionMessage")
+        
         response = await self._client.start_interaction()
+        logger.debug(f"Started interaction with id: {response.interaction_id}")
         self._interaction.interaction_id = response.interaction_id
+        self._interaction.set_state(InteractionState.ACTIVE)
 
     async def _end_interaction(self):
         """End the current interaction.

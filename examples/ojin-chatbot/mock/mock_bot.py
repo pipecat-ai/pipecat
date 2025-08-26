@@ -25,6 +25,13 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
 from mock_tts import MockTTSProcessor
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
+# Ensure we can import sibling 'utils' package when running from the 'mock' subdir
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from utils.frame_metrics import FrameMetricsProcessor
+from utils.tk_overlay import create_fps_overlay, start_tk_fps_udpater, start_tk_updater
 
 load_dotenv(override=True)
 
@@ -89,12 +96,12 @@ async def main():
     input = MockTTSProcessor(
         {
             "audio_sequence": [                
-                ("./mock/assets/long_audio_16k.wav", 20),
+                ("./mock/assets/long_audio_16k.wav", 14),
                 #("./mock/assets/long_audio_16k.wav", 23),
             ],
             "event_sequence": [                
-                ("user_started_speaking", 18),
-                ("user_stopped_speaking", 19),
+                ("user_started_speaking", 12),
+                ("user_stopped_speaking", 13),
                 #("user_started_speaking", 21),
                 #("user_stopped_speaking", 22),
             ],
@@ -115,22 +122,6 @@ async def main():
     tk_root.after_idle(tk_root.attributes, '-topmost', False)
     tk_root.focus_force()
     
-    # Make Tkinter responsive by processing events periodically
-    async def update_tk_periodically():
-        while True:
-            try:
-                tk_root.update_idletasks()
-                tk_root.update()
-                await asyncio.sleep(0.01)  # 10ms delay
-            except tk.TclError:
-                break  # Window was closed
-            except Exception as e:
-                logger.error(f"Error updating Tkinter: {e}")
-                break
-    
-    # Start the periodic updater as a background task
-    tk_update_task = asyncio.create_task(update_tk_periodically())
-
     tk_transport = TkLocalTransport(
         tk_root,
         TkTransportParams(
@@ -151,19 +142,28 @@ async def main():
         api_key=os.getenv("OJIN_API_KEY", ""),
         persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),        
         image_size=(1280, 720),
-        idle_to_speech_seconds=1.5,
+        idle_to_speech_seconds=1.0,
         idle_sequence_duration=5,
         tts_audio_passthrough=False,
         push_bot_stopped_speaking_frames=False,
     ))    
 
-    # Create image format converter
+    # Create FPS overlay and start Tk updater    
+    fps_server_canvas = create_fps_overlay(tk_root, x=8, y=8, width=1280, height=240)
+    fps_canvas = create_fps_overlay(tk_root, x=8, y=248, width=1280, height=240)
+    tk_update_task = start_tk_updater(tk_root, interval_ms=10)
+    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona.fsm_fps_tracker, fps_canvas, interval_ms=80)    
+    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona.server_fps_tracker, fps_server_canvas, interval_ms=80)    
+
+    # Frame metrics and image format converter
+    frame_metrics = FrameMetricsProcessor()
     image_converter = ImageFormatConverter()
     
     pipeline = Pipeline(
         [
             input,
             persona,
+            frame_metrics,
             image_converter,  # Convert image format from BGR to PPM
             tk_transport.output(),  # Transport video output
         ]
@@ -187,12 +187,11 @@ async def main():
         await runner.run(task)
     finally:
         # Clean up the Tkinter update task
-        if 'tk_update_task' in locals():
+        if tk_update_task:
             tk_update_task.cancel()
-            try:
-                await tk_update_task
-            except asyncio.CancelledError:
-                pass
+        if tk_fps_update_task:
+            tk_fps_update_task.cancel()
+  
 
 
 if __name__ == "__main__":    

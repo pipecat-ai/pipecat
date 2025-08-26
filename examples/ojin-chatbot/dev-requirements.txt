@@ -1,4 +1,4 @@
--e ../../[openai,elevenlabs,deepgram,ojin]
+-e ../../[openai,elevenlabs,deepgram,ojin,silero,whisper]
 -e ../../../ojin/managed-models/avatar/services
 textual==1.0.0
 pydantic-settings>=2.7.1

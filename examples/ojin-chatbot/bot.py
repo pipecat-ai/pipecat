@@ -30,6 +30,7 @@ from pipecat.services.ojin.video import OjinPersonaService, OjinPersonaSettings
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
+from utils.tk_overlay import create_fps_overlay, start_tk_fps_udpater, start_tk_updater
 
 load_dotenv(override=True)
 
@@ -100,22 +101,6 @@ async def main():
     tk_root.attributes('-topmost', True)
     tk_root.after_idle(tk_root.attributes, '-topmost', False)
     tk_root.focus_force()
-    
-    # Make Tkinter responsive by processing events periodically
-    async def update_tk_periodically():
-        while True:
-            try:
-                tk_root.update_idletasks()
-                tk_root.update()
-                await asyncio.sleep(0.01)  # 10ms delay
-            except tk.TclError:
-                break  # Window was closed
-            except Exception as e:
-                logger.error(f"Error updating Tkinter: {e}")
-                break
-    
-    # Start the periodic updater as a background task
-    tk_update_task = asyncio.create_task(update_tk_periodically())
 
     tk_transport = TkLocalTransport(
         tk_root,
@@ -171,6 +156,13 @@ async def main():
     # Create image format converter
     image_converter = ImageFormatConverter()
     
+    # Create FPS overlay and start Tk updater    
+    fps_server_canvas = create_fps_overlay(tk_root, x=8, y=8, width=1280, height=120)
+    fps_canvas = create_fps_overlay(tk_root, x=8, y=128, width=1280, height=120)
+    tk_update_task = start_tk_updater(tk_root, interval_ms=10)
+    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona.fsm_fps_tracker, fps_canvas, interval_ms=80)    
+    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona.server_fps_tracker, fps_server_canvas, interval_ms=80)    
+
     pipeline = Pipeline(
         [
             audio_transport.input(),
