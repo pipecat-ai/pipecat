@@ -18,7 +18,6 @@ from ojin.ojin_persona_messages import (
     OjinPersonaInteractionInputMessage,
     OjinPersonaInteractionResponseMessage,
     OjinPersonaSessionReadyMessage,
-    StartInteractionResponseMessage,
 )
 from pydantic import BaseModel
 
@@ -68,6 +67,8 @@ class OjinPersonaSettings:
     ws_url: str = field(
         default="wss://models.ojin.ai/realtime"
     )  # websocket url for Ojin platform
+    client_connect_max_retries: int = field(default=3) # amount of times it will try to reconnect to the server
+    client_reconnect_delay: float = field(default=3.0) # time between connecting retries
     persona_config_id: str = field(
         default=""
     )  # config id of the persona to use from Ojin platform
@@ -142,13 +143,8 @@ class OjinPersonaFSM:
         self._previous_speech_frame: Optional[OutputImageRawFrame] = None
         self.on_state_changed_callback = on_state_changed_callback
         self.last_update_time: float = -1.0
-<<<<<<< HEAD
-        self._transition_timestamp: float = -1.0
-        self.fps_tracker = FPSTracker("OjinPersonaFSM")
-=======
         self.fps_tracker = FPSTracker("OjinPersonaFSM")
         self._transition_timestamp: float = -1.0
->>>>>>> cc0f8759f8c10a8b54260707981fa431d552cc3f
 
     async def start(self):
         await self.set_state(PersonaState.INITIALIZING)
@@ -556,17 +552,10 @@ class OjinPersonaService(FrameProcessor):
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
 
         self._resampler = create_default_resampler()
-<<<<<<< HEAD
-        self.should_generate_silence: bool = False
-        self._last_frame_msg: int | None = None
-        self._stopping = False
-        self._server_fps_tracker = FPSTracker("OjinPersonaService")
-=======
         self._server_fps_tracker = FPSTracker("OjinPersonaService")
         self.should_generate_silence: bool = False
         self._last_frame_msg: int | None = None
         self._stopping = False
->>>>>>> cc0f8759f8c10a8b54260707981fa431d552cc3f
 
     async def _generate_and_send_silence(self, duration: float, is_last_input: bool):
         num_samples = int(duration * OJIN_PERSONA_SAMPLE_RATE)
@@ -645,17 +634,41 @@ class OjinPersonaService(FrameProcessor):
         Authenticates with the proxy and creates tasks for processing
         audio and receiving messages.
         """
-        assert self._client is not None
-        try:
-            await self._client.connect()
-        except ConnectionError as e:
-            logger.error(e)
-            return
+        await self.connect_with_retry()
 
         # Create tasks to process audio and video
         self._audio_input_task = self.create_task(self._process_queued_audio())
         self._receive_task = self.create_task(self._receive_messages())
         self._handle_incomming_frame_task = self.create_task(self._incomming_frame_task())
+    
+    async def connect_with_retry(self):
+        """
+        Attempt to connect with configurable retry mechanism.
+        """
+        last_error: Optional[Exception] = None
+        assert self._client is not None
+        
+        for attempt in range(self._settings.client_connect_max_retries):
+            try:
+                logger.info(f"Connection attempt {attempt + 1}/{self._settings.client_connect_max_retries}")
+                await self._client.connect()
+                logger.info("Successfully connected!")
+                return
+                
+            except ConnectionError as e:
+                last_error = e
+                logger.warning(f"Connection attempt {attempt + 1} failed: {e}")
+                
+                # If this was the last attempt, don't wait
+                if attempt < self._settings.client_connect_max_retries - 1:
+                    logger.info(f"Retrying in {self._settings.client_reconnect_delay} seconds...")
+                    await asyncio.sleep(self._settings.client_reconnect_delay)
+        
+        # All retry attempts failed
+        logger.error(f"Failed to connect after {self._settings.client_connect_max_retries} attempts. Last error: {last_error}")
+        await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
+        await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
+        return
 
     async def _incomming_frame_task(self):
         while True:
