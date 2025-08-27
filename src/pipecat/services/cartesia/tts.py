@@ -10,7 +10,7 @@ import base64
 import json
 import uuid
 import warnings
-from typing import AsyncGenerator, List, Optional, Union
+from typing import AsyncGenerator, List, Literal, Optional, Union
 
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -101,7 +101,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control (string or float).
+            speed: Voice speed control.
             emotion: List of emotion controls.
 
                 .. deprecated:: 0.0.68
@@ -109,7 +109,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         """
 
         language: Optional[Language] = Language.EN
-        speed: Optional[Union[str, float]] = ""
+        speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = []
 
     def __init__(
@@ -478,7 +478,7 @@ class CartesiaHttpTTSService(TTSService):
 
         Parameters:
             language: Language to use for synthesis.
-            speed: Voice speed control (string or float).
+            speed: Voice speed control.
             emotion: List of emotion controls.
 
                 .. deprecated:: 0.0.68
@@ -486,7 +486,7 @@ class CartesiaHttpTTSService(TTSService):
         """
 
         language: Optional[Language] = Language.EN
-        speed: Optional[Union[str, float]] = ""
+        speed: Optional[Literal["slow", "normal", "fast"]] = None
         emotion: Optional[List[str]] = Field(default_factory=list)
 
     def __init__(
