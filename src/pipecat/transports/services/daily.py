@@ -640,6 +640,9 @@ class DailyTransportClient(EventHandler):
 
     async def _join(self):
         """Execute the actual room join operation."""
+        if not self._client:
+            return
+
         future = self._get_event_loop().create_future()
 
         camera_enabled = self._params.video_out_enabled and self._params.camera_out_enabled
@@ -731,6 +734,9 @@ class DailyTransportClient(EventHandler):
 
     async def _leave(self):
         """Execute the actual room leave operation."""
+        if not self._client:
+            return
+
         future = self._get_event_loop().create_future()
         self._client.leave(completion=completion_callback(future))
         return await asyncio.wait_for(future, timeout=10)
