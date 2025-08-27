@@ -87,11 +87,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `SarvamTTSService` to use WebSocket streaming for real-time audio 
-  generation with multiple Indian languages, with HTTP support still available 
+- Updated `SarvamTTSService` to use WebSocket streaming for real-time audio
+  generation with multiple Indian languages, with HTTP support still available
   via `SarvamHttpTTSService`.
 
 ### Fixed
+
+- Fixed a missing import in `SentryMetrics`.
 
 - Fixed a `CartesiaTTSService` issue that was causing the application to hang
   after Cartesia's 5 minutes timed out.
