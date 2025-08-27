@@ -6,6 +6,8 @@
 
 """Sentry integration for frame processor metrics."""
 
+import asyncio
+
 from loguru import logger
 
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
