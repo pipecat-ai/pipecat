@@ -350,6 +350,7 @@ class DailyTransportClient(EventHandler):
         self._video_renderers = {}
         self._transcription_ids = []
         self._transcription_status = None
+        self._dial_out_session_id: str = ""
 
         self._joining = False
         self._joined = False
@@ -790,6 +791,14 @@ class DailyTransportClient(EventHandler):
         Args:
             settings: DTMF settings including tones and target session.
         """
+        session_id = settings.get("sessionId") or self._dial_out_session_id
+        if not session_id:
+            logger.error("Unable to send DTMF: 'sessionId' is not set")
+            return
+
+        # Update 'sessionId' field.
+        settings["sessionId"] = session_id
+
         future = self._get_event_loop().create_future()
         self._client.send_dtmf(settings, completion=completion_callback(future))
         await future
@@ -1166,6 +1175,7 @@ class DailyTransportClient(EventHandler):
         Args:
             data: Dial-out connection data.
         """
+        self._dial_out_session_id = data["sessionId"] if "sessionId" in data else ""
         self._call_event_callback(self._callbacks.on_dialout_connected, data)
 
     def on_dialout_stopped(self, data: Any):
@@ -1174,6 +1184,9 @@ class DailyTransportClient(EventHandler):
         Args:
             data: Dial-out stop data.
         """
+        # Cleanup only if our session stopped.
+        if data["sessionId"] == self._dial_out_session_id:
+            self._dial_out_session_id = ""
         self._call_event_callback(self._callbacks.on_dialout_stopped, data)
 
     def on_dialout_error(self, data: Any):
@@ -1182,6 +1195,9 @@ class DailyTransportClient(EventHandler):
         Args:
             data: Dial-out error data.
         """
+        # Cleanup only if our session errored out.
+        if data["sessionId"] == self._dial_out_session_id:
+            self._dial_out_session_id = ""
         self._call_event_callback(self._callbacks.on_dialout_error, data)
 
     def on_dialout_warning(self, data: Any):
