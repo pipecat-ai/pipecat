@@ -491,6 +491,7 @@ class OjinPersonaInteraction:
         if self.state == new_state:
             return
 
+        logger.debug(f"Old Interaction state: {self.state}, New Interaction state: {new_state}")
         old_state = self.state
         self.state = new_state
 
@@ -788,7 +789,7 @@ class OjinPersonaService(FrameProcessor):
             return self._fsm.get_state()
         return PersonaState.INVALID
 
-    def is_tts_input_allowed(self) -> bool:
+    def is_pending_initialization(self) -> bool:
         """Check if the persona is ready to receive TTS input.
 
         Returns:
@@ -798,6 +799,17 @@ class OjinPersonaService(FrameProcessor):
         return self.get_fsm_state() not in [
             PersonaState.INITIALIZING,
             PersonaState.INVALID,
+        ]
+
+    def is_tts_input_allowed(self) -> bool:
+        """Check if the persona is ready to receive TTS input.
+
+        Returns:
+            True if the persona is in a state that can accept TTS input, False otherwise
+
+        """
+        return self._interaction is None or self._interaction.state in [
+            InteractionState.ACTIVE,
         ]
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -843,7 +855,7 @@ class OjinPersonaService(FrameProcessor):
         elif isinstance(frame, StartInterruptionFrame):
             logger.debug("StartInterruptionFrame")
             # only interrupt if we are allowed to send TTS input
-            if self.is_tts_input_allowed():
+            if self.is_pending_initialization():
                 await self._interrupt()
 
             await self.push_frame(frame, direction)
@@ -950,7 +962,7 @@ class OjinPersonaService(FrameProcessor):
             frame.audio, frame.sample_rate, OJIN_PERSONA_SAMPLE_RATE
         )
 
-        if not self.is_tts_input_allowed():
+        if not self.is_pending_initialization():
             if self._interaction is None or self._interaction.interaction_id is None:
                 logger.debug("No interaction is set")
                 return
@@ -972,7 +984,7 @@ class OjinPersonaService(FrameProcessor):
             logger.debug(
                 f"Audio input is still not allowed (initializing), queing to pending interaction. Queue size: {self._pending_interaction.audio_input_queue.qsize()}"
             )
-        else:
+        elif self.is_tts_input_allowed():
             if self._interaction is None:
                 await self._start_interaction(is_speech=True)
 
@@ -1068,6 +1080,7 @@ class OjinPersonaService(FrameProcessor):
                     )
 
             if is_final_message:
+                logger.debug("sending last audio input")
                 self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
                 message.is_last_input = True
 
