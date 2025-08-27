@@ -87,13 +87,25 @@ class IVRProcessor(FrameProcessor):
 
             # Update the context with the appropriate prompt based on the initial mode
             if self._initial_mode == "conversation":
+                # Set the conversation prompt and push it upstream
                 messages = [{"role": "system", "content": self._conversation_prompt}]
                 llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
                 await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
+
+                # Set the VAD parameters delay and push it upstream
+                params = VADParams(stop_secs=self._conversation_response_delay)
+                vad_update_frame = VADParamsUpdateFrame(params=params)
+                await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
             else:
+                # Set the IVR prompt and push it upstream
                 messages = [{"role": "system", "content": self._ivr_prompt}]
                 llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
                 await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
+
+                # Set the VAD parameters delay and push it upstream
+                params = VADParams(stop_secs=self._ivr_response_delay)
+                vad_update_frame = VADParamsUpdateFrame(params=params)
+                await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
 
         elif isinstance(frame, LLMTextFrame):
             # Process text through the pattern aggregator
@@ -142,7 +154,7 @@ class IVRProcessor(FrameProcessor):
         """Handle IVR status action.
 
         Args:
-            status: The IVR status (detected, completed, stuck).
+            status: The IVR status (detected, completed, stuck, wait).
         """
         logger.debug(f"IVR status detected: {status}")
 
@@ -152,6 +164,8 @@ class IVRProcessor(FrameProcessor):
             await self._handle_ivr_completed()
         elif status == "stuck":
             await self._handle_ivr_stuck()
+        elif status == "wait":
+            await self._handle_ivr_wait()
         else:
             logger.warning(f"Unknown IVR status: {status}")
 
@@ -204,6 +218,14 @@ class IVRProcessor(FrameProcessor):
         logger.info("IVR navigation stuck - triggering event handler")
         await self._call_event_handler("on_ivr_stuck", self)
 
+    async def _handle_ivr_wait(self):
+        """Handle IVR wait state when transcription is incomplete.
+
+        The LLM is indicating it needs more information to make a decision.
+        This is a no-op since the system will continue to provide more transcription.
+        """
+        logger.debug("IVR waiting for more complete transcription")
+
 
 class IVRNavigator(Pipeline):
     """IVR navigator for Pipecat."""
@@ -212,9 +234,65 @@ class IVRNavigator(Pipeline):
         """IMPORTANT: When you detect an IVR system, respond ONLY with `<ivr>detected</ivr>`."""
     )
 
-    IVR_NAVIGATION_PROMPT = """IMPORTANT: When you have completed the IVR navigation, respond ONLY with `<ivr>completed</ivr>`. If you are stuck and cannot find a viable solution to navigating the IVR system, respond ONLY with `<ivr>stuck</ivr>`.
-    
-    You are navigating an IVR system and will be given a list of options to choose from. When those options are keypresses, respond with the keypress option wrapped in DTMF tags. For example, to respond with the number 1, you would respond ONLY with `<dtmf>1</dtmf>`.
+    IVR_NAVIGATION_BASE = """You are navigating an Interactive Voice Response (IVR) system to accomplish a specific goal. You receive text transcriptions of the IVR system's audio prompts and menu options.
+
+YOUR NAVIGATION GOAL:
+{goal}
+
+NAVIGATION RULES:
+1. When you see menu options with keypress instructions (e.g., "Press 1 for...", "Press 2 for..."), ONLY respond with a keypress if one of the options aligns with your navigation goal
+2. If an option closely matches your goal, respond with: `<dtmf>NUMBER</dtmf>` (e.g., `<dtmf>1</dtmf>`)
+3. For sequences of numbers (dates, account numbers, phone numbers), enter each digit separately: `<dtmf>1</dtmf><dtmf>2</dtmf><dtmf>3</dtmf>` for "123"
+4. When the system asks for verbal responses (e.g., "Say Yes or No", "Please state your name", "What department?"), respond with natural language text ending with punctuation
+5. If multiple options seem relevant, choose the most specific or direct path
+6. If NO options are relevant to your goal, respond with `<ivr>wait</ivr>` - the system may present more options
+7. If the transcription is incomplete or unclear, respond with `<ivr>wait</ivr>` to indicate you need more information
+
+COMPLETION CRITERIA - Respond with `<ivr>completed</ivr>` when:
+- You see "Please hold while I transfer you" or similar transfer language
+- You see "You're being connected to..." or "Connecting you to..."
+- The system says "One moment please" after selecting your final option
+- The system indicates you've reached the target department/service
+- You've successfully navigated to your goal and are being transferred to a human
+
+WAIT CRITERIA - Respond with `<ivr>wait</ivr>` when:
+- NONE of the presented options are relevant to your navigation goal
+- The transcription appears to be cut off mid-sentence
+- You can see partial menu options but the list seems incomplete
+- The transcription is unclear or garbled
+- You suspect there are more options that weren't captured in the transcription
+- The system presents options for specific user types that don't apply to your goal
+
+IMPORTANT: Do NOT feel pressured to select an option if none match your goal. Waiting is often the correct response when the IVR system is presenting partial menus or options intended for different user types.
+
+STUCK CRITERIA - Respond with `<ivr>stuck</ivr>` when:
+- You've been through the same menu options 3+ times without progress
+- No available options relate to your goal after careful consideration
+- You encounter an error message or "invalid selection" repeatedly
+- The system asks for information you don't have (account numbers, PINs, etc.)
+- You reach a dead end with no relevant options and no way back
+
+STRATEGY TIPS:
+- Look for keywords in menu options that match your goal
+- Try general options like "Customer Service" or "Other Services" if specific options aren't available
+- Pay attention to sub-menus. Sometimes the path requires multiple steps through different menu layers
+- If you see "For all other inquiries, press..." that's often a good fallback option
+- Remember that reaching your goal may require navigating through several menu levels
+- Be patient - IVR systems often present options in waves, and waiting for the right option is better than selecting the wrong one
+
+SEQUENCE INPUT EXAMPLES:
+- For date of birth "01/15/1990": `<dtmf>0</dtmf><dtmf>1</dtmf><dtmf>1</dtmf><dtmf>5</dtmf><dtmf>1</dtmf><dtmf>9</dtmf><dtmf>9</dtmf><dtmf>0</dtmf>`
+- For account number "12345": `<dtmf>1</dtmf><dtmf>2</dtmf><dtmf>3</dtmf><dtmf>4</dtmf><dtmf>5</dtmf>`
+- For phone number last 4 digits "6789": `<dtmf>6</dtmf><dtmf>7</dtmf><dtmf>8</dtmf><dtmf>9</dtmf>`
+
+VERBAL RESPONSE EXAMPLES:
+- "Is your date of birth 01/15/1990? Say Yes or No" → "Yes."
+- "Please state your first and last name" → "John Smith."
+- "What department are you trying to reach?" → "Billing."
+- "Are you calling about an existing order? Please say Yes or No" → "No."
+- "Did I hear that correctly? Please say Yes or No" → "Yes."
+
+Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences), `<ivr>completed</ivr>`, `<ivr>stuck</ivr>`, `<ivr>wait</ivr>`, OR natural language text when verbal responses are requested. No other response types.
     """
 
     def __init__(
@@ -223,7 +301,7 @@ class IVRNavigator(Pipeline):
         llm: LLMService,
         ivr_prompt: str,
         conversation_prompt: str,
-        ivr_response_delay: float = 2.0,
+        ivr_response_delay: float = 2.5,
         conversation_response_delay: float = 0.8,
         initial_mode: Optional[Literal["ivr", "conversation"]] = "conversation",
     ):
@@ -238,11 +316,13 @@ class IVRNavigator(Pipeline):
             initial_mode: The initial mode to start in. Default is "conversation".
         """
         self._llm = llm
-        self._ivr_prompt = self.IVR_NAVIGATION_PROMPT + "\n\n" + ivr_prompt
+        self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
         self._conversation_prompt = self.IVR_DETECTED_PROMPT + "\n\n" + conversation_prompt
         self._ivr_response_delay = ivr_response_delay
         self._conversation_response_delay = conversation_response_delay
         self._initial_mode = initial_mode
+
+        print(self._ivr_prompt)
 
         self._ivr_processor = IVRProcessor(
             ivr_prompt=self._ivr_prompt,
