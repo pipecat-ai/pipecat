@@ -96,6 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a missing import in `SentryMetrics`.
+
 - Fixed `AWSPollyTTSService` to support AWS credential provider chain (IAM
   roles, IRSA, instance profiles) instead of requiring explicit environment
   variables.
