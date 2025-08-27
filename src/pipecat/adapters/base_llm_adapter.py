@@ -11,7 +11,7 @@ adapters that handle tool format conversion and standardization.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Generic, List, TypeVar, Union, cast
+from typing import Any, Dict, Generic, List, TypeVar
 
 from loguru import logger
 
@@ -63,7 +63,7 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
         pass
 
     @abstractmethod
-    def get_messages_for_logging(self, context: LLMContext) -> List[dict[str, Any]]:
+    def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about this provider.
 
         Args:
