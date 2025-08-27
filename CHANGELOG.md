@@ -105,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a `CartesiaTTSService` issue that was causing the application to hang
   after Cartesia's 5 minutes timed out.
 
+- Fixed an issue preventing `SpeechmaticsSTTService` from transcribing audio.
+
 ## [0.0.81] - 2025-08-25
 
 ### Added

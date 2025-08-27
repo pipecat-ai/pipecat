@@ -581,7 +581,6 @@ class SpeechmaticsSTTService(STTService):
             logger.debug(f"{self} Connected to Speechmatics STT service")
         except Exception as e:
             logger.error(f"{self} Error connecting to Speechmatics: {e}")
-        finally:
             self._client = None
 
     async def _disconnect(self) -> None:
