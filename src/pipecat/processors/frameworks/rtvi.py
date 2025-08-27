@@ -1124,7 +1124,9 @@ class RTVIProcessor(FrameProcessor):
         self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
-        self._client_version = []
+        # Default to 0.3.0 which is the last version before actually having a
+        # "client-version".
+        self._client_version = [0, 3, 0]
         self._errors_enabled = True
 
         self._registered_actions: Dict[str, RTVIAction] = {}
@@ -1431,16 +1433,13 @@ class RTVIProcessor(FrameProcessor):
 
     async def _handle_client_ready(self, request_id: str, data: RTVIClientReadyData | None):
         """Handle the client-ready message from the client."""
-        version = data.version if data else "unknown"
+        version = data.version if data else None
         logger.debug(f"Received client-ready: version {version}")
-        if version == "unknown":
-            self._client_version = [0, 3, 0]  # Default to 0.3.0 if unknown
-        else:
+        if version:
             try:
                 self._client_version = [int(v) for v in version.split(".")]
             except ValueError:
                 logger.warning(f"Invalid client version format: {version}")
-                self._client_version = [0, 3, 0]
         about = data.about if data else {"library": "unknown"}
         logger.debug(f"Client Details: {about}")
         if self._input_transport:
@@ -1623,7 +1622,7 @@ class RTVIProcessor(FrameProcessor):
     async def _send_bot_ready(self):
         """Send the bot-ready message to the client."""
         config = None
-        if self._client_version[0] < 1:
+        if self._client_version and self._client_version[0] < 1:
             config = self._config.config
         message = RTVIBotReady(
             id=self._client_ready_id,
