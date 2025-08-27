@@ -634,14 +634,17 @@ class OjinPersonaService(FrameProcessor):
         Authenticates with the proxy and creates tasks for processing
         audio and receiving messages.
         """
-        await self.connect_with_retry()
+        is_connected = await self.connect_with_retry()
+
+        if not is_connected:
+            return
 
         # Create tasks to process audio and video
         self._audio_input_task = self.create_task(self._process_queued_audio())
         self._receive_task = self.create_task(self._receive_messages())
         self._handle_incomming_frame_task = self.create_task(self._incomming_frame_task())
     
-    async def connect_with_retry(self):
+    async def connect_with_retry(self) -> bool:
         """
         Attempt to connect with configurable retry mechanism.
         """
@@ -653,7 +656,7 @@ class OjinPersonaService(FrameProcessor):
                 logger.info(f"Connection attempt {attempt + 1}/{self._settings.client_connect_max_retries}")
                 await self._client.connect()
                 logger.info("Successfully connected!")
-                return
+                return True
                 
             except ConnectionError as e:
                 last_error = e
@@ -668,7 +671,7 @@ class OjinPersonaService(FrameProcessor):
         logger.error(f"Failed to connect after {self._settings.client_connect_max_retries} attempts. Last error: {last_error}")
         await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
         await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
-        return
+        return False
 
     async def _incomming_frame_task(self):
         while True:
