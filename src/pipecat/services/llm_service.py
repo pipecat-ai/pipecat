@@ -14,7 +14,6 @@ from typing import (
     Awaitable,
     Callable,
     Dict,
-    List,
     Mapping,
     Optional,
     Protocol,
@@ -37,6 +36,10 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
+    LLMConfigureOutputFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
     UserImageRequestFrame,
@@ -179,6 +182,7 @@ class LLMService(AIService):
         self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
         self._tracing_enabled: bool = False
+        self._skip_tts: bool = False
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
@@ -272,6 +276,20 @@ class LLMService(AIService):
 
         if isinstance(frame, StartInterruptionFrame):
             await self._handle_interruptions(frame)
+        elif isinstance(frame, LLMConfigureOutputFrame):
+            self._skip_tts = frame.skip_tts
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Pushes a frame.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame pushing.
+        """
+        if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
+            frame.skip_tts = self._skip_tts
+
+        await super().push_frame(frame, direction)
 
     async def _handle_interruptions(self, _: StartInterruptionFrame):
         for function_name, entry in self._functions.items():
