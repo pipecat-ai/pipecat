@@ -128,8 +128,7 @@ This creates a secret set called `quickstart-secrets` (matching your TOML file) 
 Build your Docker image and push to Docker Hub:
 
 ```bash
-# Update build.sh with your Docker Hub username, then:
-./build.sh
+uv run pcc docker build-push
 ```
 
 Deploy to Pipecat Cloud:
