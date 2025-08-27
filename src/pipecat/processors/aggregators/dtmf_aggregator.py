@@ -103,7 +103,7 @@ class DTMFAggregator(FrameProcessor):
         digit_value = frame.button.value
         self._aggregation += digit_value
 
-        # For first digit, schedule interruption in separate task
+        # For first digit, schedule interruption.
         if is_first_digit:
             await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
 

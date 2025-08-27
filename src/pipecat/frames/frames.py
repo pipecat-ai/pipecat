@@ -305,6 +305,11 @@ class TextFrame(DataFrame):
     """
 
     text: str
+    skip_tts: bool = field(init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.skip_tts = False
 
     def __str__(self):
         pts = format_pts(self.pts)
@@ -600,6 +605,21 @@ class LLMEnablePromptCachingFrame(DataFrame):
     """
 
     enable: bool
+
+
+@dataclass
+class LLMConfigureOutputFrame(DataFrame):
+    """Frame to configure LLM output.
+
+    This frame is used to configure how the LLM produces output. For example, it
+    can tell the LLM to generate tokens that should be added to the context but
+    not spoken by the TTS service (if one is present in the pipeline).
+
+    Parameters:
+        skip_tts: Whether LLM tokens should skip the TTS service (if any).
+    """
+
+    skip_tts: bool
 
 
 @dataclass
@@ -1331,14 +1351,22 @@ class LLMFullResponseStartFrame(ControlFrame):
     more TextFrames and a final LLMFullResponseEndFrame.
     """
 
-    pass
+    skip_tts: bool = field(init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.skip_tts = False
 
 
 @dataclass
 class LLMFullResponseEndFrame(ControlFrame):
     """Frame indicating the end of an LLM response."""
 
-    pass
+    skip_tts: bool = field(init=False)
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.skip_tts = False
 
 
 @dataclass
