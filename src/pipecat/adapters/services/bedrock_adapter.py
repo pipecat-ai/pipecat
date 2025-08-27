@@ -43,7 +43,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         """
         raise NotImplementedError("Universal LLMContext is not yet supported for AWS Bedrock.")
 
-    def get_messages_for_logging(self, context) -> List[dict[str, Any]]:
+    def get_messages_for_logging(self, context) -> List[Dict[str, Any]]:
         """Get messages from a universal LLM context in a format ready for logging about AWS Bedrock.
 
         Removes or truncates sensitive data like image content for safe logging.

@@ -279,7 +279,7 @@ class BaseOpenAILLMService(LLMService):
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
         logger.debug(
-            f"{self}: Generating chat from OpenAI context [{context.get_messages_for_logging()}]"
+            f"{self}: Generating chat from OpenAI context {context.get_messages_for_logging()}"
         )
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
@@ -311,7 +311,7 @@ class BaseOpenAILLMService(LLMService):
     ) -> AsyncStream[ChatCompletionChunk]:
         adapter = self.get_llm_adapter()
         logger.debug(
-            f"{self}: Generating chat from universal context [{adapter.get_messages_for_logging(context)}]"
+            f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
         )
 
         params: OpenAILLMInvocationParams = adapter.get_llm_invocation_params(context)

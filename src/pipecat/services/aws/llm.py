@@ -556,11 +556,11 @@ class AWSBedrockLLMContext(OpenAILLMContext):
             messages.insert(0, {"role": "system", "content": self.system})
         return messages
 
-    def get_messages_for_logging(self) -> str:
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get messages formatted for logging with sensitive data redacted.
 
         Returns:
-            JSON string representation of messages with image data redacted.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -571,7 +571,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                         if item.get("image"):
                             item["source"]["bytes"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs)
+        return msgs
 
 
 class AWSBedrockUserContextAggregator(LLMUserContextAggregator):
