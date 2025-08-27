@@ -87,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `PipelineTask` now waits for `StartFrame` to reach the end of the pipeline
+  before pushing any other frames.
+
 - Updated `CartesiaTTSService` and `CartesiaHttpTTSService` to align with
   Cartesia's changes for the `speed` parameter. It now takes only an enum of
   `slow`, `normal`, or `fast`.
@@ -99,6 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   via `SarvamHttpTTSService`.
 
 ### Fixed
+
+- Fixed an RTVI issue that was causing frames to be pushed before pipeline was
+  properly initialized.
 
 - Fixed some `get_messages_for_logging()` that were returning a JSON string
   instead of a list.
