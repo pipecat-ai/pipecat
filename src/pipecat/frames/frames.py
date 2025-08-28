@@ -12,7 +12,6 @@ and LLM processing.
 """
 
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -28,6 +27,7 @@ from typing import (
 )
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.dtmf.types import KeypadEntry as NewKeypadEntry
 from pipecat.audio.interruptions.base_interruption_strategy import BaseInterruptionStrategy
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
@@ -41,8 +41,12 @@ if TYPE_CHECKING:
     from pipecat.processors.frame_processor import FrameProcessor
 
 
-class KeypadEntry(str, Enum):
+class DeprecatedKeypadEntry:
     """DTMF keypad entries for phone system integration.
+
+    .. deprecated:: 0.0.82
+        This class is deprecated and will be removed in a future version.
+        Instead, use `audio.dtmf.types.KeypadEntry`.
 
     Parameters:
         ONE: Number key 1.
@@ -59,18 +63,38 @@ class KeypadEntry(str, Enum):
         STAR: Star/asterisk key (*).
     """
 
-    ONE = "1"
-    TWO = "2"
-    THREE = "3"
-    FOUR = "4"
-    FIVE = "5"
-    SIX = "6"
-    SEVEN = "7"
-    EIGHT = "8"
-    NINE = "9"
-    ZERO = "0"
-    POUND = "#"
-    STAR = "*"
+    _enum = NewKeypadEntry
+
+    @classmethod
+    def _warn(cls):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`pipecat.frames.frames.KeypadEntry` is deprecated and will be removed in a future version. "
+                "Use `pipecat.audio.dtmf.types.KeypadEntry` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Allow the instance to be called as a function."""
+        self._warn()
+        return self._enum(*args, **kwargs)
+
+    def __getattr__(self, name):
+        """Retrieve an attribute from the underlying enum."""
+        self._warn()
+        return getattr(self._enum, name)
+
+    def __getitem__(self, name):
+        """Retrieve an item from the underlying enum."""
+        self._warn()
+        return self._enum[name]
+
+
+KeypadEntry = DeprecatedKeypadEntry()
 
 
 def format_pts(pts: Optional[int]):
@@ -526,15 +550,16 @@ class LLMMessagesFrame(DataFrame):
         super().__post_init__()
         import warnings
 
-        warnings.simplefilter("always")
-        warnings.warn(
-            "LLMMessagesFrame is deprecated and will be removed in a future version. "
-            "Instead, use either "
-            "`LLMMessagesUpdateFrame` with `run_llm=True`, or "
-            "`OpenAILLMContextFrame` with desired messages in a new context",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LLMMessagesFrame is deprecated and will be removed in a future version. "
+                "Instead, use either "
+                "`LLMMessagesUpdateFrame` with `run_llm=True`, or "
+                "`OpenAILLMContextFrame` with desired messages in a new context",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass
@@ -668,7 +693,7 @@ class DTMFFrame:
         button: The DTMF keypad entry that was pressed.
     """
 
-    button: KeypadEntry
+    button: NewKeypadEntry
 
 
 @dataclass
