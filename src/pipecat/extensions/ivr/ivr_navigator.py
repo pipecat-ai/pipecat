@@ -68,8 +68,9 @@ class IVRProcessor(FrameProcessor):
         self._aggregator = PatternPairAggregator()
         self._setup_xml_patterns()
 
-        # Register the IVR stuck event
+        # Register IVR events
         self._register_event_handler("on_ivr_stuck")
+        self._register_event_handler("on_ivr_completed")
 
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
@@ -225,8 +226,13 @@ class IVRProcessor(FrameProcessor):
         Updates the context to the conversation prompt and VAD parameters for conversation response timing.
         This action should be called when the IVR navigation is completed and before the conversation starts.
         The bot's first response will be in response to the user's first input.
+
+        Also triggers the on_ivr_completed event for custom developer workflows.
         """
         logger.info("IVR navigation completed - switching back to conversation mode")
+
+        # Trigger the completion event before mode switching
+        await self._call_event_handler("on_ivr_completed")
 
         # Switch back to conversation prompt
         messages = [{"role": "system", "content": self._conversation_prompt}]
@@ -244,7 +250,7 @@ class IVRProcessor(FrameProcessor):
         Emits the on_ivr_stuck event for external handling of stuck scenarios.
         """
         logger.info("IVR navigation stuck - triggering event handler")
-        await self._call_event_handler("on_ivr_stuck", self)
+        await self._call_event_handler("on_ivr_stuck")
 
     async def _handle_ivr_wait(self):
         """Handle IVR wait state when transcription is incomplete.
@@ -365,8 +371,9 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
 
         super().__init__([self._llm, self._ivr_processor])
 
-        # Register the IVR stuck event after super().__init__()
+        # Register IVR events
         self._register_event_handler("on_ivr_stuck")
+        self._register_event_handler("on_ivr_completed")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames at the pipeline level to intercept context frames.
@@ -422,7 +429,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             event_name: The name of the event to handle.
             handler: The function to call when the event occurs.
         """
-        if event_name == "on_ivr_stuck":
+        if event_name in ("on_ivr_stuck", "on_ivr_completed"):
             self._ivr_processor.add_event_handler(event_name, handler)
         else:
             super().add_event_handler(event_name, handler)
