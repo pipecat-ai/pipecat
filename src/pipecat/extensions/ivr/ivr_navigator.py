@@ -321,9 +321,9 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         llm: LLMService,
         ivr_prompt: str,
         conversation_prompt: str,
-        ivr_response_delay: float = 2.0,
-        conversation_response_delay: float = 0.8,
-        initial_mode: Optional[Literal["ivr", "conversation"]] = "conversation",
+        ivr_response_delay: Optional[float] = 2.0,
+        conversation_response_delay: Optional[float] = 0.8,
+        initial_mode: Optional[Literal["ivr", "conversation"]] = "ivr",
     ):
         """Initialize the IVR navigator.
 
@@ -341,6 +341,9 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         self._ivr_response_delay = ivr_response_delay
         self._conversation_response_delay = conversation_response_delay
         self._initial_mode = initial_mode
+
+        # Track conversation turn count to optimize pure conversation scenarios
+        self._conversation_turn_count = 0
 
         print(self._ivr_prompt)
 
@@ -368,10 +371,24 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         # 1. We started in conversation mode
         # 2. We haven't switched to IVR mode yet
         # 3. We're seeing a context frame
+        #
+        # We need to preserve the conversation history in the event that the
+        # mode switches from conversation to ivr. In this case, the prompt
+        # update pushed to the LLM needs both the IVR prompt and the prior
+        # user messages, so that inference can be run right away. This should
+        # only be relevant when initial_mode == "conversation", since the IVR
+        # navigator won't ever switch to conversation mode.
+        #
+        # Optimization: After several conversation turns without IVR detection,
+        # assume this is a pure conversation scenario and stop preserving messages.
+        # This saves CPU/memory for chat-only applications.
+        PURE_CONVERSATION_THRESHOLD = 5  # Stop preserving after 5 conversation turns
+
         if (
             isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame))
             and self._initial_mode == "conversation"
             and not self._ivr_processor._has_switched_to_ivr
+            and self._conversation_turn_count < PURE_CONVERSATION_THRESHOLD
         ):
             # Extract messages and pass to IVR processor
             if isinstance(frame, OpenAILLMContextFrame):
@@ -383,9 +400,9 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             self._ivr_processor._preserved_messages = [
                 msg for msg in all_messages if isinstance(msg, dict) and msg.get("role") == "user"
             ]
-            logger.debug(
-                f"IVRNavigator preserved {len(self._ivr_processor._preserved_messages)} user messages"
-            )
+
+            # Increment conversation turn count for pure conversation optimization
+            self._conversation_turn_count += 1
 
         # Let the pipeline handle normal frame processing
         await super().process_frame(frame, direction)
