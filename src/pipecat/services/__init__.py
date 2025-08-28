@@ -11,11 +11,11 @@ _warned_modules = set()
 
 
 def _warn_deprecated_access(globals: Dict[str, Any], attr, old: str, new: str):
-    import warnings
-
     # Only warn once per old->new module pair
     module_key = (old, new)
     if module_key not in _warned_modules:
+        import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
