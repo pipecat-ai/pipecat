@@ -6,7 +6,7 @@
 
 """IVR navigator for Pipecat."""
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 from loguru import logger
 
@@ -14,6 +14,7 @@ from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     KeypadEntry,
+    LLMContextFrame,
     LLMMessagesUpdateFrame,
     LLMTextFrame,
     OutputDTMFUrgentFrame,
@@ -21,6 +22,7 @@ from pipecat.frames.frames import (
     VADParamsUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
@@ -54,6 +56,9 @@ class IVRProcessor(FrameProcessor):
         self._ivr_response_delay = ivr_response_delay
         self._conversation_response_delay = conversation_response_delay
         self._initial_mode = initial_mode
+
+        # Track conversation messages to preserve context when switching modes
+        self._preserved_messages: List[dict] = []
 
         # XML pattern aggregation
         self._aggregator = PatternPairAggregator()
@@ -173,13 +178,22 @@ class IVRProcessor(FrameProcessor):
         """Handle IVR detection by switching to IVR mode.
 
         Only switches if initial_mode was "conversation".
+        Preserves user messages from the conversation context.
         """
         # Only switch to IVR mode if we started in conversation mode
         if self._initial_mode == "conversation":
             logger.info("IVR detected - switching to IVR navigation mode")
 
-            # Switch to IVR prompt
+            # Create new context with IVR system prompt and preserved user messages
             messages = [{"role": "system", "content": self._ivr_prompt}]
+
+            # Add preserved user messages (including the IVR menu transcription)
+            messages.extend(self._preserved_messages)
+
+            logger.debug(
+                f"Creating IVR context with {len(self._preserved_messages)} preserved user messages"
+            )
+
             llm_update_frame = LLMMessagesUpdateFrame(messages=messages, run_llm=True)
             await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
@@ -301,7 +315,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         llm: LLMService,
         ivr_prompt: str,
         conversation_prompt: str,
-        ivr_response_delay: float = 2.5,
+        ivr_response_delay: float = 2.0,
         conversation_response_delay: float = 0.8,
         initial_mode: Optional[Literal["ivr", "conversation"]] = "conversation",
     ):
@@ -336,6 +350,32 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
 
         # Register the IVR stuck event after super().__init__()
         self._register_event_handler("on_ivr_stuck")
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames at the pipeline level to intercept context frames.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame flow in the pipeline.
+        """
+        # Intercept context frames to preserve conversation history
+        if isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame)):
+            # Extract messages and pass to IVR processor
+            if isinstance(frame, OpenAILLMContextFrame):
+                all_messages = frame.context.messages
+            else:
+                all_messages = frame.context.get_messages()
+
+            # Store messages in the IVR processor for mode switching
+            self._ivr_processor._preserved_messages = [
+                msg for msg in all_messages if isinstance(msg, dict) and msg.get("role") == "user"
+            ]
+            logger.debug(
+                f"IVRNavigator preserved {len(self._ivr_processor._preserved_messages)} user messages"
+            )
+
+        # Let the pipeline handle normal frame processing
+        await super().process_frame(frame, direction)
 
     def add_event_handler(self, event_name: str, handler):
         """Add an event handler for IVR navigation events.
