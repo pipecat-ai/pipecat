@@ -12,6 +12,7 @@ from loguru import logger
 from openai import AsyncStream
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import FunctionCallFromLLM
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.llm import OpenAILLMService
@@ -148,9 +149,7 @@ class MistralLLMService(OpenAILLMService):
         if calls_to_execute:
             await super().run_function_calls(calls_to_execute)
 
-    def build_chat_completion_params(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> dict:
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
         """Build parameters for Mistral chat completion request.
 
         Handles Mistral-specific requirements including:
@@ -159,14 +158,14 @@ class MistralLLMService(OpenAILLMService):
         - Core completion settings
         """
         # Apply Mistral's assistant prefix requirement for API compatibility
-        fixed_messages = self._apply_mistral_assistant_prefix(messages)
+        fixed_messages = self._apply_mistral_assistant_prefix(params_from_context["messages"])
 
         params = {
             "model": self.model_name,
             "stream": True,
             "messages": fixed_messages,
-            "tools": context.tools,
-            "tool_choice": context.tool_choice,
+            "tools": params_from_context["tools"],
+            "tool_choice": params_from_context["tool_choice"],
             "frequency_penalty": self._settings["frequency_penalty"],
             "presence_penalty": self._settings["presence_penalty"],
             "temperature": self._settings["temperature"],

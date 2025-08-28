@@ -247,7 +247,7 @@ async def run_eval_pipeline(
         properties={
             "result": {
                 "type": "boolean",
-                "description": "The result of the eval",
+                "description": "Whether the answer is correct or not",
             },
             "reasoning": {
                 "type": "string",
