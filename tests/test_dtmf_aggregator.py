@@ -12,6 +12,7 @@ from pipecat.frames.frames import (
     KeypadEntry,
     TranscriptionFrame,
 )
+from pipecat.pipeline.task import PipelineParams
 from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator
 from pipecat.tests.utils import SleepFrame, run_test
 
@@ -69,6 +70,8 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
             aggregator,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            # TODO(aleix): we should handle StartInterruptionFrame
+            pipeline_params=PipelineParams(allow_interruptions=False),
         )
 
         # Find the TranscriptionFrames
@@ -105,6 +108,8 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
             aggregator,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            # TODO(aleix): we should handle StartInterruptionFrame
+            pipeline_params=PipelineParams(allow_interruptions=False),
         )
 
         transcription_frames = [
@@ -134,6 +139,8 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
             aggregator,
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
+            # TODO(aleix): we should handle StartInterruptionFrame
+            pipeline_params=PipelineParams(allow_interruptions=False),
             send_end_frame=False,  # We're sending one in the test to test EndFrame logic
         )
 

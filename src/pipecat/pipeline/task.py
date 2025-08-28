@@ -23,6 +23,7 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.clocks.base_clock import BaseClock
 from pipecat.clocks.system_clock import SystemClock
 from pipecat.frames.frames import (
+    BotInterruptionFrame,
     BotSpeakingFrame,
     CancelFrame,
     CancelTaskFrame,
@@ -36,6 +37,7 @@ from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     MetricsFrame,
     StartFrame,
+    StartInterruptionFrame,
     StopFrame,
     StopTaskFrame,
     TranscriptionFrame,
@@ -632,7 +634,11 @@ class PipelineTask(BasePipelineTask):
         if isinstance(frame, self._reached_upstream_types):
             await self._call_event_handler("on_frame_reached_upstream", frame)
 
-        if isinstance(frame, EndTaskFrame):
+        if isinstance(frame, BotInterruptionFrame) and self.params.allow_interruptions:
+            # Tell the pipeline we should interrupt.
+            logger.debug("Bot interruption")
+            await self.queue_frame(StartInterruptionFrame())
+        elif isinstance(frame, EndTaskFrame):
             # Tell the task we should end nicely.
             await self.queue_frame(EndFrame())
         elif isinstance(frame, CancelTaskFrame):
