@@ -703,11 +703,11 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
-class _AudioContextContainer(ABC):
-    """A container for audio contexts."""
+class _AudioContextBaseService(ABC):
+    """A service that supports audio contexts."""
 
     def __init__(self):
-        """Initialize the container."""
+        """Initialize the service."""
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
 
@@ -842,7 +842,7 @@ class _AudioContextContainer(ABC):
         pass
 
 
-class AudioContextTTSService(WebsocketTTSService, _AudioContextContainer):
+class AudioContextTTSService(WebsocketTTSService, _AudioContextBaseService):
     """Websocket-based TTS service with audio context management.
 
     This is a base class for websocket-based TTS services that allow correlating
@@ -864,7 +864,7 @@ class AudioContextTTSService(WebsocketTTSService, _AudioContextContainer):
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
         WebsocketTTSService.__init__(self, **kwargs)
-        _AudioContextContainer.__init__(self)
+        _AudioContextBaseService.__init__(self)
 
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.
@@ -904,7 +904,7 @@ class AudioContextTTSService(WebsocketTTSService, _AudioContextContainer):
         self._create_audio_context_task()
 
 
-class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextContainer):
+class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextBaseService):
     """Websocket-based TTS service with word timestamps and audio context management.
 
     This is a base class for websocket-based TTS services that support word
@@ -927,7 +927,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextContainer
             **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
         """
         WebsocketWordTTSService.__init__(self, **kwargs)
-        _AudioContextContainer.__init__(self)
+        _AudioContextBaseService.__init__(self)
 
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.
