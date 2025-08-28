@@ -60,6 +60,9 @@ class IVRProcessor(FrameProcessor):
         # Track conversation messages to preserve context when switching modes
         self._preserved_messages: List[dict] = []
 
+        # Track whether we've already switched to IVR mode
+        self._has_switched_to_ivr = False
+
         # XML pattern aggregation
         self._aggregator = PatternPairAggregator()
         self._setup_xml_patterns()
@@ -201,6 +204,9 @@ class IVRProcessor(FrameProcessor):
             vad_params = VADParams(stop_secs=self._ivr_response_delay)
             vad_update_frame = VADParamsUpdateFrame(params=vad_params)
             await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
+
+            # Mark that we've switched to IVR mode - no more message preservation needed
+            self._has_switched_to_ivr = True
 
         else:
             logger.debug("IVR detected but already in IVR mode - no action needed")
@@ -358,8 +364,15 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
-        # Intercept context frames to preserve conversation history
-        if isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame)):
+        # Only preserve conversation history if:
+        # 1. We started in conversation mode
+        # 2. We haven't switched to IVR mode yet
+        # 3. We're seeing a context frame
+        if (
+            isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame))
+            and self._initial_mode == "conversation"
+            and not self._ivr_processor._has_switched_to_ivr
+        ):
             # Extract messages and pass to IVR processor
             if isinstance(frame, OpenAILLMContextFrame):
                 all_messages = frame.context.messages
