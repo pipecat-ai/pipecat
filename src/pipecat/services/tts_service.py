@@ -836,7 +836,7 @@ class AudioContextTTSService(WebsocketTTSService, _AudioContextContainer):
         Args:
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
-        WebSocketTTSService.__init__(self, **kwargs)
+        WebsocketTTSService.__init__(self, **kwargs)
         _AudioContextContainer.__init__(self)
 
     async def start(self, frame: StartFrame):
@@ -899,7 +899,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextContainer
         Args:
             **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
         """
-        WebSocketTTSService.__init__(self, **kwargs)
+        WebsocketWordTTSService.__init__(self, **kwargs)
         _AudioContextContainer.__init__(self)
 
     async def start(self, frame: StartFrame):
