@@ -20,6 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
 ]
 dependencies = [
+    "aiofiles>=24.1.0,<25",
     "aiohttp>=3.11.12,<4",
     "audioop-lts~=0.2.1; python_version>='3.13'",
     "docstring_parser~=0.16",
@@ -137,6 +138,20 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "pipecat" = ["py.typed"]
+"pipecat.audio.dtmf" = [
+    "src/pipecat/audio/dtmf/dtmf-0.wav",
+    "src/pipecat/audio/dtmf/dtmf-1.wav",
+    "src/pipecat/audio/dtmf/dtmf-2.wav",
+    "src/pipecat/audio/dtmf/dtmf-3.wav",
+    "src/pipecat/audio/dtmf/dtmf-4.wav",
+    "src/pipecat/audio/dtmf/dtmf-5.wav",
+    "src/pipecat/audio/dtmf/dtmf-6.wav",
+    "src/pipecat/audio/dtmf/dtmf-7.wav",
+    "src/pipecat/audio/dtmf/dtmf-8.wav",
+    "src/pipecat/audio/dtmf/dtmf-9.wav",
+    "src/pipecat/audio/dtmf/dtmf-pound.wav",
+    "src/pipecat/audio/dtmf/dtmf-star.wav",
+]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
 
 [tool.pytest.ini_options]
