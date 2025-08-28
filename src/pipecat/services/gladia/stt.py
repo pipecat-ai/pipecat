@@ -13,7 +13,6 @@ supporting multiple languages, custom vocabulary, and various audio processing o
 import asyncio
 import base64
 import json
-import warnings
 from typing import Any, AsyncGenerator, Dict, Literal, Optional
 
 import aiohttp
@@ -173,12 +172,16 @@ class _InputParamsDescriptor:
     """Descriptor for backward compatibility with deprecation warning."""
 
     def __get__(self, obj, objtype=None):
-        warnings.warn(
-            "GladiaSTTService.InputParams is deprecated and will be removed in a future version. "
-            "Import and use GladiaInputParams directly instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "GladiaSTTService.InputParams is deprecated and will be removed in a future version. "
+                "Import and use GladiaInputParams directly instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return GladiaInputParams
 
 
@@ -234,12 +237,14 @@ class GladiaSTTService(STTService):
 
         # Warn about deprecated language parameter if it's used
         if params.language is not None:
-            warnings.warn(
-                "The 'language' parameter is deprecated and will be removed in a future version. "
-                "Use 'language_config' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'language' parameter is deprecated and will be removed in a future version. "
+                    "Use 'language_config' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         self._api_key = api_key
         self._region = region
