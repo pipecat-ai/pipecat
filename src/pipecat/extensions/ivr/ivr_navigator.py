@@ -190,37 +190,34 @@ class IVRProcessor(FrameProcessor):
     async def _handle_ivr_detected(self):
         """Handle IVR detection by switching to IVR mode.
 
-        Only switches if initial_mode was "conversation".
-        Preserves user messages from the conversation context.
+        Allows bidirectional switching for error recovery and complex IVR flows.
+        Preserves user messages from the conversation context when available.
         """
-        # Only switch to IVR mode if we started in conversation mode
-        if self._initial_mode == "conversation":
-            logger.info("IVR detected - switching to IVR navigation mode")
+        logger.info("IVR detected - switching to IVR navigation mode")
 
-            # Create new context with IVR system prompt and preserved user messages
-            messages = [{"role": "system", "content": self._ivr_prompt}]
+        # Create new context with IVR system prompt and preserved user messages
+        messages = [{"role": "system", "content": self._ivr_prompt}]
 
-            # Add preserved user messages (including the IVR menu transcription)
+        # Add preserved user messages if available (from conversation mode)
+        if self._preserved_messages:
             messages.extend(self._preserved_messages)
-
             logger.debug(
                 f"Creating IVR context with {len(self._preserved_messages)} preserved user messages"
             )
-
-            # Push the messages upstream and run the LLM with the new context
-            llm_update_frame = LLMMessagesUpdateFrame(messages=messages, run_llm=True)
-            await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
-
-            # Update VAD parameters for IVR response timing
-            vad_params = VADParams(stop_secs=self._ivr_response_delay)
-            vad_update_frame = VADParamsUpdateFrame(params=vad_params)
-            await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
-
-            # Mark that we've switched to IVR mode - no more message preservation needed
-            self._has_switched_to_ivr = True
-
         else:
-            logger.debug("IVR detected but already in IVR mode - no action needed")
+            logger.debug("Creating IVR context without preserved messages")
+
+        # Push the messages upstream and run the LLM with the new context
+        llm_update_frame = LLMMessagesUpdateFrame(messages=messages, run_llm=True)
+        await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
+
+        # Update VAD parameters for IVR response timing
+        vad_params = VADParams(stop_secs=self._ivr_response_delay)
+        vad_update_frame = VADParamsUpdateFrame(params=vad_params)
+        await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
+
+        # Mark that we've switched to IVR mode - no more message preservation needed
+        self._has_switched_to_ivr = True
 
     async def _handle_ivr_completed(self):
         """Handle IVR completion by switching back to conversation mode.
@@ -323,8 +320,7 @@ VERBAL RESPONSE EXAMPLES:
 - "Are you calling about an existing order? Please say Yes or No" → "No."
 - "Did I hear that correctly? Please say Yes or No" → "Yes."
 
-Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences), `<ivr>completed</ivr>`, `<ivr>stuck</ivr>`, `<ivr>wait</ivr>`, OR natural language text when verbal responses are requested. No other response types.
-    """
+Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences), `<ivr>completed</ivr>`, `<ivr>stuck</ivr>`, `<ivr>wait</ivr>`, OR natural language text when verbal responses are requested. No other response types."""
 
     def __init__(
         self,
@@ -344,7 +340,8 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             conversation_prompt: The prompt to use for conversation navigation.
             ivr_response_delay: The delay to wait before responding to the IVR.
             conversation_response_delay: The delay to wait before responding to the conversation.
-            initial_mode: The initial mode to start in. Default is "conversation".
+            initial_mode: The initial mode to start in. Default is "ivr".
+                         The LLM can automatically switch between modes as needed during the conversation.
         """
         self._llm = llm
         self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
