@@ -7,8 +7,8 @@
 """Base classes for Text-to-speech services."""
 
 import asyncio
-from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Tuple
+from abc import ABC, abstractmethod
+from typing import Any, AsyncGenerator, Coroutine, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from loguru import logger
 
@@ -37,6 +37,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
+from pipecat.utils.asyncio.task_manager import BaseTaskManager
 from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
@@ -702,7 +703,7 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
-class _AudioContextContainer:
+class _AudioContextContainer(ABC):
     """A container for audio contexts."""
 
     def __init__(self):
@@ -813,6 +814,32 @@ class _AudioContextContainer:
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break
+
+    @abstractmethod
+    def reset_watchdog(self) -> None:
+        pass
+
+    @abstractmethod
+    def create_task(self, coroutine: Coroutine) -> asyncio.Task:
+        pass
+
+    @abstractmethod
+    async def cancel_task(self, task: asyncio.Task) -> None:
+        pass
+
+    @abstractmethod
+    async def push_frame(self, frame: Frame) -> None:
+        pass
+
+    @property
+    @abstractmethod
+    def sample_rate(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def task_manager(self) -> BaseTaskManager:
+        pass
 
 
 class AudioContextTTSService(WebsocketTTSService, _AudioContextContainer):
