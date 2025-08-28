@@ -72,6 +72,32 @@ class IVRProcessor(FrameProcessor):
         self._register_event_handler("on_ivr_stuck")
         self._register_event_handler("on_ivr_completed")
 
+    async def start_conversation(self):
+        """Start conversation mode after IVR completion.
+
+        Call this method to explicitly switch to conversation mode with the
+        conversation prompt and VAD parameters. This is typically called from
+        an on_ivr_completed event handler.
+
+        Example:
+            @navigator.event_handler("on_ivr_completed")
+            async def on_completed(ivr_processor):
+                await log_completion()
+                # Start conversation with the customer service rep
+                await ivr_processor.start_conversation()
+        """
+        logger.info("Starting conversation mode")
+
+        # Switch to conversation prompt
+        messages = [{"role": "system", "content": self._conversation_prompt}]
+        llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
+        await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
+
+        # Update VAD parameters for conversation response timing
+        vad_params = VADParams(stop_secs=self._conversation_response_delay)
+        vad_update_frame = VADParamsUpdateFrame(params=vad_params)
+        await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
+
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
         # Register DTMF pattern
@@ -221,28 +247,13 @@ class IVRProcessor(FrameProcessor):
         self._has_switched_to_ivr = True
 
     async def _handle_ivr_completed(self):
-        """Handle IVR completion by switching back to conversation mode.
+        """Handle IVR completion by triggering the completion event.
 
-        Updates the context to the conversation prompt and VAD parameters for conversation response timing.
-        This action should be called when the IVR navigation is completed and before the conversation starts.
-        The bot's first response will be in response to the user's first input.
-
-        Also triggers the on_ivr_completed event for custom developer workflows.
+        This method simply notifies that IVR navigation is complete. If you want
+        to start conversation mode, call start_conversation() from your event handler.
         """
-        logger.info("IVR navigation completed - switching back to conversation mode")
-
-        # Trigger the completion event before mode switching
+        logger.info("IVR navigation completed - triggering completion event")
         await self._call_event_handler("on_ivr_completed")
-
-        # Switch back to conversation prompt
-        messages = [{"role": "system", "content": self._conversation_prompt}]
-        llm_update_frame = LLMMessagesUpdateFrame(messages=messages)  # run_llm=None (default)
-        await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
-
-        # Update VAD parameters for conversation response timing
-        vad_params = VADParams(stop_secs=self._conversation_response_delay)
-        vad_update_frame = VADParamsUpdateFrame(params=vad_params)
-        await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
 
     async def _handle_ivr_stuck(self):
         """Handle IVR stuck state by triggering event handler.
@@ -428,6 +439,16 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         Args:
             event_name: The name of the event to handle.
             handler: The function to call when the event occurs.
+
+        For on_ivr_completed handlers:
+            Call await ivr_processor.start_conversation() to start conversation mode.
+            By default, no action is taken after IVR completion.
+
+        Example:
+            @navigator.event_handler("on_ivr_completed")
+            async def on_completed(ivr_processor):
+                await log_completion()
+                await ivr_processor.start_conversation()  # Start conversation mode
         """
         if event_name in ("on_ivr_stuck", "on_ivr_completed"):
             self._ivr_processor.add_event_handler(event_name, handler)
