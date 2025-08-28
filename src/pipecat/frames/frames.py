@@ -538,6 +538,17 @@ class LLMMessagesFrame(DataFrame):
 
 
 @dataclass
+class LLMRunFrame(DataFrame):
+    """Frame to trigger LLM processing with current context.
+
+    A frame that instructs the LLM service to process the current context and
+    generate a response.
+    """
+
+    pass
+
+
+@dataclass
 class LLMMessagesAppendFrame(DataFrame):
     """Frame containing LLM messages to append to current context.
 
@@ -557,9 +568,8 @@ class LLMMessagesAppendFrame(DataFrame):
 class LLMMessagesUpdateFrame(DataFrame):
     """Frame containing LLM messages to replace current context.
 
-    A frame containing a list of new LLM messages. These messages will
-    replace the current context LLM messages and should generate a new
-    LLMMessagesFrame.
+    A frame containing a list of new LLM messages to replace the current
+    context LLM messages.
 
     Parameters:
         messages: List of message dictionaries to replace current context.

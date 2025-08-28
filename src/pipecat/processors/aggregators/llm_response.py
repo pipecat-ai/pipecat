@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMMessagesFrame,
     LLMMessagesUpdateFrame,
+    LLMRunFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
     LLMTextFrame,
@@ -319,9 +320,20 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
     def get_context_frame(self) -> OpenAILLMContextFrame:
         """Create a context frame with the current context.
 
+        .. deprecated:: 0.0.82
+            This method is deprecated and will be removed in a future version.
+
         Returns:
-            OpenAILLMContextFrame containing the current context.
+            LLMContextFrame containing the current context.
         """
+        warnings.warn(
+            "get_context_frame() is deprecated and will be removed in a future version. To trigger an LLM response, use LLMRunFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self._get_context_frame()
+
+    def _get_context_frame(self) -> OpenAILLMContextFrame:
         return OpenAILLMContextFrame(context=self._context)
 
     async def push_context_frame(self, direction: FrameDirection = FrameDirection.DOWNSTREAM):
@@ -330,7 +342,7 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         Args:
             direction: The direction to push the frame (upstream or downstream).
         """
-        frame = self.get_context_frame()
+        frame = self._get_context_frame()
         await self.push_frame(frame, direction)
 
     def add_messages(self, messages):
@@ -484,6 +496,8 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             await self._handle_transcription(frame)
         elif isinstance(frame, InterimTranscriptionFrame):
             await self._handle_interim_transcription(frame)
+        elif isinstance(frame, LLMRunFrame):
+            await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
@@ -562,6 +576,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _cancel(self, frame: CancelFrame):
         await self._cancel_aggregation_task()
+
+    async def _handle_llm_run(self, frame: LLMRunFrame):
+        await self.push_context_frame()
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
@@ -827,6 +844,8 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
             await self._handle_llm_end(frame)
         elif isinstance(frame, TextFrame):
             await self._handle_text(frame)
+        elif isinstance(frame, LLMRunFrame):
+            await self._handle_llm_run(frame)
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_llm_messages_append(frame)
         elif isinstance(frame, LLMMessagesUpdateFrame):
@@ -868,6 +887,9 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         # Push timestamp frame with current time
         timestamp_frame = OpenAILLMContextAssistantTimestampFrame(timestamp=time_now_iso8601())
         await self.push_frame(timestamp_frame)
+
+    async def _handle_llm_run(self, frame: LLMRunFrame):
+        await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_llm_messages_append(self, frame: LLMMessagesAppendFrame):
         self.add_messages(frame.messages)
