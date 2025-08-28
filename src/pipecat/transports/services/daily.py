@@ -31,8 +31,6 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
-    OutputDTMFFrame,
-    OutputDTMFUrgentFrame,
     OutputImageRawFrame,
     SpriteFrame,
     StartFrame,
@@ -1676,7 +1674,7 @@ class DailyInputTransport(BaseInputTransport):
 class DailyOutputTransport(BaseOutputTransport):
     """Handles outgoing media streams and events to Daily calls.
 
-    Manages sending audio, video, DTMF tones, and other data to Daily calls,
+    Manages sending audio, video and other data to Daily calls,
     including audio destination registration and message transmission.
     """
 
@@ -1782,19 +1780,6 @@ class DailyOutputTransport(BaseOutputTransport):
             destination: The destination identifier to register.
         """
         await self._client.register_audio_destination(destination)
-
-    async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
-        """Write DTMF tones to the call.
-
-        Args:
-            frame: The DTMF frame containing tone information.
-        """
-        await self._client.send_dtmf(
-            {
-                "sessionId": frame.transport_destination,
-                "tones": frame.button.value,
-            }
-        )
 
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
         """Write an audio frame to the Daily call.
@@ -2021,25 +2006,6 @@ class DailyTransport(BaseTransport):
             participant_id: ID of the participant to stop dial-out for.
         """
         await self._client.stop_dialout(participant_id)
-
-    async def send_dtmf(self, settings):
-        """Send DTMF tones during a call (deprecated).
-
-        .. deprecated:: 0.0.69
-            Push an `OutputDTMFFrame` or an `OutputDTMFUrgentFrame` instead.
-
-        Args:
-            settings: DTMF settings including tones and target session.
-        """
-        import warnings
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "`DailyTransport.send_dtmf()` is deprecated, push an `OutputDTMFFrame` or an `OutputDTMFUrgentFrame` instead.",
-                DeprecationWarning,
-            )
-        await self._client.send_dtmf(settings)
 
     async def sip_call_transfer(self, settings):
         """Transfer a SIP call to another destination.
