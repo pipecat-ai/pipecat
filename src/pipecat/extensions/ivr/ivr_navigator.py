@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     OutputDTMFUrgentFrame,
     StartFrame,
+    TextFrame,
     VADParamsUpdateFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -155,6 +156,10 @@ class IVRProcessor(FrameProcessor):
             keypad_entry = KeypadEntry(value)
             dtmf_frame = OutputDTMFUrgentFrame(button=keypad_entry)
             await self.push_frame(dtmf_frame, FrameDirection.DOWNSTREAM)
+            # Push a TextFrame to add DTMF message to the context
+            text_frame = TextFrame(text=f"<dtmf>{value}</dtmf>")
+            text_frame.skip_tts = True
+            await self.push_frame(text_frame, FrameDirection.DOWNSTREAM)
         except ValueError:
             logger.warning(f"Invalid DTMF value: {value}. Must be 0-9, *, or #")
 
@@ -177,6 +182,11 @@ class IVRProcessor(FrameProcessor):
         else:
             logger.warning(f"Unknown IVR status: {status}")
 
+        # Push a TextFrame to add the IVR detected signal to the context
+        ivr_text_frame = TextFrame(text=f"<ivr>{status}</ivr>")
+        ivr_text_frame.skip_tts = True
+        await self.push_frame(ivr_text_frame, FrameDirection.DOWNSTREAM)
+
     async def _handle_ivr_detected(self):
         """Handle IVR detection by switching to IVR mode.
 
@@ -197,6 +207,7 @@ class IVRProcessor(FrameProcessor):
                 f"Creating IVR context with {len(self._preserved_messages)} preserved user messages"
             )
 
+            # Push the messages upstream and run the LLM with the new context
             llm_update_frame = LLMMessagesUpdateFrame(messages=messages, run_llm=True)
             await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
