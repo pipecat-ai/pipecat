@@ -66,8 +66,8 @@ class IVRProcessor(FrameProcessor):
         *,
         ivr_prompt: str,
         conversation_prompt: Optional[str] = None,
-        ivr_response_delay: float,
-        conversation_response_delay: float,
+        ivr_vad_params: Optional[VADParams] = None,
+        conversation_vad_params: Optional[VADParams] = None,
         initial_mode: Literal["ivr", "conversation"],
     ):
         """Initialize the IVR processor.
@@ -75,16 +75,16 @@ class IVRProcessor(FrameProcessor):
         Args:
             ivr_prompt: System prompt for IVR navigation mode.
             conversation_prompt: System prompt for conversation mode. Optional if only using IVR navigation.
-            ivr_response_delay: VAD stop delay in seconds for IVR responses.
-            conversation_response_delay: VAD stop delay in seconds for conversation responses.
+            ivr_vad_params: VAD parameters for IVR navigation mode. If None, defaults to VADParams(stop_secs=2.0).
+            conversation_vad_params: VAD parameters for conversation mode. Optional, but should be provided if using conversation mode to ensure consistency with transport settings.
             initial_mode: Starting mode, either "ivr" or "conversation".
         """
         super().__init__()
 
         self._ivr_prompt = ivr_prompt
         self._conversation_prompt = conversation_prompt
-        self._ivr_response_delay = ivr_response_delay
-        self._conversation_response_delay = conversation_response_delay
+        self._ivr_vad_params = ivr_vad_params or VADParams(stop_secs=2.0)
+        self._conversation_vad_params = conversation_vad_params
         self._initial_mode = initial_mode
 
         # Track conversation messages to preserve context when switching modes
@@ -119,6 +119,10 @@ class IVRProcessor(FrameProcessor):
             logger.warning("Cannot start conversation mode: no conversation_prompt provided")
             return
 
+        if self._conversation_vad_params is None:
+            logger.warning("Cannot start conversation mode: no conversation_vad_params provided")
+            return
+
         logger.info("Starting conversation mode")
 
         # Switch to conversation prompt
@@ -127,8 +131,7 @@ class IVRProcessor(FrameProcessor):
         await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
         # Update VAD parameters for conversation response timing
-        vad_params = VADParams(stop_secs=self._conversation_response_delay)
-        vad_update_frame = VADParamsUpdateFrame(params=vad_params)
+        vad_update_frame = VADParamsUpdateFrame(params=self._conversation_vad_params)
         await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
 
     def _setup_xml_patterns(self):
@@ -163,9 +166,8 @@ class IVRProcessor(FrameProcessor):
                 llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
                 await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
-                # Set the VAD parameters delay and push it upstream
-                params = VADParams(stop_secs=self._conversation_response_delay)
-                vad_update_frame = VADParamsUpdateFrame(params=params)
+                # Set the VAD parameters and push it upstream
+                vad_update_frame = VADParamsUpdateFrame(params=self._conversation_vad_params)
                 await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
             else:
                 # Set the IVR prompt and push it upstream
@@ -173,9 +175,8 @@ class IVRProcessor(FrameProcessor):
                 llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
                 await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
-                # Set the VAD parameters delay and push it upstream
-                params = VADParams(stop_secs=self._ivr_response_delay)
-                vad_update_frame = VADParamsUpdateFrame(params=params)
+                # Set the VAD parameters and push it upstream
+                vad_update_frame = VADParamsUpdateFrame(params=self._ivr_vad_params)
                 await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
 
         elif isinstance(frame, LLMTextFrame):
@@ -279,8 +280,7 @@ class IVRProcessor(FrameProcessor):
         await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
         # Update VAD parameters for IVR response timing
-        vad_params = VADParams(stop_secs=self._ivr_response_delay)
-        vad_update_frame = VADParamsUpdateFrame(params=vad_params)
+        vad_update_frame = VADParamsUpdateFrame(params=self._ivr_vad_params)
         await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
 
         # Mark that we've switched to IVR mode - no more message preservation needed
@@ -397,8 +397,8 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         llm: LLMService,
         ivr_prompt: str,
         conversation_prompt: Optional[str] = None,
-        ivr_response_delay: Optional[float] = 2.0,
-        conversation_response_delay: Optional[float] = 0.8,
+        ivr_vad_params: Optional[VADParams] = None,
+        conversation_vad_params: Optional[VADParams] = None,
         initial_mode: Optional[Literal["ivr", "conversation"]] = "ivr",
     ):
         """Initialize the IVR navigator.
@@ -407,13 +407,17 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             llm: LLM service for text generation and decision making.
             ivr_prompt: Navigation goal prompt integrated with IVR navigation instructions.
             conversation_prompt: System prompt for conversation mode with human agents. Optional if only using IVR navigation.
-            ivr_response_delay: VAD stop delay in seconds for IVR navigation. Defaults to 2.0.
-            conversation_response_delay: VAD stop delay in seconds for conversations. Defaults to 0.8.
+            ivr_vad_params: VAD parameters for IVR navigation mode. If None, defaults to VADParams(stop_secs=2.0).
+            conversation_vad_params: VAD parameters for conversation mode. Optional, but should be provided if using conversation mode to ensure consistency with transport settings.
             initial_mode: Starting mode, "ivr" or "conversation". Defaults to "ivr".
                          Mode switching occurs automatically based on LLM responses.
         """
         if initial_mode == "conversation" and conversation_prompt is None:
             raise ValueError("conversation_prompt is required when initial_mode is 'conversation'")
+        if initial_mode == "conversation" and conversation_vad_params is None:
+            raise ValueError(
+                "conversation_vad_params is required when initial_mode is 'conversation'"
+            )
 
         self._llm = llm
         self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
@@ -422,8 +426,8 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             if conversation_prompt is not None
             else None
         )
-        self._ivr_response_delay = ivr_response_delay
-        self._conversation_response_delay = conversation_response_delay
+        self._ivr_vad_params = ivr_vad_params or VADParams(stop_secs=2.0)
+        self._conversation_vad_params = conversation_vad_params
         self._initial_mode = initial_mode
 
         # Track conversation turn count to optimize pure conversation scenarios
@@ -432,8 +436,8 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         self._ivr_processor = IVRProcessor(
             ivr_prompt=self._ivr_prompt,
             conversation_prompt=self._conversation_prompt,
-            ivr_response_delay=self._ivr_response_delay,
-            conversation_response_delay=self._conversation_response_delay,
+            ivr_vad_params=self._ivr_vad_params,
+            conversation_vad_params=self._conversation_vad_params,
             initial_mode=self._initial_mode,
         )
 

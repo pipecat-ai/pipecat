@@ -7,6 +7,7 @@
 import unittest
 from unittest.mock import AsyncMock
 
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.extensions.ivr.ivr_navigator import IVRNavigator, IVRProcessor
 from pipecat.frames.frames import (
     LLMMessagesUpdateFrame,
@@ -29,14 +30,18 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         self.ivr_prompt = "Navigate to the billing department"
         self.conversation_prompt = "You are a helpful customer service agent"
 
+        # VAD parameters
+        self.ivr_vad_params = VADParams(stop_secs=2.0)
+        self.conversation_vad_params = VADParams(stop_secs=0.8)
+
     async def test_switch_to_ivr_mode(self):
         """Test switching to IVR mode from conversation mode."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="conversation",
         )
 
@@ -70,6 +75,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
                 llm=self.mock_llm,
                 ivr_prompt=self.ivr_prompt,
                 conversation_prompt=None,  # This should cause an error
+                conversation_vad_params=self.conversation_vad_params,
                 initial_mode="conversation",  # This requires conversation_prompt
             )
 
@@ -78,14 +84,44 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
             str(context.exception),
         )
 
+    async def test_conversation_mode_requires_conversation_vad_params(self):
+        """Test that IVRNavigator conversation mode requires conversation_vad_params."""
+        with self.assertRaises(ValueError) as context:
+            IVRNavigator(
+                llm=self.mock_llm,
+                ivr_prompt=self.ivr_prompt,
+                conversation_prompt=self.conversation_prompt,
+                conversation_vad_params=None,  # This should cause an error
+                initial_mode="conversation",  # This requires conversation_vad_params
+            )
+
+        self.assertIn(
+            "conversation_vad_params is required when initial_mode is 'conversation'",
+            str(context.exception),
+        )
+
+    async def test_ivr_only_mode_without_conversation_params(self):
+        """Test that IVRNavigator works with only IVR parameters when not using conversation mode."""
+        # This should not raise an error - conversation_prompt and conversation_vad_params can be None
+        navigator = IVRNavigator(
+            llm=self.mock_llm,
+            ivr_prompt=self.ivr_prompt,
+            conversation_prompt=None,
+            conversation_vad_params=None,
+            initial_mode="ivr",
+        )
+
+        # Should work fine
+        self.assertIsNotNone(navigator)
+
     async def test_basic_dtmf_navigation(self):
         """Test basic DTMF tone generation from LLM responses."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
@@ -116,8 +152,8 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
@@ -157,8 +193,8 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
@@ -188,8 +224,8 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
@@ -237,8 +273,8 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
@@ -288,8 +324,8 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
@@ -335,8 +371,8 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=None,  # No conversation prompt
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
@@ -383,8 +419,8 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         processor = IVRProcessor(
             ivr_prompt=self.ivr_prompt,
             conversation_prompt=self.conversation_prompt,
-            ivr_response_delay=2.0,
-            conversation_response_delay=0.8,
+            ivr_vad_params=self.ivr_vad_params,
+            conversation_vad_params=self.conversation_vad_params,
             initial_mode="ivr",
         )
 
