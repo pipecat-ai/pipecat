@@ -27,7 +27,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         self.mock_llm = AsyncMock(spec=LLMService)
 
         # Test prompts
-        self.mode_detection_prompt = "Classify as IVR or conversation"
+        self.classifier_prompt = "Classify as IVR or conversation"
         self.ivr_prompt = "Navigate to the billing department"
 
         # VAD parameters
@@ -37,7 +37,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test switching to IVR mode from conversation mode."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )
@@ -67,7 +67,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test switching to conversation mode when conversation is detected."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )
@@ -123,7 +123,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test basic DTMF tone generation from LLM responses."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )
@@ -152,7 +152,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test basic DTMF tone generation from LLM responses."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )
@@ -190,7 +190,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test basic DTMF tone generation from LLM responses."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )
@@ -218,7 +218,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test that on_ivr_status_changed event handler is called when stuck."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )
@@ -273,7 +273,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test that on_ivr_status_changed event handler is called when completed."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )
@@ -327,7 +327,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
     async def test_normal_text_passthrough(self):
         """Test that normal LLM text (no XML) passes through unchanged."""
         processor = IVRProcessor(
-            mode_detection_prompt=self.mode_detection_prompt,
+            classifier_prompt=self.classifier_prompt,
             ivr_prompt=self.ivr_prompt,
             ivr_vad_params=self.ivr_vad_params,
         )

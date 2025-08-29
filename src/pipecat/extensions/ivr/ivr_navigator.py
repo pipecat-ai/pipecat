@@ -64,14 +64,14 @@ class IVRProcessor(FrameProcessor):
     def __init__(
         self,
         *,
-        mode_detection_prompt: str,
+        classifier_prompt: str,
         ivr_prompt: str,
         ivr_vad_params: Optional[VADParams] = None,
     ):
         """Initialize the IVR processor.
 
         Args:
-            mode_detection_prompt: System prompt for mode detection.
+            classifier_prompt: System prompt for classifying IVR or conversation.
             ivr_prompt: System prompt for IVR navigation mode.
             ivr_vad_params: VAD parameters for IVR navigation mode. If None, defaults to VADParams(stop_secs=2.0).
         """
@@ -79,7 +79,7 @@ class IVRProcessor(FrameProcessor):
 
         self._ivr_prompt = ivr_prompt
         self._ivr_vad_params = ivr_vad_params or VADParams(stop_secs=2.0)
-        self._mode_detection_prompt = mode_detection_prompt
+        self._classifier_prompt = classifier_prompt
 
         # Store saved context messages
         self._saved_messages: List[dict] = []
@@ -91,6 +91,17 @@ class IVRProcessor(FrameProcessor):
         # Register IVR events
         self._register_event_handler("on_conversation_detected")
         self._register_event_handler("on_ivr_status_changed")
+
+    def update_saved_messages(self, messages: List[dict]) -> None:
+        """Update the saved context messages.
+
+        Sets the messages that are saved when switching between
+        conversation and IVR navigation modes.
+
+        Args:
+            messages: List of message dictionaries to save.
+        """
+        self._saved_messages = messages
 
     def _get_conversation_history(self) -> List[dict]:
         """Get saved context messages without the system message.
@@ -127,8 +138,8 @@ class IVRProcessor(FrameProcessor):
             # Push the StartFrame right away
             await self.push_frame(frame, direction)
 
-            # Set the mode detection prompt and push it upstream
-            messages = [{"role": "system", "content": self._mode_detection_prompt}]
+            # Set the classifier prompt and push it upstream
+            messages = [{"role": "system", "content": self._classifier_prompt}]
             llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
             await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
@@ -179,14 +190,15 @@ class IVRProcessor(FrameProcessor):
             logger.warning(f"Unknown IVR status: {status}")
             return
 
-        if ivr_status == IVRStatus.DETECTED:
-            await self._handle_ivr_detected()
-        elif ivr_status == IVRStatus.COMPLETED:
-            await self._handle_ivr_completed()
-        elif ivr_status == IVRStatus.STUCK:
-            await self._handle_ivr_stuck()
-        elif ivr_status == IVRStatus.WAIT:
-            await self._handle_ivr_wait()
+        match ivr_status:
+            case IVRStatus.DETECTED:
+                await self._handle_ivr_detected()
+            case IVRStatus.COMPLETED:
+                await self._handle_ivr_completed()
+            case IVRStatus.STUCK:
+                await self._handle_ivr_stuck()
+            case IVRStatus.WAIT:
+                await self._handle_ivr_wait()
 
         # Push a TextFrame to add the IVR detected signal to the context
         ivr_text_frame = TextFrame(text=f"<ivr>{status}</ivr>")
@@ -280,18 +292,18 @@ class IVRNavigator(Pipeline):
     """Pipeline for automated IVR system navigation.
 
     Orchestrates LLM-based IVR navigation by combining an LLM service with
-    IVR processing capabilities. Starts with mode detection to classify input
+    IVR processing capabilities. Starts with mode classification to classify input
     as conversation or IVR system.
 
     Navigation behavior:
 
     - Detects conversation vs IVR systems automatically
     - Navigates IVR menus using DTMF tones and verbal responses
-    - Provides event hooks for mode detection and status changes (on_conversation_detected, on_ivr_status_changed)
+    - Provides event hooks for mode classification and status changes (on_conversation_detected, on_ivr_status_changed)
     - Developers control conversation handling via on_conversation_detected event
     """
 
-    MODE_DETECTION_PROMPT = """You are an IVR detection classifier. Analyze the transcribed text to determine if it's an automated IVR system or a live human conversation.
+    CLASSIFIER_PROMPT = """You are an IVR detection classifier. Analyze the transcribed text to determine if it's an automated IVR system or a live human conversation.
 
 IVR SYSTEM (respond `<mode>ivr</mode>`):
 - Menu options: "Press 1 for billing", "Press 2 for technical support", "Press 0 to speak to an agent"
@@ -390,10 +402,10 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         self._llm = llm
         self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
         self._ivr_vad_params = ivr_vad_params or VADParams(stop_secs=2.0)
-        self._mode_detection_prompt = self.MODE_DETECTION_PROMPT
+        self._classifier_prompt = self.CLASSIFIER_PROMPT
 
         self._ivr_processor = IVRProcessor(
-            mode_detection_prompt=self._mode_detection_prompt,
+            classifier_prompt=self._classifier_prompt,
             ivr_prompt=self._ivr_prompt,
             ivr_vad_params=self._ivr_vad_params,
         )
@@ -414,13 +426,10 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         """
         if isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame)):
             # Extract messages and pass to IVR processor
-            if isinstance(frame, OpenAILLMContextFrame):
-                all_messages = frame.context.messages
-            else:
-                all_messages = frame.context.get_messages()
+            all_messages = frame.context.get_messages()
 
             # Store messages in the IVR processor for mode switching
-            self._ivr_processor._saved_messages = all_messages
+            self._ivr_processor.update_saved_messages(all_messages)
 
         # Let the pipeline handle normal frame processing
         await super().process_frame(frame, direction)
