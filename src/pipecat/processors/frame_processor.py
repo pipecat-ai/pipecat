@@ -30,7 +30,6 @@ from pipecat.frames.frames import (
     FrameProcessorResumeUrgentFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
@@ -587,8 +586,6 @@ class FrameProcessor(BaseObject):
         elif isinstance(frame, StartInterruptionFrame):
             await self._start_interruption()
             await self.stop_all_metrics()
-        elif isinstance(frame, StopInterruptionFrame):
-            self._should_report_ttfb = True
         elif isinstance(frame, CancelFrame):
             await self.__cancel(frame)
         elif isinstance(frame, (FrameProcessorPauseFrame, FrameProcessorPauseUrgentFrame)):

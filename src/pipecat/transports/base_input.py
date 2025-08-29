@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     StopFrame,
-    StopInterruptionFrame,
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -374,7 +373,6 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(frame)
             if self.interruptions_allowed:
                 await self._stop_interruption()
-                await self.push_frame(StopInterruptionFrame())
 
     #
     # Handle bot speaking state
