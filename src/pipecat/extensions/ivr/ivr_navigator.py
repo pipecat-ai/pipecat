@@ -203,8 +203,12 @@ class IVRProcessor(FrameProcessor):
         logger.info(f"Mode detected: {mode}")
         if mode == "conversation":
             await self._handle_conversation()
-        elif mode == "detected":
+        elif mode == "ivr":
             await self._handle_ivr_detected()
+
+        # No TextFrame is pushed for the mode selection, as the mode
+        # selection conversation is ephemeral and the system message
+        # is removed after the mode is detected.
 
     async def _handle_conversation(self):
         """Handle conversation mode by switching to conversation mode.
@@ -289,7 +293,7 @@ class IVRNavigator(Pipeline):
 
     MODE_DETECTION_PROMPT = """You are an IVR detection classifier. Analyze the transcribed text to determine if it's an automated IVR system or a live human conversation.
 
-IVR SYSTEM (respond `<mode>detected</mode>`):
+IVR SYSTEM (respond `<mode>ivr</mode>`):
 - Menu options: "Press 1 for billing", "Press 2 for technical support", "Press 0 to speak to an agent"
 - Automated instructions: "Please enter your account number", "Say or press your selection", "Enter your phone number followed by the pound key"
 - System prompts: "Thank you for calling [company]", "Your call is important to us", "Please hold while we connect you"
@@ -306,7 +310,7 @@ HUMAN CONVERSATION (respond `<mode>conversation</mode>`):
 - Spontaneous responses: "Oh, I can help with that", "Sure, no problem", "Hmm, let me check"
 
 RESPOND ONLY with either:
-- `<mode>detected</mode>` for IVR system
+- `<mode>ivr</mode>` for IVR system
 - `<mode>conversation</mode>` for human conversation"""
 
     IVR_NAVIGATION_BASE = """You are navigating an Interactive Voice Response (IVR) system to accomplish a specific goal. You receive text transcriptions of the IVR system's audio prompts and menu options.

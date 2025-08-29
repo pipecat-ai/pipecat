@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import AsyncMock
 
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.extensions.ivr.ivr_navigator import IVRNavigator, IVRProcessor
+from pipecat.extensions.ivr.ivr_navigator import IVRProcessor
 from pipecat.frames.frames import (
     LLMMessagesUpdateFrame,
     LLMTextFrame,
@@ -27,36 +27,31 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         self.mock_llm = AsyncMock(spec=LLMService)
 
         # Test prompts
+        self.mode_detection_prompt = "Classify as IVR or conversation"
         self.ivr_prompt = "Navigate to the billing department"
-        self.conversation_prompt = "You are a helpful customer service agent"
 
         # VAD parameters
         self.ivr_vad_params = VADParams(stop_secs=2.0)
-        self.conversation_vad_params = VADParams(stop_secs=0.8)
 
     async def test_switch_to_ivr_mode(self):
         """Test switching to IVR mode from conversation mode."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
             ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="conversation",
         )
 
         frames_to_send = [
-            # LLM responds with DTMF command
-            LLMTextFrame(text="<ivr>detected</ivr>"),
+            LLMTextFrame(text="<mode>ivr</mode>"),
         ]
 
         expected_down_frames = [
-            TextFrame,  # Context frame with skip_tts=True
+            # No frames expected - mode selection doesn't push TextFrame
         ]
 
         expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the conversation prompt
-            VADParamsUpdateFrame,  # Initialize the conversation VAD parameters
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
             LLMMessagesUpdateFrame,  # Switch to the ivr prompt
             VADParamsUpdateFrame,  # Switch to the ivr VAD parameters
         ]
@@ -68,61 +63,69 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=expected_up_frames,
         )
 
-    async def test_conversation_mode_requires_conversation_prompt(self):
-        """Test that IVRNavigator conversation mode requires a conversation prompt."""
-        with self.assertRaises(ValueError) as context:
-            IVRNavigator(
-                llm=self.mock_llm,
-                ivr_prompt=self.ivr_prompt,
-                conversation_prompt=None,  # This should cause an error
-                conversation_vad_params=self.conversation_vad_params,
-                initial_mode="conversation",  # This requires conversation_prompt
-            )
-
-        self.assertIn(
-            "conversation_prompt is required when initial_mode is 'conversation'",
-            str(context.exception),
-        )
-
-    async def test_conversation_mode_requires_conversation_vad_params(self):
-        """Test that IVRNavigator conversation mode requires conversation_vad_params."""
-        with self.assertRaises(ValueError) as context:
-            IVRNavigator(
-                llm=self.mock_llm,
-                ivr_prompt=self.ivr_prompt,
-                conversation_prompt=self.conversation_prompt,
-                conversation_vad_params=None,  # This should cause an error
-                initial_mode="conversation",  # This requires conversation_vad_params
-            )
-
-        self.assertIn(
-            "conversation_vad_params is required when initial_mode is 'conversation'",
-            str(context.exception),
-        )
-
-    async def test_ivr_only_mode_without_conversation_params(self):
-        """Test that IVRNavigator works with only IVR parameters when not using conversation mode."""
-        # This should not raise an error - conversation_prompt and conversation_vad_params can be None
-        navigator = IVRNavigator(
-            llm=self.mock_llm,
+    async def test_switch_to_conversation_mode(self):
+        """Test switching to conversation mode when conversation is detected."""
+        # Create just the IVR processor to test in isolation
+        processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=None,
-            conversation_vad_params=None,
-            initial_mode="ivr",
+            ivr_vad_params=self.ivr_vad_params,
         )
 
-        # Should work fine
-        self.assertIsNotNone(navigator)
+        # Mock event handler
+        conversation_handler_called = False
+        received_processor = None
+        received_history = None
+
+        async def mock_conversation_handler(ivr_processor, conversation_history):
+            nonlocal conversation_handler_called, received_processor, received_history
+            conversation_handler_called = True
+            received_processor = ivr_processor
+            received_history = conversation_history
+
+        # Register the event handler
+        processor.add_event_handler("on_conversation_detected", mock_conversation_handler)
+
+        frames_to_send = [
+            LLMTextFrame(text="<mode>conversation</mode>"),
+        ]
+
+        expected_down_frames = [
+            # No frames expected - mode selection doesn't push TextFrame
+        ]
+
+        expected_up_frames = [
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
+        ]
+
+        await run_test(
+            processor,
+            frames_to_send=frames_to_send,
+            expected_down_frames=expected_down_frames,
+            expected_up_frames=expected_up_frames,
+        )
+
+        # Verify the event handler was called
+        self.assertTrue(
+            conversation_handler_called,
+            "on_conversation_detected event handler should have been called",
+        )
+        self.assertEqual(
+            received_processor, processor, "Event handler should receive the IVRProcessor instance"
+        )
+        self.assertEqual(
+            received_history,
+            [],
+            "Event handler should receive empty conversation history initially",
+        )
 
     async def test_basic_dtmf_navigation(self):
         """Test basic DTMF tone generation from LLM responses."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
             ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
         )
 
         frames_to_send = [
@@ -135,8 +138,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
         ]
 
         await run_test(
@@ -150,11 +152,9 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test basic DTMF tone generation from LLM responses."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
             ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
         )
 
         frames_to_send = [
@@ -176,8 +176,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
         ]
 
         await run_test(
@@ -191,11 +190,9 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         """Test basic DTMF tone generation from LLM responses."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
             ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
         )
 
         frames_to_send = [
@@ -207,8 +204,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
         ]
 
         await run_test(
@@ -219,27 +215,28 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_ivr_stuck(self):
-        """Test that on_ivr_stuck event handler is called when stuck."""
+        """Test that on_ivr_status_changed event handler is called when stuck."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
             ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
         )
 
         # Mock event handler
         stuck_handler_called = False
         received_processor = None
+        received_status = None
 
-        async def mock_stuck_handler(ivr_processor):
-            nonlocal stuck_handler_called, received_processor
-            stuck_handler_called = True
-            received_processor = ivr_processor
+        async def mock_status_handler(ivr_processor, status):
+            nonlocal stuck_handler_called, received_processor, received_status
+            if status.value == "stuck":
+                stuck_handler_called = True
+                received_processor = ivr_processor
+                received_status = status
 
         # Register the event handler
-        processor.add_event_handler("on_ivr_stuck", mock_stuck_handler)
+        processor.add_event_handler("on_ivr_status_changed", mock_status_handler)
 
         frames_to_send = [
             LLMTextFrame(text="<ivr>stuck</ivr>"),
@@ -250,57 +247,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
-        ]
-
-        await run_test(
-            processor,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-            expected_up_frames=expected_up_frames,
-        )
-
-        # Verify the event handler was called
-        self.assertTrue(stuck_handler_called, "on_ivr_stuck event handler should have been called")
-        self.assertEqual(
-            received_processor, processor, "Event handler should receive the IVRProcessor instance"
-        )
-
-    async def test_ivr_completed(self):
-        """Test that on_ivr_completed event handler is called when completed."""
-        # Create just the IVR processor to test in isolation
-        processor = IVRProcessor(
-            ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
-            ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
-        )
-
-        # Mock event handler
-        completed_handler_called = False
-        received_processor = None
-
-        async def mock_completed_handler(ivr_processor):
-            nonlocal completed_handler_called, received_processor
-            completed_handler_called = True
-            received_processor = ivr_processor
-
-        # Register the event handler
-        processor.add_event_handler("on_ivr_completed", mock_completed_handler)
-
-        frames_to_send = [
-            LLMTextFrame(text="<ivr>completed</ivr>"),
-        ]
-
-        expected_down_frames = [
-            TextFrame,  # Context frame with skip_tts=True
-        ]
-
-        expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
         ]
 
         await run_test(
@@ -312,33 +259,39 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
 
         # Verify the event handler was called
         self.assertTrue(
-            completed_handler_called, "on_ivr_completed event handler should have been called"
+            stuck_handler_called,
+            "on_ivr_status_changed event handler should have been called for stuck status",
         )
         self.assertEqual(
             received_processor, processor, "Event handler should receive the IVRProcessor instance"
         )
+        self.assertEqual(
+            received_status.value, "stuck", "Event handler should receive IVRStatus.STUCK"
+        )
 
-    async def test_ivr_completed_with_start_conversation(self):
-        """Test that start_conversation() works when called from event handler."""
+    async def test_ivr_completed(self):
+        """Test that on_ivr_status_changed event handler is called when completed."""
         # Create just the IVR processor to test in isolation
         processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
             ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
         )
 
-        # Mock event handler that calls start_conversation
-        conversation_started = False
+        # Mock event handler
+        completed_handler_called = False
+        received_processor = None
+        received_status = None
 
-        async def mock_completed_handler(ivr_processor):
-            nonlocal conversation_started
-            await ivr_processor.start_conversation()
-            conversation_started = True
+        async def mock_status_handler(ivr_processor, status):
+            nonlocal completed_handler_called, received_processor, received_status
+            if status.value == "completed":
+                completed_handler_called = True
+                received_processor = ivr_processor
+                received_status = status
 
         # Register the event handler
-        processor.add_event_handler("on_ivr_completed", mock_completed_handler)
+        processor.add_event_handler("on_ivr_status_changed", mock_status_handler)
 
         frames_to_send = [
             LLMTextFrame(text="<ivr>completed</ivr>"),
@@ -349,10 +302,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
-            LLMMessagesUpdateFrame,  # Start conversation mode
-            VADParamsUpdateFrame,  # Conversation VAD parameters
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
         ]
 
         await run_test(
@@ -362,66 +312,24 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
             expected_up_frames=expected_up_frames,
         )
 
-        # Verify conversation was started
-        self.assertTrue(conversation_started, "start_conversation() should have been called")
-
-    async def test_ivr_completed_without_conversation_prompt(self):
-        """Test that start_conversation() fails gracefully without conversation_prompt."""
-        # Create processor without conversation prompt
-        processor = IVRProcessor(
-            ivr_prompt=self.ivr_prompt,
-            conversation_prompt=None,  # No conversation prompt
-            ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
+        # Verify the event handler was called
+        self.assertTrue(
+            completed_handler_called,
+            "on_ivr_status_changed event handler should have been called for completed status",
         )
-
-        # Mock event handler that tries to call start_conversation
-        handler_called = False
-        conversation_attempted = False
-
-        async def mock_completed_handler(ivr_processor):
-            nonlocal handler_called, conversation_attempted
-            handler_called = True
-            await ivr_processor.start_conversation()
-            conversation_attempted = True
-
-        # Register the event handler
-        processor.add_event_handler("on_ivr_completed", mock_completed_handler)
-
-        frames_to_send = [
-            LLMTextFrame(text="<ivr>completed</ivr>"),
-        ]
-
-        expected_down_frames = [
-            TextFrame,  # Context frame with skip_tts=True
-        ]
-
-        expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
-            # No conversation frames should be sent
-        ]
-
-        await run_test(
-            processor,
-            frames_to_send=frames_to_send,
-            expected_down_frames=expected_down_frames,
-            expected_up_frames=expected_up_frames,
+        self.assertEqual(
+            received_processor, processor, "Event handler should receive the IVRProcessor instance"
         )
-
-        # Verify handler was called but conversation didn't start
-        self.assertTrue(handler_called, "Event handler should have been called")
-        self.assertTrue(conversation_attempted, "start_conversation() should have been attempted")
+        self.assertEqual(
+            received_status.value, "completed", "Event handler should receive IVRStatus.COMPLETED"
+        )
 
     async def test_normal_text_passthrough(self):
         """Test that normal LLM text (no XML) passes through unchanged."""
         processor = IVRProcessor(
+            mode_detection_prompt=self.mode_detection_prompt,
             ivr_prompt=self.ivr_prompt,
-            conversation_prompt=self.conversation_prompt,
             ivr_vad_params=self.ivr_vad_params,
-            conversation_vad_params=self.conversation_vad_params,
-            initial_mode="ivr",
         )
 
         frames_to_send = [
@@ -433,8 +341,7 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
         ]
 
         expected_up_frames = [
-            LLMMessagesUpdateFrame,  # Initialize the IVR prompt
-            VADParamsUpdateFrame,  # Initialize the VAD parameters
+            LLMMessagesUpdateFrame,  # Initialize the mode detection prompt
         ]
 
         await run_test(
