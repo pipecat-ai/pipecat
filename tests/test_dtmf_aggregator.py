@@ -6,10 +6,10 @@
 
 import unittest
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     EndFrame,
     InputDTMFFrame,
-    KeypadEntry,
     TranscriptionFrame,
 )
 from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator

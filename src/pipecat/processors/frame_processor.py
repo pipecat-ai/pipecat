@@ -452,12 +452,14 @@ class FrameProcessor(BaseObject):
         """
         import warnings
 
-        warnings.warn(
-            "`FrameProcessor.wait_for_task()` is deprecated. "
-            "Use `await task` or `await asyncio.wait_for(task, timeout)` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FrameProcessor.wait_for_task()` is deprecated. "
+                "Use `await task` or `await asyncio.wait_for(task, timeout)` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         if timeout:
             await asyncio.wait_for(task, timeout)

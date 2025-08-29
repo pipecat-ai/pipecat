@@ -122,11 +122,13 @@ async def configure_with_args(aiohttp_session: aiohttp.ClientSession, parser=Non
     """
     import warnings
 
-    warnings.warn(
-        "configure_with_args is deprecated. Use configure() instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("always")
+        warnings.warn(
+            "configure_with_args is deprecated. Use configure() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
     room_url, token = await configure(aiohttp_session)
     return (room_url, token, None)
