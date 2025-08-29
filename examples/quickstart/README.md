@@ -14,38 +14,17 @@ python --version
 
 If you need to upgrade Python, we recommend using a version manager like `uv` or `pyenv`.
 
-### AI Service API keys
-
-Pipecat orchestrates different AI services in a pipeline, ensuring low latency communication. In this quickstart example, we'll use:
-
-- [Deepgram](https://console.deepgram.com/signup) for Speech-to-Text transcriptions
-- [OpenAI](https://auth.openai.com/create-account) for LLM inference
-- [Cartesia](https://play.cartesia.ai/sign-up) for Text-to-Speech audio generation
-
-Have your API keys ready. We'll add them to your `.env` shortly.
-
 ## Setup
 
-1. Set up a virtual environment
+1. Install dependencies
 
-From the `examples/quickstart` directory, run:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-> Using `uv`? Create your venv using: `uv venv && source .venv/bin/activate`.
-
-2. Install dependencies
+From the root of the `pipecat` repo, run:
 
 ```bash
-pip install -r requirements.txt
+uv sync --extra webrtc --extra silero --extra deepgram --extra google --extra respeecher --extra runner
 ```
 
-> Using `uv`? Install requirements using: `uv pip install -r requirements.txt`.
-
-3. Configure environment variables
+2. Configure environment variables
 
 Create a `.env` file:
 
@@ -57,8 +36,8 @@ Then, add your API keys:
 
 ```
 DEEPGRAM_API_KEY=your_deepgram_api_key
-OPENAI_API_KEY=your_openai_api_key
-CARTESIA_API_KEY=your_cartesia_api_key
+GOOGLE_API_KEY=your_google_api_key
+RESPEECHER_API_KEY=your_respeecher_api_key
 ```
 
 4. Run the example
@@ -66,10 +45,8 @@ CARTESIA_API_KEY=your_cartesia_api_key
 Run your bot using:
 
 ```bash
-python bot.py
+uv run examples/quickstart/bot.py
 ```
-
-> Using `uv`? Run your bot using: `uv run bot.py`.
 
 **Open http://localhost:7860 in your browser** and click `Connect` to start talking to your bot.
 
