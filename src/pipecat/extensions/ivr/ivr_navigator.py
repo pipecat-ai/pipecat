@@ -104,15 +104,15 @@ class IVRProcessor(FrameProcessor):
         """Set up XML pattern detection and handlers."""
         # Register DTMF pattern
         self._aggregator.add_pattern_pair("dtmf", "<dtmf>", "</dtmf>", remove_match=True)
-        self._aggregator.on_pattern_match("dtmf", self._handle_dtmf_pattern)
+        self._aggregator.on_pattern_match("dtmf", self._handle_dtmf_action)
 
         # Register mode pattern
         self._aggregator.add_pattern_pair("mode", "<mode>", "</mode>", remove_match=True)
-        self._aggregator.on_pattern_match("mode", self._handle_mode_pattern)
+        self._aggregator.on_pattern_match("mode", self._handle_mode_action)
 
         # Register IVR pattern
         self._aggregator.add_pattern_pair("ivr", "<ivr>", "</ivr>", remove_match=True)
-        self._aggregator.on_pattern_match("ivr", self._handle_ivr_pattern)
+        self._aggregator.on_pattern_match("ivr", self._handle_ivr_action)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and aggregate XML tag content.
@@ -142,24 +142,13 @@ class IVRProcessor(FrameProcessor):
         else:
             await self.push_frame(frame, direction)
 
-    async def _handle_dtmf_pattern(self, match: PatternMatch):
-        """Handle DTMF XML pattern matches."""
-        await self._handle_dtmf_action(match.content)
-
-    async def _handle_ivr_pattern(self, match: PatternMatch):
-        """Handle IVR XML pattern matches."""
-        await self._handle_ivr_action(match.content)
-
-    async def _handle_mode_pattern(self, match: PatternMatch):
-        """Handle mode XML pattern matches."""
-        await self._handle_mode_action(match.content)
-
-    async def _handle_dtmf_action(self, value: str):
+    async def _handle_dtmf_action(self, match: PatternMatch):
         """Handle DTMF action by creating and pushing DTMF frame.
 
         Args:
-            value: The DTMF value to send (0-9, *, #).
+            match: The pattern match containing DTMF content.
         """
+        value = match.content
         logger.debug(f"DTMF detected: {value}")
 
         try:
@@ -174,12 +163,13 @@ class IVRProcessor(FrameProcessor):
         except ValueError:
             logger.warning(f"Invalid DTMF value: {value}. Must be 0-9, *, or #")
 
-    async def _handle_ivr_action(self, status: str):
+    async def _handle_ivr_action(self, match: PatternMatch):
         """Handle IVR status action.
 
         Args:
-            status: The IVR status string value from XML pattern.
+            match: The pattern match containing IVR status content.
         """
+        status = match.content
         logger.debug(f"IVR status detected: {status}")
 
         # Convert string to enum, with validation
@@ -203,12 +193,13 @@ class IVRProcessor(FrameProcessor):
         ivr_text_frame.skip_tts = True
         await self.push_frame(ivr_text_frame)
 
-    async def _handle_mode_action(self, mode: str):
+    async def _handle_mode_action(self, match: PatternMatch):
         """Handle mode action by switching to the appropriate mode.
 
         Args:
-            mode: The mode string value from XML pattern.
+            match: The pattern match containing mode content.
         """
+        mode = match.content
         logger.info(f"Mode detected: {mode}")
         if mode == "conversation":
             await self._handle_conversation()
