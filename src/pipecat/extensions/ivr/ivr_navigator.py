@@ -11,7 +11,7 @@ using LLM-based decision making and DTMF tone generation.
 """
 
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import List, Optional
 
 from loguru import logger
 
@@ -64,34 +64,25 @@ class IVRProcessor(FrameProcessor):
     def __init__(
         self,
         *,
+        mode_detection_prompt: str,
         ivr_prompt: str,
-        conversation_prompt: Optional[str] = None,
         ivr_vad_params: Optional[VADParams] = None,
-        conversation_vad_params: Optional[VADParams] = None,
-        initial_mode: Literal["ivr", "conversation"],
     ):
         """Initialize the IVR processor.
 
         Args:
+            mode_detection_prompt: System prompt for mode detection.
             ivr_prompt: System prompt for IVR navigation mode.
-            conversation_prompt: System prompt for conversation mode. Optional if only using IVR navigation.
             ivr_vad_params: VAD parameters for IVR navigation mode. If None, defaults to VADParams(stop_secs=2.0).
-            conversation_vad_params: VAD parameters for conversation mode. Optional, but should be provided if using conversation mode to ensure consistency with transport settings.
-            initial_mode: Starting mode, either "ivr" or "conversation".
         """
         super().__init__()
 
         self._ivr_prompt = ivr_prompt
-        self._conversation_prompt = conversation_prompt
         self._ivr_vad_params = ivr_vad_params or VADParams(stop_secs=2.0)
-        self._conversation_vad_params = conversation_vad_params
-        self._initial_mode = initial_mode
+        self._mode_detection_prompt = mode_detection_prompt
 
-        # Track conversation messages to preserve context when switching modes
+        # Store preserved messages
         self._preserved_messages: List[dict] = []
-
-        # Track whether we've already switched to IVR mode
-        self._has_switched_to_ivr = False
 
         # XML pattern aggregation
         self._aggregator = PatternPairAggregator()
@@ -100,45 +91,25 @@ class IVRProcessor(FrameProcessor):
         # Register IVR events
         self._register_event_handler("on_ivr_stuck")
         self._register_event_handler("on_ivr_completed")
+        self._register_event_handler("on_conversation_detected")
 
-    async def start_conversation(self):
-        """Switch to conversation mode with conversation prompt and VAD timing.
+    def _get_conversation_history(self) -> List[dict]:
+        """Get preserved conversation history without the system message.
 
-        Call this method to explicitly switch to conversation mode with the
-        conversation prompt and VAD parameters. This is typically called from
-        an on_ivr_completed event handler.
-
-        Example::
-
-            @navigator.event_handler("on_ivr_completed")
-            async def on_completed(ivr_processor):
-                # Start conversation with the customer service rep
-                await ivr_processor.start_conversation()
+        Returns:
+            List of message dictionaries excluding the first system message.
         """
-        if self._conversation_prompt is None:
-            logger.warning("Cannot start conversation mode: no conversation_prompt provided")
-            return
-
-        if self._conversation_vad_params is None:
-            logger.warning("Cannot start conversation mode: no conversation_vad_params provided")
-            return
-
-        logger.info("Starting conversation mode")
-
-        # Switch to conversation prompt
-        messages = [{"role": "system", "content": self._conversation_prompt}]
-        llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
-        await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
-
-        # Update VAD parameters for conversation response timing
-        vad_update_frame = VADParamsUpdateFrame(params=self._conversation_vad_params)
-        await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
+        return self._preserved_messages[1:] if self._preserved_messages else []
 
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
         # Register DTMF pattern
         self._aggregator.add_pattern_pair("dtmf", "<dtmf>", "</dtmf>", remove_match=True)
         self._aggregator.on_pattern_match("dtmf", self._handle_dtmf_pattern)
+
+        # Register mode pattern
+        self._aggregator.add_pattern_pair("mode", "<mode>", "</mode>", remove_match=True)
+        self._aggregator.on_pattern_match("mode", self._handle_mode_pattern)
 
         # Register IVR pattern
         self._aggregator.add_pattern_pair("ivr", "<ivr>", "</ivr>", remove_match=True)
@@ -157,27 +128,10 @@ class IVRProcessor(FrameProcessor):
             # Push the StartFrame right away
             await self.push_frame(frame, direction)
 
-            # Update the context with the appropriate prompt based on the initial mode
-            # We push the LLMMessagesUpdateFrame upstream because the IVRProcessor is
-            # placed after LLM, which is in the IVRNavigator class.
-            if self._initial_mode == "conversation":
-                # Set the conversation prompt and push it upstream
-                messages = [{"role": "system", "content": self._conversation_prompt}]
-                llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
-                await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
-
-                # Set the VAD parameters and push it upstream
-                vad_update_frame = VADParamsUpdateFrame(params=self._conversation_vad_params)
-                await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
-            else:
-                # Set the IVR prompt and push it upstream
-                messages = [{"role": "system", "content": self._ivr_prompt}]
-                llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
-                await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
-
-                # Set the VAD parameters and push it upstream
-                vad_update_frame = VADParamsUpdateFrame(params=self._ivr_vad_params)
-                await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
+            # Set the mode detection prompt and push it upstream
+            messages = [{"role": "system", "content": self._mode_detection_prompt}]
+            llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
+            await self.push_frame(llm_update_frame, FrameDirection.UPSTREAM)
 
         elif isinstance(frame, LLMTextFrame):
             # Process text through the pattern aggregator
@@ -187,24 +141,19 @@ class IVRProcessor(FrameProcessor):
                 await self.push_frame(LLMTextFrame(result), direction)
 
         else:
-            # Pass all non-LLM frames through
             await self.push_frame(frame, direction)
 
     async def _handle_dtmf_pattern(self, match: PatternMatch):
-        """Handle DTMF XML pattern matches.
-
-        Args:
-            match: The pattern match containing DTMF content.
-        """
+        """Handle DTMF XML pattern matches."""
         await self._handle_dtmf_action(match.content)
 
     async def _handle_ivr_pattern(self, match: PatternMatch):
-        """Handle IVR XML pattern matches.
-
-        Args:
-            match: The pattern match containing IVR status content.
-        """
+        """Handle IVR XML pattern matches."""
         await self._handle_ivr_action(match.content)
+
+    async def _handle_mode_pattern(self, match: PatternMatch):
+        """Handle mode XML pattern matches."""
+        await self._handle_mode_action(match.content)
 
     async def _handle_dtmf_action(self, value: str):
         """Handle DTMF action by creating and pushing DTMF frame.
@@ -255,6 +204,30 @@ class IVRProcessor(FrameProcessor):
         ivr_text_frame.skip_tts = True
         await self.push_frame(ivr_text_frame)
 
+    async def _handle_mode_action(self, mode: str):
+        """Handle mode action by switching to the appropriate mode.
+
+        Args:
+            mode: The mode string value from XML pattern.
+        """
+        logger.info(f"Mode detected: {mode}")
+        if mode == "conversation":
+            await self._handle_conversation()
+        elif mode == "detected":
+            await self._handle_ivr_detected()
+
+    async def _handle_conversation(self):
+        """Handle conversation mode by switching to conversation mode.
+
+        Emit an on_conversation_detected event with preserved conversation history.
+        """
+        logger.info("Conversation detected - emitting on_conversation_detected event")
+
+        # Extract conversation history for the event handler
+        conversation_history = self._get_conversation_history()
+
+        await self._call_event_handler("on_conversation_detected", conversation_history)
+
     async def _handle_ivr_detected(self):
         """Handle IVR detection by switching to IVR mode.
 
@@ -266,14 +239,10 @@ class IVRProcessor(FrameProcessor):
         # Create new context with IVR system prompt and preserved user messages
         messages = [{"role": "system", "content": self._ivr_prompt}]
 
-        # Add preserved user messages if available (from conversation mode)
-        if self._preserved_messages:
-            messages.extend(self._preserved_messages)
-            logger.debug(
-                f"Creating IVR context with {len(self._preserved_messages)} preserved user messages"
-            )
-        else:
-            logger.debug("Creating IVR context without preserved messages")
+        # Add preserved conversation history if available
+        conversation_history = self._get_conversation_history()
+        if conversation_history:
+            messages.extend(conversation_history)
 
         # Push the messages upstream and run the LLM with the new context
         llm_update_frame = LLMMessagesUpdateFrame(messages=messages, run_llm=True)
@@ -282,9 +251,6 @@ class IVRProcessor(FrameProcessor):
         # Update VAD parameters for IVR response timing
         vad_update_frame = VADParamsUpdateFrame(params=self._ivr_vad_params)
         await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
-
-        # Mark that we've switched to IVR mode - no more message preservation needed
-        self._has_switched_to_ivr = True
 
     async def _handle_ivr_completed(self):
         """Handle IVR completion by triggering the completion event.
@@ -316,20 +282,34 @@ class IVRNavigator(Pipeline):
     """Pipeline for automated IVR system navigation.
 
     Orchestrates LLM-based IVR navigation by combining an LLM service with
-    IVR processing capabilities. Handles bidirectional mode switching between
-    conversation and IVR navigation states.
+    IVR processing capabilities. Starts with mode detection to classify input
+    as conversation or IVR system.
 
     Navigation behavior:
 
-    - Detects IVR systems automatically when in conversation mode
+    - Detects conversation vs IVR systems automatically
     - Navigates IVR menus using DTMF tones and verbal responses
-    - Preserves conversation context during mode transitions
-    - Provides event hooks for completion and error handling
+    - Provides event hooks for mode detection, completion, and error handling
+    - Developers control conversation handling via on_conversation_detected event
     """
 
-    IVR_DETECTED_PROMPT = (
-        """IMPORTANT: When you detect an IVR system, respond ONLY with `<ivr>detected</ivr>`."""
-    )
+    MODE_DETECTION_PROMPT = """You will receive transcription and must classify it as either an IVR system or human conversation.
+
+IVR INDICATORS:
+- Menu options (Press 1 for..., Press 2 for...)
+- Automated voice prompts
+- Hold music or system sounds
+- "Please enter your...", "Say or press..."
+
+CONVERSATION INDICATORS:
+- Human greeting ("Hello, how can I help you?")
+- Natural speech patterns
+- Personal responses
+- Back-and-forth dialogue
+
+RESPOND EXACTLY ONCE with either:
+- `<mode>detected</mode>` for IVR system
+- `<mode>conversation</mode>` for human conversation"""
 
     IVR_NAVIGATION_BASE = """You are navigating an Interactive Voice Response (IVR) system to accomplish a specific goal. You receive text transcriptions of the IVR system's audio prompts and menu options.
 
@@ -396,56 +376,33 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         *,
         llm: LLMService,
         ivr_prompt: str,
-        conversation_prompt: Optional[str] = None,
         ivr_vad_params: Optional[VADParams] = None,
-        conversation_vad_params: Optional[VADParams] = None,
-        initial_mode: Optional[Literal["ivr", "conversation"]] = "ivr",
     ):
         """Initialize the IVR navigator.
 
         Args:
             llm: LLM service for text generation and decision making.
             ivr_prompt: Navigation goal prompt integrated with IVR navigation instructions.
-            conversation_prompt: System prompt for conversation mode with human agents. Optional if only using IVR navigation.
             ivr_vad_params: VAD parameters for IVR navigation mode. If None, defaults to VADParams(stop_secs=2.0).
-            conversation_vad_params: VAD parameters for conversation mode. Optional, but should be provided if using conversation mode to ensure consistency with transport settings.
-            initial_mode: Starting mode, "ivr" or "conversation". Defaults to "ivr".
-                         Mode switching occurs automatically based on LLM responses.
         """
-        if initial_mode == "conversation" and conversation_prompt is None:
-            raise ValueError("conversation_prompt is required when initial_mode is 'conversation'")
-        if initial_mode == "conversation" and conversation_vad_params is None:
-            raise ValueError(
-                "conversation_vad_params is required when initial_mode is 'conversation'"
-            )
-
         self._llm = llm
         self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
-        self._conversation_prompt = (
-            self.IVR_DETECTED_PROMPT + "\n\n" + conversation_prompt
-            if conversation_prompt is not None
-            else None
-        )
         self._ivr_vad_params = ivr_vad_params or VADParams(stop_secs=2.0)
-        self._conversation_vad_params = conversation_vad_params
-        self._initial_mode = initial_mode
-
-        # Track conversation turn count to optimize pure conversation scenarios
-        self._conversation_turn_count = 0
+        self._mode_detection_prompt = self.MODE_DETECTION_PROMPT
 
         self._ivr_processor = IVRProcessor(
+            mode_detection_prompt=self._mode_detection_prompt,
             ivr_prompt=self._ivr_prompt,
-            conversation_prompt=self._conversation_prompt,
             ivr_vad_params=self._ivr_vad_params,
-            conversation_vad_params=self._conversation_vad_params,
-            initial_mode=self._initial_mode,
         )
 
+        # Add the IVR processor to the pipeline
         super().__init__([self._llm, self._ivr_processor])
 
         # Register IVR events
         self._register_event_handler("on_ivr_stuck")
         self._register_event_handler("on_ivr_completed")
+        self._register_event_handler("on_conversation_detected")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames at the pipeline level to intercept context frames.
@@ -454,29 +411,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             frame: The frame to process.
             direction: The direction of frame flow in the pipeline.
         """
-        # Only preserve conversation history if:
-        # 1. We started in conversation mode
-        # 2. We haven't switched to IVR mode yet
-        # 3. We're seeing a context frame
-        #
-        # We need to preserve the conversation history in the event that the
-        # mode switches from conversation to ivr. In this case, the prompt
-        # update pushed to the LLM needs both the IVR prompt and the prior
-        # user messages, so that inference can be run right away. This should
-        # only be relevant when initial_mode == "conversation", since the IVR
-        # navigator won't ever switch to conversation mode.
-        #
-        # Optimization: After several conversation turns without IVR detection,
-        # assume this is a pure conversation scenario and stop preserving messages.
-        # This saves CPU/memory for chat-only applications.
-        PURE_CONVERSATION_THRESHOLD = 5  # Stop preserving after 5 conversation turns
-
-        if (
-            isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame))
-            and self._initial_mode == "conversation"
-            and not self._ivr_processor._has_switched_to_ivr
-            and self._conversation_turn_count < PURE_CONVERSATION_THRESHOLD
-        ):
+        if isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame)):
             # Extract messages and pass to IVR processor
             if isinstance(frame, OpenAILLMContextFrame):
                 all_messages = frame.context.messages
@@ -484,12 +419,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
                 all_messages = frame.context.get_messages()
 
             # Store messages in the IVR processor for mode switching
-            self._ivr_processor._preserved_messages = [
-                msg for msg in all_messages if isinstance(msg, dict) and msg.get("role") == "user"
-            ]
-
-            # Increment conversation turn count for pure conversation optimization
-            self._conversation_turn_count += 1
+            self._ivr_processor._preserved_messages = all_messages
 
         # Let the pipeline handle normal frame processing
         await super().process_frame(frame, direction)
@@ -498,10 +428,12 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         """Add event handler for IVR navigation events.
 
         Args:
-            event_name: Event name ("on_ivr_stuck" or "on_ivr_completed").
-            handler: Async function called when event occurs. Receives IVRProcessor instance.
+            event_name: Event name ("on_ivr_stuck", "on_ivr_completed", "on_conversation_detected").
+            handler: Async function called when event occurs.
+                    - on_ivr_stuck/on_ivr_completed: Receives IVRProcessor instance
+                    - on_conversation_detected: Receives IVRProcessor instance and conversation_history list
         """
-        if event_name in ("on_ivr_stuck", "on_ivr_completed"):
+        if event_name in ("on_ivr_stuck", "on_ivr_completed", "on_conversation_detected"):
             self._ivr_processor.add_event_handler(event_name, handler)
         else:
             super().add_event_handler(event_name, handler)
