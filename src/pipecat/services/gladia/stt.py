@@ -18,6 +18,7 @@ from typing import Any, AsyncGenerator, Dict, Literal, Optional
 import aiohttp
 from loguru import logger
 
+from pipecat import __version__ as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -305,6 +306,9 @@ class GladiaSTTService(STTService):
         # Add custom_metadata if provided
         if self._params.custom_metadata:
             settings["custom_metadata"] = self._params.custom_metadata
+        else:
+            settings["custom_metadata"] = {}
+        settings["custom_metadata"]["pipecat"] = pipecat_version
 
         # Add endpointing parameters if provided
         if self._params.endpointing is not None:
@@ -430,6 +434,7 @@ class GladiaSTTService(STTService):
                     response = await self._setup_gladia(settings)
                     self._session_url = response["url"]
                     self._reconnection_attempts = 0
+                    logger.info(f"Session URL : {self._session_url}")
 
                 # Connect with automatic reconnection
                 async with websocket_connect(self._session_url) as websocket:
