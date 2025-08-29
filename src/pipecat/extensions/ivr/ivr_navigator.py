@@ -141,6 +141,8 @@ class IVRProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
             # Update the context with the appropriate prompt based on the initial mode
+            # We push the LLMMessagesUpdateFrame upstream because the IVRProcessor is
+            # placed after LLM, which is in the IVRNavigator class.
             if self._initial_mode == "conversation":
                 # Set the conversation prompt and push it upstream
                 messages = [{"role": "system", "content": self._conversation_prompt}]
@@ -201,11 +203,11 @@ class IVRProcessor(FrameProcessor):
             # Convert the value to a KeypadEntry
             keypad_entry = KeypadEntry(value)
             dtmf_frame = OutputDTMFUrgentFrame(button=keypad_entry)
-            await self.push_frame(dtmf_frame, FrameDirection.DOWNSTREAM)
+            await self.push_frame(dtmf_frame)
             # Push a TextFrame to add DTMF message to the context
             text_frame = TextFrame(text=f"<dtmf>{value}</dtmf>")
             text_frame.skip_tts = True
-            await self.push_frame(text_frame, FrameDirection.DOWNSTREAM)
+            await self.push_frame(text_frame)
         except ValueError:
             logger.warning(f"Invalid DTMF value: {value}. Must be 0-9, *, or #")
 
@@ -231,7 +233,7 @@ class IVRProcessor(FrameProcessor):
         # Push a TextFrame to add the IVR detected signal to the context
         ivr_text_frame = TextFrame(text=f"<ivr>{status}</ivr>")
         ivr_text_frame.skip_tts = True
-        await self.push_frame(ivr_text_frame, FrameDirection.DOWNSTREAM)
+        await self.push_frame(ivr_text_frame)
 
     async def _handle_ivr_detected(self):
         """Handle IVR detection by switching to IVR mode.
@@ -407,8 +409,6 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
 
         # Track conversation turn count to optimize pure conversation scenarios
         self._conversation_turn_count = 0
-
-        print(self._ivr_prompt)
 
         self._ivr_processor = IVRProcessor(
             ivr_prompt=self._ivr_prompt,
