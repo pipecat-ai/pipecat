@@ -14,13 +14,13 @@ for downstream processing by LLM context aggregators.
 import asyncio
 from typing import Optional
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputDTMFFrame,
-    KeypadEntry,
     StartFrame,
     TranscriptionFrame,
 )

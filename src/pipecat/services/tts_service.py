@@ -276,11 +276,13 @@ class TTSService(AIService):
         """
         import warnings
 
-        warnings.warn(
-            "`TTSService.say()` is deprecated. Push a `TTSSpeakFrame` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`TTSService.say()` is deprecated. Push a `TTSSpeakFrame` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         await self.queue_frame(TTSSpeakFrame(text))
 

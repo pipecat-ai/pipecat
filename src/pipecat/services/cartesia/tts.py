@@ -271,11 +271,13 @@ class CartesiaTTSService(AudioContextWordTTSService):
         voice_config["id"] = self._voice_id
 
         if self._settings["emotion"]:
-            warnings.warn(
-                "The 'emotion' parameter in __experimental_controls is deprecated and will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'emotion' parameter in __experimental_controls is deprecated and will be removed in a future version.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
             voice_config["__experimental_controls"] = {}
             if self._settings["emotion"]:
                 voice_config["__experimental_controls"]["emotion"] = self._settings["emotion"]
@@ -606,11 +608,13 @@ class CartesiaHttpTTSService(TTSService):
             voice_config = {"mode": "id", "id": self._voice_id}
 
             if self._settings["emotion"]:
-                warnings.warn(
-                    "The 'emotion' parameter in voice.__experimental_controls is deprecated and will be removed in a future version.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+                with warnings.catch_warnings():
+                    warnings.simplefilter("always")
+                    warnings.warn(
+                        "The 'emotion' parameter in voice.__experimental_controls is deprecated and will be removed in a future version.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 voice_config["__experimental_controls"] = {"emotion": self._settings["emotion"]}
 
             await self.start_ttfb_metrics()

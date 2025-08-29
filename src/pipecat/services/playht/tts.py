@@ -14,7 +14,6 @@ import io
 import json
 import struct
 import uuid
-import warnings
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -455,11 +454,15 @@ class PlayHTHttpTTSService(TTSService):
 
         # Warn about deprecated protocol parameter if explicitly provided
         if protocol:
-            warnings.warn(
-                "The 'protocol' parameter is deprecated and will be removed in a future version.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'protocol' parameter is deprecated and will be removed in a future version.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         params = params or PlayHTHttpTTSService.InputParams()
 
