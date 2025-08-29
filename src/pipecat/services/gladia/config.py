@@ -174,7 +174,6 @@ class GladiaInputParams(BaseModel):
 
     encoding: Optional[str] = "wav/pcm"
     bit_depth: Optional[int] = 16
-    sample_rate: Optional[int] = 16000
     channels: Optional[int] = 1
     custom_metadata: Optional[Dict[str, Any]] = None
     endpointing: Optional[float] = None
