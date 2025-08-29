@@ -58,7 +58,7 @@ class IVRProcessor(FrameProcessor):
     - DTMF command processing (`<dtmf>1</dtmf>`)
     - IVR state management (see IVRStatus enum: `<ivr>detected</ivr>`, `<ivr>completed</ivr>`, `<ivr>stuck</ivr>`, `<ivr>wait</ivr>`)
     - Automatic prompt and VAD parameter switching
-    - Event emission for stuck and completion states
+    - Event emission via on_ivr_status_changed for detected, completed, and stuck states
     """
 
     def __init__(
@@ -81,25 +81,24 @@ class IVRProcessor(FrameProcessor):
         self._ivr_vad_params = ivr_vad_params or VADParams(stop_secs=2.0)
         self._mode_detection_prompt = mode_detection_prompt
 
-        # Store preserved messages
-        self._preserved_messages: List[dict] = []
+        # Store saved context messages
+        self._saved_messages: List[dict] = []
 
         # XML pattern aggregation
         self._aggregator = PatternPairAggregator()
         self._setup_xml_patterns()
 
         # Register IVR events
-        self._register_event_handler("on_ivr_stuck")
-        self._register_event_handler("on_ivr_completed")
         self._register_event_handler("on_conversation_detected")
+        self._register_event_handler("on_ivr_status_changed")
 
     def _get_conversation_history(self) -> List[dict]:
-        """Get preserved conversation history without the system message.
+        """Get saved context messages without the system message.
 
         Returns:
             List of message dictionaries excluding the first system message.
         """
-        return self._preserved_messages[1:] if self._preserved_messages else []
+        return self._saved_messages[1:] if self._saved_messages else []
 
     def _setup_xml_patterns(self):
         """Set up XML pattern detection and handlers."""
@@ -219,7 +218,7 @@ class IVRProcessor(FrameProcessor):
     async def _handle_conversation(self):
         """Handle conversation mode by switching to conversation mode.
 
-        Emit an on_conversation_detected event with preserved conversation history.
+        Emit an on_conversation_detected event with saved conversation history.
         """
         logger.info("Conversation detected - emitting on_conversation_detected event")
 
@@ -232,14 +231,14 @@ class IVRProcessor(FrameProcessor):
         """Handle IVR detection by switching to IVR mode.
 
         Allows bidirectional switching for error recovery and complex IVR flows.
-        Preserves user messages from the conversation context when available.
+        Saves previous messages from the conversation context when available.
         """
         logger.info("IVR detected - switching to IVR navigation mode")
 
-        # Create new context with IVR system prompt and preserved user messages
+        # Create new context with IVR system prompt and saved messages
         messages = [{"role": "system", "content": self._ivr_prompt}]
 
-        # Add preserved conversation history if available
+        # Add saved conversation history if available
         conversation_history = self._get_conversation_history()
         if conversation_history:
             messages.extend(conversation_history)
@@ -252,22 +251,26 @@ class IVRProcessor(FrameProcessor):
         vad_update_frame = VADParamsUpdateFrame(params=self._ivr_vad_params)
         await self.push_frame(vad_update_frame, FrameDirection.UPSTREAM)
 
-    async def _handle_ivr_completed(self):
-        """Handle IVR completion by triggering the completion event.
+        # Emit status changed event
+        await self._call_event_handler("on_ivr_status_changed", IVRStatus.DETECTED)
 
-        This method simply notifies that IVR navigation is complete. If you want
-        to start conversation mode, call start_conversation() from your event handler.
+    async def _handle_ivr_completed(self):
+        """Handle IVR completion by triggering the status changed event.
+
+        Emits on_ivr_status_changed with IVRStatus.COMPLETED.
         """
-        logger.info("IVR navigation completed - triggering completion event")
-        await self._call_event_handler("on_ivr_completed")
+        logger.info("IVR navigation completed - triggering status change event")
+
+        await self._call_event_handler("on_ivr_status_changed", IVRStatus.COMPLETED)
 
     async def _handle_ivr_stuck(self):
-        """Handle IVR stuck state by triggering event handler.
+        """Handle IVR stuck state by triggering the status changed event.
 
-        Emits the on_ivr_stuck event for external handling of stuck scenarios.
+        Emits on_ivr_status_changed with IVRStatus.STUCK for external handling of stuck scenarios.
         """
-        logger.info("IVR navigation stuck - triggering event handler")
-        await self._call_event_handler("on_ivr_stuck")
+        logger.info("IVR navigation stuck - triggering status change event")
+
+        await self._call_event_handler("on_ivr_status_changed", IVRStatus.STUCK)
 
     async def _handle_ivr_wait(self):
         """Handle IVR wait state when transcription is incomplete.
@@ -289,7 +292,7 @@ class IVRNavigator(Pipeline):
 
     - Detects conversation vs IVR systems automatically
     - Navigates IVR menus using DTMF tones and verbal responses
-    - Provides event hooks for mode detection, completion, and error handling
+    - Provides event hooks for mode detection and status changes (on_conversation_detected, on_ivr_status_changed)
     - Developers control conversation handling via on_conversation_detected event
     """
 
@@ -307,7 +310,7 @@ CONVERSATION INDICATORS:
 - Personal responses
 - Back-and-forth dialogue
 
-RESPOND EXACTLY ONCE with either:
+RESPOND ONLY with either:
 - `<mode>detected</mode>` for IVR system
 - `<mode>conversation</mode>` for human conversation"""
 
@@ -400,9 +403,8 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         super().__init__([self._llm, self._ivr_processor])
 
         # Register IVR events
-        self._register_event_handler("on_ivr_stuck")
-        self._register_event_handler("on_ivr_completed")
         self._register_event_handler("on_conversation_detected")
+        self._register_event_handler("on_ivr_status_changed")
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames at the pipeline level to intercept context frames.
@@ -419,7 +421,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
                 all_messages = frame.context.get_messages()
 
             # Store messages in the IVR processor for mode switching
-            self._ivr_processor._preserved_messages = all_messages
+            self._ivr_processor._saved_messages = all_messages
 
         # Let the pipeline handle normal frame processing
         await super().process_frame(frame, direction)
@@ -428,12 +430,15 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         """Add event handler for IVR navigation events.
 
         Args:
-            event_name: Event name ("on_ivr_stuck", "on_ivr_completed", "on_conversation_detected").
+            event_name: Event name ("on_conversation_detected", "on_ivr_status_changed").
             handler: Async function called when event occurs.
-                    - on_ivr_stuck/on_ivr_completed: Receives IVRProcessor instance
                     - on_conversation_detected: Receives IVRProcessor instance and conversation_history list
+                    - on_ivr_status_changed: Receives IVRProcessor instance and IVRStatus enum value
         """
-        if event_name in ("on_ivr_stuck", "on_ivr_completed", "on_conversation_detected"):
+        if event_name in (
+            "on_conversation_detected",
+            "on_ivr_status_changed",
+        ):
             self._ivr_processor.add_event_handler(event_name, handler)
         else:
             super().add_event_handler(event_name, handler)
