@@ -51,7 +51,7 @@ class IVRProcessor(FrameProcessor):
         self,
         *,
         ivr_prompt: str,
-        conversation_prompt: str,
+        conversation_prompt: Optional[str] = None,
         ivr_response_delay: float,
         conversation_response_delay: float,
         initial_mode: Literal["ivr", "conversation"],
@@ -60,7 +60,7 @@ class IVRProcessor(FrameProcessor):
 
         Args:
             ivr_prompt: System prompt for IVR navigation mode.
-            conversation_prompt: System prompt for conversation mode.
+            conversation_prompt: System prompt for conversation mode. Optional if only using IVR navigation.
             ivr_response_delay: VAD stop delay in seconds for IVR responses.
             conversation_response_delay: VAD stop delay in seconds for conversation responses.
             initial_mode: Starting mode, either "ivr" or "conversation".
@@ -101,6 +101,10 @@ class IVRProcessor(FrameProcessor):
                 # Start conversation with the customer service rep
                 await ivr_processor.start_conversation()
         """
+        if self._conversation_prompt is None:
+            logger.warning("Cannot start conversation mode: no conversation_prompt provided")
+            return
+
         logger.info("Starting conversation mode")
 
         # Switch to conversation prompt
@@ -138,6 +142,11 @@ class IVRProcessor(FrameProcessor):
 
             # Update the context with the appropriate prompt based on the initial mode
             if self._initial_mode == "conversation":
+                if self._conversation_prompt is None:
+                    raise ValueError(
+                        "conversation_prompt is required when initial_mode is 'conversation'"
+                    )
+
                 # Set the conversation prompt and push it upstream
                 messages = [{"role": "system", "content": self._conversation_prompt}]
                 llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
@@ -371,7 +380,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         *,
         llm: LLMService,
         ivr_prompt: str,
-        conversation_prompt: str,
+        conversation_prompt: Optional[str] = None,
         ivr_response_delay: Optional[float] = 2.0,
         conversation_response_delay: Optional[float] = 0.8,
         initial_mode: Optional[Literal["ivr", "conversation"]] = "ivr",
@@ -381,7 +390,7 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         Args:
             llm: LLM service for text generation and decision making.
             ivr_prompt: Navigation goal prompt integrated with IVR navigation instructions.
-            conversation_prompt: System prompt for conversation mode with human agents.
+            conversation_prompt: System prompt for conversation mode with human agents. Optional if only using IVR navigation.
             ivr_response_delay: VAD stop delay in seconds for IVR navigation. Defaults to 2.0.
             conversation_response_delay: VAD stop delay in seconds for conversations. Defaults to 0.8.
             initial_mode: Starting mode, "ivr" or "conversation". Defaults to "ivr".
@@ -389,7 +398,11 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         """
         self._llm = llm
         self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
-        self._conversation_prompt = self.IVR_DETECTED_PROMPT + "\n\n" + conversation_prompt
+        self._conversation_prompt = (
+            self.IVR_DETECTED_PROMPT + "\n\n" + conversation_prompt
+            if conversation_prompt is not None
+            else None
+        )
         self._ivr_response_delay = ivr_response_delay
         self._conversation_response_delay = conversation_response_delay
         self._initial_mode = initial_mode
