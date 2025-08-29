@@ -5,6 +5,31 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## Added
+
+- `BaseOutputTransport` now implements `write_dtmf()` by loading DTMF audio and
+  sending it through the transport. This makes sending DTMF generic across all
+  output transports.
+
+## Changed
+
+- `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
+  `pipecat.audio.dtmf.types.KeypadEntry`.
+
+## Removed
+
+- `DailyTransport.write_dtmf()` has been removed in favor of the generic
+  `BaseOutputTransport.write_dtmf()`.
+
+- Remove deprecated `DailyTransport.send_dtmf()`.
+
+## Deprecated
+
+- `pipecat.frames.frames.KeypadEntry` is deprecated use
+  `pipecat.audio.dtmf.types.KeypadEntry` instead.
+
 ## [0.0.82] - 2025-08-28
 
 ### Added

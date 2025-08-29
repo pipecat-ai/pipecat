@@ -12,7 +12,6 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 """
 
 import asyncio
-import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Dict, List, Literal, Optional, Set
@@ -326,11 +325,15 @@ class LLMContextResponseAggregator(BaseLLMResponseAggregator):
         Returns:
             LLMContextFrame containing the current context.
         """
-        warnings.warn(
-            "get_context_frame() is deprecated and will be removed in a future version. To trigger an LLM response, use LLMRunFrame instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "get_context_frame() is deprecated and will be removed in a future version. To trigger an LLM response, use LLMRunFrame instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return self._get_context_frame()
 
     def _get_context_frame(self) -> OpenAILLMContextFrame:
@@ -1035,12 +1038,16 @@ class LLMUserResponseAggregator(LLMUserContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
-        warnings.warn(
-            "LLMUserResponseAggregator is deprecated and will be removed in a future version. "
-            "Use LLMUserContextAggregator or another LLM-specific subclass instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LLMUserResponseAggregator is deprecated and will be removed in a future version. "
+                "Use LLMUserContextAggregator or another LLM-specific subclass instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
     async def _process_aggregation(self):
@@ -1078,12 +1085,16 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
             params: Configuration parameters for aggregation behavior.
             **kwargs: Additional arguments passed to parent class.
         """
-        warnings.warn(
-            "LLMAssistantResponseAggregator is deprecated and will be removed in a future version. "
-            "Use LLMAssistantContextAggregator or another LLM-specific subclass instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "LLMAssistantResponseAggregator is deprecated and will be removed in a future version. "
+                "Use LLMAssistantContextAggregator or another LLM-specific subclass instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         super().__init__(context=OpenAILLMContext(messages), params=params, **kwargs)
 
     async def push_aggregation(self):
