@@ -9,7 +9,6 @@
 import asyncio
 import base64
 import json
-import warnings
 from typing import Any, AsyncGenerator, Mapping, Optional
 
 import aiohttp
@@ -356,11 +355,15 @@ class SarvamTTSService(InterruptibleTTSService):
         )
         params = params or SarvamTTSService.InputParams()
         if aiohttp_session is not None:
-            warnings.warn(
-                "The 'aiohttp_session' parameter is deprecated and will be removed in a future version. ",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'aiohttp_session' parameter is deprecated and will be removed in a future version. ",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
         # WebSocket endpoint URL
         self._websocket_url = f"{url}?model={model}"
         self._api_key = api_key

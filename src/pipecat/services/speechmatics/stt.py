@@ -10,7 +10,6 @@ import asyncio
 import datetime
 import os
 import re
-import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator
@@ -1107,6 +1106,8 @@ def _check_deprecated_args(kwargs: dict, params: SpeechmaticsSTTService.InputPar
 
     # Show deprecation warnings
     def _deprecation_warning(old: str, new: str | None = None):
+        import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             if new:

@@ -4189,6 +4189,7 @@ wheels = [
 name = "pipecat-ai"
 source = { editable = "." }
 dependencies = [
+    { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
     { name = "docstring-parser" },
@@ -4409,6 +4410,7 @@ docs = [
 requires-dist = [
     { name = "accelerate", marker = "extra == 'moondream'", specifier = "~=1.10.0" },
     { name = "aioboto3", marker = "extra == 'aws'", specifier = "~=15.0.0" },
+    { name = "aiofiles", specifier = ">=24.1.0,<25" },
     { name = "aiohttp", specifier = ">=3.11.12,<4" },
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = "~=1.11.0" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = "~=0.49.0" },
