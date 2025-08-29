@@ -4339,6 +4339,7 @@ runner = [
     { name = "uvicorn" },
 ]
 sarvam = [
+    { name = "sarvamai" },
     { name = "websockets" },
 ]
 sentry = [
@@ -4467,6 +4468,7 @@ requires-dist = [
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "resampy", specifier = "~=0.4.3" },
+    { name = "sarvamai", marker = "extra == 'sarvam'" },
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = "~=2.23.1" },
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=0.1.10" },
     { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.0" },
@@ -6101,6 +6103,22 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ad/fe/cad1d9762868c7c5dc70c8620074df28ebb1a8e4c17d4c0cb031889c457e/safetensors-0.6.2-cp38-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:d944cea65fad0ead848b6ec2c37cc0b197194bec228f8020054742190e9312ac", size = 655957, upload-time = "2025-08-08T13:13:57.029Z" },
     { url = "https://files.pythonhosted.org/packages/59/a7/e2158e17bbe57d104f0abbd95dff60dda916cf277c9f9663b4bf9bad8b6e/safetensors-0.6.2-cp38-abi3-win32.whl", hash = "sha256:cab75ca7c064d3911411461151cb69380c9225798a20e712b102edda2542ddb1", size = 308926, upload-time = "2025-08-08T13:14:01.095Z" },
     { url = "https://files.pythonhosted.org/packages/2c/c3/c0be1135726618dc1e28d181b8c442403d8dbb9e273fd791de2d4384bcdd/safetensors-0.6.2-cp38-abi3-win_amd64.whl", hash = "sha256:c7b214870df923cbc1593c3faee16bec59ea462758699bd3fee399d00aac072c", size = 320192, upload-time = "2025-08-08T13:13:59.467Z" },
+]
+
+[[package]]
+name = "sarvamai"
+version = "0.1.19"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "pydantic-core" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/31/8e808588ad234fe8d441a4efeb03acd0c32aa37951d8188700d64229fece/sarvamai-0.1.19.tar.gz", hash = "sha256:ebcaa96170bec3426a00dfa357674771d208601e8fd4181471a3355a1d84ddc1", size = 84210, upload-time = "2025-08-21T09:45:27.679Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dd/cb/a9f9fb92ef99d0fe12c1ac4d2f54436d89808ef632bce41edf3c2d871027/sarvamai-0.1.19-py3-none-any.whl", hash = "sha256:155c609ca80c31c829a44daa5e23e2d25cc7c88af8ec4a18b2214a966224a3f9", size = 167849, upload-time = "2025-08-21T09:45:26.582Z" },
 ]
 
 [[package]]
