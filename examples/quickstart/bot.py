@@ -11,8 +11,8 @@ browser and speak with it.
 
 Required AI services:
 - Deepgram (Speech-to-Text)
-- OpenAI (LLM)
-- Cartesia (Text-to-Speech)
+- Google (LLM)
+- Respeecher (Text-to-Speech)
 
 The example connects between client and server using a P2P WebRTC connection.
 
@@ -40,9 +40,9 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.rtvi import RTVIConfig, RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
-from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.respeecher.tts import RespeecherTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 logger.info("✅ Pipeline components loaded")
@@ -60,12 +60,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = CartesiaTTSService(
-        api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    tts = RespeecherTTSService(
+        api_key=os.getenv("RESPEECHER_API_KEY"),
+        voice_id="samantha",
     )
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
     messages = [
         {
