@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -53,7 +54,6 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
 from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_openai_realtime, traced_stt
 
@@ -66,7 +66,7 @@ from .context import (
 from .frames import RealtimeFunctionCallResultFrame, RealtimeMessagesUpdateFrame
 
 try:
-    import websockets
+    from websockets.asyncio.client import connect as websocket_connect
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use OpenAI, you need to `pip install pipecat-ai[openai]`.")
@@ -171,6 +171,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         """
         self._audio_input_paused = paused
 
+    def _is_modality_enabled(self, modality: str) -> bool:
+        """Check if a specific modality is enabled, "text" or "audio"."""
+        modalities = self._session_properties.modalities or ["audio", "text"]
+        return modality in modalities
+
+    def _get_enabled_modalities(self) -> list[str]:
+        """Get the list of enabled modalities."""
+        return self._session_properties.modalities or ["audio", "text"]
+
     async def retrieve_conversation_item(self, item_id: str):
         """Retrieve a conversation item by ID from the server.
 
@@ -243,7 +252,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.stop_all_metrics()
         if self._current_assistant_response:
             await self.push_frame(LLMFullResponseEndFrame())
-            await self.push_frame(TTSStoppedFrame())
+            # Only push TTSStoppedFrame if audio modality is enabled
+            if self._is_modality_enabled("audio"):
+                await self.push_frame(TTSStoppedFrame())
 
     async def _handle_user_started_speaking(self, frame):
         pass
@@ -333,6 +344,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self.reset_conversation()
             # Run the LLM at next opportunity
             await self._create_response()
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for OpenAI Realtime."
+            )
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
@@ -387,9 +402,9 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 # Here we assume that if we have a websocket, we are connected. We
                 # handle disconnections in the send/recv code paths.
                 return
-            self._websocket = await websockets.connect(
+            self._websocket = await websocket_connect(
                 uri=self.base_url,
-                extra_headers={
+                additional_headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "OpenAI-Beta": "realtime=v1",
                 },
@@ -445,7 +460,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     #
 
     async def _receive_task_handler(self):
-        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
+        async for message in self._websocket:
             evt = events.parse_server_event(message)
             if evt.type == "session.created":
                 await self._handle_evt_session_created(evt)
@@ -469,6 +484,8 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_speech_started(evt)
             elif evt.type == "input_audio_buffer.speech_stopped":
                 await self._handle_evt_speech_stopped(evt)
+            elif evt.type == "response.text.delta":
+                await self._handle_evt_text_delta(evt)
             elif evt.type == "response.audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
             elif evt.type == "error":
@@ -617,6 +634,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # Response message without preceding user message. Add it to the context.
             await self._handle_assistant_output(evt.response.output)
 
+    async def _handle_evt_text_delta(self, evt):
+        if evt.delta:
+            await self.push_frame(LLMTextFrame(evt.delta))
+
     async def _handle_evt_audio_transcript_delta(self, evt):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
@@ -723,7 +744,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.start_ttfb_metrics()
         await self.send_client_event(
             events.ResponseCreateEvent(
-                response=events.ResponseProperties(modalities=["audio", "text"])
+                response=events.ResponseProperties(modalities=self._get_enabled_modalities())
             )
         )
 

@@ -12,7 +12,6 @@ output processing, including frame buffering, mixing, timing, and media streamin
 
 import asyncio
 import itertools
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
@@ -20,8 +19,9 @@ from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
-from pipecat.audio.utils import create_stream_resampler
+from pipecat.audio.utils import create_stream_resampler, is_silence
 from pipecat.frames.frames import (
     BotSpeakingFrame,
     BotStartedSpeakingFrame,
@@ -34,6 +34,8 @@ from pipecat.frames.frames import (
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
     OutputImageRawFrame,
+    OutputTransportReadyFrame,
+    SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
     StartInterruptionFrame,
@@ -45,7 +47,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
 BOT_VAD_STOP_SECS = 0.35
@@ -174,6 +175,9 @@ class BaseOutputTransport(FrameProcessor):
             )
             await self._media_senders[destination].start(frame)
 
+        # Sending a frame indicating that the output transport is ready and able to receive frames.
+        await self.push_frame(OutputTransportReadyFrame(), FrameDirection.UPSTREAM)
+
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         """Send a transport message.
 
@@ -220,7 +224,12 @@ class BaseOutputTransport(FrameProcessor):
         Args:
             frame: The DTMF frame to write.
         """
-        pass
+        dtmf_audio = await load_dtmf_audio(frame.button, sample_rate=self._sample_rate)
+        dtmf_audio_frame = OutputAudioRawFrame(
+            audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
+        )
+        dtmf_audio_frame.transport_destination = frame.transport_destination
+        await self.write_audio_frame(dtmf_audio_frame)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         """Send an audio frame downstream.
@@ -424,7 +433,7 @@ class BaseOutputTransport(FrameProcessor):
                 frame: The end frame signaling sender shutdown.
             """
             # Let the sink tasks process the queue until they reach this EndFrame.
-            await self._clock_queue.put((sys.maxsize, frame.id, frame))
+            await self._clock_queue.put((float("inf"), frame.id, frame))
             await self._audio_queue.put(frame)
 
             # At this point we have enqueued an EndFrame and we need to wait for
@@ -432,9 +441,9 @@ class BaseOutputTransport(FrameProcessor):
             # also need to wait for these tasks before cancelling the video task
             # because it might be still rendering.
             if self._audio_task:
-                await self._transport.wait_for_task(self._audio_task)
+                await self._audio_task
             if self._clock_task:
-                await self._transport.wait_for_task(self._clock_task)
+                await self._clock_task
 
             # Stop audio mixer.
             if self._mixer:
@@ -622,10 +631,8 @@ class BaseOutputTransport(FrameProcessor):
                         frame = await asyncio.wait_for(
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
-                        self._transport.reset_watchdog()
                         yield frame
                     except asyncio.TimeoutError:
-                        self._transport.reset_watchdog()
                         # Notify the bot stopped speaking upstream if necessary.
                         await self._bot_stopped_speaking()
 
@@ -635,13 +642,11 @@ class BaseOutputTransport(FrameProcessor):
                 while True:
                     try:
                         frame = self._audio_queue.get_nowait()
-                        self._transport.reset_watchdog()
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await self._mixer.mix(frame.audio)
                         last_frame_time = time.time()
                         yield frame
                     except asyncio.QueueEmpty:
-                        self._transport.reset_watchdog()
                         # Notify the bot stopped speaking upstream if necessary.
                         diff_time = time.time() - last_frame_time
                         if diff_time > vad_stop_secs:
@@ -653,6 +658,11 @@ class BaseOutputTransport(FrameProcessor):
                             num_channels=self._params.audio_out_channels,
                         )
                         yield frame
+                        # Allow other asyncio tasks to execute by adding a small sleep
+                        # Without this sleep, in task cancellation scenarios, this loop would
+                        # continuously return without any delay, leading to 100% CPU utilization
+                        # and preventing cancel/stop signals from being processed properly
+                        await asyncio.sleep(0)
 
             if self._mixer:
                 return with_mixer(BOT_VAD_STOP_SECS)
@@ -667,10 +677,24 @@ class BaseOutputTransport(FrameProcessor):
             TOTAL_CHUNK_MS = self._params.audio_out_10ms_chunks * 10
             BOT_SPEAKING_CHUNK_PERIOD = max(int(200 / TOTAL_CHUNK_MS), 1)
             bot_speaking_counter = 0
+            speech_last_speaking_time = 0
+
             async for frame in self._next_frame():
                 # Notify the bot started speaking upstream if necessary and that
                 # it's actually speaking.
+                is_speaking = False
                 if isinstance(frame, TTSAudioRawFrame):
+                    is_speaking = True
+                elif isinstance(frame, SpeechOutputAudioRawFrame):
+                    if not is_silence(frame.audio):
+                        is_speaking = True
+                        speech_last_speaking_time = time.time()
+                    else:
+                        silence_duration = time.time() - speech_last_speaking_time
+                        if silence_duration > BOT_VAD_STOP_SECS:
+                            await self._bot_stopped_speaking()
+
+                if is_speaking:
                     await self._bot_started_speaking()
                     if bot_speaking_counter % BOT_SPEAKING_CHUNK_PERIOD == 0:
                         await self._transport.push_frame(BotSpeakingFrame())
@@ -804,13 +828,12 @@ class BaseOutputTransport(FrameProcessor):
         def _create_clock_task(self):
             """Create the clock/timing processing task."""
             if not self._clock_task:
-                self._clock_queue = WatchdogPriorityQueue(self._transport.task_manager)
+                self._clock_queue = asyncio.PriorityQueue()
                 self._clock_task = self._transport.create_task(self._clock_task_handler())
 
         async def _cancel_clock_task(self):
             """Cancel and cleanup the clock processing task."""
             if self._clock_task:
-                self._clock_queue.cancel()
                 await self._transport.cancel_task(self._clock_task)
                 self._clock_task = None
 

@@ -12,13 +12,14 @@ in conversational pipelines.
 """
 
 from pipecat.frames.frames import TextFrame
-from pipecat.processors.aggregators.llm_response import LLMUserResponseAggregator
+from pipecat.processors.aggregators.llm_response import LLMUserContextAggregator
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 
-class UserResponseAggregator(LLMUserResponseAggregator):
+class UserResponseAggregator(LLMUserContextAggregator):
     """Aggregates user responses into TextFrame objects.
 
-    This aggregator extends LLMUserResponseAggregator to specifically handle
+    This aggregator extends LLMUserContextAggregator to specifically handle
     user input by collecting text responses and outputting them as TextFrame
     objects when the aggregation is complete.
     """
@@ -27,9 +28,9 @@ class UserResponseAggregator(LLMUserResponseAggregator):
         """Initialize the user response aggregator.
 
         Args:
-            **kwargs: Additional arguments passed to parent LLMUserResponseAggregator.
+            **kwargs: Additional arguments passed to parent LLMUserContextAggregator.
         """
-        super().__init__(**kwargs)
+        super().__init__(context=OpenAILLMContext(), **kwargs)
 
     async def push_aggregation(self):
         """Push the aggregated user response as a TextFrame.

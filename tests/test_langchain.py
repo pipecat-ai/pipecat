@@ -12,7 +12,7 @@ from langchain_core.language_models import FakeStreamingListLLM
 from pipecat.frames.frames import (
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
+    OpenAILLMContextAssistantTimestampFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -21,8 +21,12 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
-    LLMAssistantResponseAggregator,
-    LLMUserResponseAggregator,
+    LLMAssistantContextAggregator,
+    LLMUserContextAggregator,
+)
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.processors.frameworks.langchain import LangchainProcessor
@@ -63,9 +67,10 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         proc = LangchainProcessor(chain=chain)
         self.mock_proc = self.MockProcessor("token_collector")
 
-        tma_in = LLMUserResponseAggregator(messages)
-        tma_out = LLMAssistantResponseAggregator(
-            messages, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
+        context = OpenAILLMContext()
+        tma_in = LLMUserContextAggregator(context)
+        tma_out = LLMAssistantContextAggregator(
+            context, params=LLMAssistantAggregatorParams(expect_stripped_words=False)
         )
 
         pipeline = Pipeline([tma_in, proc, self.mock_proc, tma_out])
@@ -79,7 +84,8 @@ class TestLangchain(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
-            LLMMessagesFrame,
+            OpenAILLMContextFrame,
+            OpenAILLMContextAssistantTimestampFrame,
         ]
         await run_test(
             pipeline,

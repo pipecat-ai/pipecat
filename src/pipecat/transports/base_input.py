@@ -505,8 +505,6 @@ class BaseInputTransport(FrameProcessor):
                     if self._params.turn_analyzer:
                         self._params.turn_analyzer.clear()
                     await self._handle_user_interruption(UserStoppedSpeakingFrame())
-            finally:
-                self.reset_watchdog()
 
     async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer."""

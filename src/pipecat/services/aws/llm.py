@@ -16,6 +16,7 @@ import base64
 import copy
 import io
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -31,6 +32,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -40,6 +42,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
@@ -58,6 +61,7 @@ try:
     import aioboto3
     import httpx
     from botocore.config import Config
+    from botocore.exceptions import ReadTimeoutError
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
@@ -552,11 +556,11 @@ class AWSBedrockLLMContext(OpenAILLMContext):
             messages.insert(0, {"role": "system", "content": self.system})
         return messages
 
-    def get_messages_for_logging(self) -> str:
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get messages formatted for logging with sensitive data redacted.
 
         Returns:
-            JSON string representation of messages with image data redacted.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -567,7 +571,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                         if item.get("image"):
                             item["source"]["bytes"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs)
+        return msgs
 
 
 class AWSBedrockUserContextAggregator(LLMUserContextAggregator):
@@ -724,6 +728,8 @@ class AWSBedrockLLMService(LLMService):
         aws_region: str = "us-east-1",
         params: Optional[InputParams] = None,
         client_config: Optional[Config] = None,
+        retry_timeout_secs: Optional[float] = 5.0,
+        retry_on_timeout: Optional[bool] = False,
         **kwargs,
     ):
         """Initialize the AWS Bedrock LLM service.
@@ -736,6 +742,8 @@ class AWSBedrockLLMService(LLMService):
             aws_region: AWS region for the Bedrock service.
             params: Model parameters and configuration.
             client_config: Custom boto3 client configuration.
+            retry_timeout_secs: Request timeout in seconds for retry logic.
+            retry_on_timeout: Whether to retry the request once if it times out.
             **kwargs: Additional arguments passed to parent LLMService.
         """
         super().__init__(**kwargs)
@@ -754,14 +762,16 @@ class AWSBedrockLLMService(LLMService):
 
         # Store AWS session parameters for creating client in async context
         self._aws_params = {
-            "aws_access_key_id": aws_access_key,
-            "aws_secret_access_key": aws_secret_key,
-            "aws_session_token": aws_session_token,
-            "region_name": aws_region,
+            "aws_access_key_id": aws_access_key or os.getenv("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": aws_secret_key or os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "aws_session_token": aws_session_token or os.getenv("AWS_SESSION_TOKEN"),
+            "region_name": aws_region or os.getenv("AWS_REGION", "us-east-1"),
             "config": client_config,
         }
 
         self.set_model_name(model)
+        self._retry_timeout_secs = retry_timeout_secs
+        self._retry_on_timeout = retry_on_timeout
         self._settings = {
             "max_tokens": params.max_tokens,
             "temperature": params.temperature,
@@ -781,6 +791,106 @@ class AWSBedrockLLMService(LLMService):
             True if metrics generation is supported.
         """
         return True
+
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Args:
+            context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        try:
+            messages = []
+            system = []
+            if isinstance(context, LLMContext):
+                # Future code will be something like this:
+                # adapter = self.get_llm_adapter()
+                # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+                # messages = params["messages"]
+                # system = params["system_instruction"]
+                raise NotImplementedError(
+                    "Universal LLMContext is not yet supported for AWS Bedrock."
+                )
+            else:
+                context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
+                messages = context.messages
+                system = getattr(context, "system", None) or system_instruction
+
+            # Determine if we're using Claude or Nova based on model ID
+            model_id = self.model_name
+
+            # Prepare request parameters
+            request_params = {
+                "modelId": model_id,
+                "messages": messages,
+                "inferenceConfig": {
+                    "maxTokens": 8192,
+                    "temperature": 0.7,
+                    "topP": 0.9,
+                },
+            }
+
+            if system:
+                request_params["system"] = [{"text": system}]
+
+            async with self._aws_session.client(
+                service_name="bedrock-runtime", **self._aws_params
+            ) as client:
+                # Call Bedrock without streaming
+                response = await client.converse(**request_params)
+
+                # Extract the response text
+                if (
+                    "output" in response
+                    and "message" in response["output"]
+                    and "content" in response["output"]["message"]
+                ):
+                    content = response["output"]["message"]["content"]
+                    if isinstance(content, list):
+                        for item in content:
+                            if item.get("text"):
+                                return item["text"]
+                    elif isinstance(content, str):
+                        return content
+
+                return None
+
+        except Exception as e:
+            logger.error(f"Bedrock summary generation failed: {e}", exc_info=True)
+            return None
+
+    async def _create_converse_stream(self, client, request_params):
+        """Create converse stream with optional timeout and retry.
+
+        Args:
+            client: The AWS Bedrock client instance.
+            request_params: Parameters for the converse_stream call.
+
+        Returns:
+            Async stream of response events.
+        """
+        if self._retry_on_timeout:
+            try:
+                response = await asyncio.wait_for(
+                    await client.converse_stream(**request_params), timeout=self._retry_timeout_secs
+                )
+                return response
+            except (ReadTimeoutError, asyncio.TimeoutError) as e:
+                # Retry, this time without a timeout so we get a response
+                logger.debug(f"{self}: Retrying converse_stream due to timeout")
+                response = await client.converse_stream(**request_params)
+                return response
+        else:
+            response = await client.converse_stream(**request_params)
+            return response
 
     def create_context_aggregator(
         self,
@@ -911,7 +1021,7 @@ class AWSBedrockLLMService(LLMService):
                 service_name="bedrock-runtime", **self._aws_params
             ) as client:
                 # Call AWS Bedrock with streaming
-                response = await client.converse_stream(**request_params)
+                response = await self._create_converse_stream(client, request_params)
 
                 await self.stop_ttfb_metrics()
 
@@ -922,8 +1032,6 @@ class AWSBedrockLLMService(LLMService):
                 function_calls = []
 
                 async for event in response["stream"]:
-                    self.reset_watchdog()
-
                     # Handle text content
                     if "contentBlockDelta" in event:
                         delta = event["contentBlockDelta"]["delta"]
@@ -1014,6 +1122,8 @@ class AWSBedrockLLMService(LLMService):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context = AWSBedrockLLMContext.upgrade_to_bedrock(frame.context)
+        if isinstance(frame, LLMContextFrame):
+            raise NotImplementedError("Universal LLMContext is not yet supported for AWS Bedrock.")
         elif isinstance(frame, LLMMessagesFrame):
             context = AWSBedrockLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):

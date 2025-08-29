@@ -13,8 +13,7 @@ supporting multiple languages, custom vocabulary, and various audio processing o
 import asyncio
 import base64
 import json
-import warnings
-from typing import Any, AsyncGenerator, Dict, Optional
+from typing import Any, AsyncGenerator, Dict, Literal, Optional
 
 import aiohttp
 from loguru import logger
@@ -31,12 +30,13 @@ from pipecat.frames.frames import (
 from pipecat.services.gladia.config import GladiaInputParams
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Gladia, you need to `pip install pipecat-ai[gladia]`.")
@@ -172,12 +172,16 @@ class _InputParamsDescriptor:
     """Descriptor for backward compatibility with deprecation warning."""
 
     def __get__(self, obj, objtype=None):
-        warnings.warn(
-            "GladiaSTTService.InputParams is deprecated and will be removed in a future version. "
-            "Import and use GladiaInputParams directly instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "GladiaSTTService.InputParams is deprecated and will be removed in a future version. "
+                "Import and use GladiaInputParams directly instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         return GladiaInputParams
 
 
@@ -201,6 +205,7 @@ class GladiaSTTService(STTService):
         self,
         *,
         api_key: str,
+        region: Literal["us-west", "eu-west"] | None = None,
         url: str = "https://api.gladia.io/v2/live",
         confidence: float = 0.5,
         sample_rate: Optional[int] = None,
@@ -215,6 +220,7 @@ class GladiaSTTService(STTService):
 
         Args:
             api_key: Gladia API key for authentication.
+            region: Region used to process audio. eu-west or us-west. Defaults to eu-west.
             url: Gladia API URL. Defaults to "https://api.gladia.io/v2/live".
             confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
             sample_rate: Audio sample rate in Hz. If None, uses service default.
@@ -231,14 +237,17 @@ class GladiaSTTService(STTService):
 
         # Warn about deprecated language parameter if it's used
         if params.language is not None:
-            warnings.warn(
-                "The 'language' parameter is deprecated and will be removed in a future version. "
-                "Use 'language_config' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'language' parameter is deprecated and will be removed in a future version. "
+                    "Use 'language_config' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
         self._api_key = api_key
+        self._region = region
         self._url = url
         self.set_model_name(model)
         self._confidence = confidence
@@ -402,7 +411,7 @@ class GladiaSTTService(STTService):
                 logger.warning(f"Audio buffer exceeded max size, trimmed {trim_size} bytes")
 
         # Send audio if connected
-        if self._connection_active and self._websocket and not self._websocket.closed:
+        if self._connection_active and self._websocket and self._websocket.state is State.OPEN:
             try:
                 await self._send_audio(audio)
             except websockets.exceptions.ConnectionClosed as e:
@@ -423,11 +432,11 @@ class GladiaSTTService(STTService):
                     self._reconnection_attempts = 0
 
                 # Connect with automatic reconnection
-                async with websockets.connect(self._session_url) as websocket:
+                async with websocket_connect(self._session_url) as websocket:
                     try:
                         self._websocket = websocket
                         self._connection_active = True
-                        logger.info("Connected to Gladia WebSocket")
+                        logger.debug(f"{self} Connected to Gladia WebSocket")
 
                         # Send buffered audio if any
                         await self._send_buffered_audio()
@@ -482,10 +491,14 @@ class GladiaSTTService(STTService):
 
     async def _setup_gladia(self, settings: Dict[str, Any]):
         async with aiohttp.ClientSession() as session:
+            params = {}
+            if self._region:
+                params["region"] = self._region
             async with session.post(
                 self._url,
-                headers={"X-Gladia-Key": self._api_key, "Content-Type": "application/json"},
+                headers={"X-Gladia-Key": self._api_key},
                 json=settings,
+                params=params,
             ) as response:
                 if response.ok:
                     return await response.json()
@@ -507,7 +520,7 @@ class GladiaSTTService(STTService):
 
     async def _send_audio(self, audio: bytes):
         """Send audio chunk with proper message format."""
-        if self._websocket and not self._websocket.closed:
+        if self._websocket and self._websocket.state is State.OPEN:
             data = base64.b64encode(audio).decode("utf-8")
             message = {"type": "audio_chunk", "data": {"chunk": data}}
             await self._websocket.send(json.dumps(message))
@@ -516,22 +529,21 @@ class GladiaSTTService(STTService):
         """Send any buffered audio after reconnection."""
         async with self._buffer_lock:
             if self._audio_buffer:
-                logger.info(f"Sending {len(self._audio_buffer)} bytes of buffered audio")
+                logger.debug(f"{self} Sending {len(self._audio_buffer)} bytes of buffered audio")
                 await self._send_audio(bytes(self._audio_buffer))
 
     async def _send_stop_recording(self):
-        if self._websocket and not self._websocket.closed:
+        if self._websocket and self._websocket.state is State.OPEN:
             await self._websocket.send(json.dumps({"type": "stop_recording"}))
 
     async def _keepalive_task_handler(self):
         """Send periodic empty audio chunks to keep the connection alive."""
         try:
-            KEEPALIVE_SLEEP = 20 if self.task_manager.task_watchdog_enabled else 3
+            KEEPALIVE_SLEEP = 20
             while self._connection_active:
-                self.reset_watchdog()
                 # Send keepalive (Gladia times out after 30 seconds)
                 await asyncio.sleep(KEEPALIVE_SLEEP)
-                if self._websocket and not self._websocket.closed:
+                if self._websocket and self._websocket.state is State.OPEN:
                     # Send an empty audio chunk as keepalive
                     empty_audio = b""
                     await self._send_audio(empty_audio)
@@ -545,7 +557,7 @@ class GladiaSTTService(STTService):
 
     async def _receive_task_handler(self):
         try:
-            async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
+            async for message in self._websocket:
                 content = json.loads(message)
 
                 # Handle audio chunk acknowledgments
@@ -603,8 +615,6 @@ class GladiaSTTService(STTService):
                                 translation, "", time_now_iso8601(), translated_language
                             )
                         )
-
-                self.reset_watchdog()
         except websockets.exceptions.ConnectionClosed:
             # Expected when closing the connection
             pass
@@ -621,8 +631,8 @@ class GladiaSTTService(STTService):
             self._should_reconnect = False
             return False
         delay = self._reconnection_delay * (2 ** (self._reconnection_attempts - 1))
-        logger.info(
-            f"Reconnecting in {delay} seconds (attempt {self._reconnection_attempts}/{self._max_reconnection_attempts})"
+        logger.debug(
+            f"{self} Reconnecting in {delay} seconds (attempt {self._reconnection_attempts}/{self._max_reconnection_attempts})"
         )
         await asyncio.sleep(delay)
         return True

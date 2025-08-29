@@ -102,8 +102,8 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
         ]
         await run_test(
             aggregator,
@@ -127,8 +127,8 @@ class BaseTestUserContextAggregator:
         ]
         expected_down_frames = [
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
         ]
         await run_test(
             aggregator,
@@ -158,8 +158,8 @@ class BaseTestUserContextAggregator:
             UserStartedSpeakingFrame,
             UserStoppedSpeakingFrame,
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
         ]
         await run_test(
             aggregator,
@@ -298,8 +298,8 @@ class BaseTestUserContextAggregator:
         expected_down_frames = [
             SpeechControlParamsFrame,
             UserStartedSpeakingFrame,
-            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
+            UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(

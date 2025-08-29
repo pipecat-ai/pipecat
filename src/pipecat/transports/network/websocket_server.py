@@ -39,6 +39,8 @@ from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 try:
     import websockets
+    from websockets.asyncio.server import serve as websocket_serve
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use websockets, you need to `pip install pipecat-ai[websocket]`.")
@@ -152,7 +154,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
             await self.cancel_task(self._monitor_task)
             self._monitor_task = None
         if self._server_task:
-            await self.wait_for_task(self._server_task)
+            await self._server_task
             self._server_task = None
 
     async def cancel(self, frame: CancelFrame):
@@ -177,11 +179,11 @@ class WebsocketServerInputTransport(BaseInputTransport):
     async def _server_task_handler(self):
         """Handle WebSocket server startup and client connections."""
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
-        async with websockets.serve(self._client_handler, self._host, self._port) as server:
+        async with websocket_serve(self._client_handler, self._host, self._port) as server:
             await self._callbacks.on_websocket_ready()
             await self._stop_server_event.wait()
 
-    async def _client_handler(self, websocket: websockets.WebSocketServerProtocol, path):
+    async def _client_handler(self, websocket: websockets.WebSocketServerProtocol):
         """Handle individual client connections and message processing."""
         logger.info(f"New client connection from {websocket.remote_address}")
         if self._websocket:
@@ -231,7 +233,7 @@ class WebsocketServerInputTransport(BaseInputTransport):
         """Monitor WebSocket connection for session timeout."""
         try:
             await asyncio.sleep(session_timeout)
-            if not websocket.closed:
+            if websocket.state is not State.CLOSED:
                 await self._callbacks.on_session_timeout(websocket)
         except asyncio.CancelledError:
             logger.info(f"Monitoring task cancelled for: {websocket.remote_address}")
@@ -351,8 +353,6 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             frame: The output audio frame to write.
         """
         if not self._websocket:
-            # Simulate audio playback with a sleep.
-            await self._write_audio_sleep()
             return
 
         frame = OutputAudioRawFrame(

@@ -36,7 +36,7 @@ class SleepFrame(SystemFrame):
         sleep: Duration to sleep in seconds before processing the next frame.
     """
 
-    sleep: float = 0.1
+    sleep: float = 0.2
 
 
 class HeartbeatsObserver(BaseObserver):
@@ -100,7 +100,7 @@ class QueuedFrameProcessor(FrameProcessor):
             queue_direction: The direction of frames to capture (UPSTREAM or DOWNSTREAM).
             ignore_start: Whether to ignore StartFrames when capturing.
         """
-        super().__init__()
+        super().__init__(enable_direct_mode=True)
         self._queue = queue
         self._queue_direction = queue_direction
         self._ignore_start = ignore_start

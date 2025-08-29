@@ -1,0 +1,19 @@
+[project]
+name = "pipecat-quickstart"
+version = "0.1.0"
+description = "Quickstart example for building voice AI bots with Pipecat"
+requires-python = ">=3.10"
+dependencies = [
+    "pipecat-ai[webrtc,daily,silero,deepgram,openai,cartesia,runner]>=0.0.79",
+    "pipecatcloud>=0.2.4"
+]
+
+[dependency-groups]
+dev = [
+    "ruff~=0.12.1",
+]
+
+[tool.ruff]
+line-length = 100
+[tool.ruff.lint]
+select = ["I"]

@@ -50,3 +50,12 @@ class QwenLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating Qwen client with base URL: {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
+
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as QwenLLMService does not yet support universal LLMContext.
+        """
+        return False

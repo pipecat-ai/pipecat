@@ -37,7 +37,6 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from fastapi import WebSocket
@@ -132,8 +131,11 @@ class FastAPIWebsocketClient:
                 f"{self} exception sending data: {e.__class__.__name__} ({e}), application_state: {self._websocket.application_state}"
             )
             # For some reason the websocket is disconnected, and we are not able to send data
-            # So let's properly handle it and disconnect the transport
-            if self._websocket.application_state == WebSocketState.DISCONNECTED:
+            # So let's properly handle it and disconnect the transport if it is not already disconnecting
+            if (
+                self._websocket.application_state == WebSocketState.DISCONNECTED
+                and not self.is_closing
+            ):
                 logger.warning("Closing already disconnected websocket!")
                 self._closing = True
                 await self.trigger_client_disconnected()
@@ -146,8 +148,12 @@ class FastAPIWebsocketClient:
 
         if self.is_connected and not self.is_closing:
             self._closing = True
-            await self._websocket.close()
-            await self.trigger_client_disconnected()
+            try:
+                await self._websocket.close()
+            except Exception as e:
+                logger.error(f"{self} exception while closing the websocket: {e}")
+            finally:
+                await self.trigger_client_disconnected()
 
     async def trigger_client_disconnected(self):
         """Trigger the client disconnected callback."""
@@ -276,9 +282,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _receive_messages(self):
         """Main message receiving loop for WebSocket messages."""
         try:
-            async for message in WatchdogAsyncIterator(
-                self._client.receive(), manager=self.task_manager
-            ):
+            async for message in self._client.receive():
                 if not self._params.serializer:
                     continue
 
@@ -412,12 +416,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         Args:
             frame: The output audio frame to write.
         """
-        if self._client.is_closing:
-            return
-
-        if not self._client.is_connected:
-            # Simulate audio playback with a sleep.
-            await self._write_audio_sleep()
+        if self._client.is_closing or not self._client.is_connected:
             return
 
         frame = OutputAudioRawFrame(
