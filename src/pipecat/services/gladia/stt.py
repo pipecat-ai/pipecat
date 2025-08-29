@@ -304,10 +304,7 @@ class GladiaSTTService(STTService):
         }
 
         # Add custom_metadata if provided
-        if self._params.custom_metadata:
-            settings["custom_metadata"] = self._params.custom_metadata
-        else:
-            settings["custom_metadata"] = {}
+        settings["custom_metadata"] = dict(self._params.custom_metadata or {})
         settings["custom_metadata"]["pipecat"] = pipecat_version
 
         # Add endpointing parameters if provided

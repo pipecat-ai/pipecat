@@ -34,7 +34,7 @@ class PreProcessingConfig(BaseModel):
     """
 
     audio_enhancer: Optional[bool] = None
-    speech_threshold: Optional[float] = 0.7
+    speech_threshold: Optional[float] = None
 
 
 class CustomVocabularyItem(BaseModel):
@@ -155,7 +155,6 @@ class GladiaInputParams(BaseModel):
     Parameters:
         encoding: Audio encoding format
         bit_depth: Audio bit depth
-        sample_rate: Audio sample rate
         channels: Number of audio channels
         custom_metadata: Additional metadata to include with requests
         endpointing: Silence duration in seconds to mark end of speech
