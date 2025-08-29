@@ -29,10 +29,12 @@ class PreProcessingConfig(BaseModel):
     """Configuration for audio pre-processing options.
 
     Parameters:
+        audio_enhancer: Apply pre-processing to the audio stream to enhance quality
         speech_threshold: Sensitivity for speech detection (0-1)
     """
 
-    speech_threshold: Optional[float] = None
+    audio_enhancer: Optional[bool] = None
+    speech_threshold: Optional[float] = 0.7
 
 
 class CustomVocabularyItem(BaseModel):
@@ -41,10 +43,14 @@ class CustomVocabularyItem(BaseModel):
     Parameters:
         value: The vocabulary word or phrase
         intensity: The bias intensity for this vocabulary item (0-1)
+        pronunciations: The pronunciations used in the transcription.
+        language: Specify the language in which it will be pronounced when sound comparison occurs. Default to transcription language.
     """
 
     value: str
     intensity: float
+    pronunciations: Optional[List[str]] = None
+    language: Optional[str] = None
 
 
 class CustomVocabularyConfig(BaseModel):
@@ -149,6 +155,7 @@ class GladiaInputParams(BaseModel):
     Parameters:
         encoding: Audio encoding format
         bit_depth: Audio bit depth
+        sample_rate: Audio sample rate
         channels: Number of audio channels
         custom_metadata: Additional metadata to include with requests
         endpointing: Silence duration in seconds to mark end of speech
@@ -167,10 +174,11 @@ class GladiaInputParams(BaseModel):
 
     encoding: Optional[str] = "wav/pcm"
     bit_depth: Optional[int] = 16
+    sample_rate: Optional[int] = 16000
     channels: Optional[int] = 1
     custom_metadata: Optional[Dict[str, Any]] = None
     endpointing: Optional[float] = None
-    maximum_duration_without_endpointing: Optional[int] = 10
+    maximum_duration_without_endpointing: Optional[int] = 5
     language: Optional[Language] = None  # Deprecated
     language_config: Optional[LanguageConfig] = None
     pre_processing: Optional[PreProcessingConfig] = None
