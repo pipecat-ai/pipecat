@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
+- Added `pipecat.extensions.ivr` for automated IVR system navigation with
+  configurable goals and conversation handling. Supports DTMF input, verbal
+  responses, and intelligent menu traversal.
+
 - `BaseOutputTransport` now implements `write_dtmf()` by loading DTMF audio and
   sending it through the transport. This makes sending DTMF generic across all
   output transports.
@@ -33,10 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.82] - 2025-08-28
 
 ### Added
-
-- Added `pipecat.extensions.ivr` for automated IVR system navigation with
-  configurable goals and conversation handling. Supports DTMF input, verbal
-  responses, and intelligent menu traversal.
 
 - Added a new `LLMRunFrame` to trigger an LLM response:
 

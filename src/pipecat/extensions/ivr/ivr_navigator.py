@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""IVR navigator for Pipecat."""
+"""Interactive Voice Response (IVR) navigation components.
+
+This module provides classes for automated navigation of IVR phone systems
+using LLM-based decision making and DTMF tone generation.
+"""
 
 from typing import List, Literal, Optional
 
@@ -30,7 +34,18 @@ from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPair
 
 
 class IVRProcessor(FrameProcessor):
-    """IVR processor for Pipecat."""
+    """Processes LLM responses for IVR navigation commands.
+
+    Aggregates XML-tagged commands from LLM text streams and executes
+    corresponding actions like DTMF tone generation and mode switching.
+
+    Supported features:
+
+    - DTMF command processing (`<dtmf>1</dtmf>`)
+    - IVR state management (`<ivr>detected</ivr>`, `<ivr>completed</ivr>`)
+    - Automatic prompt and VAD parameter switching
+    - Event emission for stuck and completion states
+    """
 
     def __init__(
         self,
@@ -44,11 +59,11 @@ class IVRProcessor(FrameProcessor):
         """Initialize the IVR processor.
 
         Args:
-            ivr_prompt: The prompt to use for IVR navigation.
-            conversation_prompt: The prompt to use for conversation navigation.
-            ivr_response_delay: The delay to wait before responding to the IVR.
-            conversation_response_delay: The delay to wait before responding to the conversation.
-            initial_mode: The initial mode to start in.
+            ivr_prompt: System prompt for IVR navigation mode.
+            conversation_prompt: System prompt for conversation mode.
+            ivr_response_delay: VAD stop delay in seconds for IVR responses.
+            conversation_response_delay: VAD stop delay in seconds for conversation responses.
+            initial_mode: Starting mode, either "ivr" or "conversation".
         """
         super().__init__()
 
@@ -73,16 +88,16 @@ class IVRProcessor(FrameProcessor):
         self._register_event_handler("on_ivr_completed")
 
     async def start_conversation(self):
-        """Start conversation mode after IVR completion.
+        """Switch to conversation mode with conversation prompt and VAD timing.
 
         Call this method to explicitly switch to conversation mode with the
         conversation prompt and VAD parameters. This is typically called from
         an on_ivr_completed event handler.
 
-        Example:
+        Example::
+
             @navigator.event_handler("on_ivr_completed")
             async def on_completed(ivr_processor):
-                await log_completion()
                 # Start conversation with the customer service rep
                 await ivr_processor.start_conversation()
         """
@@ -273,7 +288,19 @@ class IVRProcessor(FrameProcessor):
 
 
 class IVRNavigator(Pipeline):
-    """IVR navigator for Pipecat."""
+    """Pipeline for automated IVR system navigation.
+
+    Orchestrates LLM-based IVR navigation by combining an LLM service with
+    IVR processing capabilities. Handles bidirectional mode switching between
+    conversation and IVR navigation states.
+
+    Navigation behavior:
+
+    - Detects IVR systems automatically when in conversation mode
+    - Navigates IVR menus using DTMF tones and verbal responses
+    - Preserves conversation context during mode transitions
+    - Provides event hooks for completion and error handling
+    """
 
     IVR_DETECTED_PROMPT = (
         """IMPORTANT: When you detect an IVR system, respond ONLY with `<ivr>detected</ivr>`."""
@@ -352,13 +379,13 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         """Initialize the IVR navigator.
 
         Args:
-            llm: The LLM service to use for navigation.
-            ivr_prompt: The prompt to use for IVR navigation.
-            conversation_prompt: The prompt to use for conversation navigation.
-            ivr_response_delay: The delay to wait before responding to the IVR.
-            conversation_response_delay: The delay to wait before responding to the conversation.
-            initial_mode: The initial mode to start in. Default is "ivr".
-                         The LLM can automatically switch between modes as needed during the conversation.
+            llm: LLM service for text generation and decision making.
+            ivr_prompt: Navigation goal prompt integrated with IVR navigation instructions.
+            conversation_prompt: System prompt for conversation mode with human agents.
+            ivr_response_delay: VAD stop delay in seconds for IVR navigation. Defaults to 2.0.
+            conversation_response_delay: VAD stop delay in seconds for conversations. Defaults to 0.8.
+            initial_mode: Starting mode, "ivr" or "conversation". Defaults to "ivr".
+                         Mode switching occurs automatically based on LLM responses.
         """
         self._llm = llm
         self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
@@ -434,21 +461,11 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
         await super().process_frame(frame, direction)
 
     def add_event_handler(self, event_name: str, handler):
-        """Add an event handler for IVR navigation events.
+        """Add event handler for IVR navigation events.
 
         Args:
-            event_name: The name of the event to handle.
-            handler: The function to call when the event occurs.
-
-        For on_ivr_completed handlers:
-            Call await ivr_processor.start_conversation() to start conversation mode.
-            By default, no action is taken after IVR completion.
-
-        Example:
-            @navigator.event_handler("on_ivr_completed")
-            async def on_completed(ivr_processor):
-                await log_completion()
-                await ivr_processor.start_conversation()  # Start conversation mode
+            event_name: Event name ("on_ivr_stuck" or "on_ivr_completed").
+            handler: Async function called when event occurs. Receives IVRProcessor instance.
         """
         if event_name in ("on_ivr_stuck", "on_ivr_completed"):
             self._ivr_processor.add_event_handler(event_name, handler)
