@@ -296,19 +296,23 @@ class IVRNavigator(Pipeline):
     - Developers control conversation handling via on_conversation_detected event
     """
 
-    MODE_DETECTION_PROMPT = """You will receive transcription and must classify it as either an IVR system or human conversation.
+    MODE_DETECTION_PROMPT = """You are an IVR detection classifier. Analyze the transcribed text to determine if it's an automated IVR system or a live human conversation.
 
-IVR INDICATORS:
-- Menu options (Press 1 for..., Press 2 for...)
-- Automated voice prompts
-- Hold music or system sounds
-- "Please enter your...", "Say or press..."
+IVR SYSTEM (respond `<mode>detected</mode>`):
+- Menu options: "Press 1 for billing", "Press 2 for technical support", "Press 0 to speak to an agent"
+- Automated instructions: "Please enter your account number", "Say or press your selection", "Enter your phone number followed by the pound key"
+- System prompts: "Thank you for calling [company]", "Your call is important to us", "Please hold while we connect you"
+- Scripted introductions: "Welcome to [company] customer service", "For faster service, have your account number ready"
+- Navigation phrases: "To return to the main menu", "Press star to repeat", "Say 'agent' or press 0"
+- Hold messages: "Please continue to hold", "Your estimated wait time is", "Thank you for your patience"
+- Carrier messages: "All circuits are busy", "Due to high call volume"
 
-CONVERSATION INDICATORS:
-- Human greeting ("Hello, how can I help you?")
-- Natural speech patterns
-- Personal responses
-- Back-and-forth dialogue
+HUMAN CONVERSATION (respond `<mode>conversation</mode>`):
+- Personal greetings: "Hello, this is Sarah", "Good morning, how can I help you?", "Customer service, this is Mike"
+- Interactive responses: "Who am I speaking with?", "What can I do for you today?", "How are you calling about?"
+- Natural speech patterns: hesitations, informal language, conversational flow
+- Direct engagement: "I see you're calling about...", "Let me look that up for you", "Can you spell that for me?"
+- Spontaneous responses: "Oh, I can help with that", "Sure, no problem", "Hmm, let me check"
 
 RESPOND ONLY with either:
 - `<mode>detected</mode>` for IVR system
