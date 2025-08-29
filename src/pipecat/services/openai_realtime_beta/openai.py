@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
     LLMUpdateSettingsFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -653,7 +652,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.start_ttfb_metrics()
         await self.start_processing_metrics()
         await self._stop_interruption()
-        await self.push_frame(StopInterruptionFrame())
         await self.push_frame(UserStoppedSpeakingFrame())
 
     async def _maybe_handle_evt_retrieve_conversation_item_error(self, evt: events.ErrorEvent):

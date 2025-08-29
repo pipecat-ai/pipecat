@@ -27,7 +27,6 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     STTMuteFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -206,7 +205,6 @@ class STTMuteFilter(FrameProcessor):
             frame,
             (
                 StartInterruptionFrame,
-                StopInterruptionFrame,
                 VADUserStartedSpeakingFrame,
                 VADUserStoppedSpeakingFrame,
                 UserStartedSpeakingFrame,
