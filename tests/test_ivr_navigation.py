@@ -7,17 +7,14 @@
 import unittest
 from unittest.mock import AsyncMock
 
-from pipecat.extensions.ivr.ivr_navigator import IVRProcessor
+from pipecat.extensions.ivr.ivr_navigator import IVRNavigator, IVRProcessor
 from pipecat.frames.frames import (
-    ErrorFrame,
     LLMMessagesUpdateFrame,
     LLMTextFrame,
     OutputDTMFUrgentFrame,
-    StartFrame,
     TextFrame,
     VADParamsUpdateFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import LLMService
 from pipecat.tests.utils import run_test
 
@@ -64,6 +61,21 @@ class TestIVRNavigation(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
             expected_up_frames=expected_up_frames,
+        )
+
+    async def test_conversation_mode_requires_conversation_prompt(self):
+        """Test that IVRNavigator conversation mode requires a conversation prompt."""
+        with self.assertRaises(ValueError) as context:
+            IVRNavigator(
+                llm=self.mock_llm,
+                ivr_prompt=self.ivr_prompt,
+                conversation_prompt=None,  # This should cause an error
+                initial_mode="conversation",  # This requires conversation_prompt
+            )
+
+        self.assertIn(
+            "conversation_prompt is required when initial_mode is 'conversation'",
+            str(context.exception),
         )
 
     async def test_basic_dtmf_navigation(self):

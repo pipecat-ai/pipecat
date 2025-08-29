@@ -142,11 +142,6 @@ class IVRProcessor(FrameProcessor):
 
             # Update the context with the appropriate prompt based on the initial mode
             if self._initial_mode == "conversation":
-                if self._conversation_prompt is None:
-                    raise ValueError(
-                        "conversation_prompt is required when initial_mode is 'conversation'"
-                    )
-
                 # Set the conversation prompt and push it upstream
                 messages = [{"role": "system", "content": self._conversation_prompt}]
                 llm_update_frame = LLMMessagesUpdateFrame(messages=messages)
@@ -396,6 +391,9 @@ Remember: Respond with `<dtmf>NUMBER</dtmf>` (single or multiple for sequences),
             initial_mode: Starting mode, "ivr" or "conversation". Defaults to "ivr".
                          Mode switching occurs automatically based on LLM responses.
         """
+        if initial_mode == "conversation" and conversation_prompt is None:
+            raise ValueError("conversation_prompt is required when initial_mode is 'conversation'")
+
         self._llm = llm
         self._ivr_prompt = self.IVR_NAVIGATION_BASE.format(goal=ivr_prompt)
         self._conversation_prompt = (
