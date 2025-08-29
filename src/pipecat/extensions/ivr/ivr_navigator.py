@@ -10,6 +10,7 @@ This module provides classes for automated navigation of IVR phone systems
 using LLM-based decision making and DTMF tone generation.
 """
 
+from enum import Enum
 from typing import List, Literal, Optional
 
 from loguru import logger
@@ -33,6 +34,19 @@ from pipecat.services.llm_service import LLMService
 from pipecat.utils.text.pattern_pair_aggregator import PatternMatch, PatternPairAggregator
 
 
+class IVRStatus(Enum):
+    """Enumeration of IVR navigation status values.
+
+    These statuses are used to communicate the current state of IVR navigation
+    between the LLM and the IVR processing system.
+    """
+
+    DETECTED = "detected"
+    COMPLETED = "completed"
+    STUCK = "stuck"
+    WAIT = "wait"
+
+
 class IVRProcessor(FrameProcessor):
     """Processes LLM responses for IVR navigation commands.
 
@@ -42,7 +56,7 @@ class IVRProcessor(FrameProcessor):
     Supported features:
 
     - DTMF command processing (`<dtmf>1</dtmf>`)
-    - IVR state management (`<ivr>detected</ivr>`, `<ivr>completed</ivr>`)
+    - IVR state management (see IVRStatus enum: `<ivr>detected</ivr>`, `<ivr>completed</ivr>`, `<ivr>stuck</ivr>`, `<ivr>wait</ivr>`)
     - Automatic prompt and VAD parameter switching
     - Event emission for stuck and completion states
     """
@@ -215,20 +229,25 @@ class IVRProcessor(FrameProcessor):
         """Handle IVR status action.
 
         Args:
-            status: The IVR status (detected, completed, stuck, wait).
+            status: The IVR status string value from XML pattern.
         """
         logger.debug(f"IVR status detected: {status}")
 
-        if status == "detected":
-            await self._handle_ivr_detected()
-        elif status == "completed":
-            await self._handle_ivr_completed()
-        elif status == "stuck":
-            await self._handle_ivr_stuck()
-        elif status == "wait":
-            await self._handle_ivr_wait()
-        else:
+        # Convert string to enum, with validation
+        try:
+            ivr_status = IVRStatus(status)
+        except ValueError:
             logger.warning(f"Unknown IVR status: {status}")
+            return
+
+        if ivr_status == IVRStatus.DETECTED:
+            await self._handle_ivr_detected()
+        elif ivr_status == IVRStatus.COMPLETED:
+            await self._handle_ivr_completed()
+        elif ivr_status == IVRStatus.STUCK:
+            await self._handle_ivr_stuck()
+        elif ivr_status == IVRStatus.WAIT:
+            await self._handle_ivr_wait()
 
         # Push a TextFrame to add the IVR detected signal to the context
         ivr_text_frame = TextFrame(text=f"<ivr>{status}</ivr>")
