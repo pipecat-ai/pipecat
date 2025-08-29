@@ -14,10 +14,10 @@ from typing import List, Literal, Optional
 
 from loguru import logger
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
-    KeypadEntry,
     LLMContextFrame,
     LLMMessagesUpdateFrame,
     LLMTextFrame,
