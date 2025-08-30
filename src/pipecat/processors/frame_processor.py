@@ -444,7 +444,7 @@ class FrameProcessor(BaseObject):
 
         .. deprecated:: 0.0.81
             This function is deprecated, use `await task` or
-            `await asyncio.wait_for(task, timeout) instead.
+            `await asyncio.wait_for(task, timeout)` instead.
 
         Args:
             task: The task to wait for.
