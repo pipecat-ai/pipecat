@@ -332,8 +332,10 @@ class SarvamTTSService(InterruptibleTTSService):
             voice_id: Voice identifier for synthesis (default "anushka").
             url: WebSocket URL for connecting to the TTS backend (default production URL).
             aiohttp_session: Optional shared aiohttp session. To maintain backward compatibility.
+
                 .. deprecated:: 0.0.81
                     aiohttp_session is no longer used. This parameter will be removed in a future version.
+
             aggregate_sentences: Whether to merge multiple sentences into one audio chunk (default True).
             sample_rate: Desired sample rate for the output audio in Hz (overrides default if set).
             params: Optional input parameters to override global configuration.
