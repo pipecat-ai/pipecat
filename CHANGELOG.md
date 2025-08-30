@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## Added
+### Added
 
 - Added `pipecat.extensions.ivr` for automated IVR system navigation with
   configurable goals and conversation handling. Supports DTMF input, verbal
@@ -42,22 +42,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sending it through the transport. This makes sending DTMF generic across all
   output transports.
 
-## Changed
+### Changed
 
 - `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
   `pipecat.audio.dtmf.types.KeypadEntry`.
 
-## Removed
+### Removed
 
 - `DailyTransport.write_dtmf()` has been removed in favor of the generic
   `BaseOutputTransport.write_dtmf()`.
 
 - Remove deprecated `DailyTransport.send_dtmf()`.
 
-## Deprecated
+### Deprecated
 
 - `pipecat.frames.frames.KeypadEntry` is deprecated use
   `pipecat.audio.dtmf.types.KeypadEntry` instead.
+
+### Performance
+
+- Reduced latency and improved memory performance in `Mem0MemoryService`.
 
 ## [0.0.82] - 2025-08-28
 
