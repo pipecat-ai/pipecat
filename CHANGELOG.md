@@ -192,6 +192,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `BotInterruptionFrame` frame handling has been moved from `BaseInputTransport`
+  to `PipelineTask`. This allows any type of pipeline to handle
+  `BotInterruptionFrame` without the need of an input transport.
+
+- `pipeline.tests.utils.run_test()` now allows passing `PipelineParams` instead
+  of individual parameters.
+
 - Updated `daily-python` to 0.19.8.
 
 - `PipelineTask` now waits for `StartFrame` to reach the end of the pipeline

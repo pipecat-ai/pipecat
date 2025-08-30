@@ -65,7 +65,7 @@ class TestPipeline(unittest.IsolatedAsyncioTestCase):
             frames_to_send=frames_to_send,
             expected_down_frames=expected_down_frames,
             ignore_start=False,
-            start_metadata={"foo": "bar"},
+            pipeline_params=PipelineParams(start_metadata={"foo": "bar"}),
         )
         assert "foo" in received_down[-1].metadata
 

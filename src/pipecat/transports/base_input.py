@@ -22,7 +22,6 @@ from pipecat.audio.turn.base_turn_analyzer import (
 )
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADState
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -289,8 +288,6 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, BotInterruptionFrame):
-            await self._handle_bot_interruption(frame)
         elif isinstance(frame, BotStartedSpeakingFrame):
             await self._handle_bot_started_speaking(frame)
             await self.push_frame(frame, direction)
@@ -334,13 +331,6 @@ class BaseInputTransport(FrameProcessor):
     #
     # Handle interruptions
     #
-
-    async def _handle_bot_interruption(self, frame: BotInterruptionFrame):
-        """Handle bot interruption frames."""
-        logger.debug("Bot interruption")
-        if self.interruptions_allowed:
-            await self._start_interruption()
-            await self.push_frame(StartInterruptionFrame())
 
     async def _handle_user_interruption(self, frame: Frame):
         """Handle user interruption events based on speaking state."""
