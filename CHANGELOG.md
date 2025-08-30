@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## Added
+### Added
 
 - Added `pipecat.extensions.ivr` for automated IVR system navigation with
   configurable goals and conversation handling. Supports DTMF input, verbal
@@ -42,18 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sending it through the transport. This makes sending DTMF generic across all
   output transports.
 
-- Added new config parameters to `GladiaSTTService`. 
+- Added new config parameters to `GladiaSTTService`.
   - PreProcessingConfig > `audio_enhancer` to enhance audio quality.
   - CustomVocabularyItem > `pronunciations` and `language` to specify special pronunciations and in which language it will be pronounced.
 
-## Changed
+### Changed
 
 - `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
   `pipecat.audio.dtmf.types.KeypadEntry`.
 
 - Updated `RimeTTSService`'s flush_audio message to conform with Rime's official API.
 
-## Removed
+### Removed
 
 - Remove `StopInterruptionFrame`. This was a legacy frame that was not being
   used really anywhere and it didn't provide any useful meaning. It was only
@@ -65,14 +65,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove deprecated `DailyTransport.send_dtmf()`.
 
-## Deprecated
+### Deprecated
 
 - `pipecat.frames.frames.KeypadEntry` is deprecated use
   `pipecat.audio.dtmf.types.KeypadEntry` instead.
 
-## Fixed
+### Fixed
 
 - Fixed an issue where `PipelineTask` was not cleaning up the observers.
+
+### Performance
+
+- Reduced latency and improved memory performance in `Mem0MemoryService`.
 
 ## [0.0.82] - 2025-08-28
 
