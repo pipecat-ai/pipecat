@@ -23,7 +23,7 @@ class TransportParams(BaseModel):
 
     camera_out_enabled: bool = False
     camera_out_is_live: bool = False
-    camera_out_width: int = 1920
+    camera_out_width: int = 1440
     camera_out_height: int = 1080
     camera_out_bitrate: int = 6000000
     camera_out_framerate: int = 30

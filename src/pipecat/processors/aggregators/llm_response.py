@@ -22,6 +22,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
     ImageContextRawFrame,
     OutputImageRawFrame,
+    InputImageRawFrame,
 )
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
@@ -327,7 +328,7 @@ class LLMUserContextAggregator(LLMContextAggregator):
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, OutputImageRawFrame):
+        if isinstance(frame, InputImageRawFrame):
             # print("caching latest")
             self.latest_cached_frame = frame
     
@@ -340,6 +341,8 @@ class LLMUserContextAggregator(LLMContextAggregator):
             # for messages in self._context.get_messages():
             #     new_messages 
 
+
+            # this is where we flush old images
             msgs = []
             for message in self._context.messages:
                 msg = copy.deepcopy(message)
@@ -353,11 +356,11 @@ class LLMUserContextAggregator(LLMContextAggregator):
         
             self._context.set_messages(msgs)
             
-            # this is where we flush old images
 
             vision_substrings = ["see", "look", "frame", "vision", "view"]
-            image_prompt = "if the user wants information about what the drone sees or to take action based on whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks. ignore the timestamp in the top corner"
-            if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
+            image_prompt = "if the user wants information about what the drone sees or whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks"
+            # if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
+            if self.latest_cached_frame:
                 self._context.add_image_frame_message(
                     format=self.latest_cached_frame.format,
                     size=self.latest_cached_frame.size,
