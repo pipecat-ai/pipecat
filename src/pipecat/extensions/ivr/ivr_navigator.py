@@ -181,7 +181,7 @@ class IVRProcessor(FrameProcessor):
             match: The pattern match containing IVR status content.
         """
         status = match.content
-        logger.debug(f"IVR status detected: {status}")
+        logger.trace(f"IVR status detected: {status}")
 
         # Convert string to enum, with validation
         try:
@@ -212,7 +212,7 @@ class IVRProcessor(FrameProcessor):
             match: The pattern match containing mode content.
         """
         mode = match.content
-        logger.info(f"Mode detected: {mode}")
+        logger.debug(f"Mode detected: {mode}")
         if mode == "conversation":
             await self._handle_conversation()
         elif mode == "ivr":
@@ -227,7 +227,7 @@ class IVRProcessor(FrameProcessor):
 
         Emit an on_conversation_detected event with saved conversation history.
         """
-        logger.info("Conversation detected - emitting on_conversation_detected event")
+        logger.debug("Conversation detected - emitting on_conversation_detected event")
 
         # Extract conversation history for the event handler
         conversation_history = self._get_conversation_history()
@@ -240,7 +240,7 @@ class IVRProcessor(FrameProcessor):
         Allows bidirectional switching for error recovery and complex IVR flows.
         Saves previous messages from the conversation context when available.
         """
-        logger.info("IVR detected - switching to IVR navigation mode")
+        logger.debug("IVR detected - switching to IVR navigation mode")
 
         # Create new context with IVR system prompt and saved messages
         messages = [{"role": "system", "content": self._ivr_prompt}]
@@ -266,7 +266,7 @@ class IVRProcessor(FrameProcessor):
 
         Emits on_ivr_status_changed with IVRStatus.COMPLETED.
         """
-        logger.info("IVR navigation completed - triggering status change event")
+        logger.debug("IVR navigation completed - triggering status change event")
 
         await self._call_event_handler("on_ivr_status_changed", IVRStatus.COMPLETED)
 
@@ -275,7 +275,7 @@ class IVRProcessor(FrameProcessor):
 
         Emits on_ivr_status_changed with IVRStatus.STUCK for external handling of stuck scenarios.
         """
-        logger.info("IVR navigation stuck - triggering status change event")
+        logger.debug("IVR navigation stuck - triggering status change event")
 
         await self._call_event_handler("on_ivr_status_changed", IVRStatus.STUCK)
 
