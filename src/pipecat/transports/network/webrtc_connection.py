@@ -387,9 +387,10 @@ class SmallWebRTCConnection(BaseObject):
 
     def force_transceivers_to_send_recv(self):
         """Force all transceivers to bidirectional send/receive mode."""
-        for transceiver in self._pc.getTransceivers():
-            # For now, we only support sendrecv for camera audio and video (the first two transceivers)
-            if transceiver.mid == "0" or transceiver.mid == "1":
+        transceivers = self._pc.getTransceivers()
+        # For now, we only support sendrecv for camera audio and video (the first two transceivers)
+        for i, transceiver in enumerate(transceivers):
+            if i < 2:  # First two transceivers (camera audio and video)
                 transceiver.direction = "sendrecv"
             else:
                 transceiver.direction = "recvonly"
