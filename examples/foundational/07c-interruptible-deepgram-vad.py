@@ -12,9 +12,8 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     LLMRunFrame,
-    StopInterruptionFrame,
+    StartInterruptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -98,11 +97,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @stt.event_handler("on_speech_started")
     async def on_speech_started(stt, *args, **kwargs):
-        await task.queue_frames([BotInterruptionFrame(), UserStartedSpeakingFrame()])
+        await task.queue_frames([StartInterruptionFrame(), UserStartedSpeakingFrame()])
 
     @stt.event_handler("on_utterance_end")
     async def on_utterance_end(stt, *args, **kwargs):
-        await task.queue_frames([StopInterruptionFrame(), UserStoppedSpeakingFrame()])
+        await task.queue_frames([UserStoppedSpeakingFrame()])
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
