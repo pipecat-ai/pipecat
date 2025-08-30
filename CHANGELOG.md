@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
   `pipecat.audio.dtmf.types.KeypadEntry`.
 
+## Deprecated
+
+- `pipecat.frames.frames.KeypadEntry` is deprecated use
+  `pipecat.audio.dtmf.types.KeypadEntry` instead.
+
 ## Removed
 
 - `DailyTransport.write_dtmf()` has been removed in favor of the generic
@@ -54,10 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Remove deprecated `DailyTransport.send_dtmf()`.
 
-## Deprecated
+## Performance
 
-- `pipecat.frames.frames.KeypadEntry` is deprecated use
-  `pipecat.audio.dtmf.types.KeypadEntry` instead.
+- Pre-load `AWSNovaSonicLLMService` audio cue file in the constructor to avoid
+  loading files in real-time.
 
 ## [0.0.82] - 2025-08-28
 
