@@ -64,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pipecat.frames.frames.KeypadEntry` is deprecated use
   `pipecat.audio.dtmf.types.KeypadEntry` instead.
 
+## Fixed
+
+- Fixed an issue where `PipelineTask` was not cleaning up the observers.
+
 ## [0.0.82] - 2025-08-28
 
 ### Added
