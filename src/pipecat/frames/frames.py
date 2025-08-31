@@ -870,19 +870,6 @@ class StartInterruptionFrame(SystemFrame):
 
 
 @dataclass
-class StopInterruptionFrame(SystemFrame):
-    """Frame indicating user stopped speaking (interruption ended).
-
-    Emitted by the BaseInputTransport to indicate that a user has stopped
-    speaking (i.e. no more interruptions). This is similar to
-    UserStoppedSpeakingFrame except that it should be pushed concurrently
-    with other frames (so the order is not guaranteed).
-    """
-
-    pass
-
-
-@dataclass
 class UserStartedSpeakingFrame(SystemFrame):
     """Frame indicating user has started speaking.
 
