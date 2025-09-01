@@ -38,7 +38,6 @@ from pipecat.services.ai_service import AIService
 from pipecat.services.websocket_service import WebsocketService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
 from pipecat.utils.text.base_text_filter import BaseTextFilter
 from pipecat.utils.text.simple_text_aggregator import SimpleTextAggregator
@@ -820,19 +819,13 @@ class _AudioContextServiceMixin(ABC):
         while running:
             try:
                 frame = await asyncio.wait_for(queue.get(), timeout=AUDIO_CONTEXT_TIMEOUT)
-                self.reset_watchdog()
                 if frame:
                     await self.push_frame(frame)
                 running = frame is not None
             except asyncio.TimeoutError:
-                self.reset_watchdog()
                 # We didn't get audio, so let's consider this context finished.
                 logger.trace(f"{self} time out on audio context {context_id}")
                 break
-
-    @abstractmethod
-    def reset_watchdog(self) -> None:
-        pass
 
     @abstractmethod
     def create_task(self, coroutine: Coroutine) -> asyncio.Task:

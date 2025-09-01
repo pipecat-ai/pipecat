@@ -28,7 +28,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.tts_service import AudioContextTTSService
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for Respeecher configuration needed
@@ -247,9 +246,7 @@ class RespeecherTTSService(AudioContextTTSService):
         self._context_id = None
 
     async def _receive_messages(self):
-        async for message in WatchdogAsyncIterator(
-            self._get_websocket(), manager=self.task_manager
-        ):
+        async for message in self._get_websocket():
             try:
                 response = TypeAdapter(TTSResponse).validate_json(message)
             except ValidationError as e:
