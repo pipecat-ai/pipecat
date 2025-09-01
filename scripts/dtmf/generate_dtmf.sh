@@ -17,8 +17,8 @@ declare -A DTMF=(
 )
 
 # Tone duration (seconds) + gap after
-DURATION=0.2
-GAP=0.05
+DURATION=0.3
+GAP=0.2
 SAMPLERATE=8000
 
 for key in "${!DTMF[@]}"; do

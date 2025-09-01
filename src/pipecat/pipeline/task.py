@@ -571,6 +571,10 @@ class PipelineTask(BasePipelineTask):
         # Cleanup base object.
         await self.cleanup()
 
+        # Cleanup observers.
+        if self._observer:
+            await self._observer.cleanup()
+
         # End conversation tracing if it's active - this will also close any active turn span
         if self._enable_tracing and hasattr(self, "_turn_trace_observer"):
             self._turn_trace_observer.end_conversation_tracing()

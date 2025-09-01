@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     SpriteFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -273,7 +272,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
+        elif isinstance(frame, StartInterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
         elif isinstance(frame, TransportMessageUrgentFrame):

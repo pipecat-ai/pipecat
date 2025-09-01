@@ -21,7 +21,6 @@ from pipecat.frames.frames import (
     LLMRunFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -234,7 +233,6 @@ class TurnDetectionLLM(Pipeline):
             return (
                 isinstance(frame, OpenAILLMContextFrame)
                 or isinstance(frame, StartInterruptionFrame)
-                or isinstance(frame, StopInterruptionFrame)
                 or isinstance(frame, FunctionCallInProgressFrame)
                 or isinstance(frame, FunctionCallResultFrame)
             )
