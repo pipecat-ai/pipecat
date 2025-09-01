@@ -496,6 +496,9 @@ class BaseOutputTransport(FrameProcessor):
             if not self._transport.interruptions_allowed:
                 return
 
+            # Netic Extension: Clear audio buffer
+            self._transport.clear_audio_buffer()
+
             # Cancel tasks.
             await self._cancel_audio_task()
             await self._cancel_clock_task()
