@@ -55,11 +55,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = RespeecherTTSService(
         api_key=os.getenv("RESPEECHER_API_KEY"),
         voice_id="samantha",
-        sampling_params={
-            # Optional sampling params overrides
-            # See https://space.respeecher.com/docs/api/tts/sampling-params-guide
-            # "temperature": 0.5
-        },
+        params=RespeecherTTSService.InputParams(
+            sampling_params={
+                # Optional sampling params overrides
+                # See https://space.respeecher.com/docs/api/tts/sampling-params-guide
+                # "temperature": 0.5
+            },
+        ),
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
