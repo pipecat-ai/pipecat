@@ -11,6 +11,7 @@ from loguru import logger
 
 from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
+    LLMRunFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -53,7 +54,7 @@ def create_action_llm_append_to_messages(context_aggregator: OpenAIContextAggreg
                 frame = LLMMessagesAppendFrame(messages=arguments["messages"])
                 await rtvi.push_frame(frame)
 
-            frame = context_aggregator.user().get_context_frame()
+            frame = LLMRunFrame()
             await rtvi.push_frame(frame)
         return True
 
@@ -139,7 +140,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected: {client}")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

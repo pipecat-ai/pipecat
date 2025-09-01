@@ -31,6 +31,7 @@ from pipecat.frames.frames import (
     FunctionCallCancelFrame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMEnablePromptCachingFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -41,6 +42,7 @@ from pipecat.frames.frames import (
     VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMAssistantContextAggregator,
@@ -53,7 +55,6 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
@@ -198,6 +199,46 @@ class AnthropicLLMService(LLMService):
             response = await api_call(**params)
             return response
 
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Args:
+            context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context. If both are provided, the
+              one in the context takes precedence.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        messages = []
+        system = []
+        if isinstance(context, LLMContext):
+            # Future code will be something like this:
+            # adapter = self.get_llm_adapter()
+            # params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            # messages = params["messages"]
+            # system = params["system_instruction"]
+            raise NotImplementedError("Universal LLMContext is not yet supported for Anthropic.")
+        else:
+            context = AnthropicLLMContext.upgrade_to_anthropic(context)
+            messages = context.messages
+            system = getattr(context, "system", None) or system_instruction
+
+        # LLM completion
+        response = await self._client.messages.create(
+            model=self.model_name,
+            messages=messages,
+            system=system,
+            max_tokens=8192,
+            stream=False,
+        )
+
+        return response.content[0].text
+
     @property
     def enable_prompt_caching_beta(self) -> bool:
         """Check if prompt caching beta feature is enabled.
@@ -254,7 +295,7 @@ class AnthropicLLMService(LLMService):
             await self.start_processing_metrics()
 
             logger.debug(
-                f"{self}: Generating chat [{context.system}] | [{context.get_messages_for_logging()}]"
+                f"{self}: Generating chat [{context.system}] | {context.get_messages_for_logging()}"
             )
 
             messages = context.messages
@@ -290,7 +331,7 @@ class AnthropicLLMService(LLMService):
             json_accumulator = ""
 
             function_calls = []
-            async for event in WatchdogAsyncIterator(response, manager=self.task_manager):
+            async for event in response:
                 # Aggregate streaming content, create frames, trigger events
 
                 if event.type == "content_block_delta":
@@ -409,6 +450,8 @@ class AnthropicLLMService(LLMService):
         context = None
         if isinstance(frame, OpenAILLMContextFrame):
             context: "AnthropicLLMContext" = AnthropicLLMContext.upgrade_to_anthropic(frame.context)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError("Universal LLMContext is not yet supported for Anthropic.")
         elif isinstance(frame, LLMMessagesFrame):
             context = AnthropicLLMContext.from_messages(frame.messages)
         elif isinstance(frame, VisionImageRawFrame):
@@ -890,13 +933,13 @@ class AnthropicLLMContext(OpenAILLMContext):
             messages.insert(0, {"role": "system", "content": self.system})
         return messages
 
-    def get_messages_for_logging(self) -> str:
+    def get_messages_for_logging(self) -> List[Dict[str, Any]]:
         """Get messages formatted for logging with sensitive data redacted.
 
         Replaces image data with placeholder text for cleaner logs.
 
         Returns:
-            JSON string representation of messages for logging.
+            List of messages in a format ready for logging.
         """
         msgs = []
         for message in self.messages:
@@ -907,7 +950,7 @@ class AnthropicLLMContext(OpenAILLMContext):
                         if item["type"] == "image":
                             item["source"]["data"] = "..."
             msgs.append(msg)
-        return json.dumps(msgs)
+        return msgs
 
 
 class AnthropicUserContextAggregator(LLMUserContextAggregator):

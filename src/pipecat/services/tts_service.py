@@ -278,11 +278,13 @@ class TTSService(AIService):
         """
         import warnings
 
-        warnings.warn(
-            "`TTSService.say()` is deprecated. Push a `TTSSpeakFrame` instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`TTSService.say()` is deprecated. Push a `TTSSpeakFrame` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         await self.queue_frame(TTSSpeakFrame(text))
 
@@ -299,6 +301,11 @@ class TTSService(AIService):
         await super().process_frame(frame, direction)
 
         if (
+            isinstance(frame, (TextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame))
+            and frame.skip_tts
+        ):
+            await self.push_frame(frame, direction)
+        elif (
             isinstance(frame, TextFrame)
             and not isinstance(frame, InterimTranscriptionFrame)
             and not isinstance(frame, TranscriptionFrame)
@@ -438,7 +445,7 @@ class TTSService(AIService):
         while True:
             try:
                 frame = await asyncio.wait_for(
-                    self._stop_frame_queue.get(), self._stop_frame_timeout_s
+                    self._stop_frame_queue.get(), timeout=self._stop_frame_timeout_s
                 )
                 if isinstance(frame, TTSStartedFrame):
                     has_started = True
@@ -448,8 +455,6 @@ class TTSService(AIService):
                 if has_started:
                     await self.push_frame(TTSStoppedFrame())
                     has_started = False
-            finally:
-                self.reset_watchdog()
 
 
 class WordTTSService(TTSService):
@@ -536,7 +541,7 @@ class WordTTSService(TTSService):
 
     def _create_words_task(self):
         if not self._words_task:
-            self._words_queue = WatchdogQueue(self.task_manager)
+            self._words_queue = asyncio.Queue()
             self._words_task = self.create_task(self._words_task_handler())
 
     async def _stop_words_task(self):
@@ -775,13 +780,12 @@ class _AudioContextServiceMixin(ABC):
 
     def _create_audio_context_task(self):
         if not self._audio_context_task:
-            self._contexts_queue = WatchdogQueue(self.task_manager)
+            self._contexts_queue = asyncio.Queue()
             self._contexts: Dict[str, asyncio.Queue] = {}
             self._audio_context_task = self.create_task(self._audio_context_task_handler())
 
     async def _stop_audio_context_task(self):
         if self._audio_context_task:
-            self._contexts_queue.cancel()
             await self.cancel_task(self._audio_context_task)
             self._audio_context_task = None
 
@@ -896,7 +900,7 @@ class AudioContextTTSService(WebsocketTTSService, _AudioContextServiceMixin):
             # Indicate no more audio contexts are available. this will end the
             # task cleanly after all contexts have been processed.
             await self._contexts_queue.put(None)
-            await self.wait_for_task(self._audio_context_task)
+            await self._audio_context_task
             self._audio_context_task = None
 
     async def cancel(self, frame: CancelFrame):

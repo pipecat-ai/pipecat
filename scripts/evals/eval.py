@@ -30,7 +30,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import EndTaskFrame, OutputImageRawFrame
+from pipecat.frames.frames import EndTaskFrame, LLMRunFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -89,7 +89,13 @@ class EvalRunner:
     async def assert_eval_false(self):
         await self._queue.put(False)
 
-    async def run_eval(self, example_file: str, prompt: EvalPrompt, eval: Optional[str] = None):
+    async def run_eval(
+        self,
+        example_file: str,
+        prompt: EvalPrompt,
+        eval: str,
+        user_speaks_first: bool = False,
+    ):
         if not re.match(self._pattern, example_file):
             return
 
@@ -106,7 +112,9 @@ class EvalRunner:
         try:
             tasks = [
                 asyncio.create_task(run_example_pipeline(script_path)),
-                asyncio.create_task(run_eval_pipeline(self, example_file, prompt, eval)),
+                asyncio.create_task(
+                    run_eval_pipeline(self, example_file, prompt, eval, user_speaks_first)
+                ),
             ]
             _, pending = await asyncio.wait(tasks, timeout=EVAL_TIMEOUT_SECS)
             if pending:
@@ -195,7 +203,8 @@ async def run_eval_pipeline(
     eval_runner: EvalRunner,
     example_file: str,
     prompt: EvalPrompt,
-    eval: Optional[str],
+    eval: str,
+    user_speaks_first: bool = False,
 ):
     logger.info(f"Starting eval bot")
 
@@ -225,7 +234,7 @@ async def run_eval_pipeline(
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
-        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+        voice_id="97f4b8fb-f2fe-444b-bb9a-c109783a857a",  # Nathan
     )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
@@ -238,7 +247,7 @@ async def run_eval_pipeline(
         properties={
             "result": {
                 "type": "boolean",
-                "description": "The result of the eval",
+                "description": "Whether the answer is correct or not",
             },
             "reasoning": {
                 "type": "string",
@@ -257,15 +266,17 @@ async def run_eval_pipeline(
     elif isinstance(prompt, tuple):
         example_prompt, example_image = prompt
 
-    # See if we need to include an eval prompt.
-    eval_prompt = ""
-    if eval:
-        eval_prompt = f"The answer is correct if the user says [{eval}]."
+    eval_prompt = f"The answer is correct if it's appropriate for the context and matches: {eval}."
+    common_system_prompt = f"Call the eval function with your assessment only if the user answers the question. {eval_prompt}"
+    if user_speaks_first:
+        system_prompt = f"You are an LLM eval, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
+    else:
+        system_prompt = f"You are an LLM eval, be extremly brief. Your goal is to first ask one question: {example_prompt}. {common_system_prompt}"
 
     messages = [
         {
             "role": "system",
-            "content": f"You are an LLM eval, be extremly brief. Your goal is to only ask one question: {example_prompt}. Call the eval function only if the user answers the question and check if the answer is correct (words as numbers are valid). {eval_prompt}",
+            "content": system_prompt,
         },
     ]
 
@@ -313,6 +324,14 @@ async def run_eval_pipeline(
             )
         await audio_buffer.start_recording()
 
+        # Default behavior is for the bot to speak first
+        # If the eval bot speaks first, we append the prompt to the messages
+        if user_speaks_first:
+            messages.append(
+                {"role": "user", "content": f"Start by saying this exactly: '{prompt}'"}
+            )
+            await task.queue_frames([LLMRunFrame()])
+
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
@@ -322,6 +341,8 @@ async def run_eval_pipeline(
     async def on_pipeline_idle_timeout(task):
         await eval_runner.assert_eval_false()
 
-    runner = PipelineRunner()
+    # TODO(aleix): We should handle SIGINT and SIGTERM so we can cancel both the
+    # eval and the example.
+    runner = PipelineRunner(handle_sigint=False)
 
     await runner.run(task)

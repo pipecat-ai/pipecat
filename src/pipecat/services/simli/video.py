@@ -22,7 +22,6 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, StartFrame
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from av.audio.frame import AudioFrame
@@ -96,7 +95,7 @@ class SimliVideoService(FrameProcessor):
         """Consume audio frames from Simli and push them downstream."""
         await self._pipecat_resampler_event.wait()
         audio_iterator = self._simli_client.getAudioStreamIterator()
-        async for audio_frame in WatchdogAsyncIterator(audio_iterator, manager=self.task_manager):
+        async for audio_frame in audio_iterator:
             resampled_frames = self._pipecat_resampler.resample(audio_frame)
             for resampled_frame in resampled_frames:
                 audio_array = resampled_frame.to_ndarray()
@@ -114,7 +113,7 @@ class SimliVideoService(FrameProcessor):
         """Consume video frames from Simli and convert them to output frames."""
         await self._pipecat_resampler_event.wait()
         video_iterator = self._simli_client.getVideoStreamIterator(targetFormat="rgb24")
-        async for video_frame in WatchdogAsyncIterator(video_iterator, manager=self.task_manager):
+        async for video_frame in video_iterator:
             # Process the video frame
             convertedFrame: OutputImageRawFrame = OutputImageRawFrame(
                 image=video_frame.to_rgb().to_image().tobytes(),

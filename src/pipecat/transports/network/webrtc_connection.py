@@ -39,6 +39,7 @@ except ModuleNotFoundError as e:
 SIGNALLING_TYPE = "signalling"
 AUDIO_TRANSCEIVER_INDEX = 0
 VIDEO_TRANSCEIVER_INDEX = 1
+SCREEN_VIDEO_TRANSCEIVER_INDEX = 2
 
 
 class TrackStatusMessage(BaseModel):
@@ -99,6 +100,7 @@ class SmallWebRTCTrack:
 
         Args:
             track: The underlying MediaStreamTrack to wrap.
+            index: The index of the track in the transceiver (0 for mic, 1 for cam, 2 for screen)
         """
         self._track = track
         self._enabled = True
@@ -191,6 +193,7 @@ class SmallWebRTCConnection(BaseObject):
         self._track_getters = {
             AUDIO_TRANSCEIVER_INDEX: self.audio_input_track,
             VIDEO_TRANSCEIVER_INDEX: self.video_input_track,
+            SCREEN_VIDEO_TRANSCEIVER_INDEX: self.screen_video_input_track,
         }
 
         self._initialize()
@@ -343,7 +346,14 @@ class SmallWebRTCConnection(BaseObject):
             video_input_track = self.video_input_track()
             if video_input_track:
                 await self.video_input_track().discard_old_frames()
-            self.ask_to_renegotiate()
+            screen_video_input_track = self.screen_video_input_track()
+            if screen_video_input_track:
+                await self.screen_video_input_track().discard_old_frames()
+            if video_input_track or screen_video_input_track:
+                # This prevents an issue where sometimes the WebRTC connection can be established
+                # before the bot is ready to receive video. When that happens, we can lose a couple
+                # of seconds of video before we received a key frame to finally start displaying it.
+                self.ask_to_renegotiate()
 
     async def renegotiate(self, sdp: str, type: str, restart_pc: bool = False):
         """Renegotiate the WebRTC connection with new parameters.
@@ -378,7 +388,11 @@ class SmallWebRTCConnection(BaseObject):
     def force_transceivers_to_send_recv(self):
         """Force all transceivers to bidirectional send/receive mode."""
         for transceiver in self._pc.getTransceivers():
-            transceiver.direction = "sendrecv"
+            # For now, we only support sendrecv for camera audio and video (the first two transceivers)
+            if transceiver.mid == "0" or transceiver.mid == "1":
+                transceiver.direction = "sendrecv"
+            else:
+                transceiver.direction = "recvonly"
             # logger.debug(
             #    f"Transceiver: {transceiver}, Mid: {transceiver.mid}, Direction: {transceiver.direction}"
             # )
@@ -415,6 +429,22 @@ class SmallWebRTCConnection(BaseObject):
             transceivers[1].sender.replaceTrack(track)
         else:
             logger.warning("Video transceiver not found. Cannot replace video track.")
+
+    def replace_screen_video_track(self, track):
+        """Replace the screen video track in the second transceiver.
+
+        Args:
+            track: The new screen video track to use for sending.
+        """
+        logger.debug(f"Replacing screen video track {track.kind}")
+        # Transceivers always appear in creation-order for both peers
+        # For now we are only considering that we are going to have 02 transceivers,
+        # one for audio and one for video
+        transceivers = self._pc.getTransceivers()
+        if len(transceivers) > 2 and transceivers[2].sender:
+            transceivers[2].sender.replaceTrack(track)
+        else:
+            logger.warning("Screen video transceiver not found. Cannot replace screen video track.")
 
     async def disconnect(self):
         """Disconnect from the WebRTC peer connection."""
@@ -488,8 +518,8 @@ class SmallWebRTCConnection(BaseObject):
             return self._track_map[AUDIO_TRANSCEIVER_INDEX]
 
         # Transceivers always appear in creation-order for both peers
-        # For now we are only considering that we are going to have 02 transceivers,
-        # one for audio and one for video
+        # For support 3 receivers in the following order:
+        #   audio, video, screenVideo
         transceivers = self._pc.getTransceivers()
         if len(transceivers) == 0 or not transceivers[AUDIO_TRANSCEIVER_INDEX].receiver:
             logger.warning("No audio transceiver is available")
@@ -510,8 +540,8 @@ class SmallWebRTCConnection(BaseObject):
             return self._track_map[VIDEO_TRANSCEIVER_INDEX]
 
         # Transceivers always appear in creation-order for both peers
-        # For now we are only considering that we are going to have 02 transceivers,
-        # one for audio and one for video
+        # For support 3 receivers in the following order:
+        #   audio, video, screenVideo
         transceivers = self._pc.getTransceivers()
         if len(transceivers) <= 1 or not transceivers[VIDEO_TRANSCEIVER_INDEX].receiver:
             logger.warning("No video transceiver is available")
@@ -520,6 +550,28 @@ class SmallWebRTCConnection(BaseObject):
         track = transceivers[VIDEO_TRANSCEIVER_INDEX].receiver.track
         video_track = SmallWebRTCTrack(track) if track else None
         self._track_map[VIDEO_TRANSCEIVER_INDEX] = video_track
+        return video_track
+
+    def screen_video_input_track(self):
+        """Get the screen video input track wrapper.
+
+        Returns:
+            SmallWebRTCTrack wrapper for the screen video track, or None if unavailable.
+        """
+        if self._track_map.get(SCREEN_VIDEO_TRANSCEIVER_INDEX):
+            return self._track_map[SCREEN_VIDEO_TRANSCEIVER_INDEX]
+
+        # Transceivers always appear in creation-order for both peers
+        # For support 3 receivers in the following order:
+        #   audio, video, screenVideo
+        transceivers = self._pc.getTransceivers()
+        if len(transceivers) <= 2 or not transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver:
+            logger.warning("No screen video transceiver is available")
+            return None
+
+        track = transceivers[SCREEN_VIDEO_TRANSCEIVER_INDEX].receiver.track
+        video_track = SmallWebRTCTrack(track) if track else None
+        self._track_map[SCREEN_VIDEO_TRANSCEIVER_INDEX] = video_track
         return video_track
 
     def send_app_message(self, message: Any):

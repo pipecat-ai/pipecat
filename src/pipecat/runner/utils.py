@@ -260,6 +260,7 @@ async def maybe_capture_participant_screen(
             await transport.capture_participant_video(
                 client["id"], framerate=framerate, video_source="screenVideo"
             )
+
     except ImportError:
         pass
 

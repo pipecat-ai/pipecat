@@ -71,7 +71,10 @@ class PipelineRunner(BaseObject):
         logger.debug(f"Runner {self} started running {task}")
         self._tasks[task.name] = task
         params = PipelineTaskParams(loop=self._loop)
-        await task.run(params)
+        try:
+            await task.run(params)
+        except asyncio.CancelledError:
+            await self._cancel()
         del self._tasks[task.name]
 
         # Cleanup base object.
@@ -95,6 +98,10 @@ class PipelineRunner(BaseObject):
     async def cancel(self):
         """Cancel all running tasks immediately."""
         logger.debug(f"Cancelling runner {self}")
+        await self._cancel()
+
+    async def _cancel(self):
+        """Cancel all running tasks immediately."""
         await asyncio.gather(*[t.cancel() for t in self._tasks.values()])
 
     def _setup_sigint(self):
