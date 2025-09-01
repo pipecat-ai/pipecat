@@ -34,7 +34,6 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 try:
     from respeecher import SamplingParams
     from respeecher.tts import Response as TTSResponse
-    from respeecher.tts import StreamingEncoding
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
@@ -67,7 +66,6 @@ class RespeecherTTSService(AudioContextTTSService):
         model: str = "public/tts/en-rt",
         url: str = "wss://api.respeecher.com/v1",
         sample_rate: Optional[int] = None,
-        encoding: StreamingEncoding = "pcm_s16le",
         params: Optional[InputParams] = None,
         additional_silence_between_sentences_time_s: float = 0,
         **kwargs,
@@ -80,7 +78,6 @@ class RespeecherTTSService(AudioContextTTSService):
             model: Model path for the Respeecher TTS API.
             url: WebSocket base URL for Respeecher TTS API.
             sample_rate: Audio sample rate. If None, uses default.
-            encoding: Audio encoding format.
             params: Additional input parameters for voice customization.
             additional_silence_between_sentences_time_s: Duration of additional silence to insert between sentences in seconds.
             **kwargs: Additional arguments passed to the parent service.
@@ -97,7 +94,7 @@ class RespeecherTTSService(AudioContextTTSService):
         self._api_key = api_key
         self._url = url
         self._output_format = {
-            "encoding": encoding,
+            "encoding": "pcm_s16le",
             "sample_rate": sample_rate,
         }
         self.set_model_name(model)
