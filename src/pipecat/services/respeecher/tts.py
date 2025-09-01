@@ -105,6 +105,7 @@ class RespeecherTTSService(AudioContextTTSService):
         self.set_model_name(model)
         self.set_voice(voice_id)
 
+        self._context_id: str | None = None
         self._receive_task = None
 
     def can_generate_metrics(self) -> bool:
@@ -127,10 +128,13 @@ class RespeecherTTSService(AudioContextTTSService):
         await self._disconnect()
         await self._connect()
 
-    def _build_msg(self, text: str, context_id: str):
+    def _build_msg(self, text: str, continue_transcript: bool = True):
+        assert self._context_id is not None
+
         msg: ContextfulGenerationRequestParams = {
             "transcript": text,
-            "context_id": context_id,
+            "continue": continue_transcript,
+            "context_id": self._context_id,
             "voice": {
                 "id": self._voice_id,
                 "sampling_params": self._settings["sampling_params"],
@@ -191,6 +195,7 @@ class RespeecherTTSService(AudioContextTTSService):
             )
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
+            self._context_id = None
             self._websocket = None
             await self._call_event_handler("on_connection_error", f"{e}")
 
@@ -214,10 +219,19 @@ class RespeecherTTSService(AudioContextTTSService):
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
-        for context_id in self._contexts:
-            cancel_msg = json.dumps({"context_id": context_id, "cancel": True})
+        if self._context_id:
+            cancel_msg = json.dumps({"context_id": self._context_id, "cancel": True})
             await self._get_websocket().send(cancel_msg)
-            await self.remove_audio_context(context_id)
+            self._context_id = None
+
+    async def flush_audio(self):
+        """Flush any pending audio and finalize the current context."""
+        if not self._context_id or not self._websocket:
+            return
+        logger.trace(f"{self}: flushing audio")
+        msg = self._build_msg(text="", continue_transcript=False)
+        await self._websocket.send(msg)
+        self._context_id = None
 
     async def _receive_messages(self):
         async for message in WatchdogAsyncIterator(
@@ -272,13 +286,13 @@ class RespeecherTTSService(AudioContextTTSService):
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
 
-            if not self._contexts:
+            if not self._context_id:
                 await self.start_ttfb_metrics()
                 yield TTSStartedFrame()
+                self._context_id = str(uuid.uuid4())
+                await self.create_audio_context(self._context_id)
 
-            context_id = str(uuid.uuid4())
-            await self.create_audio_context(context_id)
-            msg = self._build_msg(text=text, context_id=context_id)
+            msg = self._build_msg(text=text)
 
             try:
                 await self._get_websocket().send(msg)
