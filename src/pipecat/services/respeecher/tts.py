@@ -32,7 +32,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for Respeecher configuration needed
 try:
-    from respeecher import SamplingParams
+    from respeecher.tts import ContextfulGenerationRequestParams, StreamingOutputFormatParams
     from respeecher.tts import Response as TTSResponse
     from respeecher.voices import (
         SamplingParamsParams as SamplingParams,  # TypedDict instead of a Pydantic model
@@ -96,9 +96,9 @@ class RespeecherTTSService(AudioContextTTSService):
         self._params = params or RespeecherTTSService.InputParams()
         self._api_key = api_key
         self._url = url
-        self._output_format = {
+        self._output_format: StreamingOutputFormatParams = {
             "encoding": "pcm_s16le",
-            "sample_rate": sample_rate,
+            "sample_rate": sample_rate or 0,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -126,7 +126,7 @@ class RespeecherTTSService(AudioContextTTSService):
         await self._connect()
 
     def _build_msg(self, text: str, context_id: str):
-        msg = {
+        msg: ContextfulGenerationRequestParams = {
             "transcript": text,
             "context_id": context_id,
             "voice": {
