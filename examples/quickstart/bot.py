@@ -63,6 +63,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tts = RespeecherTTSService(
         api_key=os.getenv("RESPEECHER_API_KEY"),
         voice_id="samantha",
+        params=RespeecherTTSService.InputParams(
+            sampling_params={
+                # "temperature": 1000
+            }
+        ),
     )
 
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
