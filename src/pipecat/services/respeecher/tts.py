@@ -93,13 +93,15 @@ class RespeecherTTSService(AudioContextTTSService):
             **kwargs,
         )
 
-        self._params = params or RespeecherTTSService.InputParams()
+        params = params or RespeecherTTSService.InputParams()
+
         self._api_key = api_key
         self._url = url
         self._output_format: StreamingOutputFormatParams = {
             "encoding": "pcm_s16le",
             "sample_rate": sample_rate or 0,
         }
+        self._settings = {"sampling_params": params.sampling_params}
         self.set_model_name(model)
         self.set_voice(voice_id)
 
@@ -131,7 +133,7 @@ class RespeecherTTSService(AudioContextTTSService):
             "context_id": context_id,
             "voice": {
                 "id": self._voice_id,
-                "sampling_params": self._params.sampling_params,
+                "sampling_params": self._settings["sampling_params"],
             },
             "output_format": self._output_format,
         }
