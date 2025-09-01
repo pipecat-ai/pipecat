@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sending it through the transport. This makes sending DTMF generic across all
   output transports.
 
+- Added new config parameters to `GladiaSTTService`. 
+  - PreProcessingConfig > `audio_enhancer` to enhance audio quality.
+  - CustomVocabularyItem > `pronunciations` and `language` to specify special pronunciations and in which language it will be pronounced.
+
 ## Changed
 
 - `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
