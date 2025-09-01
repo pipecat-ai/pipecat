@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    LLMFullResponseEndFrame,
     StartFrame,
     StartInterruptionFrame,
     TTSAudioRawFrame,
@@ -70,7 +71,7 @@ class RespeecherTTSService(AudioContextTTSService):
         url: str = "wss://api.respeecher.com/v1",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
-        additional_silence_between_sentences_time_s: float = 0,
+        aggregate_sentences: bool = False,
         **kwargs,
     ):
         """Initialize the Respeecher TTS service.
@@ -82,14 +83,14 @@ class RespeecherTTSService(AudioContextTTSService):
             url: WebSocket base URL for Respeecher TTS API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
-            additional_silence_between_sentences_time_s: Duration of additional silence to insert between sentences in seconds.
+            aggregate_sentences: Whether to aggregate text into sentences client-side.
             **kwargs: Additional arguments passed to the parent service.
         """
         super().__init__(
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
-            silence_between_contexts_time_s=additional_silence_between_sentences_time_s,
+            aggregate_sentences=aggregate_sentences,
             **kwargs,
         )
 
@@ -128,10 +129,10 @@ class RespeecherTTSService(AudioContextTTSService):
         await self._disconnect()
         await self._connect()
 
-    def _build_msg(self, text: str, continue_transcript: bool = True):
+    def _build_request(self, text: str, continue_transcript: bool = True):
         assert self._context_id is not None
 
-        msg: ContextfulGenerationRequestParams = {
+        request: ContextfulGenerationRequestParams = {
             "transcript": text,
             "continue": continue_transcript,
             "context_id": self._context_id,
@@ -142,7 +143,7 @@ class RespeecherTTSService(AudioContextTTSService):
             "output_format": self._output_format,
         }
 
-        return json.dumps(msg)
+        return json.dumps(request)
 
     async def start(self, frame: StartFrame):
         """Start the Respeecher TTS service.
@@ -220,17 +221,29 @@ class RespeecherTTSService(AudioContextTTSService):
         await super()._handle_interruption(frame, direction)
         await self.stop_all_metrics()
         if self._context_id:
-            cancel_msg = json.dumps({"context_id": self._context_id, "cancel": True})
-            await self._get_websocket().send(cancel_msg)
+            cancel_request = json.dumps({"context_id": self._context_id, "cancel": True})
+            await self._get_websocket().send(cancel_request)
             self._context_id = None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames with context awareness.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
+            await self.flush_audio()
 
     async def flush_audio(self):
         """Flush any pending audio and finalize the current context."""
         if not self._context_id or not self._websocket:
             return
         logger.trace(f"{self}: flushing audio")
-        msg = self._build_msg(text="", continue_transcript=False)
-        await self._websocket.send(msg)
+        flush_request = self._build_request(text="", continue_transcript=False)
+        await self._websocket.send(flush_request)
         self._context_id = None
 
     async def _receive_messages(self):
@@ -292,10 +305,10 @@ class RespeecherTTSService(AudioContextTTSService):
                 self._context_id = str(uuid.uuid4())
                 await self.create_audio_context(self._context_id)
 
-            msg = self._build_msg(text=text)
+            generation_request = self._build_request(text=text)
 
             try:
-                await self._get_websocket().send(msg)
+                await self._get_websocket().send(generation_request)
                 await self.start_tts_usage_metrics(text)
             except Exception as e:
                 logger.error(f"{self} error sending message: {e}")
