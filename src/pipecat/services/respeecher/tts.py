@@ -34,6 +34,9 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 try:
     from respeecher import SamplingParams
     from respeecher.tts import Response as TTSResponse
+    from respeecher.voices import (
+        SamplingParamsParams as SamplingParams,  # TypedDict instead of a Pydantic model
+    )
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
 except ModuleNotFoundError as e:
@@ -56,7 +59,7 @@ class RespeecherTTSService(AudioContextTTSService):
             sampling_params: Sampling parameters used for speech synthesis.
         """
 
-        sampling_params: SamplingParams = SamplingParams()
+        sampling_params: SamplingParams = {}
 
     def __init__(
         self,
@@ -128,7 +131,7 @@ class RespeecherTTSService(AudioContextTTSService):
             "context_id": context_id,
             "voice": {
                 "id": self._voice_id,
-                "sampling_params": self._params.sampling_params.model_dump(exclude_none=True),
+                "sampling_params": self._params.sampling_params,
             },
             "output_format": self._output_format,
         }
