@@ -75,7 +75,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a friendly AI assistant. Respond naturally and keep your answers conversational.",
+            "content": "You are a friendly AI assistant. Respond naturally and keep your answers conversational. Use neither asterisks nor emojis in your responses.",
         },
     ]
 
