@@ -347,12 +347,7 @@ class TTSService(AIService):
             direction: The direction to push the frame.
         """
         if self._push_silence_after_stop and isinstance(frame, TTSStoppedFrame):
-            silence_num_bytes = int(self._silence_time_s * self.sample_rate * 2)  # 16-bit
-            silence_frame = TTSAudioRawFrame(
-                audio=b"\x00" * silence_num_bytes,
-                sample_rate=self.sample_rate,
-                num_channels=1,
-            )
+            silence_frame = self.silence_frame(self._silence_time_s)
             silence_frame.transport_destination = self._transport_destination
             await self.push_frame(silence_frame)
 
@@ -368,6 +363,20 @@ class TTSService(AIService):
             or isinstance(frame, TTSStoppedFrame)
         ):
             await self._stop_frame_queue.put(frame)
+
+    def silence_frame(self, duration_s: float) -> TTSAudioRawFrame:
+        """Create a frame of silence.
+
+        Args:
+            duration_s: Silence duration in seconds.
+        """
+        silence_num_bytes = int(duration_s * self.sample_rate * 2)  # 16-bit
+
+        return TTSAudioRawFrame(
+            audio=b"\x00" * silence_num_bytes,
+            sample_rate=self.sample_rate,
+            num_channels=1,
+        )
 
     async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
         self._processing_text = False
@@ -703,13 +712,25 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
             self._bot_speaking = False
 
 
-class _AudioContextBaseService(ABC):
-    """A service that supports audio contexts."""
+class _AudioContextServiceMixin(ABC):
+    """A service that supports audio contexts.
 
-    def __init__(self):
-        """Initialize the service."""
+    This class does not inherit from other service base classes to avoid
+    diamond inheritance.
+    """
+
+    def __init__(
+        self,
+        silence_between_contexts_time_s: float = 1.0,
+    ):
+        """Initialize the service.
+
+        Args:
+            silence_between_contexts_time_s: Duration of silence to push between contexts.
+        """
         self._contexts: Dict[str, asyncio.Queue] = {}
         self._audio_context_task = None
+        self._silence_between_contexts_time_s = silence_between_contexts_time_s
 
     async def create_audio_context(self, context_id: str):
         """Create a new audio context for grouping related audio.
@@ -787,11 +808,9 @@ class _AudioContextBaseService(ABC):
                 del self._contexts[context_id]
 
                 # Append some silence between sentences.
-                silence = b"\x00" * self.sample_rate
-                frame = TTSAudioRawFrame(
-                    audio=silence, sample_rate=self.sample_rate, num_channels=1
-                )
-                await self.push_frame(frame)
+                if self._silence_between_contexts_time_s > 0:
+                    silence_frame = self.silence_frame(self._silence_between_contexts_time_s)
+                    await self.push_frame(silence_frame)
             else:
                 running = False
 
@@ -831,9 +850,8 @@ class _AudioContextBaseService(ABC):
     async def push_frame(self, frame: Frame) -> None:
         pass
 
-    @property
     @abstractmethod
-    def sample_rate(self) -> int:
+    def silence_frame(self, duration_s: float) -> TTSAudioRawFrame:
         pass
 
     @property
@@ -842,7 +860,7 @@ class _AudioContextBaseService(ABC):
         pass
 
 
-class AudioContextTTSService(WebsocketTTSService, _AudioContextBaseService):
+class AudioContextTTSService(WebsocketTTSService, _AudioContextServiceMixin):
     """Websocket-based TTS service with audio context management.
 
     This is a base class for websocket-based TTS services that allow correlating
@@ -857,14 +875,19 @@ class AudioContextTTSService(WebsocketTTSService, _AudioContextBaseService):
     audio from context ID "A" will be played first.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        silence_between_contexts_time_s: float = 1.0,
+        **kwargs,
+    ):
         """Initialize the Audio Context TTS service.
 
         Args:
+            silence_between_contexts_time_s: Duration of silence to push between contexts.
             **kwargs: Additional arguments passed to the parent WebsocketTTSService.
         """
         WebsocketTTSService.__init__(self, **kwargs)
-        _AudioContextBaseService.__init__(self)
+        _AudioContextServiceMixin.__init__(self, silence_between_contexts_time_s)
 
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.
@@ -904,7 +927,7 @@ class AudioContextTTSService(WebsocketTTSService, _AudioContextBaseService):
         self._create_audio_context_task()
 
 
-class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextBaseService):
+class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextServiceMixin):
     """Websocket-based TTS service with word timestamps and audio context management.
 
     This is a base class for websocket-based TTS services that support word
@@ -920,14 +943,19 @@ class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextBaseServi
     audio from context ID "A" will be played first.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(
+        self,
+        silence_between_contexts_time_s: float = 1.0,
+        **kwargs,
+    ):
         """Initialize the Audio Context Word TTS service.
 
         Args:
+            silence_between_contexts_time_s: Duration of silence to push between contexts.
             **kwargs: Additional arguments passed to the parent WebsocketWordTTSService.
         """
         WebsocketWordTTSService.__init__(self, **kwargs)
-        _AudioContextBaseService.__init__(self)
+        _AudioContextServiceMixin.__init__(self, silence_between_contexts_time_s)
 
     async def start(self, frame: StartFrame):
         """Start the audio context TTS service.

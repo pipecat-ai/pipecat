@@ -12,7 +12,7 @@ import uuid
 from typing import AsyncGenerator, Optional
 
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -33,6 +33,7 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 # See .env.example for Respeecher configuration needed
 try:
     from respeecher import SamplingParams
+    from respeecher.tts import Response as TTSResponse
     from respeecher.tts import StreamingEncoding
     from websockets.asyncio.client import connect as websocket_connect
     from websockets.protocol import State
@@ -68,6 +69,7 @@ class RespeecherTTSService(AudioContextTTSService):
         sample_rate: Optional[int] = None,
         encoding: StreamingEncoding = "pcm_s16le",
         params: Optional[InputParams] = None,
+        additional_silence_between_sentences_time_s: float = 0,
         **kwargs,
     ):
         """Initialize the Respeecher TTS service.
@@ -80,12 +82,14 @@ class RespeecherTTSService(AudioContextTTSService):
             sample_rate: Audio sample rate. If None, uses default.
             encoding: Audio encoding format.
             params: Additional input parameters for voice customization.
+            additional_silence_between_sentences_time_s: Duration of additional silence to insert between sentences in seconds.
             **kwargs: Additional arguments passed to the parent service.
         """
         super().__init__(
             push_text_frames=False,
             pause_frame_processing=True,
             sample_rate=sample_rate,
+            silence_between_contexts_time_s=additional_silence_between_sentences_time_s,
             **kwargs,
         )
 
@@ -217,27 +221,38 @@ class RespeecherTTSService(AudioContextTTSService):
         async for message in WatchdogAsyncIterator(
             self._get_websocket(), manager=self.task_manager
         ):
-            msg = json.loads(message)
-            if not msg or not self.audio_context_available(msg["context_id"]):
+            try:
+                response = TypeAdapter(TTSResponse).validate_json(message)
+            except ValidationError as e:
+                logger.error(f"{self} cannot parse message: {e}")
                 continue
-            if msg["type"] == "done":
+
+            if response.context_id is not None and not self.audio_context_available(
+                response.context_id
+            ):
+                logger.error(
+                    f"{self} error, received {response.type} for unknown context_id: {response.context_id}"
+                )
+                continue
+
+            if response.type == "error":
+                logger.error(f"{self} error: {response}")
+                await self.push_frame(TTSStoppedFrame())
+                await self.stop_all_metrics()
+                await self.push_error(ErrorFrame(f"{self} error: {response.error}"))
+                continue
+
+            if response.type == "done":
                 await self.stop_ttfb_metrics()
-                await self.remove_audio_context(msg["context_id"])
-            elif msg["type"] == "chunk":
+                await self.remove_audio_context(response.context_id)
+            elif response.type == "chunk":
                 await self.stop_ttfb_metrics()
                 frame = TTSAudioRawFrame(
-                    audio=base64.b64decode(msg["data"]),
+                    audio=base64.b64decode(response.data),
                     sample_rate=self.sample_rate,
                     num_channels=1,
                 )
-                await self.append_to_audio_context(msg["context_id"], frame)
-            elif msg["type"] == "error":
-                logger.error(f"{self} error: {msg}")
-                await self.push_frame(TTSStoppedFrame())
-                await self.stop_all_metrics()
-                await self.push_error(ErrorFrame(f"{self} error: {msg['error']}"))
-            else:
-                logger.error(f"{self} error, unknown message type: {msg}")
+                await self.append_to_audio_context(response.context_id, frame)
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame | None, None]:
