@@ -29,9 +29,11 @@ class PreProcessingConfig(BaseModel):
     """Configuration for audio pre-processing options.
 
     Parameters:
+        audio_enhancer: Apply pre-processing to the audio stream to enhance quality
         speech_threshold: Sensitivity for speech detection (0-1)
     """
 
+    audio_enhancer: Optional[bool] = None
     speech_threshold: Optional[float] = None
 
 
@@ -41,10 +43,14 @@ class CustomVocabularyItem(BaseModel):
     Parameters:
         value: The vocabulary word or phrase
         intensity: The bias intensity for this vocabulary item (0-1)
+        pronunciations: The pronunciations used in the transcription.
+        language: Specify the language in which it will be pronounced when sound comparison occurs. Default to transcription language.
     """
 
     value: str
     intensity: float
+    pronunciations: Optional[List[str]] = None
+    language: Optional[str] = None
 
 
 class CustomVocabularyConfig(BaseModel):
@@ -170,7 +176,7 @@ class GladiaInputParams(BaseModel):
     channels: Optional[int] = 1
     custom_metadata: Optional[Dict[str, Any]] = None
     endpointing: Optional[float] = None
-    maximum_duration_without_endpointing: Optional[int] = 10
+    maximum_duration_without_endpointing: Optional[int] = 5
     language: Optional[Language] = None  # Deprecated
     language_config: Optional[LanguageConfig] = None
     pre_processing: Optional[PreProcessingConfig] = None
