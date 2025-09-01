@@ -135,7 +135,7 @@ class VonageClient:
     ):
         """Initialize the Vonage client with session string and parameters."""
         self._session_str: str = session_str
-        self._session_id: str = json.loads(session_str).get("session_id", "")
+        self._session_id: str = json.loads(session_str).get("sessionId", "")
         self._params = params
         self._connected: bool = False
         self._connection_counter: int = 0
@@ -241,7 +241,7 @@ class VonageClient:
             self._loop.call_soon_threadsafe(future.set_result, None)
 
     def _on_session_error_cb(self, session_id: str, description: str, code: int):
-        logger.warn(f"Session error {session_id} code={code} description={description}")
+        logger.warning(f"Session error {session_id} code={code} description={description}")
 
     def _on_session_connected_cb(self, session_id: str):
         logger.info(f"Session connected {session_id}")
@@ -259,7 +259,7 @@ class VonageClient:
         self._connected = False
 
     def _on_publisher_error_cb(self, publisher_id: str, description: str, code: int):
-        logger.warn(
+        logger.warning(
             f"Publisher error session={self._session_id} publisher={publisher_id} "
             f"code={code} description={description}"
         )
