@@ -35,7 +35,6 @@ from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from livekit import rtc
@@ -599,7 +598,7 @@ class LiveKitInputTransport(BaseInputTransport):
         """Handle incoming audio frames from participants."""
         logger.info("Audio input task started")
         audio_iterator = self._client.get_next_audio_frame()
-        async for audio_data in WatchdogAsyncIterator(audio_iterator, manager=self.task_manager):
+        async for audio_data in audio_iterator:
             if audio_data:
                 audio_frame_event, participant_id = audio_data
                 pipecat_audio_frame = await self._convert_livekit_audio_to_pipecat(

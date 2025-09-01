@@ -36,10 +36,15 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     FunctionCallsStartedFrame,
+    LLMConfigureOutputFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
     StartFrame,
     StartInterruptionFrame,
     UserImageRequestFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -88,7 +93,7 @@ class FunctionCallParams:
     tool_call_id: str
     arguments: Mapping[str, Any]
     llm: "LLMService"
-    context: OpenAILLMContext
+    context: OpenAILLMContext | LLMContext
     result_callback: FunctionCallResultCallback
 
 
@@ -129,7 +134,7 @@ class FunctionCallRunnerItem:
     function_name: str
     tool_call_id: str
     arguments: Mapping[str, Any]
-    context: OpenAILLMContext
+    context: OpenAILLMContext | LLMContext
     run_llm: Optional[bool] = None
 
 
@@ -177,6 +182,7 @@ class LLMService(AIService):
         self._function_call_tasks: Dict[asyncio.Task, FunctionCallRunnerItem] = {}
         self._sequential_runner_task: Optional[asyncio.Task] = None
         self._tracing_enabled: bool = False
+        self._skip_tts: bool = False
 
         self._register_event_handler("on_function_calls_started")
         self._register_event_handler("on_completion_timeout")
@@ -188,6 +194,24 @@ class LLMService(AIService):
             The adapter instance used for LLM communication.
         """
         return self._adapter
+
+    async def run_inference(
+        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
+    ) -> Optional[str]:
+        """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
+
+        Must be implemented by subclasses.
+
+        Args:
+            context: The LLM context containing conversation history.
+            system_instruction: Optional system instruction to guide the LLM's
+              behavior. You could also (again, optionally) provide a system
+              instruction directly in the context.
+
+        Returns:
+            The LLM's response as a string, or None if no response is generated.
+        """
+        raise NotImplementedError(f"run_inference() not supported by {self.__class__.__name__}")
 
     def create_context_aggregator(
         self,
@@ -252,6 +276,20 @@ class LLMService(AIService):
 
         if isinstance(frame, StartInterruptionFrame):
             await self._handle_interruptions(frame)
+        elif isinstance(frame, LLMConfigureOutputFrame):
+            self._skip_tts = frame.skip_tts
+
+    async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
+        """Pushes a frame.
+
+        Args:
+            frame: The frame to push.
+            direction: The direction of frame pushing.
+        """
+        if isinstance(frame, (LLMTextFrame, LLMFullResponseStartFrame, LLMFullResponseEndFrame)):
+            frame.skip_tts = self._skip_tts
+
+        await super().push_frame(frame, direction)
 
     async def _handle_interruptions(self, _: StartInterruptionFrame):
         for function_name, entry in self._functions.items():
@@ -432,7 +470,9 @@ class LLMService(AIService):
             else:
                 await self._sequential_runner_queue.put(runner_item)
 
-    async def _call_start_function(self, context: OpenAILLMContext, function_name: str):
+    async def _call_start_function(
+        self, context: OpenAILLMContext | LLMContext, function_name: str
+    ):
         if function_name in self._start_callbacks.keys():
             await self._start_callbacks[function_name](function_name, self, context)
         elif None in self._start_callbacks.keys():
@@ -487,7 +527,7 @@ class LLMService(AIService):
             self._function_call_tasks[task] = runner_item
             # Since we run tasks sequentially we don't need to call
             # task.add_done_callback(self._function_call_task_finished).
-            await self.wait_for_task(task)
+            await task
             del self._function_call_tasks[task]
 
     async def _run_function_call(self, runner_item: FunctionCallRunnerItem):
@@ -616,7 +656,3 @@ class LLMService(AIService):
     def _function_call_task_finished(self, task: asyncio.Task):
         if task in self._function_call_tasks:
             del self._function_call_tasks[task]
-            # The task is finished so this should exit immediately. We need to
-            # do this because otherwise the task manager would report a dangling
-            # task if we don't remove it.
-            asyncio.run_coroutine_threadsafe(self.wait_for_task(task), self.get_event_loop())

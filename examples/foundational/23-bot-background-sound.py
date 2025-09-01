@@ -13,7 +13,7 @@ from loguru import logger
 
 from pipecat.audio.mixers.soundfile_mixer import SoundfileMixer
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import MixerEnableFrame, MixerUpdateSettingsFrame
+from pipecat.frames.frames import LLMRunFrame, MixerEnableFrame, MixerUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -126,7 +126,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frame(MixerEnableFrame(True))
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

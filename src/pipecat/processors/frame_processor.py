@@ -30,16 +30,12 @@ from pipecat.frames.frames import (
     FrameProcessorResumeUrgentFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
 from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.processors.metrics.frame_processor_metrics import FrameProcessorMetrics
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_event import WatchdogEvent
-from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.base_object import BaseObject
 
 
@@ -66,16 +62,14 @@ class FrameProcessorSetup:
         clock: The clock instance for timing operations.
         task_manager: The task manager for handling async operations.
         observer: Optional observer for monitoring frame processing events.
-        watchdog_timers_enabled: Whether to enable watchdog timers by default.
     """
 
     clock: BaseClock
     task_manager: BaseTaskManager
     observer: Optional[BaseObserver] = None
-    watchdog_timers_enabled: bool = False
 
 
-class FrameProcessorQueue(WatchdogPriorityQueue):
+class FrameProcessorQueue(asyncio.PriorityQueue):
     """A priority queue for systems frames and other frames.
 
     This is a specialized queue for frame processors that separates and
@@ -87,14 +81,14 @@ class FrameProcessorQueue(WatchdogPriorityQueue):
     HIGH_PRIORITY = 1
     LOW_PRIORITY = 2
 
-    def __init__(self, manager: BaseTaskManager):
+    def __init__(self):
         """Initialize the FrameProcessorQueue.
 
         Args:
             manager (BaseTaskManager): The task manager used by the internal watchdog queues.
 
         """
-        super().__init__(manager, tuple_size=3)
+        super().__init__()
         self.__high_counter = 0
         self.__low_counter = 0
 
@@ -148,10 +142,7 @@ class FrameProcessor(BaseObject):
         *,
         name: Optional[str] = None,
         enable_direct_mode: bool = False,
-        enable_watchdog_logging: Optional[bool] = None,
-        enable_watchdog_timers: Optional[bool] = None,
         metrics: Optional[FrameProcessorMetrics] = None,
-        watchdog_timeout_secs: Optional[float] = None,
         **kwargs,
     ):
         """Initialize the frame processor.
@@ -159,10 +150,7 @@ class FrameProcessor(BaseObject):
         Args:
             name: Optional name for this processor instance.
             enable_direct_mode: Whether to process frames immediately or use internal queues.
-            enable_watchdog_logging: Whether to enable watchdog logging for tasks.
-            enable_watchdog_timers: Whether to enable watchdog timers for tasks.
             metrics: Optional metrics collector for this processor.
-            watchdog_timeout_secs: Timeout in seconds for watchdog operations.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(name=name, **kwargs)
@@ -171,15 +159,6 @@ class FrameProcessor(BaseObject):
 
         # Enable direct mode to skip queues and process frames right away.
         self._enable_direct_mode = enable_direct_mode
-
-        # Enable watchdog timers for all tasks created by this frame processor.
-        self._enable_watchdog_timers = enable_watchdog_timers
-
-        # Enable watchdog logging for all tasks created by this frame processor.
-        self._enable_watchdog_logging = enable_watchdog_logging
-
-        # Allow this frame processor to control their tasks timeout.
-        self._watchdog_timeout_secs = watchdog_timeout_secs
 
         # Clock
         self._clock: Optional[BaseClock] = None
@@ -434,23 +413,12 @@ class FrameProcessor(BaseObject):
         await self.stop_ttfb_metrics()
         await self.stop_processing_metrics()
 
-    def create_task(
-        self,
-        coroutine: Coroutine,
-        name: Optional[str] = None,
-        *,
-        enable_watchdog_logging: Optional[bool] = None,
-        enable_watchdog_timers: Optional[bool] = None,
-        watchdog_timeout_secs: Optional[float] = None,
-    ) -> asyncio.Task:
+    def create_task(self, coroutine: Coroutine, name: Optional[str] = None) -> asyncio.Task:
         """Create a new task managed by this processor.
 
         Args:
             coroutine: The coroutine to run in the task.
             name: Optional name for the task.
-            enable_watchdog_logging: Whether to enable watchdog logging.
-            enable_watchdog_timers: Whether to enable watchdog timers.
-            watchdog_timeout_secs: Timeout in seconds for watchdog operations.
 
         Returns:
             The created asyncio task.
@@ -459,21 +427,7 @@ class FrameProcessor(BaseObject):
             name = f"{self}::{name}"
         else:
             name = f"{self}::{coroutine.cr_code.co_name}"
-        return self.task_manager.create_task(
-            coroutine,
-            name,
-            enable_watchdog_logging=(
-                enable_watchdog_logging
-                if enable_watchdog_logging
-                else self._enable_watchdog_logging
-            ),
-            enable_watchdog_timers=(
-                enable_watchdog_timers if enable_watchdog_timers else self._enable_watchdog_timers
-            ),
-            watchdog_timeout=(
-                watchdog_timeout_secs if watchdog_timeout_secs else self._watchdog_timeout_secs
-            ),
-        )
+        return self.task_manager.create_task(coroutine, name)
 
     async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Cancel a task managed by this processor.
@@ -487,15 +441,29 @@ class FrameProcessor(BaseObject):
     async def wait_for_task(self, task: asyncio.Task, timeout: Optional[float] = None):
         """Wait for a task to complete.
 
+        .. deprecated:: 0.0.81
+            This function is deprecated, use `await task` or
+            `await asyncio.wait_for(task, timeout)` instead.
+
         Args:
             task: The task to wait for.
             timeout: Optional timeout for waiting.
         """
-        await self.task_manager.wait_for_task(task, timeout)
+        import warnings
 
-    def reset_watchdog(self):
-        """Reset the watchdog timer for the current task."""
-        self.task_manager.task_reset_watchdog()
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "`FrameProcessor.wait_for_task()` is deprecated. "
+                "Use `await task` or `await asyncio.wait_for(task, timeout)` instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        if timeout:
+            await asyncio.wait_for(task, timeout)
+        else:
+            await task
 
     async def setup(self, setup: FrameProcessorSetup):
         """Set up the processor with required components.
@@ -506,11 +474,6 @@ class FrameProcessor(BaseObject):
         self._clock = setup.clock
         self._task_manager = setup.task_manager
         self._observer = setup.observer
-        self._watchdog_timers_enabled = (
-            self._enable_watchdog_timers
-            if self._enable_watchdog_timers
-            else setup.watchdog_timers_enabled
-        )
 
         # Create processing tasks.
         self.__create_input_task()
@@ -623,8 +586,6 @@ class FrameProcessor(BaseObject):
         elif isinstance(frame, StartInterruptionFrame):
             await self._start_interruption()
             await self.stop_all_metrics()
-        elif isinstance(frame, StopInterruptionFrame):
-            self._should_report_ttfb = True
         elif isinstance(frame, CancelFrame):
             await self.__cancel(frame)
         elif isinstance(frame, (FrameProcessorPauseFrame, FrameProcessorPauseUrgentFrame)):
@@ -774,14 +735,13 @@ class FrameProcessor(BaseObject):
             return
 
         if not self.__input_frame_task:
-            self.__input_event = WatchdogEvent(self.task_manager)
-            self.__input_queue = FrameProcessorQueue(self.task_manager)
+            self.__input_event = asyncio.Event()
+            self.__input_queue = FrameProcessorQueue()
             self.__input_frame_task = self.create_task(self.__input_frame_task_handler())
 
     async def __cancel_input_task(self):
         """Cancel the frame input processing task."""
         if self.__input_frame_task:
-            self.__input_queue.cancel()
             await self.cancel_task(self.__input_frame_task)
             self.__input_frame_task = None
 
@@ -792,14 +752,13 @@ class FrameProcessor(BaseObject):
 
         if not self.__process_frame_task:
             self.__should_block_frames = False
-            self.__process_event = WatchdogEvent(self.task_manager)
-            self.__process_queue = WatchdogQueue(self.task_manager)
+            self.__process_event = asyncio.Event()
+            self.__process_queue = asyncio.Queue()
             self.__process_frame_task = self.create_task(self.__process_frame_task_handler())
 
     async def __cancel_process_task(self):
         """Cancel the non-system frame processing task."""
         if self.__process_frame_task:
-            self.__process_queue.cancel()
             await self.cancel_task(self.__process_frame_task)
             self.__process_frame_task = None
 

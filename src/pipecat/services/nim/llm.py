@@ -47,6 +47,15 @@ class NimLLMService(OpenAILLMService):
         self._has_reported_prompt_tokens = False
         self._is_processing = False
 
+    @property
+    def supports_universal_context(self) -> bool:
+        """Check if this service supports universal LLMContext.
+
+        Returns:
+            False, as NimLLMService does not yet support universal LLMContext.
+        """
+        return False
+
     async def _process_context(self, context: OpenAILLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
 

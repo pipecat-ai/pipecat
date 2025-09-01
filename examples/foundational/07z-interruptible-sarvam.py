@@ -5,6 +5,7 @@
 #
 
 
+import asyncio
 import os
 
 import aiohttp
@@ -12,6 +13,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame, TTSUpdateSettingsFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -21,7 +23,6 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.sarvam.tts import SarvamTTSService
-from pipecat.transcriptions.language import Language
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
@@ -54,64 +55,64 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # Create an HTTP session
-    async with aiohttp.ClientSession() as session:
-        stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-        tts = SarvamTTSService(
-            api_key=os.getenv("SARVAM_API_KEY"),
-            aiohttp_session=session,
-            params=SarvamTTSService.InputParams(language=Language.EN),
-        )
+    tts = SarvamTTSService(
+        api_key=os.getenv("SARVAM_API_KEY"),
+        model="bulbul:v2",
+        voice_id="manisha",
+    )
+    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
-        llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    messages = [
+        {
+            "role": "system",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
 
-        messages = [
-            {
-                "role": "system",
-                "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
-            },
+    context = OpenAILLMContext(messages)
+    context_aggregator = llm.create_context_aggregator(context)
+
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,
+            context_aggregator.user(),  # User responses
+            llm,  # LLM
+            tts,  # TTS
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
+    )
 
-        context = OpenAILLMContext(messages)
-        context_aggregator = llm.create_context_aggregator(context)
+    task = PipelineTask(
+        pipeline,
+        params=PipelineParams(
+            enable_metrics=True,
+            enable_usage_metrics=True,
+        ),
+    )
 
-        pipeline = Pipeline(
-            [
-                transport.input(),  # Transport user input
-                stt,
-                context_aggregator.user(),  # User responses
-                llm,  # LLM
-                tts,  # TTS
-                transport.output(),  # Transport bot output
-                context_aggregator.assistant(),  # Assistant spoken responses
-            ]
-        )
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        logger.info(f"Client connected")
+        # Kick off the conversation.
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(
-                enable_metrics=True,
-                enable_usage_metrics=True,
-            ),
-            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        )
+        # Optionally, you can wait for 30 seconds and then change the voice.
+        # await asyncio.sleep(30)
+        # await task.queue_frame(TTSUpdateSettingsFrame(settings={"voice": "anushka"}))
 
-        @transport.event_handler("on_client_connected")
-        async def on_client_connected(transport, client):
-            logger.info(f"Client connected")
-            # Kick off the conversation.
-            messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info(f"Client disconnected")
+        await task.cancel()
 
-        @transport.event_handler("on_client_disconnected")
-        async def on_client_disconnected(transport, client):
-            logger.info(f"Client disconnected")
-            await task.cancel()
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
-        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
-
-        await runner.run(task)
+    await runner.run(task)
 
 
 async def bot(runner_args: RunnerArguments):

@@ -13,7 +13,7 @@ from loguru import logger
 from openai.types.chat import ChatCompletionToolParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame
+from pipecat.frames.frames import Frame, LLMRunFrame
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -165,7 +165,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 "content": f"Please introduce yourself to the user and let them know the languages you speak. Your initial responses should be in {tts.current_language}.",
             }
         )
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

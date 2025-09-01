@@ -34,6 +34,7 @@ from pipecat.frames.frames import (
     FunctionCallFromLLM,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -62,7 +63,6 @@ from pipecat.services.aws_nova_sonic.context import (
 )
 from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
-from pipecat.utils.asyncio.watchdog_coroutine import watchdog_coroutine
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -323,6 +323,10 @@ class AWSNovaSonicLLMService(LLMService):
 
         if isinstance(frame, OpenAILLMContextFrame):
             await self._handle_context(frame.context)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for AWS Nova Sonic."
+            )
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
@@ -795,7 +799,7 @@ class AWSNovaSonicLLMService(LLMService):
         try:
             while self._stream and not self._disconnecting:
                 output = await self._stream.await_output()
-                result = await watchdog_coroutine(output[1].receive(), manager=self.task_manager)
+                result = await output[1].receive()
 
                 if result.value and result.value.bytes_:
                     response_data = result.value.bytes_.decode("utf-8")

@@ -7,7 +7,249 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Added
+
+- Added `pipecat.extensions.ivr` for automated IVR system navigation with
+  configurable goals and conversation handling. Supports DTMF input, verbal
+  responses, and intelligent menu traversal.
+
+  Basic usage:
+
+  ```python
+  from pipecat.extensions.ivr.ivr_navigator import IVRNavigator
+
+  # Create IVR navigator with your goal
+  ivr_navigator = IVRNavigator(
+      llm=llm_service,
+      ivr_prompt="Navigate to billing department to dispute a charge"
+  )
+
+  # Handle different outcomes
+  @ivr_navigator.event_handler("on_conversation_detected")
+  async def on_conversation(processor, conversation_history):
+      # Switch to normal conversation mode
+      pass
+
+  @ivr_navigator.event_handler("on_ivr_status_changed")
+  async def on_ivr_status(processor, status):
+      if status == IVRStatus.COMPLETED:
+          # End pipeline, transfer call, or start bot conversation
+      elif status == IVRStatus.STUCK:
+          # Handle navigation failure
+  ```
+
+- `BaseOutputTransport` now implements `write_dtmf()` by loading DTMF audio and
+  sending it through the transport. This makes sending DTMF generic across all
+  output transports.
+
+## Changed
+
+- `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
+  `pipecat.audio.dtmf.types.KeypadEntry`.
+
+## Removed
+
+- Remove `StopInterruptionFrame`. This was a legacy frame that was not being
+  used really anywhere and it didn't provide any useful meaning. It was only
+  pushed after `UserStoppedSpeakingFrame`, so developers can just use
+  `UserStoppedSpeakingFrame`.
+
+- `DailyTransport.write_dtmf()` has been removed in favor of the generic
+  `BaseOutputTransport.write_dtmf()`.
+
+- Remove deprecated `DailyTransport.send_dtmf()`.
+
+## Deprecated
+
+- `pipecat.frames.frames.KeypadEntry` is deprecated use
+  `pipecat.audio.dtmf.types.KeypadEntry` instead.
+
+## Fixed
+
+- Fixed an issue where `PipelineTask` was not cleaning up the observers.
+
+## [0.0.82] - 2025-08-28
+
 ### Added
+
+- Added a new `LLMRunFrame` to trigger an LLM response:
+
+  ```python
+  await task.queue_frames([LLMRunFrame()])
+  ```
+
+  This replaces `OpenAILLMContextFrame`, which you’d previously typically use
+  like this:
+
+  ```python
+  await task.queue_frames([context_aggregator.user().get_context_frame()])
+  ```
+
+  Use this way of kicking off your conversation when you’ve already initialized
+  your context and are simply instructing the bot when to go:
+
+  ```python
+  context = OpenAILLMContext(messages, tools)
+  context_aggregator = llm.create_context_aggregator(context)
+
+  # ...
+
+  @transport.event_handler("on_client_connected")
+  async def on_client_connected(transport, client):
+      # Kick off the conversation.
+      await task.queue_frames([LLMRunFrame()])
+  ```
+
+  Note that if you want to add new messages when kicking off the conversation,
+  you could use `LLMMessagesAppendFrame` with `run_llm=True` instead:
+
+  ```python
+  @transport.event_handler("on_client_connected")
+  async def on_client_connected(transport, client):
+      # Kick off the conversation.
+      await task.queue_frames([LLMMessagesAppendFrame(new_messages, run_llm=True)])
+  ```
+
+  In the rare case you don’t have a context aggregator in your pipeline, then
+  you may continue using a context frame.
+
+- Added support for switching between audio+text to text-only modes within the
+  same pipeline. This is done by pushing
+  `LLMConfigureOutputFrame(skip_tts=True)` to enter text-only mode, and
+  disabling it to return to audio+text. The LLM will still generate tokens and
+  add them to the context, but they will not be sent to TTS.
+
+- Added `skip_tts` field to `TextFrame`. This lets a text frame bypass TTS while
+  still being included in the LLM context. Useful for cases like structured text
+  that isn’t meant to be spoken but should still contribute to context.
+
+- Added a `cancel_timeout_secs` argument to `PipelineTask` which defines how
+  long the pipeline has to complete cancellation. When `PipelineTask.cancel()`
+  is called, a `CancelFrame` is pushed through the pipeline and must reach the
+  end. If it does not reach the end within the specified time, a warning is
+  shown and the wait is aborted.
+
+- Added a new "universal" (LLM-agnostic) `LLMContext` and accompanying
+  `LLMContextAggregatorPair`, which will eventually replace `OpenAILLMContext`
+  (and the other under-the-hood contexts) and the other context aggregators.
+  The new universal `LLMContext` machinery allows a single context to be shared
+  between different LLMs, enabling runtime LLM switching and scenarios like
+  failover.
+
+  From the developer's point of view, switching to using the new universal
+  context machinery will usually be a matter of going from this:
+
+  ```python
+  context = OpenAILLMContext(messages, tools)
+  context_aggregator = llm.create_context_aggregator(context)
+  ```
+
+  To this:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(context)
+  ```
+
+  To start, the universal `LLMContext` is supported with the following LLM
+  services:
+
+  - `OpenAILLMService`
+  - `GoogleLLMService`
+
+- Added a new `LLMSwitcher` class to enable runtime LLM switching, built atop a
+  new generic `ServiceSwitcher`.
+
+  Switchers take a switching strategy. The first available strategy is
+  `ServiceSwitcherStrategyManual`.
+
+  To switch LLMs at runtime, the LLMs must be sharing one instance of the new
+  universal `LLMContext` (see above bullet).
+
+  ```python
+  # Instantiate your LLM services
+  llm_openai = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+  llm_google = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
+
+  # Instantiate a switcher
+  # (ServiceSwitcherStrategyManual defaults to OpenAI, as it's first in the list)
+  llm_switcher = LLMSwitcher(
+      llms=[llm_openai, llm_google], strategy_type=ServiceSwitcherStrategyManual
+  )
+
+  # Create your pipeline
+  pipeline = Pipeline(
+    [
+        transport.input(),
+        stt,
+        context_aggregator.user(),
+        llm_switcher,
+        tts,
+        transport.output(),
+        context_aggregator.assistant(),
+    ]
+  )
+  task = PipelineTask(pipeline, params=PipelineParams(allow_interruptions=True))
+
+  # ...
+  # Whenever is appropriate, switch LLMs!
+  await task.queue_frames([ManuallySwitchServiceFrame(service=llm_google)])
+  ```
+
+- Added an `LLMService.run_inference()` method to LLM services to enable
+  direct, out-of-band (i.e. out-of-pipeline) inference.
+
+### Changed
+
+- Updated `daily-python` to 0.19.8.
+
+- `PipelineTask` now waits for `StartFrame` to reach the end of the pipeline
+  before pushing any other frames.
+
+- Updated `CartesiaTTSService` and `CartesiaHttpTTSService` to align with
+  Cartesia's changes for the `speed` parameter. It now takes only an enum of
+  `slow`, `normal`, or `fast`.
+
+- Added support to `AWSBedrockLLMService` for setting authentication
+  credentials through environment variables.
+
+- Updated `SarvamTTSService` to use WebSocket streaming for real-time audio
+  generation with multiple Indian languages, with HTTP support still available
+  via `SarvamHttpTTSService`.
+
+### Fixed
+
+- Fixed an RTVI issue that was causing frames to be pushed before pipeline was
+  properly initialized.
+
+- Fixed some `get_messages_for_logging()` that were returning a JSON string
+  instead of a list.
+
+- Fixed a `DailyTransport` issue that prevented DTMF tones from being sent.
+
+- Fixed a missing import in `SentryMetrics`.
+
+- Fixed `AWSPollyTTSService` to support AWS credential provider chain (IAM
+  roles, IRSA, instance profiles) instead of requiring explicit environment
+  variables.
+
+- Fixed a `CartesiaTTSService` issue that was causing the application to hang
+  after Cartesia's 5 minutes timed out.
+
+- Fixed an issue preventing `SpeechmaticsSTTService` from transcribing audio.
+
+## [0.0.81] - 2025-08-25
+
+### Added
+
+- Added `pipecat.extensions.voicemail`, a module for detecting voicemail vs.
+  live conversation, primarily intended for use in outbound calling scenarios.
+  The voicemail module is optimized for text LLMs only.
+
+- Added new frames to the `idle_timeout_frames` arg: `TranscriptionFrame`,
+  `InterimTranscriptionFrame`, `UserStartedSpeakingFrame`, and
+  `UserStoppedSpeakingFrame`. These additions serve as indicators of user
+  activity in the pipeline idle detection logic.
 
 - Allow passing custom pipeline sink and source processors to a
   `Pipeline`. Pipeline source and sink processors are used to know and control
@@ -39,12 +281,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `retry_timeout_secs` and `retry_on_timeout`. This feature is disabled by
   default.
 
+### Changed
+
+- Updated `daily-python` to 0.19.7.
+
+### Deprecated
+
+- `FrameProcessor.wait_for_task()` is deprecated. Use `await task` or
+  `await asyncio.wait_for(task, timeout)` instead.
+
 ### Removed
+
+- Watchdog timers have been removed. They were introduced in 0.0.72 to help
+  diagnose pipeline freezes. Unfortunately, they proved ineffective since they
+  required developers to use Pipecat-specific queues, iterators, and events to
+  correctly reset the timer, which limited their usefulness and added friction.
 
 - Removed unused `FrameProcessor.set_parent()` and
   `FrameProcessor.get_parent()`.
 
 ### Fixed
+
+- Fixed an issue that would cause `PipelineRunner` and `PipelineTask` to not
+  handle external asyncio task cancellation properly.
+
+- Added `SpeechmaticsSTTService` exception handling on connection and sending.
+
+- Replaced `asyncio.wait_for()` for `wait_for2.wait_for()` for Python <
+  3.12. because of issues regarding task cancellation (i.e. cancellation is
+  never propagated).
+  See https://bugs.python.org/issue42130
 
 - Fixed an `AudioBufferProcessor` issues that would cause audio overlap when
   setting a max buffer size.

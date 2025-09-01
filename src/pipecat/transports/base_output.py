@@ -19,6 +19,7 @@ from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional
 from loguru import logger
 from PIL import Image
 
+from pipecat.audio.dtmf.utils import load_dtmf_audio
 from pipecat.audio.mixers.base_audio_mixer import BaseAudioMixer
 from pipecat.audio.utils import create_stream_resampler, is_silence
 from pipecat.frames.frames import (
@@ -38,7 +39,6 @@ from pipecat.frames.frames import (
     SpriteFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -46,7 +46,6 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
-from pipecat.utils.asyncio.watchdog_priority_queue import WatchdogPriorityQueue
 from pipecat.utils.time import nanoseconds_to_seconds
 
 BOT_VAD_STOP_SECS = 0.35
@@ -224,7 +223,12 @@ class BaseOutputTransport(FrameProcessor):
         Args:
             frame: The DTMF frame to write.
         """
-        pass
+        dtmf_audio = await load_dtmf_audio(frame.button, sample_rate=self._sample_rate)
+        dtmf_audio_frame = OutputAudioRawFrame(
+            audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
+        )
+        dtmf_audio_frame.transport_destination = frame.transport_destination
+        await self.write_audio_frame(dtmf_audio_frame)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
         """Send an audio frame downstream.
@@ -268,7 +272,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, (StartInterruptionFrame, StopInterruptionFrame)):
+        elif isinstance(frame, StartInterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
         elif isinstance(frame, TransportMessageUrgentFrame):
@@ -436,9 +440,9 @@ class BaseOutputTransport(FrameProcessor):
             # also need to wait for these tasks before cancelling the video task
             # because it might be still rendering.
             if self._audio_task:
-                await self._transport.wait_for_task(self._audio_task)
+                await self._audio_task
             if self._clock_task:
-                await self._transport.wait_for_task(self._clock_task)
+                await self._clock_task
 
             # Stop audio mixer.
             if self._mixer:
@@ -626,10 +630,8 @@ class BaseOutputTransport(FrameProcessor):
                         frame = await asyncio.wait_for(
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
-                        self._transport.reset_watchdog()
                         yield frame
                     except asyncio.TimeoutError:
-                        self._transport.reset_watchdog()
                         # Notify the bot stopped speaking upstream if necessary.
                         await self._bot_stopped_speaking()
 
@@ -639,13 +641,11 @@ class BaseOutputTransport(FrameProcessor):
                 while True:
                     try:
                         frame = self._audio_queue.get_nowait()
-                        self._transport.reset_watchdog()
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await self._mixer.mix(frame.audio)
                         last_frame_time = time.time()
                         yield frame
                     except asyncio.QueueEmpty:
-                        self._transport.reset_watchdog()
                         # Notify the bot stopped speaking upstream if necessary.
                         diff_time = time.time() - last_frame_time
                         if diff_time > vad_stop_secs:
@@ -827,15 +827,12 @@ class BaseOutputTransport(FrameProcessor):
         def _create_clock_task(self):
             """Create the clock/timing processing task."""
             if not self._clock_task:
-                self._clock_queue = WatchdogPriorityQueue(
-                    self._transport.task_manager, tuple_size=3
-                )
+                self._clock_queue = asyncio.PriorityQueue()
                 self._clock_task = self._transport.create_task(self._clock_task_handler())
 
         async def _cancel_clock_task(self):
             """Cancel and cleanup the clock processing task."""
             if self._clock_task:
-                self._clock_queue.cancel()
                 await self._transport.cancel_task(self._clock_task)
                 self._clock_task = None
 

@@ -38,7 +38,6 @@ from pipecat.frames.frames import (
     StartFrame,
     StartInterruptionFrame,
     StopFrame,
-    StopInterruptionFrame,
     SystemFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
@@ -374,7 +373,6 @@ class BaseInputTransport(FrameProcessor):
             await self.push_frame(frame)
             if self.interruptions_allowed:
                 await self._stop_interruption()
-                await self.push_frame(StopInterruptionFrame())
 
     #
     # Handle bot speaking state
@@ -505,8 +503,6 @@ class BaseInputTransport(FrameProcessor):
                     if self._params.turn_analyzer:
                         self._params.turn_analyzer.clear()
                     await self._handle_user_interruption(UserStoppedSpeakingFrame())
-            finally:
-                self.reset_watchdog()
 
     async def _handle_prediction_result(self, result: MetricsData):
         """Handle a prediction result event from the turn analyzer."""

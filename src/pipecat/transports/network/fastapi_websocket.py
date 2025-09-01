@@ -37,7 +37,6 @@ from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 
 try:
     from fastapi import WebSocket
@@ -283,9 +282,7 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
     async def _receive_messages(self):
         """Main message receiving loop for WebSocket messages."""
         try:
-            async for message in WatchdogAsyncIterator(
-                self._client.receive(), manager=self.task_manager
-            ):
+            async for message in self._client.receive():
                 if not self._params.serializer:
                     continue
 
