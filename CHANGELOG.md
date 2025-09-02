@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for WhatsApp User-initiated Calls.
+
 - Added new audio filter `AICFilter`, speech enhancement for improving VAD/STT
   performance, no ONNX dependency.
   See https://ai-coustics.com/sdk/
@@ -84,6 +86,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pipecat.audio.dtmf.types.KeypadEntry` instead.
 
 ### Fixed
+
+- Fixed `SmallWebRTCTransport` to not use `mid` to decide if the transceiver should
+  be `sendrecv` or not.
 
 - Fixed an issue where Deepgram swallowed `asyncio.CancelledError` during
   disconnect, preventing tasks from being cancelled.
