@@ -474,13 +474,13 @@ wheels = [
 
 [[package]]
 name = "daily-python"
-version = "0.19.7"
+version = "0.19.8"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/b3/fa69e78338b294cfca5b96dabb3b95220cb990c82d14e79d9380514c6daa/daily_python-0.19.7-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:86b4115720a2e8219eb2ccdc5a6b9b30a3c4eb5eaa772d54bab8f70892714473", size = 13692618, upload-time = "2025-08-14T06:24:45.687Z" },
-    { url = "https://files.pythonhosted.org/packages/d1/1f/ccfb155285dd5d9607a6a44dca22226de28b2b3cfc9ee40681cb801d72e7/daily_python-0.19.7-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:0c4f8104b200a59f4af52b9bcbcab4d5133deef4319093fd338e6e48b79be51d", size = 12047173, upload-time = "2025-08-14T06:24:47.812Z" },
-    { url = "https://files.pythonhosted.org/packages/61/a2/af0243049c2782cdbb4e781a1ca2cd39bc7a062d9b088630e4bd6da0777b/daily_python-0.19.7-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:6c3127ae1f6ca666cc4f663020e273e2b0db1836d628cb073070bf759d46a871", size = 14110897, upload-time = "2025-08-14T06:24:49.693Z" },
-    { url = "https://files.pythonhosted.org/packages/12/22/f3d5063eaad06f2989474360f9c50588190ed89df5c886caa11972f7badb/daily_python-0.19.7-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:7dcb67eafe1b50a605e2384159520d5794233b7f5b27081e137fbbaca1a785e2", size = 14582931, upload-time = "2025-08-14T06:24:51.542Z" },
+    { url = "https://files.pythonhosted.org/packages/25/33/21029ca23df6bae54dfa4e8af550fdcc557f053dc924a554cfa0e32b2904/daily_python-0.19.8-cp37-abi3-macosx_10_15_x86_64.whl", hash = "sha256:cccd2eb8b223299408a9f1269a6f1a257d03aba749ef9fa97678010474c2b40b", size = 13692303, upload-time = "2025-08-27T21:24:36.567Z" },
+    { url = "https://files.pythonhosted.org/packages/14/5b/c795498ffe7cbdca72530b71b4102c4ef43c2f528a72f0deb2d4c3af1cac/daily_python-0.19.8-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:2c1010d44238d492cee3a6af231ff613899efb54943fe3a191f5b84d6af3330d", size = 12047872, upload-time = "2025-08-27T21:24:39.097Z" },
+    { url = "https://files.pythonhosted.org/packages/94/fd/145d65d6902873f3b44f3da7918d1bbbeeb6228e260e2aeb163311a33aa2/daily_python-0.19.8-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:d2b2fedf92e84b599f18d424ede423116eabffbe01ec6434f478d0b577d8bec3", size = 14111600, upload-time = "2025-08-27T21:24:40.962Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/b6/a0123f00003cee45e488467649e2d69f09058f7815a4c590b4827992d3ef/daily_python-0.19.8-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:faec30ae64e233384d8bb96ad13de871843bb02f67bf3aa793a6bce9722734c5", size = 14582824, upload-time = "2025-08-27T21:24:43.148Z" },
 ]
 
 [[package]]
@@ -1649,7 +1649,7 @@ wheels = [
 
 [[package]]
 name = "pipecat-ai"
-version = "0.0.80"
+version = "0.0.82"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1667,10 +1667,11 @@ dependencies = [
     { name = "pyloudnorm" },
     { name = "resampy" },
     { name = "soxr" },
+    { name = "wait-for2", marker = "python_full_version < '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/a4/bc9dc94434481af77cd8c88cc396c5f1bd5ca3fd4c0ad3db02238d0bac54/pipecat_ai-0.0.80.tar.gz", hash = "sha256:93a2a40a5c1eae17ec92e8237ee8a387cbad4c6e64d9a0909aed97d87804f0e1", size = 2958096, upload-time = "2025-08-13T16:43:14.052Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5b/d7/afaf75b3ab4f5f977d501622678a5da1d483da4140cd8af0bcc314ab5ddf/pipecat_ai-0.0.82.tar.gz", hash = "sha256:b44a20ca292fd91ff1687beb68be62dbf94c3aef0ce21081b5c29a5a8864d044", size = 2990742, upload-time = "2025-08-28T20:07:11.787Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/44/bb0ea9856ec99b6acc27c0ff1b70c2d5f32f7f51b82235952e8a2d39b29f/pipecat_ai-0.0.80-py3-none-any.whl", hash = "sha256:c827bc51289fb627fd9a3766526f6a71870357795145dfde819b9b4259c18578", size = 2640149, upload-time = "2025-08-13T16:43:11.918Z" },
+    { url = "https://files.pythonhosted.org/packages/fe/da/c7233c55f985f77a50d828e73e5e09f171a9632c3d01d0db7ded090fed03/pipecat_ai-0.0.82-py3-none-any.whl", hash = "sha256:2fc2bb8b5282939ec36d1fc80bc952b43128ba2de4191425d4261cf0a6f0c083", size = 2669642, upload-time = "2025-08-28T20:07:09.386Z" },
 ]
 
 [package.optional-dependencies]
@@ -1726,8 +1727,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pipecat-ai", extras = ["webrtc", "daily", "silero", "deepgram", "openai", "cartesia", "runner"], specifier = ">=0.0.79" },
-    { name = "pipecatcloud", specifier = ">=0.2.3" },
+    { name = "pipecat-ai", extras = ["webrtc", "daily", "silero", "deepgram", "openai", "cartesia", "runner"], specifier = ">=0.0.82" },
+    { name = "pipecatcloud", specifier = ">=0.2.4" },
 ]
 
 [package.metadata.requires-dev]
@@ -1735,7 +1736,7 @@ dev = [{ name = "ruff", specifier = "~=0.12.1" }]
 
 [[package]]
 name = "pipecatcloud"
-version = "0.2.3"
+version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1748,9 +1749,9 @@ dependencies = [
     { name = "typer" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d5/31/6b86af48be2d83a57f1ab34ac8ee09bf25ee54a61dfb78b0c96d4c05bb7c/pipecatcloud-0.2.3.tar.gz", hash = "sha256:a77441a88e6c1baa97c717e7e42406b7970f7f0f947ef893b59b31d95eee85be", size = 56393, upload-time = "2025-08-20T00:56:53.203Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ab/52/a813e9180714a9a542030c9cef3a7d8f3e04a0cd25e44cbeae66c7516be3/pipecatcloud-0.2.4.tar.gz", hash = "sha256:9ffb7709d6caa89279b26e713159c9337911b0ea862b590a8ba0749371ba04ec", size = 61361, upload-time = "2025-08-26T21:22:40.012Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/2f/285b132714a64ee2ae0d85e9b03c105c547a4511ffcc4ad79ae5dfe7942b/pipecatcloud-0.2.3-py3-none-any.whl", hash = "sha256:0b0d8acc0e7ae732bebdd142c74f7fd5d67c19119802c050cb7b06aaeda25dcb", size = 45283, upload-time = "2025-08-20T00:56:50.658Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/65/25cf51c2951b159d8f2b01b87e6170cced1ef241a2b1577719de6724c129/pipecatcloud-0.2.4-py3-none-any.whl", hash = "sha256:048360183e48e4ab2fd5a09f23b7b19594fac4f3822c353d0873a9fce05913ba", size = 49068, upload-time = "2025-08-26T21:22:38.373Z" },
 ]
 
 [[package]]
@@ -2869,6 +2870,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/19/f5b78616566ea68edd42aacaf645adbf71fbd83fc52281fba555dc27e3f1/uvloop-0.21.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f3df876acd7ec037a3d005b3ab85a7e4110422e4d9c1571d4fc89b0fc41b6816", size = 4701068, upload-time = "2024-10-14T23:38:06.385Z" },
     { url = "https://files.pythonhosted.org/packages/47/57/66f061ee118f413cd22a656de622925097170b9380b30091b78ea0c6ea75/uvloop-0.21.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:bd53ecc9a0f3d87ab847503c2e1552b690362e005ab54e8a48ba97da3924c0dc", size = 4454428, upload-time = "2024-10-14T23:38:08.416Z" },
     { url = "https://files.pythonhosted.org/packages/63/9a/0962b05b308494e3202d3f794a6e85abe471fe3cafdbcf95c2e8c713aabd/uvloop-0.21.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:a5c39f217ab3c663dc699c04cbd50c13813e31d917642d459fdcec07555cc553", size = 4660018, upload-time = "2024-10-14T23:38:10.888Z" },
+]
+
+[[package]]
+name = "wait-for2"
+version = "0.4.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8f/7c/ea09d6a11990a8aa3ceac206fb7ea82366ea2c200caa87966611e0e18597/wait_for2-0.4.1.tar.gz", hash = "sha256:7f415415d21845c441391d6b4abe68f5959d2c0fbe927c2f61be28a297bc2acb", size = 17519, upload-time = "2025-06-13T19:45:00.081Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/90/56/0f88040567af7ff376ec9eaabe18fd980a4f5089d3bf8c7a32598ef06b8d/wait_for2-0.4.1-py3-none-any.whl", hash = "sha256:c694503e8c7420929e8a86bcffd9b00d55acaec2c14223a2b1e92bdc2ebf2154", size = 10985, upload-time = "2025-06-13T19:44:58.82Z" },
 ]
 
 [[package]]
