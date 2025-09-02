@@ -80,7 +80,6 @@ async def configure(
     token_exp_duration: Optional[float] = 2.0,
     sip_caller_phone: Optional[str] = None,
     sip_enable_video: Optional[bool] = False,
-    sip_mode: Optional[Literal["dial-in", "dial-out"]] = "dial-in",
     sip_num_endpoints: Optional[int] = 1,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
@@ -96,7 +95,6 @@ async def configure(
         sip_caller_phone: Phone number or identifier for SIP display name.
             When provided, enables SIP functionality and returns SipRoomConfig.
         sip_enable_video: Whether video is enabled for SIP.
-        sip_mode: SIP connection mode, typically 'dial-in'.
         sip_num_endpoints: Number of allowed SIP endpoints.
 
     Returns:
@@ -163,7 +161,7 @@ async def configure(
         sip_params = DailyRoomSipParams(
             display_name=sip_caller_phone,
             video=sip_enable_video,
-            sip_mode=sip_mode,
+            sip_mode="dial-in",
             num_endpoints=sip_num_endpoints,
         )
         room_properties.sip = sip_params
