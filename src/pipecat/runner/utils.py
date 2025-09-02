@@ -203,7 +203,7 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
     """
     # Import conditionally to avoid dependency issues
     try:
-        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
         if isinstance(transport, SmallWebRTCTransport):
             return client.pc_id
@@ -211,7 +211,7 @@ def get_transport_client_id(transport: BaseTransport, client: Any) -> str:
         pass
 
     try:
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         if isinstance(transport, DailyTransport):
             return client["id"]
@@ -233,7 +233,7 @@ async def maybe_capture_participant_camera(
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
     try:
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         if isinstance(transport, DailyTransport):
             await transport.capture_participant_video(
@@ -254,7 +254,7 @@ async def maybe_capture_participant_screen(
         framerate: Video capture framerate. Defaults to 0 (auto).
     """
     try:
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         if isinstance(transport, DailyTransport):
             await transport.capture_participant_video(
@@ -359,7 +359,7 @@ async def _create_telephony_transport(
     Returns:
         Configured FastAPIWebsocketTransport ready for telephony use.
     """
-    from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport
+    from pipecat.transports.websocket.fastapi import FastAPIWebsocketTransport
 
     if params is None:
         raise ValueError(
@@ -482,7 +482,7 @@ async def create_transport(
     if isinstance(runner_args, DailyRunnerArguments):
         params = _get_transport_params("daily", transport_params)
 
-        from pipecat.transports.services.daily import DailyTransport
+        from pipecat.transports.daily.transport import DailyTransport
 
         return DailyTransport(
             runner_args.room_url,
@@ -494,7 +494,7 @@ async def create_transport(
     elif isinstance(runner_args, SmallWebRTCRunnerArguments):
         params = _get_transport_params("webrtc", transport_params)
 
-        from pipecat.transports.network.small_webrtc import SmallWebRTCTransport
+        from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
 
         return SmallWebRTCTransport(
             params=params,

@@ -17,7 +17,7 @@ from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
 from pipecat.runner.livekit import configure
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.transports.services.livekit import LiveKitParams, LiveKitTransport
+from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
 
 load_dotenv(override=True)
 

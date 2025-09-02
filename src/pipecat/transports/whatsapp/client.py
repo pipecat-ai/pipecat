@@ -12,12 +12,12 @@ WhatsApp call events.
 """
 
 import asyncio
-from typing import Awaitable, Callable, Dict, List, Optional, Union
+from typing import Awaitable, Callable, Dict, List, Optional
 
 import aiohttp
 from loguru import logger
 
-from pipecat.transports.network.webrtc_connection import IceServer, SmallWebRTCConnection
+from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
 from pipecat.transports.whatsapp.api import (
     WhatsAppApi,
     WhatsAppConnectCall,

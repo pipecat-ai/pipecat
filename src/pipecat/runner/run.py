@@ -182,7 +182,7 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-        from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
