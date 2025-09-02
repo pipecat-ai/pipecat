@@ -37,7 +37,7 @@ Example::
 import os
 import time
 import uuid
-from typing import Literal, Optional
+from typing import Dict, List, Optional
 
 import aiohttp
 from loguru import logger
@@ -81,6 +81,7 @@ async def configure(
     sip_caller_phone: Optional[str] = None,
     sip_enable_video: Optional[bool] = False,
     sip_num_endpoints: Optional[int] = 1,
+    sip_codecs: Optional[Dict[str, List[str]]] = None,
 ) -> DailyRoomConfig:
     """Configure Daily room URL and token with optional SIP capabilities.
 
@@ -96,6 +97,8 @@ async def configure(
             When provided, enables SIP functionality and returns SipRoomConfig.
         sip_enable_video: Whether video is enabled for SIP.
         sip_num_endpoints: Number of allowed SIP endpoints.
+        sip_codecs: Codecs to support for audio and video. If None, uses Daily defaults.
+            Example: {"audio": ["OPUS"], "video": ["H264"]}
 
     Returns:
         DailyRoomConfig: Object with room_url, token, and optional sip_endpoint.
@@ -163,6 +166,7 @@ async def configure(
             video=sip_enable_video,
             sip_mode="dial-in",
             num_endpoints=sip_num_endpoints,
+            codecs=sip_codecs,
         )
         room_properties.sip = sip_params
         room_properties.enable_dialout = True  # Enable outbound calls if needed

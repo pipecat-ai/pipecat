@@ -48,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Added `sip_codecs` to the `DailyRoomSipParams`.
+
 - Updated the `configure()` function in `pipecat.runner.daily` to include new
   args to create SIP-enabled rooms. Additionally, added new args to control the
   room and token expiration durations.
