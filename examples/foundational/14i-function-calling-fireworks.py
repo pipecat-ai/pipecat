@@ -75,9 +75,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
-    @llm.event_handler("on_function_calls_started")
-    async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+    # Disabling for now, as it ends up tripping up the model in this example
+    # ("let me check on that" ends up at the end of the context, which the
+    # model erroneously treats as a nudge to call the tool again; the
+    # ensuing inference then yields wonky results).
+    # @llm.event_handler("on_function_calls_started")
+    # async def on_function_calls_started(service, function_calls):
+    #     await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_current_weather",
@@ -99,7 +103,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way. Start by saying hello.",
         },
     ]
 
