@@ -14,6 +14,7 @@ from loguru import logger
 
 from pipecat.audio.filters.aic_filter import AICFilter
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -21,8 +22,8 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
-from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
@@ -31,7 +32,7 @@ from pipecat.transports.services.daily import DailyParams
 load_dotenv(override=True)
 
 
-# Create audio buffer processor with default settings
+# Create audio buffer processor so we can hear the audio fitler results.
 audiobuffer = AudioBufferProcessor(
     num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
     enable_turn_audio=False,  # Enable per-turn audio recording
@@ -78,7 +79,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    tts = DeepgramTTSService(api_key=os.getenv("DEEPGRAM_API_KEY"), voice="aura-helios-en")
+    tts = CartesiaTTSService(
+        api_key=os.getenv("CARTESIA_API_KEY"),
+        voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    )
 
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -120,7 +124,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await audiobuffer.start_recording()
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @audiobuffer.event_handler("on_audio_data")
     async def on_audio_data(buffer, audio, sample_rate, num_channels):
