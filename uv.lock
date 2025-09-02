@@ -43,6 +43,15 @@ wheels = [
 ]
 
 [[package]]
+name = "aic-sdk"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0d/4d/80accf25333ec53d9f2c1bee03f17ddea31096ddb2f10d59c12c3c62c8a8/aic_sdk-1.0.1.tar.gz", hash = "sha256:7526e391e664c1cafabd404c396baff0f2555b01413684f3c08923711516a073", size = 32076, upload-time = "2025-08-21T15:54:17.063Z" }
+
+[[package]]
 name = "aioboto3"
 version = "15.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4209,6 +4218,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+aic = [
+    { name = "aic-sdk" },
+]
 anthropic = [
     { name = "anthropic" },
 ]
@@ -4409,6 +4421,7 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", marker = "extra == 'moondream'", specifier = "~=1.10.0" },
+    { name = "aic-sdk", marker = "extra == 'aic'", specifier = "~=1.0.1" },
     { name = "aioboto3", marker = "extra == 'aws'", specifier = "~=15.0.0" },
     { name = "aiofiles", specifier = ">=24.1.0,<25" },
     { name = "aiohttp", specifier = ">=3.11.12,<4" },
@@ -4500,7 +4513,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'soniox'", specifier = ">=13.1,<15.0" },
     { name = "websockets", marker = "extra == 'websocket'", specifier = ">=13.1,<15.0" },
 ]
-provides-extras = ["anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
