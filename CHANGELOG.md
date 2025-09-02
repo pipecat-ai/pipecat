@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
   `pipecat.audio.dtmf.types.KeypadEntry`.
 
+- Updated `RimeTTSService`'s flush_audio message to conform with Rime's official API.
+
 ## Removed
 
 - Remove `StopInterruptionFrame`. This was a legacy frame that was not being
