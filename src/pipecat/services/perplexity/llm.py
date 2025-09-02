@@ -15,6 +15,7 @@ from openai import NOT_GIVEN
 
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.openai.llm import OpenAILLMService
 
@@ -84,7 +85,7 @@ class PerplexityLLMService(OpenAILLMService):
 
         return params
 
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: OpenAILLMContext | LLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
 
         This method overrides the parent class implementation to handle
