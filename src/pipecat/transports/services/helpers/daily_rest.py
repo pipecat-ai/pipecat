@@ -10,7 +10,7 @@ Methods that wrap the Daily API to create rooms, check room URLs, and get meetin
 """
 
 import time
-from typing import Literal, Optional
+from typing import Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import aiohttp
@@ -25,12 +25,15 @@ class DailyRoomSipParams(BaseModel):
         video: Whether video is enabled for SIP.
         sip_mode: SIP connection mode, typically 'dial-in'.
         num_endpoints: Number of allowed SIP endpoints.
+        codecs: Codecs to support for audio and video. If None, uses Daily defaults.
+            Example: {"audio": ["OPUS"], "video": ["H264"]}
     """
 
     display_name: str = "sw-sip-dialin"
     video: bool = False
     sip_mode: str = "dial-in"
     num_endpoints: int = 1
+    codecs: Optional[Dict[str, List[str]]] = None
 
 
 class RecordingsBucketConfig(BaseModel):
