@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a timeout around cancel input tasks to prevent indefinite 
+  hangs when cancellation is swallowed by third-party code.
+
 - Added `pipecat.extensions.ivr` for automated IVR system navigation with
   configurable goals and conversation handling. Supports DTMF input, verbal
   responses, and intelligent menu traversal.
@@ -71,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pipecat.audio.dtmf.types.KeypadEntry` instead.
 
 ### Fixed
+
+- Fixed an issue where Deepgram swallowed `asyncio.CancelledError` during 
+  disconnect, preventing tasks from being cancelled.
 
 - Fixed an issue where `PipelineTask` was not cleaning up the observers.
 

@@ -125,6 +125,11 @@ class FrameProcessorQueue(asyncio.PriorityQueue):
         return item
 
 
+# Timeout in seconds for cancelling the input frame processing task.
+# This prevents hanging if a library swallows asyncio.CancelledError.
+INPUT_TASK_CANCEL_TIMEOUT_SECS = 3
+
+
 class FrameProcessor(BaseObject):
     """Base class for all frame processors in the pipeline.
 
@@ -742,7 +747,10 @@ class FrameProcessor(BaseObject):
     async def __cancel_input_task(self):
         """Cancel the frame input processing task."""
         if self.__input_frame_task:
-            await self.cancel_task(self.__input_frame_task)
+            # Apply a timeout as a safeguard: if a library swallows asyncio.CancelledError,
+            # the task would otherwise never be cancelled. With a timeout, we can detect this
+            # situation and surface it in the logs instead of hanging indefinitely.
+            await self.cancel_task(self.__input_frame_task, INPUT_TASK_CANCEL_TIMEOUT_SECS)
             self.__input_frame_task = None
 
     def __create_process_task(self):

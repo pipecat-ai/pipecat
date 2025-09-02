@@ -6,6 +6,7 @@
 
 """Deepgram speech-to-text service implementation."""
 
+import asyncio
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger
@@ -237,7 +238,16 @@ class DeepgramSTTService(STTService):
     async def _disconnect(self):
         if self._connection.is_connected:
             logger.debug("Disconnecting from Deepgram")
-            await self._connection.finish()
+            result = await self._connection.finish()
+            # Deepgram swallows asyncio.CancelledError internally and returns False instead.
+            # This prevents proper cancellation propagation: tasks awaiting on queue.get()
+            # would remain stuck if we didn’t normalize this back into a CancelledError.
+            # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
+            if not result:
+                logger.warning(f"{self}: Deepgram connection failed to disconnect, forcing cancel.")
+                raise asyncio.CancelledError(
+                    f"{self}: Deepgram connection cancelled during disconnect"
+                )
 
     async def start_metrics(self):
         """Start TTFB and processing metrics collection."""
