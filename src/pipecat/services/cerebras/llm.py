@@ -81,12 +81,3 @@ class CerebrasLLMService(OpenAILLMService):
 
         params.update(self._settings["extra"])
         return params
-
-    @property
-    def supports_universal_context(self) -> bool:
-        """Check if this service supports universal LLMContext.
-
-        Returns:
-            False, as Cerebras service does not yet support universal LLMContext.
-        """
-        return False
