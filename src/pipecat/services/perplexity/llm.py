@@ -84,15 +84,6 @@ class PerplexityLLMService(OpenAILLMService):
 
         return params
 
-    @property
-    def supports_universal_context(self) -> bool:
-        """Check if this service supports universal LLMContext.
-
-        Returns:
-            False, as PerplexityLLMService does not yet support universal LLMContext.
-        """
-        return False
-
     async def _process_context(self, context: OpenAILLMContext):
         """Process a context through the LLM and accumulate token usage metrics.
 
