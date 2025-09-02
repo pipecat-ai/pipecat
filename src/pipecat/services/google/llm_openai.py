@@ -76,15 +76,6 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
 
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
 
-    @property
-    def supports_universal_context(self) -> bool:
-        """Check if this service supports universal LLMContext.
-
-        Returns:
-            False, as GoogleLLMOpenAIBetaService does not yet support universal LLMContext.
-        """
-        return False
-
     async def _process_context(self, context: OpenAILLMContext):
         functions_list = []
         arguments_list = []
