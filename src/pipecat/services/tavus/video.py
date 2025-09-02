@@ -34,7 +34,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
-from pipecat.transports.services.tavus import TavusCallbacks, TavusParams, TavusTransportClient
+from pipecat.transports.tavus.transport import TavusCallbacks, TavusParams, TavusTransportClient
 
 
 class TavusVideoService(AIService):
