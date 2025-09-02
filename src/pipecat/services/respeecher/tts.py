@@ -164,10 +164,10 @@ class RespeecherTTSService(AudioContextTTSService):
         await self._disconnect()
 
     async def cancel(self, frame: CancelFrame):
-        """Stop the Respeecher TTS service.
+        """Cancel the Respeecher TTS service.
 
         Args:
-            frame: The end frame.
+            frame: The cancel frame.
         """
         await super().cancel(frame)
         await self._disconnect()
