@@ -66,7 +66,7 @@ class ImageSyncAggregator(FrameProcessor):
                 )
             )
 
-        await self.push_frame(frame)
+        await self.push_frame(frame, direction)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
