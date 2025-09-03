@@ -79,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ParallelPipeline` now waits for `CancelFrame` to finish in all branches
+  before pushing it downstream.
+
 - Added `sip_codecs` to the `DailyRoomSipParams`.
 
 - Updated the `configure()` function in `pipecat.runner.daily` to include new
