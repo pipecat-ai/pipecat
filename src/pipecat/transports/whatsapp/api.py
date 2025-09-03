@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 class WhatsAppSession(BaseModel):
     """WebRTC session information for WhatsApp calls.
 
-    Attributes:
+    Parameters:
         sdp: Session Description Protocol (SDP) data for WebRTC connection
         sdp_type: Type of SDP (e.g., "offer", "answer")
     """
@@ -34,7 +34,7 @@ class WhatsAppSession(BaseModel):
 class WhatsAppError(BaseModel):
     """Error information from WhatsApp API responses.
 
-    Attributes:
+    Parameters:
         code: Error code number
         message: Human-readable error message
         href: URL for more information about the error
@@ -53,7 +53,7 @@ class WhatsAppConnectCall(BaseModel):
     Represents a user-initiated call that requires handling. This is sent
     when a WhatsApp user initiates a call to your business number.
 
-    Attributes:
+    Parameters:
         id: Unique call identifier
         from_: Phone number of the caller (WhatsApp ID format)
         to: Your business phone number that received the call
@@ -78,7 +78,7 @@ class WhatsAppTerminateCall(BaseModel):
     Represents the end of a call session, whether completed successfully,
     failed, or was rejected by either party.
 
-    Attributes:
+    Parameters:
         id: Unique call identifier (matches the connect event)
         from_: Phone number of the caller
         to: Your business phone number
@@ -108,7 +108,7 @@ class WhatsAppTerminateCall(BaseModel):
 class WhatsAppProfile(BaseModel):
     """User profile information.
 
-    Attributes:
+    Parameters:
         name: Display name of the WhatsApp user
     """
 
@@ -118,7 +118,7 @@ class WhatsAppProfile(BaseModel):
 class WhatsAppContact(BaseModel):
     """Contact information for a WhatsApp user.
 
-    Attributes:
+    Parameters:
         profile: User's profile information
         wa_id: WhatsApp ID (phone number in international format without +)
     """
@@ -130,7 +130,7 @@ class WhatsAppContact(BaseModel):
 class WhatsAppMetadata(BaseModel):
     """Business phone number metadata.
 
-    Attributes:
+    Parameters:
         display_phone_number: Formatted phone number for display
         phone_number_id: WhatsApp Business API phone number ID
     """
@@ -142,7 +142,7 @@ class WhatsAppMetadata(BaseModel):
 class WhatsAppConnectCallValue(BaseModel):
     """Webhook payload for incoming call events.
 
-    Attributes:
+    Parameters:
         messaging_product: Always "whatsapp"
         metadata: Business phone number information
         contacts: List of contact information for involved parties
@@ -158,7 +158,7 @@ class WhatsAppConnectCallValue(BaseModel):
 class WhatsAppTerminateCallValue(BaseModel):
     """Webhook payload for call termination events.
 
-    Attributes:
+    Parameters:
         messaging_product: Always "whatsapp"
         metadata: Business phone number information
         calls: List of call termination events
@@ -174,7 +174,7 @@ class WhatsAppTerminateCallValue(BaseModel):
 class WhatsAppChange(BaseModel):
     """Webhook change event wrapper.
 
-    Attributes:
+    Parameters:
         value: The actual event data (connect or terminate)
         field: Always "calls" for calling webhooks
     """
@@ -186,7 +186,7 @@ class WhatsAppChange(BaseModel):
 class WhatsAppEntry(BaseModel):
     """Webhook entry containing one or more changes.
 
-    Attributes:
+    Parameters:
         id: WhatsApp Business Account ID
         changes: List of change events in this webhook delivery
     """
@@ -201,7 +201,7 @@ class WhatsAppWebhookRequest(BaseModel):
     This is the top-level structure for all webhook deliveries from
     the WhatsApp Cloud API for calling events.
 
-    Attributes:
+    Parameters:
         object: Always "whatsapp_business_account"
         entry: List of webhook entries (usually contains one entry)
     """
@@ -216,7 +216,7 @@ class WhatsAppApi:
     This class provides methods to interact with the WhatsApp Cloud API
     for managing voice calls, including answering, rejecting, and terminating calls.
 
-    Attributes:
+    Parameters:
         BASE_URL: Base URL for WhatsApp Graph API v23.0
         phone_number_id: Your WhatsApp Business phone number ID
         session: aiohttp client session for making HTTP requests
