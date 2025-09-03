@@ -26,6 +26,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageUrgentFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
     SpriteFrame,
@@ -650,7 +651,7 @@ class SmallWebRTCInputTransport(BaseInputTransport):
             message: The application message to process.
         """
         logger.debug(f"Received app message inside SmallWebRTCInputTransport  {message}")
-        frame = TransportMessageUrgentFrame(message=message)
+        frame = InputTransportMessageUrgentFrame(message=message)
         await self.push_frame(frame)
 
     # Add this method similar to DailyInputTransport.request_participant_image

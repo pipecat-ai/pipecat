@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageUrgentFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
@@ -87,6 +88,17 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 @dataclass
 class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
     """Frame for urgent transport messages in Daily calls.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    participant_id: Optional[str] = None
+
+
+@dataclass
+class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
+    """Frame for input urgent transport messages in Daily calls.
 
     Parameters:
         participant_id: Optional ID of the participant this message is for/from.
@@ -1547,7 +1559,7 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = DailyTransportMessageUrgentFrame(message=message, participant_id=sender)
+        frame = DailyInputTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     #
