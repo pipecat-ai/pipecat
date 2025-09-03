@@ -55,7 +55,6 @@ class InteractionState(Enum):
     STARTING = "starting"
     WAITING_READY = "waiting_ready"
     ACTIVE = "active"
-    ENDING = "ending"
     WAITING_FOR_LAST_FRAME = "waiting_for_last_frame"
 
 
@@ -470,6 +469,7 @@ class OjinPersonaInteraction:
     ending_extra_time: float = 1.0
     ending_timestamp: float = 0.0
     mouth_opening_scale: float = 0.0
+    received_all_interaction_inputs: bool = False
 
     def __post_init__(self):
         """Initialize queues after instance creation."""
@@ -498,6 +498,7 @@ class OjinPersonaInteraction:
                 self.audio_output_queue.task_done()
 
         self.state = InteractionState.INACTIVE
+        self.received_all_interaction_inputs = False
 
     def set_state(self, new_state: InteractionState):
         """Update the interaction state.
@@ -858,6 +859,7 @@ class OjinPersonaService(FrameProcessor):
                 await self._fsm.start()
         
         elif isinstance(message, OjinPersonaInteractionReadyMessage):
+            logger.debug("Received interaction ready message")
             assert self._fsm is not None
             if self._interaction is not None and self._interaction.state == InteractionState.WAITING_READY:
                 self._interaction.start_frame_idx = self._fsm.get_transition_frame_idx()
@@ -1044,7 +1046,7 @@ class OjinPersonaService(FrameProcessor):
     async def _end_interaction(self):
         """End the current interaction.
 
-        Updates the interaction state to ENDING, which will trigger cleanup
+        Sets received_all_interaction_inputs flag to True, which will trigger cleanup
         once all queued audio has been processed.
         """
         # TODO Handle possible race conditions i.e. when _interaction.state == STARTING
@@ -1053,7 +1055,7 @@ class OjinPersonaService(FrameProcessor):
             return
 
         self._interaction.ending_timestamp = time.perf_counter()
-        self._interaction.set_state(InteractionState.ENDING)
+        self._interaction.received_all_interaction_inputs = True
 
     async def _handle_input_audio(self, frame: TTSAudioRawFrame):
         """Process incoming audio frames from the TTS service.
@@ -1158,7 +1160,7 @@ class OjinPersonaService(FrameProcessor):
                 continue
 
             is_final_message = False
-            if self._interaction.state == InteractionState.ENDING:
+            if self._interaction.received_all_interaction_inputs:
                 if (
                     self._interaction.ending_timestamp
                     + self._interaction.ending_extra_time
