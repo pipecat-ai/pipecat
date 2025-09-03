@@ -5,6 +5,7 @@
 #
 
 
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -20,16 +21,23 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
-from pipecat.runner.utils import create_transport
+from pipecat.runner.utils import (
+    create_transport,
+    get_transport_client_id,
+    maybe_capture_participant_camera,
+)
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
+
+
+# Global variable to store the client ID
+client_id = ""
 
 
 async def get_weather(params: FunctionCallParams):
@@ -37,8 +45,25 @@ async def get_weather(params: FunctionCallParams):
     await params.result_callback(f"The weather in {location} is currently 72 degrees and sunny.")
 
 
-async def fetch_restaurant_recommendation(params: FunctionCallParams):
-    await params.result_callback({"name": "The Golden Dragon"})
+async def get_image(params: FunctionCallParams):
+    question = params.arguments["question"]
+    logger.debug(f"Requesting image with user_id={client_id}, question={question}")
+
+    # Request the image frame
+    await params.llm.request_image_frame(
+        user_id=client_id,
+        function_name=params.function_name,
+        tool_call_id=params.tool_call_id,
+        text_content=question,
+    )
+
+    # Wait a short time for the frame to be processed
+    await asyncio.sleep(0.5)
+
+    # Return a result to complete the function call
+    await params.result_callback(
+        f"I've captured an image from your camera and I'm analyzing what you asked about: {question}"
+    )
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -48,16 +73,13 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
-    ),
-    "twilio": lambda: FastAPIWebsocketParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
+        video_in_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
+        video_in_enabled=True,
         vad_analyzer=SileroVADAnalyzer(),
     ),
 }
@@ -76,9 +98,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AnthropicLLMService(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         model="claude-3-7-sonnet-latest",
+        params=AnthropicLLMService.InputParams(enable_prompt_caching_beta=True),
     )
     llm.register_function("get_weather", get_weather)
-    llm.register_function("get_restaurant_recommendation", fetch_restaurant_recommendation)
+    llm.register_function("get_image", get_image)
 
     weather_function = FunctionSchema(
         name="get_weather",
@@ -91,27 +114,44 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
         required=["location"],
     )
-    restaurant_function = FunctionSchema(
-        name="get_restaurant_recommendation",
-        description="Get a restaurant recommendation",
+    get_image_function = FunctionSchema(
+        name="get_image",
+        description="Get an image from the video stream.",
         properties={
-            "location": {
+            "question": {
                 "type": "string",
-                "description": "The city and state, e.g. San Francisco, CA",
-            },
+                "description": "The question that the user is asking about the image.",
+            }
         },
-        required=["location"],
+        required=["question"],
     )
-    tools = ToolsSchema(standard_tools=[weather_function, restaurant_function])
+    tools = ToolsSchema(standard_tools=[weather_function, get_image_function])
 
-    # todo: test with very short initial user message
+    system_prompt = """\
+You are a helpful assistant who converses with a user and answers questions. Respond concisely to general questions.
 
-    # messages = [{"role": "system",
-    #              "content": "You are a helpful assistant who can report the weather in any location in the universe. Respond concisely. Your response will be turned into speech so use only simple words and punctuation."},
-    #             {"role": "user",
-    #              "content": " Start the conversation by introducing yourself."}]
+Your response will be turned into speech so use only simple words and punctuation.
 
-    messages = [{"role": "user", "content": "Say 'hello' to start the conversation."}]
+You have access to two tools: get_weather and get_image.
+
+You can respond to questions about the weather using the get_weather tool.
+
+You can answer questions about the user's video stream using the get_image tool. Some examples of phrases that \
+indicate you should use the get_image tool are:
+- What do you see?
+- What's in the video?
+- Can you describe the video?
+- Tell me about what you see.
+- Tell me something interesting about what you see.
+- What's happening in the video?
+
+If you need to use a tool, simply use the tool. Do not tell the user the tool you are using. Be brief and concise.
+    """
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "Start the conversation by introducing yourself."},
+    ]
 
     context = LLMContext(messages, tools)
     context_aggregator = LLMContextAggregatorPair(context)
@@ -119,8 +159,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
-            stt,
-            context_aggregator.user(),  # User spoken responses
+            stt,  # STT
+            context_aggregator.user(),  # User speech to text
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
@@ -139,7 +179,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info(f"Client connected")
+        logger.info(f"Client connected: {client}")
+
+        await maybe_capture_participant_camera(transport, client)
+
+        global client_id
+        client_id = get_transport_client_id(transport, client)
+
         # Kick off the conversation.
         await task.queue_frames([LLMRunFrame()])
 

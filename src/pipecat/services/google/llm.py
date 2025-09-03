@@ -858,8 +858,7 @@ class GoogleLLMService(LLMService):
         self, context: OpenAILLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         logger.debug(
-            # f"{self}: Generating chat [{self._system_instruction}] | {context.get_messages_for_logging()}"
-            f"{self}: Generating chat from OpenAI context {context.get_messages_for_logging()}"
+            f"{self}: Generating chat from LLM-specific context [{context.system_message}] | {context.get_messages_for_logging()}"
         )
 
         params = GeminiLLMInvocationParams(
@@ -874,12 +873,11 @@ class GoogleLLMService(LLMService):
         self, context: LLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        logger.debug(
-            # f"{self}: Generating chat [{self._system_instruction}] | {context.get_messages_for_logging()}"
-            f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
-        )
-
         params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+
+        logger.debug(
+            f"{self}: Generating chat from universal context [{params['system_instruction']}] | {adapter.get_messages_for_logging(context)}"
+        )
 
         return await self._stream_content(params)
 

@@ -39,11 +39,12 @@ class BaseLLMAdapter(ABC, Generic[TLLMInvocationParams]):
     """
 
     @abstractmethod
-    def get_llm_invocation_params(self, context: LLMContext) -> TLLMInvocationParams:
+    def get_llm_invocation_params(self, context: LLMContext, **kwargs) -> TLLMInvocationParams:
         """Get provider-specific LLM invocation parameters from a universal LLM context.
 
         Args:
             context: The LLM context containing messages, tools, etc.
+            **kwargs: Additional provider-specific arguments that subclasses can use.
 
         Returns:
             Provider-specific parameters for invoking the LLM.
