@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new frames `InputTransportMessageUrgentFrame` and
+  `DailyInputTransportMessageUrgentFrame` for transport messages received from
+  external sources.
+  
 - Added `UserSpeakingFrame`. This will be sent upstream and downstream while VAD
   detects the user is speaking.
 
@@ -133,6 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pipecat.audio.dtmf.types.KeypadEntry` instead.
 
 ### Fixed
+
+- Fixed an issue where messages received from the transport were always being resent.
 
 - Fixed `SmallWebRTCTransport` to not use `mid` to decide if the transceiver should
   be `sendrecv` or not.
