@@ -39,6 +39,7 @@ from pipecat.frames.frames import (
     StartInterruptionFrame,
     StopFrame,
     SystemFrame,
+    UserSpeakingFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADParamsUpdateFrame,
@@ -411,7 +412,7 @@ class BaseInputTransport(FrameProcessor):
             )
         return state
 
-    async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState):
+    async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState) -> VADState:
         """Handle Voice Activity Detection results and generate appropriate frames."""
         new_vad_state = await self._vad_analyze(audio_frame)
         if (
@@ -488,6 +489,10 @@ class BaseInputTransport(FrameProcessor):
 
                 if self._params.turn_analyzer:
                     await self._run_turn_analyzer(frame, vad_state, previous_vad_state)
+
+                if vad_state == VADState.SPEAKING:
+                    await self.push_frame(UserSpeakingFrame())
+                    await self.push_frame(UserSpeakingFrame(), FrameDirection.UPSTREAM)
 
                 # Push audio downstream if passthrough is set.
                 if self._params.audio_in_passthrough:
