@@ -93,9 +93,8 @@ class UserAudioCollector(FrameProcessor):
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self._user_speaking = False
             self._context.add_audio_frames_message(audio_frames=self._audio_frames)
-            await self._user_context_aggregator.push_frame(
-                self._user_context_aggregator.get_context_frame()
-            )
+            await self._user_context_aggregator.push_frame(LLMRunFrame())
+
         elif isinstance(frame, InputAudioRawFrame):
             if self._user_speaking:
                 self._audio_frames.append(frame)
@@ -151,7 +150,7 @@ class TranscriptExtractor(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class TanscriptionContextFixup(FrameProcessor):
+class TranscriptionContextFixup(FrameProcessor):
     def __init__(self, context):
         super().__init__()
         self._context = context
@@ -245,7 +244,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context_aggregator = llm.create_context_aggregator(context)
     audio_collector = UserAudioCollector(context, context_aggregator.user())
     pull_transcript_out_of_llm_output = TranscriptExtractor(context)
-    fixup_context_messages = TanscriptionContextFixup(context)
+    fixup_context_messages = TranscriptionContextFixup(context)
 
     pipeline = Pipeline(
         [
