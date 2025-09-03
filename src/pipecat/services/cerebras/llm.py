@@ -26,7 +26,7 @@ class CerebrasLLMService(OpenAILLMService):
         *,
         api_key: str,
         base_url: str = "https://api.cerebras.ai/v1",
-        model: str = "qwen-3-32b",
+        model: str = "gpt-oss-120b",
         **kwargs,
     ):
         """Initialize the Cerebras LLM service.
@@ -34,7 +34,7 @@ class CerebrasLLMService(OpenAILLMService):
         Args:
             api_key: The API key for accessing Cerebras's API.
             base_url: The base URL for Cerebras API. Defaults to "https://api.cerebras.ai/v1".
-            model: The model identifier to use. Defaults to "qwen-3-32b".
+            model: The model identifier to use. Defaults to "gpt-oss-120b".
             **kwargs: Additional keyword arguments passed to OpenAILLMService.
         """
         super().__init__(api_key=api_key, base_url=base_url, model=model, **kwargs)
