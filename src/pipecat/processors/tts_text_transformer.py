@@ -57,9 +57,13 @@ class TTSTextTransformer:
     # Standalone ordinal patterns  
     ORDINAL_TEXT_PATTERN = r'\b([0-9]{1,2})(st|nd|rd|th)\b'
     
+    # Spaced time patterns (e.g., "8 00 a m", "12 45 p m")
+    SPACED_TIME_PATTERN = r'\b([0-9]{1,2})\s+([0-9]{2})\s+([aApP])\s+([mM])\b'
+    
     UNITS_PATTERN = r'\b([0-9]+)(\s*(?:square\s+feet|sqft|sq\.?\s*ft|degrees?|°|lbs?|pounds?|kg|miles?|mi|feet|ft|inches?|in))\b'
     
     NUMBER_ADJACENT_LETTER_PATTERN = r'([a-zA-Z])([0-9]+)'
+    COMMA_SEPARATED_NUMBER_PATTERN = r'\b[0-9]{1,3}(,[0-9]{2,3})+\b'
     STANDALONE_NUMBER_PATTERN = r'\b[0-9]+\b'
 
     def __init__(self):
@@ -94,11 +98,21 @@ class TTSTextTransformer:
             minute = match.group(2)
             am_pm = match.group(3) or ""  # AM/PM suffix if present
 
-            # For :00 minutes, omit them (e.g., "8:00" -> "8")
+            # Convert hour to words
+            hour_word = self.number_to_words(hour)
+
+            # For :00 minutes, omit them (e.g., "8:00" -> "eight")
             if minute == "00":
-                return f"{hour}{am_pm}"
-            # For other minutes, separate with space (e.g., "9:30" -> "9 30")
-            return f"{hour} {minute}{am_pm}"
+                if am_pm.strip():
+                    return f"{hour_word} {am_pm.strip()}"
+                else:
+                    return hour_word
+            # For other minutes, convert to words and separate with space (e.g., "9:30" -> "nine thirty")
+            minute_word = self.number_to_words(minute)
+            if am_pm.strip():
+                return f"{hour_word} {minute_word} {am_pm.strip()}"
+            else:
+                return f"{hour_word} {minute_word}"
 
         # Apply colon time transformations first
         text = re.sub(colon_pattern, replace_colon_time, text)
@@ -111,8 +125,9 @@ class TTSTextTransformer:
         def replace_simple_time(match):
             hour = match.group(1)
             am_pm = match.group(2)
-            # Add space between hour and AM/PM
-            return f"{hour} {am_pm}"
+            # Convert hour to words and add space between hour and AM/PM
+            hour_word = self.number_to_words(hour)
+            return f"{hour_word} {am_pm}"
 
         # Apply simple time transformations
         text = re.sub(simple_pattern, replace_simple_time, text)
@@ -460,22 +475,40 @@ class TTSTextTransformer:
         # 1. Time patterns (highest priority - colon patterns or AM/PM)
         def replace_time(match):
             return self.time_transformer(match.group(0))
-        result = re.sub(self.TIME_COLON_PATTERN, replace_time, result)
-        result = re.sub(self.TIME_SIMPLE_PATTERN, replace_time, result)
         
-        # Handle times without word boundary (like "from8:00 AM" and "to12:00 PM")
+        # First handle no-boundary patterns to avoid conflicts
         def replace_time_no_boundary(match):
             prefix = match.group(1)
             time_part = match.group(2)
-            return prefix + self.time_transformer(time_part)
+            return prefix + " " + self.time_transformer(time_part)
         result = re.sub(self.TIME_NO_BOUNDARY_COLON_PATTERN, replace_time_no_boundary, result)
         
-        # Handle simple times without boundary (like remaining "8 AM" -> "eight AM")
         def replace_simple_time_no_boundary(match):
             prefix = match.group(1)
             time_part = match.group(2)
-            return prefix + self.time_transformer(time_part)
+            return prefix + " " + self.time_transformer(time_part)
         result = re.sub(self.TIME_NO_BOUNDARY_SIMPLE_PATTERN, replace_simple_time_no_boundary, result)
+        
+        # Handle spaced time patterns (e.g., "8 00 a m" -> "eight a m")
+        def replace_spaced_time(match):
+            hour = match.group(1)
+            minute = match.group(2)
+            a_or_p = match.group(3)
+            m = match.group(4)
+            
+            hour_word = self.number_to_words(hour)
+            
+            # Omit "00" minutes in spaced format
+            if minute == "00":
+                return f"{hour_word} {a_or_p} {m}"
+            else:
+                minute_word = self.number_to_words(minute)
+                return f"{hour_word} {minute_word} {a_or_p} {m}"
+        result = re.sub(self.SPACED_TIME_PATTERN, replace_spaced_time, result)
+        
+        # Then handle normal boundary patterns
+        result = re.sub(self.TIME_COLON_PATTERN, replace_time, result)
+        result = re.sub(self.TIME_SIMPLE_PATTERN, replace_time, result)
         
         # 2. Money patterns (dollar signs or "dollars" word)
         # Handle "$299 dollars" first (more specific pattern) - preserve "dollars" word
@@ -597,9 +630,10 @@ class TTSTextTransformer:
         def replace_quantity_with_unit(match):
             number_text = self.transform_quantity_with_units(match.group(1))
             unit_text = match.group(2)
-            # Convert "square feet" to "sqft" for consistency
-            if "square feet" in unit_text.lower():
-                unit_text = unit_text.replace("square feet", "sqft").replace("Square feet", "sqft").replace("Square Feet", "sqft")
+            # Convert common unit abbreviations to full words
+            unit_text = unit_text.replace("sqft", "square feet").replace("SQFT", "square feet")
+            unit_text = unit_text.replace("lbs", "pounds").replace("LBS", "pounds") 
+            unit_text = unit_text.replace("kg", "kilograms").replace("KG", "kilograms")
             return number_text + unit_text
         result = re.sub(self.UNITS_PATTERN, replace_quantity_with_unit, result, flags=re.IGNORECASE)
         
@@ -610,7 +644,20 @@ class TTSTextTransformer:
             return prefix + " " + self.transform_quantity_number(number)
         result = re.sub(self.NUMBER_ADJACENT_LETTER_PATTERN, replace_number_adjacent_letter, result)
         
-        # 8. All remaining standalone numbers (default to quantity transformation)
+        # 8. Comma-separated numbers (like "25,000")  
+        def replace_comma_number(match):
+            # Remove commas and convert to standard number format
+            full_match = match.group(0)
+            # Handle cases like "25,00" -> "25000"
+            if full_match.endswith(",00"):
+                clean_number = full_match.replace(",00", "000")
+            else:
+                clean_number = full_match.replace(',', '')
+            # Use standard format for comma-separated numbers
+            return self.number_to_standard(clean_number)
+        result = re.sub(self.COMMA_SEPARATED_NUMBER_PATTERN, replace_comma_number, result)
+        
+        # 9. All remaining standalone numbers (default to quantity transformation)
         def replace_number(match):
             return self.transform_quantity_number(match.group(0))
         result = re.sub(self.STANDALONE_NUMBER_PATTERN, replace_number, result)
