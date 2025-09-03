@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expanded support for universal `LLMContext` to more LLM services. Using the
+  universal `LLMContext` and associated `LLMContextAggregatorPair` is a
+  pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
+  Here are the newly-supported services:
+
+  - Azure
+  - Cerebras
+  - Deepseek
+  - Fireworks AI
+  - Google Vertex AI
+  - Grok
+  - Groq
+  - Mistral
+  - NVIDIA NIM
+  - Ollama
+  - OpenPipe
+  - OpenRouter
+  - Perplexity
+  - Qwen
+  - SambaNova
+  - Together.ai
+
 - Added support for WhatsApp User-initiated Calls.
 
 - Added new audio filter `AICFilter`, speech enhancement for improving VAD/STT

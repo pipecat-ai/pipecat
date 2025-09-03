@@ -61,12 +61,3 @@ class OpenRouterLLMService(OpenAILLMService):
         """
         logger.debug(f"Creating OpenRouter client with api {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
-
-    @property
-    def supports_universal_context(self) -> bool:
-        """Check if this service supports universal LLMContext.
-
-        Returns:
-            False, as OpenRouterLLMService does not yet support universal LLMContext.
-        """
-        return False
