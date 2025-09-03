@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `UserSpeakingFrame`. This will be sent upstream and downstream while VAD
+  detects the user is speaking.
+
 - Expanded support for universal `LLMContext` to more LLM services. Using the
   universal `LLMContext` and associated `LLMContextAggregatorPair` is a
   pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
@@ -78,6 +81,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - CustomVocabularyItem > `pronunciations` and `language` to specify special pronunciations and in which language it will be pronounced.
 
 ### Changed
+
+- `UserStartedSpeakingFrame` and `UserStoppedSpeakingFrame` are also pushed
+  upstream.
 
 - `ParallelPipeline` now waits for `CancelFrame` to finish in all branches
   before pushing it downstream.

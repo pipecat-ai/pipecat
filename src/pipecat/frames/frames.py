@@ -899,6 +899,16 @@ class UserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
+class UserSpeakingFrame(SystemFrame):
+    """Frame indicating the user is speaking.
+
+    Emitted by VAD to indicate the user is speaking.
+    """
+
+    pass
+
+
+@dataclass
 class EmulateUserStartedSpeakingFrame(SystemFrame):
     """Frame to emulate user started speaking behavior.
 
