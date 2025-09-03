@@ -93,6 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `RimeTTSService`'s flush_audio message to conform with Rime's official API.
 
+- Updated the default model for `CerebrasLLMService` to GPT-OSS-120B.
+
 ### Removed
 
 - Remove `StopInterruptionFrame`. This was a legacy frame that was not being
