@@ -238,16 +238,15 @@ class DeepgramSTTService(STTService):
     async def _disconnect(self):
         if self._connection.is_connected:
             logger.debug("Disconnecting from Deepgram")
-            result = await self._connection.finish()
-            # Deepgram swallows asyncio.CancelledError internally and returns False instead.
-            # This prevents proper cancellation propagation: tasks awaiting on queue.get()
-            # would remain stuck if we didn’t normalize this back into a CancelledError.
+            # Deepgram swallows asyncio.CancelledError internally which prevents
+            # proper cancellation propagation. This issue was found with
+            # parallel pipelines where `CancelFrame` was not awaited for to
+            # finish in all branches and it was pushed downstream reaching the
+            # end of the pipeline, which caused `cleanup()` to be called while
+            # Deepgram disconnection was still finishing and therefore
+            # preventing the task cancellation that occurs during `cleanup()`.
             # GH issue: https://github.com/deepgram/deepgram-python-sdk/issues/570
-            if not result:
-                logger.warning(f"{self}: Deepgram connection failed to disconnect, forcing cancel.")
-                raise asyncio.CancelledError(
-                    f"{self}: Deepgram connection cancelled during disconnect"
-                )
+            await self._connection.finish()
 
     async def start_metrics(self):
         """Start TTFB and processing metrics collection."""
