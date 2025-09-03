@@ -1129,6 +1129,23 @@ class TransportMessageUrgentFrame(SystemFrame):
 
 
 @dataclass
+class InputTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+    """Frame for transport messages received from external sources.
+
+    This frame wraps incoming transport messages to distinguish them from outgoing
+    urgent transport messages (TransportMessageUrgentFrame), preventing infinite
+    message loops in the transport layer. It inherits the message payload from
+    TransportMessageFrame while marking the message as having been received
+    rather than generated locally.
+
+    Used by transport implementations to properly handle bidirectional message
+    flow without creating feedback loops.
+    """
+
+    pass
+
+
+@dataclass
 class UserImageRequestFrame(SystemFrame):
     """Frame requesting an image from a specific user.
 
