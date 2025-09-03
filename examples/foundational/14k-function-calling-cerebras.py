@@ -72,13 +72,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
-    # Disabling for now, as we end up in an infinite inference loop with the
-    # model in this example ("let me check on that" ends up at the end of the
-    # context, which the model erroneously treats as a nudge to call the tool
-    # again).
-    # @llm.event_handler("on_function_calls_started")
-    # async def on_function_calls_started(service, function_calls):
-    #     await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+    @llm.event_handler("on_function_calls_started")
+    async def on_function_calls_started(service, function_calls):
+        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_current_weather",
