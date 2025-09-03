@@ -28,7 +28,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 

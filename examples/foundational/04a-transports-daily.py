@@ -21,7 +21,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.daily import configure
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.services.daily import DailyLogLevel, DailyParams, DailyTransport
+from pipecat.transports.daily.transport import DailyLogLevel, DailyParams, DailyTransport
 
 load_dotenv(override=True)
 

@@ -43,7 +43,7 @@ import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.transports.services.helpers.daily_rest import (
+from pipecat.transports.daily.utils import (
     DailyRESTHelper,
     DailyRoomParams,
     DailyRoomProperties,
