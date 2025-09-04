@@ -48,4 +48,4 @@ class NebiusLLMService(OpenAILLMService):
             An OpenAI-compatible client configured for Nebius AI Studio's API.
         """
         logger.debug(f"Creating Nebius AI Studio client with api {base_url}")
-        return super().create_client(api_key, base_url, **kwargs) 
+        return super().create_client(api_key, base_url, **kwargs)

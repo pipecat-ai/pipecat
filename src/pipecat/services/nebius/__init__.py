@@ -10,4 +10,4 @@ from pipecat.services import DeprecatedModuleProxy
 
 from .llm import *
 
-sys.modules[__name__] = DeprecatedModuleProxy(globals(), "nebius", "nebius.llm") 
+sys.modules[__name__] = DeprecatedModuleProxy(globals(), "nebius", "nebius.llm")
