@@ -118,7 +118,7 @@ class AnthropicLLMService(LLMService):
             enable_prompt_caching: Whether to enable the prompt caching feature.
             enable_prompt_caching_beta (deprecated): Whether to enable the beta prompt caching feature.
 
-                .. deprecated:: 0.0.83
+                .. deprecated:: 0.0.84
                     Use the `enable_prompt_caching` parameter instead.
 
             max_tokens: Maximum tokens to generate. Must be at least 1.
