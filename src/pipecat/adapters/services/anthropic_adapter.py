@@ -62,9 +62,11 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         messages = self._from_universal_context_messages(self._get_messages(context))
         return {
             "system": messages.system,
-            "messages": self._with_cache_control_markers(messages.messages)
-            if enable_prompt_caching
-            else messages.messages,
+            "messages": (
+                self._with_cache_control_markers(messages.messages)
+                if enable_prompt_caching
+                else messages.messages
+            ),
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
         }
