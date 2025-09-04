@@ -1649,9 +1649,10 @@ wheels = [
 
 [[package]]
 name = "pipecat-ai"
-version = "0.0.82"
+version = "0.0.83"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "aiofiles" },
     { name = "aiohttp" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
     { name = "docstring-parser" },
@@ -1669,9 +1670,9 @@ dependencies = [
     { name = "soxr" },
     { name = "wait-for2", marker = "python_full_version < '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/d7/afaf75b3ab4f5f977d501622678a5da1d483da4140cd8af0bcc314ab5ddf/pipecat_ai-0.0.82.tar.gz", hash = "sha256:b44a20ca292fd91ff1687beb68be62dbf94c3aef0ce21081b5c29a5a8864d044", size = 2990742, upload-time = "2025-08-28T20:07:11.787Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/5c/ae42161de4a2ec76395a384d01341baabf907814db23c96b2784c2096da2/pipecat_ai-0.0.83.tar.gz", hash = "sha256:b922573c019655ea69972129b125b9541a2aafe0c613adb506dd1cdadbe475c3", size = 3062306, upload-time = "2025-09-03T23:50:47.258Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fe/da/c7233c55f985f77a50d828e73e5e09f171a9632c3d01d0db7ded090fed03/pipecat_ai-0.0.82-py3-none-any.whl", hash = "sha256:2fc2bb8b5282939ec36d1fc80bc952b43128ba2de4191425d4261cf0a6f0c083", size = 2669642, upload-time = "2025-08-28T20:07:09.386Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/0f/b55f6fcbf9d040050f9c687fff2ec12cea061f5d077733f60550ccfed5a7/pipecat_ai-0.0.83-py3-none-any.whl", hash = "sha256:e7b4ad54b8f9733a3ba64105fd051265936dc8b0a4300563045449e0a6e64458", size = 2749238, upload-time = "2025-09-03T23:50:45.238Z" },
 ]
 
 [package.optional-dependencies]
@@ -1727,7 +1728,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "pipecat-ai", extras = ["webrtc", "daily", "silero", "deepgram", "openai", "cartesia", "runner"], specifier = ">=0.0.82" },
+    { name = "pipecat-ai", extras = ["webrtc", "daily", "silero", "deepgram", "openai", "cartesia", "runner"], specifier = ">=0.0.83" },
     { name = "pipecatcloud", specifier = ">=0.2.4" },
 ]
 
