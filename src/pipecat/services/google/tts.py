@@ -523,6 +523,7 @@ class GoogleTTSService(TTSService):
             credentials: JSON string containing Google Cloud service account credentials.
             credentials_path: Path to Google Cloud service account JSON file.
             voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
+            voice_cloning_key: The voice cloning key for Chirp 3 custom voices.
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Language configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
