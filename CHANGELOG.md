@@ -5,6 +5,13 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed a `OpenAIImageGenService` issue where it was not creating
+  `URLImageRawFrame` correctly.
+
 ## [0.0.83] - 2025-09-03
 
 ### Added
@@ -15,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added new frames `InputTransportMessageUrgentFrame` and
   `DailyInputTransportMessageUrgentFrame` for transport messages received from
   external sources.
-  
+
 - Added `UserSpeakingFrame`. This will be sent upstream and downstream while VAD
   detects the user is speaking.
 
@@ -85,7 +92,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added new config parameters to `GladiaSTTService`.
   - PreProcessingConfig > `audio_enhancer` to enhance audio quality.
-  - CustomVocabularyItem > `pronunciations` and `language` to specify special pronunciations and in which language it will be pronounced.
+  - CustomVocabularyItem > `pronunciations` and `language` to specify special
+    pronunciations and in which language it will be pronounced.
 
 ### Changed
 
@@ -104,7 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pipecat.frames.frames.KeypadEntry` is deprecated and has been moved to
   `pipecat.audio.dtmf.types.KeypadEntry`.
 
-- Updated `RimeTTSService`'s flush_audio message to conform with Rime's official API.
+- Updated `RimeTTSService`'s flush_audio message to conform with Rime's official
+  API.
 
 - Updated the default model for `CerebrasLLMService` to GPT-OSS-120B.
 
