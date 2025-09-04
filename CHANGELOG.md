@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `AWSBedrockLLMService` crash caused by an extra `await`.
+
 - Fixed a `OpenAIImageGenService` issue where it was not creating
   `URLImageRawFrame` correctly.
 
