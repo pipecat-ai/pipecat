@@ -55,7 +55,7 @@ class InteractionState(Enum):
     STARTING = "starting"
     WAITING_READY = "waiting_ready"
     ACTIVE = "active"
-    WAITING_FOR_LAST_FRAME = "waiting_for_last_frame"
+    ALL_AUDIO_PROCESSED = "all_audio_processed"
 
 
 @dataclass
@@ -560,7 +560,7 @@ class OjinPersonaService(FrameProcessor):
         self._resampler = create_default_resampler()
         self._server_fps_tracker = FPSTracker("OjinPersonaService")
         self.should_generate_silence: bool = False
-        self._last_frame_msg: int | None = None
+        self._last_frame_timestamp: float | None = None
         self._stopping = False
 
     async def _generate_and_send_silence(self, duration: float, is_last_input: bool):
@@ -603,7 +603,7 @@ class OjinPersonaService(FrameProcessor):
             # Send silence to persona with idle_sequence_duration
             await self._start_interaction(is_speech=False)
             assert self._interaction is not None
-            self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
+            self._interaction.set_state(InteractionState.ALL_AUDIO_PROCESSED)
             await self._generate_and_send_silence(
                 self._settings.idle_sequence_duration, True
             )
@@ -687,8 +687,8 @@ class OjinPersonaService(FrameProcessor):
             if self._fsm is not None:
                 time_since_transition = time.perf_counter() - self._fsm._transition_timestamp
 
-                if self._fsm._state == PersonaState.SPEECH and self._last_frame_msg is not None:
-                    last_received_frame_time = time.perf_counter() - self._last_frame_msg
+                if self._fsm._state == PersonaState.SPEECH and self._fsm._waiting_for_image_frames and self._last_frame_timestamp is not None:
+                    last_received_frame_time = time.perf_counter() - self._last_frame_timestamp
 
                     if last_received_frame_time > 1.5:
                         logger.info("Ending interaction")
@@ -703,8 +703,8 @@ class OjinPersonaService(FrameProcessor):
                         await self._fsm.on_conversation_signal(
                             ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
                         )
-                        self._last_frame_msg = None
-                elif self._fsm._state == PersonaState.SPEECH and time_since_transition > 2.5:
+                        self._last_frame_timestamp = None
+                elif self._fsm._state == PersonaState.SPEECH and self._fsm._waiting_for_image_frames and time_since_transition > 2.5:
                     logger.warning("No Frames received from the server, stopping interaction by timeout")
                     # We send the cancel Interaction message to reset the state even when we didn't receive any frame
                     await self.push_ojin_message(
@@ -841,7 +841,7 @@ class OjinPersonaService(FrameProcessor):
                 await self.push_frame(image_frame)
 
             self._interaction.next_frame()
-            self._last_frame_msg = time.perf_counter()
+            self._last_frame_timestamp = time.perf_counter()
             if message.is_final_response:
                 logger.debug("No more video frames expected")
                 if self._fsm is not None:
@@ -1154,7 +1154,7 @@ class OjinPersonaService(FrameProcessor):
             if (not self._interaction
                 or self._interaction.audio_input_queue is None
                 or self._interaction.interaction_id is None
-                or self._interaction.state == InteractionState.WAITING_READY
+                or self._interaction.state == InteractionState.WAITING_READY or self._interaction.state == InteractionState.ALL_AUDIO_PROCESSED
             ):
                 await asyncio.sleep(0.001)
                 continue
@@ -1162,9 +1162,8 @@ class OjinPersonaService(FrameProcessor):
             is_final_message = False
             if self._interaction.received_all_interaction_inputs:
                 if (
-                    self._interaction.ending_timestamp
-                    + self._interaction.ending_extra_time
-                    >= time.perf_counter()
+                    time.perf_counter() > self._interaction.ending_timestamp
+                    + self._interaction.ending_extra_time                    
                 ):
                     is_final_message = self._interaction.audio_input_queue.qsize() <= 1
                 else:
@@ -1185,26 +1184,24 @@ class OjinPersonaService(FrameProcessor):
                 should_finish_task = True
             except asyncio.QueueEmpty:
                 should_finish_task = False
-                # if is_final_message:
-                    # logger.warning("Pushing final message with empty audio")
-                    # await self._fsm.on_conversation_signal(
-                    #     ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
-                    # )
-                    # silence_duration = 0.1
-                    # num_samples = int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
-                    # silence_audio = b"\x00\x00" * num_samples
-                    # message = OjinPersonaInteractionInputMessage(
-                    #     interaction_id=self._interaction.interaction_id,
-                    #     audio_int16_bytes=silence_audio,
-                    # )
-                # else:
-                    # logger.error(
-                        # f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}"
-                    # )
+                if is_final_message:
+                    #TODO Tell server to end interaction by finish processing pending data. No more audio frames expected.
+                    logger.warning("Pushing final message with empty audio")                   
+                    silence_duration = 0.1
+                    num_samples = int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
+                    silence_audio = b"\x00\x00" * num_samples
+                    message = OjinPersonaInteractionInputMessage(
+                        interaction_id=self._interaction.interaction_id,
+                        audio_int16_bytes=silence_audio,
+                    )
+                else:
+                    logger.error(
+                        f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}"
+                    )
 
             if is_final_message:
                 logger.debug("sending last audio input")
-                self._interaction.set_state(InteractionState.WAITING_FOR_LAST_FRAME)
+                self._interaction.set_state(InteractionState.ALL_AUDIO_PROCESSED)
                 message.is_last_input = True
 
             logger.debug(
