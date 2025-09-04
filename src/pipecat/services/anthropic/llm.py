@@ -136,6 +136,18 @@ class AnthropicLLMService(LLMService):
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+        def model_post_init(self, __context):
+            """Post-initialization to handle deprecated parameters."""
+            if self.enable_prompt_caching_beta is not None:
+                import warnings
+
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "enable_prompt_caching_beta is deprecated. Use enable_prompt_caching instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
     def __init__(
         self,
         *,
