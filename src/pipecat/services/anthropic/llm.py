@@ -115,7 +115,12 @@ class AnthropicLLMService(LLMService):
         """Input parameters for Anthropic model inference.
 
         Parameters:
-            enable_prompt_caching_beta: Whether to enable beta prompt caching feature.
+            enable_prompt_caching: Whether to enable the prompt caching feature.
+            enable_prompt_caching_beta (deprecated): Whether to enable the beta prompt caching feature.
+
+                .. deprecated:: 0.0.83
+                    Use the `enable_prompt_caching` parameter instead.
+
             max_tokens: Maximum tokens to generate. Must be at least 1.
             temperature: Sampling temperature between 0.0 and 1.0.
             top_k: Top-k sampling parameter.
@@ -123,7 +128,8 @@ class AnthropicLLMService(LLMService):
             extra: Additional parameters to pass to the API.
         """
 
-        enable_prompt_caching_beta: Optional[bool] = False
+        enable_prompt_caching: Optional[bool] = None
+        enable_prompt_caching_beta: Optional[bool] = None
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
@@ -162,7 +168,15 @@ class AnthropicLLMService(LLMService):
         self._retry_on_timeout = retry_on_timeout
         self._settings = {
             "max_tokens": params.max_tokens,
-            "enable_prompt_caching_beta": params.enable_prompt_caching_beta or False,
+            "enable_prompt_caching": (
+                params.enable_prompt_caching
+                if params.enable_prompt_caching is not None
+                else (
+                    params.enable_prompt_caching_beta
+                    if params.enable_prompt_caching_beta is not None
+                    else False
+                )
+            ),
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
@@ -222,7 +236,7 @@ class AnthropicLLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             params = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings["enable_prompt_caching_beta"]
+                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
             )
             messages = params["messages"]
             system = params["system"]
@@ -241,15 +255,6 @@ class AnthropicLLMService(LLMService):
         )
 
         return response.content[0].text
-
-    @property
-    def enable_prompt_caching_beta(self) -> bool:
-        """Check if prompt caching beta feature is enabled.
-
-        Returns:
-            True if prompt caching is enabled.
-        """
-        return self._enable_prompt_caching_beta
 
     def create_context_aggregator(
         self,
@@ -287,14 +292,14 @@ class AnthropicLLMService(LLMService):
         if isinstance(context, LLMContext):
             adapter: AnthropicLLMAdapter = self.get_llm_adapter()
             params = adapter.get_llm_invocation_params(
-                context, enable_prompt_caching=self._settings["enable_prompt_caching_beta"]
+                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
             )
             return params
 
         # Anthropic-specific context
         messages = (
             context.get_messages_with_cache_control_markers()
-            if self._settings["enable_prompt_caching_beta"]
+            if self._settings["enable_prompt_caching"]
             else context.messages
         )
         return AnthropicLLMInvocationParams(
@@ -494,7 +499,7 @@ class AnthropicLLMService(LLMService):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
-            self._settings["enable_prompt_caching_beta"] = frame.enable
+            self._settings["enable_prompt_caching"] = frame.enable
         else:
             await self.push_frame(frame, direction)
 
