@@ -880,7 +880,7 @@ class AWSBedrockLLMService(LLMService):
         if self._retry_on_timeout:
             try:
                 response = await asyncio.wait_for(
-                    await client.converse_stream(**request_params), timeout=self._retry_timeout_secs
+                    client.converse_stream(**request_params), timeout=self._retry_timeout_secs
                 )
                 return response
             except (ReadTimeoutError, asyncio.TimeoutError) as e:
