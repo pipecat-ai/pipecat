@@ -52,6 +52,10 @@ def language_to_async_language(language: Language) -> Optional[str]:
     """
     BASE_LANGUAGES = {
         Language.EN: "en",
+        Language.FR: "fr",
+        Language.ES: "es",
+        Language.DE: "de",
+        Language.IT: "it",
     }
 
     result = BASE_LANGUAGES.get(language)

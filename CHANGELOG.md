@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added multilingual support for AsyncAI in `AsyncAITTSService` and `AsyncAIHttpTTSService`.
+  - New `languages`:  `es`, `fr`, `de`, `it`.
+
 - Added new frames `InputTransportMessageUrgentFrame` and
   `DailyInputTransportMessageUrgentFrame` for transport messages received from
   external sources.
