@@ -168,7 +168,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
 
     def _from_universal_context_message(self, message: LLMContextMessage) -> MessageParam:
         if isinstance(message, LLMSpecificMessage):
-            return message.message
+            return copy.deepcopy(message.message)
         return self._from_standard_message(message)
 
     def _from_standard_message(self, message: LLMStandardMessage) -> MessageParam:
@@ -210,6 +210,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                     ]
                 }
         """
+        message = copy.deepcopy(message)
         if message["role"] == "tool":
             return {
                 "role": "user",
