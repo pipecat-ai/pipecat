@@ -792,17 +792,11 @@ class AWSBedrockLLMService(LLMService):
         """
         return True
 
-    async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
-    ) -> Optional[str]:
+    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
-            system_instruction: Optional system instruction to guide the LLM's
-              behavior. You could also (again, optionally) provide a system
-              instruction directly in the context. If both are provided, the
-              one in the context takes precedence.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -815,14 +809,14 @@ class AWSBedrockLLMService(LLMService):
                 # adapter = self.get_llm_adapter()
                 # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
                 # messages = params["messages"]
-                # system = params["system_instruction"]
+                # system = params["system_instruction"] # [{"text": "system message"}]
                 raise NotImplementedError(
                     "Universal LLMContext is not yet supported for AWS Bedrock."
                 )
             else:
                 context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
                 messages = context.messages
-                system = getattr(context, "system", None) or system_instruction
+                system = getattr(context, "system", None)  # [{"text": "system message"}]
 
             # Determine if we're using Claude or Nova based on model ID
             model_id = self.model_name
@@ -839,7 +833,7 @@ class AWSBedrockLLMService(LLMService):
             }
 
             if system:
-                request_params["system"] = [{"text": system}]
+                request_params["system"] = system
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
