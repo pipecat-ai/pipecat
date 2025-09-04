@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
   Here are the newly-supported services:
 
+  - Anthropic
   - Azure
   - Cerebras
   - Deepseek
