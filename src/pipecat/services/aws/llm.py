@@ -809,14 +809,14 @@ class AWSBedrockLLMService(LLMService):
                 # adapter = self.get_llm_adapter()
                 # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
                 # messages = params["messages"]
-                # system = params["system_instruction"]
+                # system = params["system_instruction"] # [{"text": "system message"}]
                 raise NotImplementedError(
                     "Universal LLMContext is not yet supported for AWS Bedrock."
                 )
             else:
                 context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
                 messages = context.messages
-                system = getattr(context, "system", None)
+                system = getattr(context, "system", None)  # [{"text": "system message"}]
 
             # Determine if we're using Claude or Nova based on model ID
             model_id = self.model_name
@@ -833,7 +833,7 @@ class AWSBedrockLLMService(LLMService):
             }
 
             if system:
-                request_params["system"] = [{"text": system}]
+                request_params["system"] = system
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
