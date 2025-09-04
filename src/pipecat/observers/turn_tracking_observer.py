@@ -23,6 +23,7 @@ from pipecat.frames.frames import (
     StartFrame,
     UserStartedSpeakingFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.observers.base_observer import BaseObserver, FramePushed
 
 
@@ -100,7 +101,9 @@ class TurnTrackingObserver(BaseObserver):
         # We only want to end the turn if the bot was previously speaking
         elif isinstance(data.frame, BotStoppedSpeakingFrame) and self._is_bot_speaking:
             await self._handle_bot_stopped_speaking(data)
-        elif isinstance(data.frame, (EndFrame, CancelFrame)):
+        elif isinstance(data.frame, CancelFrame):
+            await self._handle_pipeline_end(data)
+        elif isinstance(data.frame, EndFrame) and isinstance(data.src, Pipeline):
             await self._handle_pipeline_end(data)
 
     def _schedule_turn_end(self, data: FramePushed):

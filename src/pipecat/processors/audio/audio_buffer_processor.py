@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
 
@@ -197,7 +198,9 @@ class AudioBufferProcessor(FrameProcessor):
         if self._recording:
             await self._process_recording(frame)
 
-        if isinstance(frame, (CancelFrame, EndFrame)):
+        if isinstance(frame, CancelFrame):
+            await self.stop_recording()
+        elif isinstance(data.frame, EndFrame) and isinstance(data.src, Pipeline):
             await self.stop_recording()
 
         await self.push_frame(frame, direction)
