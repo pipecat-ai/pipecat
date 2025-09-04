@@ -9,6 +9,11 @@ from typing import List
 import re
 from typing import List
 
+PRONUNCIATION_DICTIONARY = {
+    "Paschal": "'pæskul",
+    "Paschal's": "'pæskulz",
+}
+
 class TTSTextTransformer:
     """
     TTS text transformer that improves pronunciation by transforming text patterns.
@@ -352,6 +357,32 @@ class TTSTextTransformer:
         """
         return self.number_to_standard(number_str)
     
+    def apply_pronunciation_dictionary(self, text: str) -> str:
+        """
+        Apply pronunciation dictionary with phoneme tags.
+        
+        Replaces words in the pronunciation dictionary with SSML phoneme tags
+        containing their IPA pronunciations.
+        
+        Examples:
+        - "Paschal" -> '<phoneme alphabet="ipa" ph="\'pæskul">Paschal</phoneme>'
+        - "Paschal's" -> '<phoneme alphabet="ipa" ph="\'pæskulz">Paschal\'s</phoneme>'
+        
+        Args:
+            text: Input text to transform
+            
+        Returns:
+            Transformed text with pronunciation dictionary words wrapped in phoneme tags
+        """
+        result = text
+        
+        for word, ipa_pronunciation in PRONUNCIATION_DICTIONARY.items():
+            pattern = r'\b' + re.escape(word) + r'\b'
+            phoneme_tag = f'<phoneme alphabet="ipa" ph="{ipa_pronunciation}">{word}</phoneme>'
+            result = re.sub(pattern, phoneme_tag, result, flags=re.IGNORECASE)
+        
+        return result
+
     def transform_money_number(self, number_str: str, preserve_dollars_word: bool = False) -> str:
         """
         Transform money amounts for natural pronunciation.
@@ -661,5 +692,8 @@ class TTSTextTransformer:
         def replace_number(match):
             return self.transform_quantity_number(match.group(0))
         result = re.sub(self.STANDALONE_NUMBER_PATTERN, replace_number, result)
+        
+        # 10. Apply pronunciation dictionary with phoneme tags
+        result = self.apply_pronunciation_dictionary(result)
         
         return result
