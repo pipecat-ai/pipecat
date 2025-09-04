@@ -323,7 +323,7 @@ class RimeTTSService(AudioContextWordTTSService):
             return
 
         logger.trace(f"{self}: flushing audio")
-        await self._get_websocket().send(json.dumps({"text": " "}))
+        await self._get_websocket().send(json.dumps({"operation": "flush"}))
         self._context_id = None
 
     async def _receive_messages(self):

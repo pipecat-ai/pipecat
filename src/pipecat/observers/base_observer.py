@@ -11,7 +11,6 @@ processors without modifying the pipeline structure. Observers can be used
 for logging, debugging, analytics, and monitoring pipeline behavior.
 """
 
-from abc import abstractmethod
 from dataclasses import dataclass
 
 from typing_extensions import TYPE_CHECKING
@@ -21,6 +20,28 @@ from pipecat.utils.base_object import BaseObject
 
 if TYPE_CHECKING:
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+
+@dataclass
+class FrameProcessed:
+    """Event data for frame processing in the pipeline.
+
+    Represents an event where a frame is being processed by a processor. This
+    data structure is typically used by observers to track the flow of frames
+    through the pipeline for logging, debugging, or analytics purposes.
+
+    Parameters:
+        processor: The processor processing the frame.
+        frame: The frame being processed.
+        direction: The direction of the frame (e.g., downstream or upstream).
+        timestamp: The time when the frame was pushed, based on the pipeline clock.
+
+    """
+
+    processor: "FrameProcessor"
+    frame: Frame
+    direction: "FrameDirection"
+    timestamp: int
 
 
 @dataclass
@@ -56,7 +77,18 @@ class BaseObserver(BaseObject):
     performance analysis, and analytics collection.
     """
 
-    @abstractmethod
+    async def on_process_frame(self, data: FrameProcessed):
+        """Handle the event when a frame is being processed by a processor.
+
+        This method should be implemented by subclasses to define specific
+        behavior (e.g., logging, monitoring, debugging) when a frame is
+        being processed by a processor.
+
+        Args:
+            data: The event data containing details about the frame processing.
+        """
+        pass
+
     async def on_push_frame(self, data: FramePushed):
         """Handle the event when a frame is pushed from one processor to another.
 

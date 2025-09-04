@@ -13,6 +13,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -25,7 +26,7 @@ from pipecat.runner.utils import (
 )
 from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
@@ -100,7 +101,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await maybe_capture_participant_camera(transport, client, framerate=1)
         await maybe_capture_participant_screen(transport, client, framerate=1)
 
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
         await asyncio.sleep(3)
         logger.debug("Unpausing audio and video")
         llm.set_audio_input_paused(False)

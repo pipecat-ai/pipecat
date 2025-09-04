@@ -31,7 +31,6 @@ from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.services.heygen.api import HeyGenApi, HeyGenSession, NewSessionRequest
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 try:
     from livekit import rtc
@@ -104,7 +103,7 @@ class HeyGenClient:
         self._connected = False
         self._session_request = session_request
         self._callbacks = callbacks
-        self._event_queue: Optional[WatchdogQueue] = None
+        self._event_queue: Optional[asyncio.Queue] = None
         self._event_task = None
         # Currently supporting to capture the audio and video from a single participant
         self._video_task = None
@@ -149,7 +148,7 @@ class HeyGenClient:
         try:
             await self._initialize()
 
-            self._event_queue = WatchdogQueue(self._task_manager)
+            self._event_queue = asyncio.Queue()
             self._event_task = self._task_manager.create_task(
                 self._callback_task_handler(self._event_queue),
                 f"{self}::event_callback_task",
@@ -170,7 +169,6 @@ class HeyGenClient:
                 self._connected = False
 
             if self._event_task and self._task_manager:
-                self._event_queue.cancel()
                 await self._task_manager.cancel_task(self._event_task)
                 self._event_task = None
         except Exception as e:
@@ -231,11 +229,9 @@ class HeyGenClient:
         """Handle incoming WebSocket messages."""
         while self._connected:
             try:
-                message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                message = await self._websocket.recv()
                 parsed_message = json.loads(message)
                 await self._handle_ws_server_event(parsed_message)
-            except asyncio.TimeoutError:
-                self._task_manager.task_reset_watchdog()
             except ConnectionClosedOK:
                 break
             except Exception as e:
@@ -248,7 +244,7 @@ class HeyGenClient:
         if event_type == "agent.state":
             logger.debug(f"HeyGenClient ws received agent status: {event}")
         else:
-            logger.error(f"HeyGenClient ws received unknown event: {event_type}")
+            logger.trace(f"HeyGenClient ws received unknown event: {event_type}")
 
     async def _ws_disconnect(self) -> None:
         """Disconnect from HeyGen websocket endpoint."""

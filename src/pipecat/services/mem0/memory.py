@@ -120,6 +120,7 @@ class Mem0MemoryService(FrameProcessor):
         try:
             logger.debug(f"Storing {len(messages)} messages in Mem0")
             params = {
+                "async_mode": True,
                 "messages": messages,
                 "metadata": {"platform": "pipecat"},
                 "output_format": "v1.1",
@@ -163,7 +164,7 @@ class Mem0MemoryService(FrameProcessor):
                     ("run_id", self.run_id),
                 ]
                 clauses = [{name: value} for name, value in id_pairs if value is not None]
-                filters = {"AND": clauses} if clauses else {}
+                filters = {"OR": clauses} if clauses else {}
                 results = self.memory_client.search(
                     query=query,
                     filters=filters,

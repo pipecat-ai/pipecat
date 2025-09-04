@@ -34,8 +34,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
-from pipecat.transports.services.tavus import TavusCallbacks, TavusParams, TavusTransportClient
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
+from pipecat.transports.tavus.transport import TavusCallbacks, TavusParams, TavusTransportClient
 
 
 class TavusVideoService(AIService):
@@ -255,13 +254,12 @@ class TavusVideoService(AIService):
     async def _create_send_task(self):
         """Create the audio sending task if it doesn't exist."""
         if not self._send_task:
-            self._queue = WatchdogQueue(self.task_manager)
+            self._queue = asyncio.Queue()
             self._send_task = self.create_task(self._send_task_handler())
 
     async def _cancel_send_task(self):
         """Cancel the audio sending task if it exists."""
         if self._send_task:
-            self._queue.cancel()
             await self.cancel_task(self._send_task)
             self._send_task = None
 

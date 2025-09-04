@@ -1,1 +1,0 @@
-pipecat-ai[webrtc,silero,deepgram,openai,cartesia,runner]>=0.0.77
