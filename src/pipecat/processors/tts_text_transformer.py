@@ -12,6 +12,7 @@ from typing import List
 PRONUNCIATION_DICTIONARY = {
     "Paschal": "'pæskul",
     "Paschal's": "'pæskulz",
+    "HVAC": "ˈeɪt͡ʃˌvæk",
 }
 
 class TTSTextTransformer:
