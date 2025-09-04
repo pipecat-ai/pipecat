@@ -228,17 +228,11 @@ class AnthropicLLMService(LLMService):
             response = await api_call(**params)
             return response
 
-    async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
-    ) -> Optional[str]:
+    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
-            system_instruction: Optional system instruction to guide the LLM's
-              behavior. You could also (again, optionally) provide a system
-              instruction directly in the context. If both are provided, the
-              one in the context takes precedence.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -255,7 +249,7 @@ class AnthropicLLMService(LLMService):
         else:
             context = AnthropicLLMContext.upgrade_to_anthropic(context)
             messages = context.messages
-            system = getattr(context, "system", None) or system_instruction or NOT_GIVEN
+            system = getattr(context, "system", NOT_GIVEN)
 
         # LLM completion
         response = await self._client.messages.create(
