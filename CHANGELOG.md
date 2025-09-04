@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Expanded support for universal `LLMContext` to the Anthropic LLM service.
+  Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
+  a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
+
 ### Fixed
 
 - Fixed a `AWSBedrockLLMService` crash caused by an extra `await`.
@@ -19,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added multilingual support for AsyncAI in `AsyncAITTSService` and `AsyncAIHttpTTSService`.
-  - New `languages`:  `es`, `fr`, `de`, `it`.
+
+  - New `languages`: `es`, `fr`, `de`, `it`.
 
 - Added new frames `InputTransportMessageUrgentFrame` and
   `DailyInputTransportMessageUrgentFrame` for transport messages received from

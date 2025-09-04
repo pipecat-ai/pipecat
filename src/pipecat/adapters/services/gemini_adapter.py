@@ -67,7 +67,7 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
         return {
             "system_instruction": messages.system_instruction,
             "messages": messages.messages,
-            # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
+            # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
         }
 
@@ -192,14 +192,14 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
     def _from_standard_message(
         self, message: LLMStandardMessage, already_have_system_instruction: bool
     ) -> Content | str:
-        """Convert universal context message to Google Content object.
+        """Convert standard universal context message to Google Content object.
 
         Handles conversion of text, images, and function calls to Google's
         format.
         System instructions are returned as a plain string.
 
         Args:
-            message: Message in universal context format.
+            message: Message in standard universal context format.
             already_have_system_instruction: Whether we already have a system instruction
 
         Returns:
@@ -308,5 +308,4 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     audio_bytes = base64.b64decode(input_audio["data"])
                     parts.append(Part(inline_data=Blob(mime_type="audio/wav", data=audio_bytes)))
 
-        message = Content(role=role, parts=parts)
-        return message
+        return Content(role=role, parts=parts)
