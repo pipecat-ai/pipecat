@@ -280,26 +280,38 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
             List of messages with cache control markers added.
         """
 
-        def add_cache_control_marker(messages: List[MessageParam], negative_index: int):
-            if len(messages) > -(negative_index + 1) and messages[negative_index]["role"] == "user":
-                if isinstance(messages[negative_index]["content"], str):
-                    messages[negative_index]["content"] = [
-                        {"type": "text", "text": messages[negative_index]["content"]}
-                    ]
-                messages[negative_index]["content"][-1]["cache_control"] = {"type": "ephemeral"}
+        def add_cache_control_marker(message: MessageParam):
+            if isinstance(message["content"], str):
+                message["content"] = [{"type": "text", "text": message["content"]}]
+            message["content"][-1]["cache_control"] = {"type": "ephemeral"}
 
         try:
-            messages_with_markers = copy.deepcopy(messages)
-            # Add cache control markers to the *last two* user messages. Why?
-            # - The marker at the last recent user message tells Anthropic to
+            # Add cache control markers to the most recent two user messages.
+            # - The marker at the most recent user message tells Anthropic to
             #   cache the prompt up to that point.
-            # - The marker at the second-to-last user message tells Anthropic
+            # - The marker at the second-most-recent user message tells Anthropic
             #   to look up the cached prompt that goes up to that point (the
             #   point that *was* the last user message the previous turn).
             # If we only added the marker to the last user message, we'd only
             # ever be adding to the cache, never looking up from it.
-            add_cache_control_marker(messages_with_markers, -1)
-            add_cache_control_marker(messages_with_markers, -3)
+            # Why user messages? We're assuming that we're primarily running
+            # inference as soon as user turns come in. In Anthropic, turns
+            # strictly alternate between user and assistant.
+
+            messages_with_markers = copy.deepcopy(messages)
+
+            # Find the most recent two user messages
+            user_message_indices = []
+            for i in range(len(messages_with_markers) - 1, -1, -1):
+                if messages_with_markers[i]["role"] == "user":
+                    user_message_indices.append(i)
+                    if len(user_message_indices) == 2:
+                        break
+
+            # Add cache control markers to the identified user messages
+            for index in user_message_indices:
+                add_cache_control_marker(messages_with_markers[index])
+
             return messages_with_markers
         except Exception as e:
             logger.error(f"Error adding cache control marker: {e}")
