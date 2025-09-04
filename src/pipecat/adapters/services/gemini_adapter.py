@@ -308,5 +308,4 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
                     audio_bytes = base64.b64decode(input_audio["data"])
                     parts.append(Part(inline_data=Blob(mime_type="audio/wav", data=audio_bytes)))
 
-        message = Content(role=role, parts=parts)
-        return message
+        return Content(role=role, parts=parts)
