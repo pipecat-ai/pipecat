@@ -55,6 +55,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a `OpenAIImageGenService` issue where it was not creating
   `URLImageRawFrame` correctly.
 
+### Removed
+
+- Remove `VisionImageRawFrame` in favor of context frames (`LLMContextFrame` or
+  `OpenAILLMContextFrame`).
+
+### Deprecated
+
+- Deprecate `VisionImageFrameAggregator` because `VisionImageRawFrame` has been
+  removed. See the `12*` examples for the new recommended replacement pattern.
+
 ## [0.0.83] - 2025-09-03
 
 ### Added

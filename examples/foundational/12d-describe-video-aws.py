@@ -13,7 +13,6 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
-    LLMContextFrame,
     TextFrame,
     TTSSpeakFrame,
     UserImageRawFrame,
@@ -22,7 +21,10 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
@@ -31,7 +33,7 @@ from pipecat.runner.utils import (
     get_transport_client_id,
     maybe_capture_participant_camera,
 )
-from pipecat.services.anthropic.llm import AnthropicLLMService
+from pipecat.services.aws.llm import AWSBedrockLLMService
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -70,14 +72,15 @@ class UserImageProcessor(FrameProcessor):
 
         if isinstance(frame, UserImageRawFrame):
             if frame.request and frame.request.context:
-                context = LLMContext()
+                # Note: AWS Bedrock does not yet support the universal LLMContext
+                context = OpenAILLMContext()
                 context.add_image_frame_message(
                     image=frame.image,
                     text=frame.request.context,
                     size=frame.size,
                     format=frame.format,
                 )
-                frame = LLMContextFrame(context)
+                frame = OpenAILLMContextFrame(context)
                 await self.push_frame(frame)
         else:
             await self.push_frame(frame, direction)
@@ -114,8 +117,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    # Anthropic for vision analysis
-    anthropic = AnthropicLLMService(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    # AWS for vision analysis
+    aws = AWSBedrockLLMService(
+        aws_region="us-west-2",
+        model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
+        params=AWSBedrockLLMService.InputParams(temperature=0.8),
+    )
 
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY"),
@@ -129,7 +136,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             user_response,
             image_requester,
             image_processor,
-            anthropic,
+            aws,
             tts,
             transport.output(),
         ]
