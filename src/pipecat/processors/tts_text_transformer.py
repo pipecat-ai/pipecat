@@ -14,6 +14,8 @@ PRONUNCIATION_DICTIONARY = {
     "Paschal's": "'pæskulz",
     "HVAC": "ˈeɪt͡ʃˌvæk",
     "fifth": "fɪfθ",
+    "twelfth": "twɛlfθ",
+    "sixth": "sɪksθ"
 }
 
 class TTSTextTransformer:
