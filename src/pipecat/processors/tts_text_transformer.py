@@ -13,6 +13,7 @@ PRONUNCIATION_DICTIONARY = {
     "Paschal": "'pæskul",
     "Paschal's": "'pæskulz",
     "HVAC": "ˈeɪt͡ʃˌvæk",
+    "fifth": "fɪfθ",
 }
 
 class TTSTextTransformer:
@@ -553,7 +554,12 @@ class TTSTextTransformer:
             return self.transform_money_number(match.group(1), preserve_dollars_word=True)
         result = re.sub(self.MONEY_DOLLAR_SIGN_PATTERN, replace_money_dollar, result)
         
-        # 3. Phone numbers (10+ digit numbers unlikely to be other things)
+        # 3. Numbers starting with zeros - always use digit-by-digit pronunciation
+        def replace_zero_leading_number(match):
+            return self.number_to_digits(match.group(0))
+        result = re.sub(r'(?<![,\d])\b0[0-9]+\b', replace_zero_leading_number, result)
+        
+        # 4. Phone numbers (10+ digit numbers unlikely to be other things)
         # Most specific patterns first
         def replace_phone_formatted(match):
             digits = re.sub(r'[^0-9]', '', match.group(0))
@@ -579,7 +585,7 @@ class TTSTextTransformer:
         # 10-digit phone numbers
         result = re.sub(self.PHONE_10_DIGIT_PATTERN, replace_phone_digits, result)
         
-        # 4. Address patterns
+        # 5. Address patterns
         # Street addresses: "1713 Springhurst Drive", "2500 Oak Street"
         def replace_street_address(match):
             return self.transform_address_number(match.group(1)) + match.group(2)
@@ -600,7 +606,7 @@ class TTSTextTransformer:
             return match.group(1) + self.transform_address_number(match.group(2))
         result = re.sub(self.STATE_ZIP_PATTERN, replace_state_code_zip, result)
         
-        # 5. Date patterns (month + number should be ordinal)
+        # 6. Date patterns (month + number should be ordinal)
         def replace_date_ordinal(match):
             month = match.group(1)
             day_num = int(match.group(2))
@@ -658,7 +664,7 @@ class TTSTextTransformer:
             return self.number_to_ordinal(day_num)
         result = re.sub(self.ORDINAL_TEXT_PATTERN, replace_ordinal_text, result)
         
-        # 6. Numbers with units (use full quantity transformation)
+        # 7. Numbers with units (use full quantity transformation)
         def replace_quantity_with_unit(match):
             number_text = self.transform_quantity_with_units(match.group(1))
             unit_text = match.group(2)
@@ -669,14 +675,14 @@ class TTSTextTransformer:
             return number_text + unit_text
         result = re.sub(self.UNITS_PATTERN, replace_quantity_with_unit, result, flags=re.IGNORECASE)
         
-        # 7. Numbers adjacent to letters (like "from8" -> "from eight")
+        # 8. Numbers adjacent to letters (like "from8" -> "from eight")
         def replace_number_adjacent_letter(match):
             prefix = match.group(1)
             number = match.group(2)
             return prefix + " " + self.transform_quantity_number(number)
         result = re.sub(self.NUMBER_ADJACENT_LETTER_PATTERN, replace_number_adjacent_letter, result)
         
-        # 8. Comma-separated numbers (like "25,000")  
+        # 9. Comma-separated numbers (like "25,000")  
         def replace_comma_number(match):
             # Remove commas and convert to standard number format
             full_match = match.group(0)
@@ -689,12 +695,12 @@ class TTSTextTransformer:
             return self.number_to_standard(clean_number)
         result = re.sub(self.COMMA_SEPARATED_NUMBER_PATTERN, replace_comma_number, result)
         
-        # 9. All remaining standalone numbers (default to quantity transformation)
+        # 10. All remaining standalone numbers (default to quantity transformation)
         def replace_number(match):
             return self.transform_quantity_number(match.group(0))
         result = re.sub(self.STANDALONE_NUMBER_PATTERN, replace_number, result)
         
-        # 10. Apply pronunciation dictionary with phoneme tags
+        # 11. Apply pronunciation dictionary with phoneme tags
         result = self.apply_pronunciation_dictionary(result)
         
         return result
