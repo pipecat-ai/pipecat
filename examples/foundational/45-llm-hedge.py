@@ -13,8 +13,6 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, LLMTextFrame
-from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
-from pipecat.observers.loggers.llm_log_observer import LLMLogObserver
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
@@ -60,6 +58,10 @@ transport_params = {
 class LLMRaceProcessor(FrameProcessor):
     """Manages racing between two LLMs - only allows frames from the first LLM to respond."""
 
+    # Class variables to share state between instances (using public names)
+    winning_llm_name = None
+    response_started = False
+
     def __init__(self) -> None:
         super().__init__()
         self._current_llm_name = None
@@ -74,15 +76,15 @@ class LLMRaceProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, LLMTextFrame):
-            if not LLMRaceProcessor._response_started:
+            if not LLMRaceProcessor.response_started:
                 # First response wins the race
-                LLMRaceProcessor._winning_llm_name = self._current_llm_name
-                LLMRaceProcessor._response_started = True
+                LLMRaceProcessor.winning_llm_name = self._current_llm_name
+                LLMRaceProcessor.response_started = True
                 logger.info(
                     f"🏆 [LLM_RACE] {self._current_llm_name} wins the race! Text: '{frame.text}'"
                 )
                 await self.push_frame(frame, direction)
-            elif LLMRaceProcessor._winning_llm_name == self._current_llm_name:
+            elif LLMRaceProcessor.winning_llm_name == self._current_llm_name:
                 # Continue allowing frames from winning LLM
                 logger.info(f"✅ [LLM_RACE] {self._current_llm_name} continuing: '{frame.text}'")
                 await self.push_frame(frame, direction)
@@ -94,11 +96,6 @@ class LLMRaceProcessor(FrameProcessor):
         else:
             # Pass through all non-LLM frames (including system frames)
             await self.push_frame(frame, direction)
-
-
-# Class variables to share state between instances
-LLMRaceProcessor._winning_llm_name = None
-LLMRaceProcessor._response_started = False
 
 
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
@@ -140,12 +137,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         [llm1, race_processor1],  # Branch 1: LLM1 -> race processor 1
         [llm2, race_processor2],  # Branch 2: LLM2 -> race processor 2
     )
-
-    # Set up debug observers with filtering - only log LLM frames going to TTS
-    debug_observer = DebugLogObserver(
-        frame_types={LLMTextFrame: (CartesiaTTSService, FrameEndpoint.DESTINATION)}
-    )
-    llm_observer = LLMLogObserver()
 
     # Simple pipeline with parallel LLM processing
     pipeline = Pipeline(
