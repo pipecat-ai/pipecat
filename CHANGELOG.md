@@ -9,9 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
+  access to OpenAI Realtime.
+
 - Expanded support for universal `LLMContext` to the Anthropic LLM service.
   Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
   a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
+
+### Deprecated
+
+- Deprecated `OpenAIRealtimeBetaLLMService` and `AzureRealtimeBetaLLMService`.
+  Use `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService`, respectively.
+  Each service will be removed in an upcoming version, 1.0.0.
 
 ### Fixed
 
