@@ -25,13 +25,13 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai_realtime import (
+from pipecat.services.openai_realtime_beta import (
     InputAudioTranscription,
-    OpenAIRealtimeLLMService,
+    OpenAIRealtimeBetaLLMService,
     SessionProperties,
     TurnDetection,
 )
-from pipecat.services.openai_realtime.events import AudioConfiguration, AudioInput
+from pipecat.services.openai_realtime_beta.events import AudioConfiguration, AudioInput
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -210,7 +210,7 @@ unless specifically asked to elaborate on a topic.
 Remember, your responses should be short. Just one or two sentences, usually.""",
     )
 
-    llm = OpenAIRealtimeLLMService(
+    llm = OpenAIRealtimeBetaLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
         start_audio_paused=False,
