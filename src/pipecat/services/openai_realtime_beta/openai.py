@@ -9,6 +9,7 @@
 import base64
 import json
 import time
+import warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -128,6 +129,15 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             send_transcription_frames: Whether to emit transcription frames. Defaults to True.
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "OpenAIRealtimeBetaLLMService is deprecated and will be removed in version 1.0.0. "
+                "Use OpenAIRealtimeLLMService instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
