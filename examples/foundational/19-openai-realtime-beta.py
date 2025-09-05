@@ -24,10 +24,10 @@ from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai_realtime_beta import (
+from pipecat.services.openai_realtime import (
     InputAudioNoiseReduction,
     InputAudioTranscription,
-    OpenAIRealtimeBetaLLMService,
+    OpenAIRealtimeLLMService,
     SemanticTurnDetection,
     SessionProperties,
 )
@@ -146,7 +146,7 @@ You have access to the following tools:
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
-    llm = OpenAIRealtimeBetaLLMService(
+    llm = OpenAIRealtimeLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
         start_audio_paused=False,
@@ -160,7 +160,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     transcript = TranscriptProcessor()
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
-    # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
+    # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
         [{"role": "user", "content": "Say hello!"}],
