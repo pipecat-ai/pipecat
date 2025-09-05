@@ -311,7 +311,7 @@ class AnthropicLLMService(LLMService):
         return AnthropicLLMInvocationParams(
             system=context.system,
             messages=messages,
-            tools=context.tools,
+            tools=context.tools or [],
         )
 
     @traced_llm

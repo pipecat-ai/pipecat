@@ -35,7 +35,7 @@ class AnthropicLLMInvocationParams(TypedDict):
 
     system: str | NotGiven
     messages: List[MessageParam]
-    tools: List[ToolUnionParam] | NotGiven
+    tools: List[ToolUnionParam]
 
 
 class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
@@ -68,7 +68,7 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
                 else messages.messages
             ),
             # NOTE: LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
-            "tools": self.from_standard_tools(context.tools),
+            "tools": self.from_standard_tools(context.tools) or [],
         }
 
     def get_messages_for_logging(self, context: LLMContext) -> List[Dict[str, Any]]:
