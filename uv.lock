@@ -4470,7 +4470,7 @@ requires-dist = [
     { name = "python-dotenv", marker = "extra == 'runner'", specifier = ">=1.0.0,<2.0.0" },
     { name = "pyvips", extras = ["binary"], marker = "extra == 'moondream'", specifier = "~=3.0.0" },
     { name = "resampy", specifier = "~=0.4.3" },
-    { name = "respeecher", marker = "extra == 'respeecher'", specifier = "~=1.0" },
+    { name = "respeecher", marker = "extra == 'respeecher'", specifier = ">=1.0,<2" },
     { name = "sentry-sdk", marker = "extra == 'sentry'", specifier = "~=2.23.1" },
     { name = "simli-ai", marker = "extra == 'simli'", specifier = "~=0.1.10" },
     { name = "soundfile", marker = "extra == 'soundfile'", specifier = "~=0.13.0" },
