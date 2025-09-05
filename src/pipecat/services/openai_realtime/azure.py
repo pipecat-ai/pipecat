@@ -4,13 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Azure OpenAI Realtime Beta LLM service implementation."""
-
-import warnings
+"""Azure OpenAI Realtime LLM service implementation."""
 
 from loguru import logger
 
-from .openai import OpenAIRealtimeBetaLLMService
+from .openai import OpenAIRealtimeLLMService
 
 try:
     from websockets.asyncio.client import connect as websocket_connect
@@ -22,12 +20,8 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
-    """Azure OpenAI Realtime Beta LLM service with Azure-specific authentication.
-
-    .. deprecated:: 0.0.84
-        `AzureRealtimeBetaLLMService` is deprecated, use `AzureRealtimeLLMService` instead.
-        This class will be removed in version 1.0.0.
+class AzureRealtimeLLMService(OpenAIRealtimeLLMService):
+    """Azure OpenAI Realtime LLM service with Azure-specific authentication.
 
     Extends the OpenAI Realtime service to work with Azure OpenAI endpoints,
     using Azure's authentication headers and endpoint format. Provides the same
@@ -41,25 +35,15 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
         base_url: str,
         **kwargs,
     ):
-        """Initialize Azure Realtime Beta LLM service.
+        """Initialize Azure Realtime LLM service.
 
         Args:
             api_key: The API key for the Azure OpenAI service.
             base_url: The full Azure WebSocket endpoint URL including api-version and deployment.
                 Example: "wss://my-project.openai.azure.com/openai/realtime?api-version=2024-10-01-preview&deployment=my-realtime-deployment"
-            **kwargs: Additional arguments passed to parent OpenAIRealtimeBetaLLMService.
+            **kwargs: Additional arguments passed to parent OpenAIRealtimeLLMService.
         """
         super().__init__(base_url=base_url, api_key=api_key, **kwargs)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "AzureRealtimeBetaLLMService is deprecated and will be removed in version 1.0.0. "
-                "Use AzureRealtimeLLMService instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         self.api_key = api_key
         self.base_url = base_url
 
