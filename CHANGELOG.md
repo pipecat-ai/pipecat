@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add the ability to send DTMF to `LiveKitTransport`.
+
 - Expanded support for universal `LLMContext` to the Anthropic LLM service.
   Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
   a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
