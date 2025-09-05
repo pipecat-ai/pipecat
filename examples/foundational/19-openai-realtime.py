@@ -15,6 +15,7 @@ from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
+from pipecat.observers.loggers.transcription_log_observer import TranscriptionLogObserver
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -23,13 +24,14 @@ from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.llm_service import FunctionCallParams
-from pipecat.services.openai_realtime_beta import (
+from pipecat.services.openai_realtime import (
     InputAudioNoiseReduction,
     InputAudioTranscription,
-    OpenAIRealtimeBetaLLMService,
+    OpenAIRealtimeLLMService,
     SemanticTurnDetection,
     SessionProperties,
 )
+from pipecat.services.openai_realtime.events import AudioConfiguration, AudioInput
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -112,13 +114,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     session_properties = SessionProperties(
-        input_audio_transcription=InputAudioTranscription(),
-        # Set openai TurnDetection parameters. Not setting this at all will turn it
-        # on by default
-        turn_detection=SemanticTurnDetection(),
-        # Or set to False to disable openai turn detection and use transport VAD
-        # turn_detection=False,
-        input_audio_noise_reduction=InputAudioNoiseReduction(type="near_field"),
+        audio=AudioConfiguration(
+            input=AudioInput(
+                transcription=InputAudioTranscription(),
+                # Set openai TurnDetection parameters. Not setting this at all will turn it
+                # on by default
+                turn_detection=SemanticTurnDetection(),
+                # Or set to False to disable openai turn detection and use transport VAD
+                # turn_detection=False,
+                noise_reduction=InputAudioNoiseReduction(type="near_field"),
+            )
+        ),
         # tools=tools,
         instructions="""You are a helpful and friendly AI.
 
@@ -140,7 +146,7 @@ You have access to the following tools:
 Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
-    llm = OpenAIRealtimeBetaLLMService(
+    llm = OpenAIRealtimeLLMService(
         api_key=os.getenv("OPENAI_API_KEY"),
         session_properties=session_properties,
         start_audio_paused=False,
@@ -154,7 +160,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
     transcript = TranscriptProcessor()
 
     # Create a standard OpenAI LLM context object using the normal messages format. The
-    # OpenAIRealtimeBetaLLMService will convert this internally to messages that the
+    # OpenAIRealtimeLLMService will convert this internally to messages that the
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
         [{"role": "user", "content": "Say hello!"}],
@@ -182,6 +188,7 @@ Remember, your responses should be short. Just one or two sentences, usually. Re
             enable_usage_metrics=True,
         ),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        observers=[TranscriptionLogObserver()],
     )
 
     @transport.event_handler("on_client_connected")
