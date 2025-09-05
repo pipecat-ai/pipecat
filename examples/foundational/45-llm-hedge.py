@@ -12,7 +12,15 @@ from loguru import logger
 from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, LLMMessagesFrame, LLMMessagesUpdateFrame, LLMTextFrame
+from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
+    Frame,
+    LLMMessagesFrame,
+    LLMMessagesUpdateFrame,
+    LLMTextFrame,
+    StartFrame,
+)
 from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.observers.loggers.llm_log_observer import LLMLogObserver
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -69,6 +77,9 @@ class LLMRaceProcessor(FrameProcessor):
         self._current_llm_name = name
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
+        # Always call super first to handle StartFrame and other system frames
+        await super().process_frame(frame, direction)
+
         if isinstance(frame, LLMTextFrame):
             if not LLMRaceProcessor._response_started:
                 # First response wins the race
@@ -88,7 +99,7 @@ class LLMRaceProcessor(FrameProcessor):
                     f"❌ [LLM_RACE] Dropping '{frame.text}' from losing LLM: {self._current_llm_name}"
                 )
         else:
-            # Always pass through non-LLM frames
+            # Pass through all non-LLM frames (including system frames)
             await self.push_frame(frame, direction)
 
 
