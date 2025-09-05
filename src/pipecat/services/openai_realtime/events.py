@@ -17,6 +17,44 @@ from pydantic import BaseModel, ConfigDict, Field
 #
 
 
+class AudioFormat(BaseModel):
+    """Base class for audio format configuration."""
+
+    type: str
+
+
+class PCMAudioFormat(AudioFormat):
+    """PCM audio format configuration.
+
+    Parameters:
+        type: Audio format type, always "audio/pcm".
+        rate: Sample rate, always 24000 for PCM.
+    """
+
+    type: Literal["audio/pcm"] = "audio/pcm"
+    rate: Literal[24000] = 24000
+
+
+class PCMUAudioFormat(AudioFormat):
+    """PCMU (G.711 μ-law) audio format configuration.
+
+    Parameters:
+        type: Audio format type, always "audio/pcmu".
+    """
+
+    type: Literal["audio/pcmu"] = "audio/pcmu"
+
+
+class PCMAAudioFormat(AudioFormat):
+    """PCMA (G.711 A-law) audio format configuration.
+
+    Parameters:
+        type: Audio format type, always "audio/pcma".
+    """
+
+    type: Literal["audio/pcma"] = "audio/pcma"
+
+
 class InputAudioTranscription(BaseModel):
     """Configuration for audio transcription settings."""
 
@@ -47,13 +85,13 @@ class TurnDetection(BaseModel):
         type: Detection type, must be "server_vad".
         threshold: Voice activity detection threshold (0.0-1.0). Defaults to 0.5.
         prefix_padding_ms: Padding before speech starts in milliseconds. Defaults to 300.
-        silence_duration_ms: Silence duration to detect speech end in milliseconds. Defaults to 800.
+        silence_duration_ms: Silence duration to detect speech end in milliseconds. Defaults to 500.
     """
 
     type: Optional[Literal["server_vad"]] = "server_vad"
     threshold: Optional[float] = 0.5
     prefix_padding_ms: Optional[int] = 300
-    silence_duration_ms: Optional[int] = 800
+    silence_duration_ms: Optional[int] = 500
 
 
 class SemanticTurnDetection(BaseModel):
@@ -82,39 +120,82 @@ class InputAudioNoiseReduction(BaseModel):
     type: Optional[Literal["near_field", "far_field"]]
 
 
+class AudioInput(BaseModel):
+    """Audio input configuration.
+
+    Parameters:
+        format: The format of the input audio.
+        transcription: Configuration for input audio transcription.
+        noise_reduction: Configuration for input audio noise reduction.
+        turn_detection: Configuration for turn detection, or False to disable.
+    """
+
+    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
+    transcription: Optional[InputAudioTranscription] = None
+    noise_reduction: Optional[InputAudioNoiseReduction] = None
+    turn_detection: Optional[Union[TurnDetection, SemanticTurnDetection, bool]] = None
+
+
+class AudioOutput(BaseModel):
+    """Audio output configuration.
+
+    Parameters:
+        format: The format of the output audio.
+        voice: The voice the model uses to respond.
+        speed: The speed of the model's spoken response.
+    """
+
+    format: Optional[Union[PCMAudioFormat, PCMUAudioFormat, PCMAAudioFormat]] = None
+    voice: Optional[str] = None
+    speed: Optional[float] = None
+
+
+class AudioConfiguration(BaseModel):
+    """Audio configuration for input and output.
+
+    Parameters:
+        input: Configuration for input audio.
+        output: Configuration for output audio.
+    """
+
+    input: Optional[AudioInput] = None
+    output: Optional[AudioOutput] = None
+
+
 class SessionProperties(BaseModel):
     """Configuration properties for an OpenAI Realtime session.
 
     Parameters:
-        modalities: Communication modalities to enable (text, audio, or both).
+        type: The type of session, always "realtime".
+        object: Object type identifier, always "realtime.session".
+        id: Unique identifier for the session.
+        model: The Realtime model used for this session.
+        output_modalities: The set of modalities the model can respond with.
         instructions: System instructions for the assistant.
-        voice: Voice ID for text-to-speech output.
-        input_audio_format: Format for input audio data.
-        output_audio_format: Format for output audio data.
-        input_audio_transcription: Configuration for input audio transcription.
-        input_audio_noise_reduction: Configuration for input audio noise reduction.
-        turn_detection: Turn detection configuration or False to disable.
+        audio: Configuration for input and output audio.
         tools: Available function tools for the assistant.
         tool_choice: Tool usage strategy ("auto", "none", or "required").
-        temperature: Sampling temperature for response generation.
-        max_response_output_tokens: Maximum tokens in response or "inf" for unlimited.
+        max_output_tokens: Maximum tokens in response or "inf" for unlimited.
+        tracing: Configuration options for tracing.
+        prompt: Reference to a prompt template and its variables.
+        expires_at: Session expiration timestamp.
+        include: Additional fields to include in server outputs.
     """
 
-    modalities: Optional[List[Literal["text", "audio"]]] = None
+    type: Optional[Literal["realtime"]] = "realtime"
+    object: Optional[Literal["realtime.session"]] = None
+    id: Optional[str] = None
+    model: Optional[str] = None
+    output_modalities: Optional[List[Literal["text", "audio"]]] = None
     instructions: Optional[str] = None
-    voice: Optional[str] = None
-    input_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
-    output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
-    input_audio_transcription: Optional[InputAudioTranscription] = None
-    input_audio_noise_reduction: Optional[InputAudioNoiseReduction] = None
-    # set turn_detection to False to disable turn detection
-    turn_detection: Optional[Union[TurnDetection, SemanticTurnDetection, bool]] = Field(
-        default=None
-    )
+    audio: Optional[AudioConfiguration] = None
     tools: Optional[List[Dict]] = None
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
-    temperature: Optional[float] = None
-    max_response_output_tokens: Optional[Union[int, Literal["inf"]]] = None
+    max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
+    tracing: Optional[Union[Literal["auto"], Dict]] = None
+    prompt: Optional[Dict] = None
+    expires_at: Optional[int] = None
+    include: Optional[List[str]] = None
 
 
 #
@@ -126,13 +207,13 @@ class ItemContent(BaseModel):
     """Content within a conversation item.
 
     Parameters:
-        type: Content type (text, audio, input_text, or input_audio).
+        type: Content type (text, audio, input_text, input_audio, output_text, or output_audio).
         text: Text content for text-based items.
         audio: Base64-encoded audio data for audio items.
         transcript: Transcribed text for audio items.
     """
 
-    type: Literal["text", "audio", "input_text", "input_audio"]
+    type: Literal["text", "audio", "input_text", "input_audio", "output_text", "output_audio"]
     text: Optional[str] = None
     audio: Optional[str] = None  # base64-encoded audio
     transcript: Optional[str] = None
@@ -184,24 +265,22 @@ class ResponseProperties(BaseModel):
     """Properties for configuring assistant responses.
 
     Parameters:
-        modalities: Output modalities for the response. Defaults to ["audio", "text"].
+        output_modalities: Output modalities for the response. Must be either ["text"] or ["audio"]. Defaults to ["audio"].
         instructions: Specific instructions for this response.
-        voice: Voice ID for text-to-speech in this response.
-        output_audio_format: Audio format for this response.
+        audio: Audio configuration for this response.
         tools: Available tools for this response.
         tool_choice: Tool usage strategy for this response.
         temperature: Sampling temperature for this response.
-        max_response_output_tokens: Maximum tokens for this response.
+        max_output_tokens: Maximum tokens for this response.
     """
 
-    modalities: Optional[List[Literal["text", "audio"]]] = ["audio", "text"]
+    output_modalities: Optional[List[Literal["text", "audio"]]] = ["audio"]
     instructions: Optional[str] = None
-    voice: Optional[str] = None
-    output_audio_format: Optional[Literal["pcm16", "g711_ulaw", "g711_alaw"]] = None
-    tools: Optional[List[Dict]] = Field(default_factory=list)
+    audio: Optional[AudioConfiguration] = None
+    tools: Optional[List[Dict]] = None
     tool_choice: Optional[Literal["auto", "none", "required"]] = None
     temperature: Optional[float] = None
-    max_response_output_tokens: Optional[Union[int, Literal["inf"]]] = None
+    max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
 
 
 #
@@ -265,10 +344,12 @@ class SessionUpdateEvent(ClientEvent):
         """
         dump = super().model_dump(*args, **kwargs)
 
-        # Handle turn_detection so that False is serialized as null
-        if "turn_detection" in dump["session"]:
-            if dump["session"]["turn_detection"] is False:
-                dump["session"]["turn_detection"] = None
+        # Handle turn_detection in audio.input so that False becomes null
+        if "audio" in dump["session"] and dump["session"]["audio"]:
+            if "input" in dump["session"]["audio"] and dump["session"]["audio"]["input"]:
+                if "turn_detection" in dump["session"]["audio"]["input"]:
+                    if dump["session"]["audio"]["input"]["turn_detection"] is False:
+                        dump["session"]["audio"]["input"]["turn_detection"] = None
 
         return dump
 
@@ -446,6 +527,34 @@ class ConversationItemCreated(ServerEvent):
     """
 
     type: Literal["conversation.item.created"]
+    previous_item_id: Optional[str] = None
+    item: ConversationItem
+
+
+class ConversationItemAdded(ServerEvent):
+    """Event indicating a conversation item has been added.
+
+    Parameters:
+        type: Event type, always "conversation.item.added".
+        previous_item_id: ID of the previous item, if any.
+        item: The added conversation item.
+    """
+
+    type: Literal["conversation.item.added"]
+    previous_item_id: Optional[str] = None
+    item: ConversationItem
+
+
+class ConversationItemDone(ServerEvent):
+    """Event indicating a conversation item is done processing.
+
+    Parameters:
+        type: Event type, always "conversation.item.done".
+        previous_item_id: ID of the previous item, if any.
+        item: The completed conversation item.
+    """
+
+    type: Literal["conversation.item.done"]
     previous_item_id: Optional[str] = None
     item: ConversationItem
 
@@ -638,7 +747,7 @@ class ResponseTextDelta(ServerEvent):
     """Event containing incremental text from a response.
 
     Parameters:
-        type: Event type, always "response.text.delta".
+        type: Event type, always "response.output_text.delta".
         response_id: ID of the response.
         item_id: ID of the conversation item.
         output_index: Index of the output item.
@@ -646,7 +755,7 @@ class ResponseTextDelta(ServerEvent):
         delta: Incremental text content.
     """
 
-    type: Literal["response.text.delta"]
+    type: Literal["response.output_text.delta"]
     response_id: str
     item_id: str
     output_index: int
@@ -658,7 +767,7 @@ class ResponseTextDone(ServerEvent):
     """Event indicating text content is complete.
 
     Parameters:
-        type: Event type, always "response.text.done".
+        type: Event type, always "response.output_text.done".
         response_id: ID of the response.
         item_id: ID of the conversation item.
         output_index: Index of the output item.
@@ -666,7 +775,7 @@ class ResponseTextDone(ServerEvent):
         text: Complete text content.
     """
 
-    type: Literal["response.text.done"]
+    type: Literal["response.output_text.done"]
     response_id: str
     item_id: str
     output_index: int
@@ -678,7 +787,7 @@ class ResponseAudioTranscriptDelta(ServerEvent):
     """Event containing incremental audio transcript from a response.
 
     Parameters:
-        type: Event type, always "response.audio_transcript.delta".
+        type: Event type, always "response.output_audio_transcript.delta".
         response_id: ID of the response.
         item_id: ID of the conversation item.
         output_index: Index of the output item.
@@ -686,7 +795,7 @@ class ResponseAudioTranscriptDelta(ServerEvent):
         delta: Incremental transcript text.
     """
 
-    type: Literal["response.audio_transcript.delta"]
+    type: Literal["response.output_audio_transcript.delta"]
     response_id: str
     item_id: str
     output_index: int
@@ -698,7 +807,7 @@ class ResponseAudioTranscriptDone(ServerEvent):
     """Event indicating audio transcript is complete.
 
     Parameters:
-        type: Event type, always "response.audio_transcript.done".
+        type: Event type, always "response.output_audio_transcript.done".
         response_id: ID of the response.
         item_id: ID of the conversation item.
         output_index: Index of the output item.
@@ -706,7 +815,7 @@ class ResponseAudioTranscriptDone(ServerEvent):
         transcript: Complete transcript text.
     """
 
-    type: Literal["response.audio_transcript.done"]
+    type: Literal["response.output_audio_transcript.done"]
     response_id: str
     item_id: str
     output_index: int
@@ -718,7 +827,7 @@ class ResponseAudioDelta(ServerEvent):
     """Event containing incremental audio data from a response.
 
     Parameters:
-        type: Event type, always "response.audio.delta".
+        type: Event type, always "response.output_audio.delta".
         response_id: ID of the response.
         item_id: ID of the conversation item.
         output_index: Index of the output item.
@@ -726,7 +835,7 @@ class ResponseAudioDelta(ServerEvent):
         delta: Base64-encoded incremental audio data.
     """
 
-    type: Literal["response.audio.delta"]
+    type: Literal["response.output_audio.delta"]
     response_id: str
     item_id: str
     output_index: int
@@ -738,14 +847,14 @@ class ResponseAudioDone(ServerEvent):
     """Event indicating audio content is complete.
 
     Parameters:
-        type: Event type, always "response.audio.done".
+        type: Event type, always "response.output_audio.done".
         response_id: ID of the response.
         item_id: ID of the conversation item.
         output_index: Index of the output item.
         content_index: Index of the content part.
     """
 
-    type: Literal["response.audio.done"]
+    type: Literal["response.output_audio.done"]
     response_id: str
     item_id: str
     output_index: int
@@ -868,6 +977,18 @@ class RateLimitsUpdated(ServerEvent):
     rate_limits: List[Dict[str, Any]]
 
 
+class CachedTokensDetails(BaseModel):
+    """Details about cached tokens.
+
+    Parameters:
+        text_tokens: Number of cached text tokens.
+        audio_tokens: Number of cached audio tokens.
+    """
+
+    text_tokens: Optional[int] = 0
+    audio_tokens: Optional[int] = 0
+
+
 class TokenDetails(BaseModel):
     """Detailed token usage information.
 
@@ -875,11 +996,15 @@ class TokenDetails(BaseModel):
         cached_tokens: Number of cached tokens used. Defaults to 0.
         text_tokens: Number of text tokens used. Defaults to 0.
         audio_tokens: Number of audio tokens used. Defaults to 0.
+        cached_tokens_details: Detailed breakdown of cached tokens.
+        image_tokens: Number of image tokens used (for input only).
     """
 
     cached_tokens: Optional[int] = 0
     text_tokens: Optional[int] = 0
     audio_tokens: Optional[int] = 0
+    cached_tokens_details: Optional[CachedTokensDetails] = None
+    image_tokens: Optional[int] = 0
 
     class Config:
         """Pydantic configuration for TokenDetails."""
@@ -914,7 +1039,14 @@ class Response(BaseModel):
         status: Current status of the response.
         status_details: Additional status information.
         output: List of conversation items in the response.
+        conversation_id: Which conversation the response is added to.
+        output_modalities: The set of modalities the model used to respond.
+        max_output_tokens: Maximum number of output tokens used.
+        audio: Audio configuration for the response.
         usage: Token usage statistics for the response.
+        voice: The voice the model used to respond.
+        temperature: Sampling temperature used for the response.
+        output_audio_format: The format of output audio.
     """
 
     id: str
@@ -922,7 +1054,13 @@ class Response(BaseModel):
     status: Literal["completed", "in_progress", "incomplete", "cancelled", "failed"]
     status_details: Any
     output: List[ConversationItem]
+    output_modalities: Optional[List[Literal["text", "audio"]]] = None
+    max_output_tokens: Optional[Union[int, Literal["inf"]]] = None
+    audio: Optional[AudioConfiguration] = None
     usage: Optional[Usage] = None
+    voice: Optional[str] = None
+    temperature: Optional[float] = None
+    output_audio_format: Optional[str] = None
 
 
 _server_event_types = {
@@ -935,6 +1073,8 @@ _server_event_types = {
     "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
     "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
     "conversation.item.created": ConversationItemCreated,
+    "conversation.item.added": ConversationItemAdded,
+    "conversation.item.done": ConversationItemDone,
     "conversation.item.input_audio_transcription.delta": ConversationItemInputAudioTranscriptionDelta,
     "conversation.item.input_audio_transcription.completed": ConversationItemInputAudioTranscriptionCompleted,
     "conversation.item.input_audio_transcription.failed": ConversationItemInputAudioTranscriptionFailed,
@@ -947,12 +1087,12 @@ _server_event_types = {
     "response.output_item.done": ResponseOutputItemDone,
     "response.content_part.added": ResponseContentPartAdded,
     "response.content_part.done": ResponseContentPartDone,
-    "response.text.delta": ResponseTextDelta,
-    "response.text.done": ResponseTextDone,
-    "response.audio_transcript.delta": ResponseAudioTranscriptDelta,
-    "response.audio_transcript.done": ResponseAudioTranscriptDone,
-    "response.audio.delta": ResponseAudioDelta,
-    "response.audio.done": ResponseAudioDone,
+    "response.output_text.delta": ResponseTextDelta,
+    "response.output_text.done": ResponseTextDone,
+    "response.output_audio_transcript.delta": ResponseAudioTranscriptDelta,
+    "response.output_audio_transcript.done": ResponseAudioTranscriptDone,
+    "response.output_audio.delta": ResponseAudioDelta,
+    "response.output_audio.done": ResponseAudioDone,
     "response.function_call_arguments.delta": ResponseFunctionCallArgumentsDelta,
     "response.function_call_arguments.done": ResponseFunctionCallArgumentsDone,
     "rate_limits.updated": RateLimitsUpdated,
