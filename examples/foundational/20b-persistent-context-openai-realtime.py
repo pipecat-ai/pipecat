@@ -31,6 +31,7 @@ from pipecat.services.openai_realtime_beta import (
     SessionProperties,
     TurnDetection,
 )
+from pipecat.services.openai_realtime_beta.events import AudioConfiguration, AudioInput
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -182,12 +183,16 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
     session_properties = SessionProperties(
-        input_audio_transcription=InputAudioTranscription(),
-        # Set openai TurnDetection parameters. Not setting this at all will turn it
-        # on by default
-        turn_detection=TurnDetection(silence_duration_ms=1000),
-        # Or set to False to disable openai turn detection and use transport VAD
-        # turn_detection=False,
+        audio=AudioConfiguration(
+            input=AudioInput(
+                transcription=InputAudioTranscription(),
+                # Set openai TurnDetection parameters. Not setting this at all will turn it
+                # on by default
+                turn_detection=TurnDetection(silence_duration_ms=1000),
+                # Or set to False to disable openai turn detection and use transport VAD
+                # turn_detection=False,
+            )
+        ),
         # tools=tools,
         instructions="""Your knowledge cutoff is 2023-10. You are a helpful and friendly AI.
 
