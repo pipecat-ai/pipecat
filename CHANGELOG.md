@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
   a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
 
+### Changed
+
+- Restored `DailyTransport`'s native DTMF support using Daily's `send_dtmf()`
+  method instead of generated audio tones.
+
 ### Fixed
 
 - Fixed a `AWSBedrockLLMService` crash caused by an extra `await`.

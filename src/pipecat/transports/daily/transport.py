@@ -1809,6 +1809,27 @@ class DailyOutputTransport(BaseOutputTransport):
         """
         await self._client.write_video_frame(frame)
 
+    def _supports_native_dtmf(self) -> bool:
+        """Daily supports native DTMF via telephone events.
+
+        Returns:
+            True, as Daily supports native DTMF transmission.
+        """
+        return True
+
+    async def _write_dtmf_native(self, frame):
+        """Use Daily's native send_dtmf method for telephone events.
+
+        Args:
+            frame: The DTMF frame to write.
+        """
+        await self._client.send_dtmf(
+            {
+                "sessionId": frame.transport_destination,
+                "tones": frame.button.value,
+            }
+        )
+
 
 class DailyTransport(BaseTransport):
     """Transport implementation for Daily audio and video calls.

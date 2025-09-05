@@ -219,7 +219,34 @@ class BaseOutputTransport(FrameProcessor):
         pass
 
     async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
-        """Write a DTMF tone to the transport.
+        """Write a DTMF tone using the transport's preferred method.
+
+        Args:
+            frame: The DTMF frame to write.
+        """
+        if self._supports_native_dtmf():
+            await self._write_dtmf_native(frame)
+        else:
+            await self._write_dtmf_audio(frame)
+
+    def _supports_native_dtmf(self) -> bool:
+        """Override in transport implementations that support native DTMF.
+
+        Returns:
+            True if the transport supports native DTMF, False otherwise.
+        """
+        return False
+
+    async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        """Override in transport implementations for native DTMF.
+
+        Args:
+            frame: The DTMF frame to write.
+        """
+        raise NotImplementedError("Transport claims native DTMF support but doesn't implement it")
+
+    async def _write_dtmf_audio(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        """Generate and send audio tones for DTMF.
 
         Args:
             frame: The DTMF frame to write.
@@ -228,7 +255,6 @@ class BaseOutputTransport(FrameProcessor):
         dtmf_audio_frame = OutputAudioRawFrame(
             audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
         )
-        dtmf_audio_frame.transport_destination = frame.transport_destination
         await self.write_audio_frame(dtmf_audio_frame)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
