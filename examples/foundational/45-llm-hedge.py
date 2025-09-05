@@ -4,23 +4,15 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import asyncio
 import os
+from typing import override
 
 from dotenv import load_dotenv
 from loguru import logger
 from openai.types.chat import ChatCompletionMessageParam
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import (
-    CancelFrame,
-    EndFrame,
-    Frame,
-    LLMMessagesFrame,
-    LLMMessagesUpdateFrame,
-    LLMTextFrame,
-    StartFrame,
-)
+from pipecat.frames.frames import Frame, LLMTextFrame
 from pipecat.observers.loggers.debug_log_observer import DebugLogObserver, FrameEndpoint
 from pipecat.observers.loggers.llm_log_observer import LLMLogObserver
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
@@ -68,7 +60,7 @@ transport_params = {
 class LLMRaceProcessor(FrameProcessor):
     """Manages racing between two LLMs - only allows frames from the first LLM to respond."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self._current_llm_name = None
 
@@ -76,6 +68,7 @@ class LLMRaceProcessor(FrameProcessor):
         """Set the name of the LLM this processor instance is handling."""
         self._current_llm_name = name
 
+    @override
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         # Always call super first to handle StartFrame and other system frames
         await super().process_frame(frame, direction)
