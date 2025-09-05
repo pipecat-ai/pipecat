@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Realtime Beta LLM service implementation with WebSocket support."""
+"""OpenAI Realtime LLM service implementation with WebSocket support."""
 
 import base64
 import json
@@ -90,9 +90,9 @@ class CurrentAudioResponse:
 
 
 class OpenAIRealtimeLLMService(LLMService):
-    """OpenAI Realtime Beta LLM service providing real-time audio and text communication.
+    """OpenAI Realtime LLM service providing real-time audio and text communication.
 
-    Implements the OpenAI Realtime API Beta with WebSocket communication for low-latency
+    Implements the OpenAI Realtime API with WebSocket communication for low-latency
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
     """
@@ -104,14 +104,14 @@ class OpenAIRealtimeLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-4o-realtime-preview-2025-06-03",
+        model: str = "gpt-realtime",
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
     ):
-        """Initialize the OpenAI Realtime Beta LLM service.
+        """Initialize the OpenAI Realtime LLM service.
 
         Args:
             api_key: OpenAI API key for authentication.
