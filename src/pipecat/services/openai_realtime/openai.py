@@ -484,8 +484,6 @@ class OpenAIRealtimeLLMService(LLMService):
                 await self._handle_evt_audio_delta(evt)
             elif evt.type == "response.output_audio.done":
                 await self._handle_evt_audio_done(evt)
-            elif evt.type == "conversation.item.created":
-                await self._handle_evt_conversation_item_created(evt)
             elif evt.type == "conversation.item.added":
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.done":
@@ -553,17 +551,6 @@ class OpenAIRealtimeLLMService(LLMService):
             await self.push_frame(TTSStoppedFrame())
             # Don't clear the self._current_audio_response here. We need to wait until we
             # receive a BotStoppedSpeakingFrame from the output transport.
-
-    async def _handle_evt_conversation_item_created(self, evt):
-        """Handle conversation.item.created event - DEPRECATED.
-
-        This event is being replaced by conversation.item.added + conversation.item.done.
-        For now, we still handle it for backward compatibility, but new code should
-        use the .added/.done pattern.
-        """
-        logger.debug("Received deprecated conversation.item.created event")
-        # During API transition, treat .created the same as .added
-        await self._handle_evt_conversation_item_added(evt)
 
     async def _handle_evt_conversation_item_added(self, evt):
         """Handle conversation.item.added event - item is added but may still be processing."""

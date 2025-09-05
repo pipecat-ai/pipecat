@@ -517,20 +517,6 @@ class ConversationCreated(ServerEvent):
     conversation: RealtimeConversation
 
 
-class ConversationItemCreated(ServerEvent):
-    """Event indicating a conversation item has been created.
-
-    Parameters:
-        type: Event type, always "conversation.item.created".
-        previous_item_id: ID of the previous item, if any.
-        item: The created conversation item.
-    """
-
-    type: Literal["conversation.item.created"]
-    previous_item_id: Optional[str] = None
-    item: ConversationItem
-
-
 class ConversationItemAdded(ServerEvent):
     """Event indicating a conversation item has been added.
 
@@ -1072,7 +1058,6 @@ _server_event_types = {
     "input_audio_buffer.cleared": InputAudioBufferCleared,
     "input_audio_buffer.speech_started": InputAudioBufferSpeechStarted,
     "input_audio_buffer.speech_stopped": InputAudioBufferSpeechStopped,
-    "conversation.item.created": ConversationItemCreated,
     "conversation.item.added": ConversationItemAdded,
     "conversation.item.done": ConversationItemDone,
     "conversation.item.input_audio_transcription.delta": ConversationItemInputAudioTranscriptionDelta,
