@@ -25,6 +25,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     OutputAudioRawFrame,
+    OutputDTMFFrame,
+    OutputDTMFUrgentFrame,
     StartFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -43,6 +45,22 @@ except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`.")
     raise Exception(f"Missing module: {e}")
+
+# DTMF mapping according to RFC 4733
+DTMF_CODE_MAP = {
+    "0": 0,
+    "1": 1,
+    "2": 2,
+    "3": 3,
+    "4": 4,
+    "5": 5,
+    "6": 6,
+    "7": 7,
+    "8": 8,
+    "9": 9,
+    "*": 10,
+    "#": 11,
+}
 
 
 @dataclass
@@ -277,6 +295,26 @@ class LiveKitTransportClient:
                 await self.room.local_participant.publish_data(data, reliable=True)
         except Exception as e:
             logger.error(f"Error sending data: {e}")
+
+    async def send_dtmf(self, digit: str):
+        """Send DTMF tone to the room.
+
+        Args:
+            digit: The DTMF digit to send (0-9, *, #).
+        """
+        if not self._connected:
+            return
+
+        if digit not in DTMF_CODE_MAP:
+            logger.warning(f"Invalid DTMF digit: {digit}")
+            return
+
+        code = DTMF_CODE_MAP[digit]
+
+        try:
+            await self.room.local_participant.publish_dtmf(code=code, digit=digit)
+        except Exception as e:
+            logger.error(f"Error sending DTMF tone {digit}: {e}")
 
     async def publish_audio(self, audio_frame: rtc.AudioFrame):
         """Publish an audio frame to the room.
@@ -733,6 +771,22 @@ class LiveKitOutputTransport(BaseOutputTransport):
         """
         livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
         await self._client.publish_audio(livekit_audio)
+
+    def _supports_native_dtmf(self) -> bool:
+        """LiveKit supports native DTMF via telephone events.
+
+        Returns:
+            True, as LiveKit supports native DTMF transmission.
+        """
+        return True
+
+    async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        """Use LiveKit's native publish_dtmf method for telephone events.
+
+        Args:
+            frame: The DTMF frame to write.
+        """
+        await self._client.send_dtmf(frame.button.value)
 
     def _convert_pipecat_audio_to_livekit(self, pipecat_audio: bytes) -> rtc.AudioFrame:
         """Convert Pipecat audio data to LiveKit audio frame."""
