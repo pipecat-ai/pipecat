@@ -6,6 +6,8 @@
 
 """Azure OpenAI Realtime Beta LLM service implementation."""
 
+import warnings
+
 from loguru import logger
 
 from .openai import OpenAIRealtimeBetaLLMService
@@ -22,6 +24,10 @@ except ModuleNotFoundError as e:
 
 class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
     """Azure OpenAI Realtime Beta LLM service with Azure-specific authentication.
+
+    .. deprecated:: 0.0.84
+        `AzureRealtimeBetaLLMService` is deprecated, use `AzureRealtimeLLMService` instead.
+        This class will be removed in version 1.0.0.
 
     Extends the OpenAI Realtime service to work with Azure OpenAI endpoints,
     using Azure's authentication headers and endpoint format. Provides the same
@@ -44,6 +50,16 @@ class AzureRealtimeBetaLLMService(OpenAIRealtimeBetaLLMService):
             **kwargs: Additional arguments passed to parent OpenAIRealtimeBetaLLMService.
         """
         super().__init__(base_url=base_url, api_key=api_key, **kwargs)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "AzureRealtimeBetaLLMService is deprecated and will be removed in version 1.0.0. "
+                "Use AzureRealtimeLLMService instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self.api_key = api_key
         self.base_url = base_url
 
