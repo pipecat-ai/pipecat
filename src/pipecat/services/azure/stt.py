@@ -21,6 +21,7 @@ from pipecat.frames.frames import (
     Frame,
     StartFrame,
     TranscriptionFrame,
+    InterimTranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.stt_service import STTService
