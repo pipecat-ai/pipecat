@@ -32,7 +32,6 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
-    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -418,8 +417,8 @@ class BaseOpenAILLMService(LLMService):
         """Process frames for LLM completion requests.
 
         Handles OpenAILLMContextFrame, LLMContextFrame, LLMMessagesFrame,
-        VisionImageRawFrame, and LLMUpdateSettingsFrame to trigger LLM
-        completions and manage settings.
+        and LLMUpdateSettingsFrame to trigger LLM completions and manage
+        settings.
 
         Args:
             frame: The frame to process.
@@ -438,16 +437,6 @@ class BaseOpenAILLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = OpenAILLMContext.from_messages(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            # This is only useful in very simple pipelines because it creates
-            # a new context. Generally we want a context manager to catch
-            # UserImageRawFrames coming through the pipeline and add them
-            # to the context.
-            # TODO: support the newer universal LLMContext with a VisionImageRawFrame equivalent?
-            context = OpenAILLMContext()
-            context.add_image_frame_message(
-                format=frame.format, size=frame.size, image=frame.image, text=frame.text
-            )
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:

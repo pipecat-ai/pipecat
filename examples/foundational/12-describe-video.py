@@ -11,12 +11,19 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import Frame, TextFrame, TTSSpeakFrame, UserImageRequestFrame
+from pipecat.frames.frames import (
+    Frame,
+    LLMContextFrame,
+    TextFrame,
+    TTSSpeakFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
-from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
@@ -34,6 +41,8 @@ load_dotenv(override=True)
 
 
 class UserImageRequester(FrameProcessor):
+    """Converts incoming text into requests for user images."""
+
     def __init__(self, participant_id: Optional[str] = None):
         super().__init__()
         self._participant_id = participant_id
@@ -46,9 +55,32 @@ class UserImageRequester(FrameProcessor):
 
         if self._participant_id and isinstance(frame, TextFrame):
             await self.push_frame(
-                UserImageRequestFrame(self._participant_id), FrameDirection.UPSTREAM
+                UserImageRequestFrame(self._participant_id, context=frame.text),
+                FrameDirection.UPSTREAM,
             )
-        await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+
+class UserImageProcessor(FrameProcessor):
+    """Converts incoming user images into context frames."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserImageRawFrame):
+            if frame.request and frame.request.context:
+                context = LLMContext()
+                context.add_image_frame_message(
+                    image=frame.image,
+                    text=frame.request.context,
+                    size=frame.size,
+                    format=frame.format,
+                )
+                frame = LLMContextFrame(context)
+                await self.push_frame(frame)
+        else:
+            await self.push_frame(frame, direction)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -78,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Initialize the image requester without setting the participant ID yet
     image_requester = UserImageRequester()
 
-    vision_aggregator = VisionImageFrameAggregator()
+    image_processor = UserImageProcessor()
 
     # If you run into weird description, try with use_cpu=True
     moondream = MoondreamService()
@@ -96,7 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             stt,
             user_response,
             image_requester,
-            vision_aggregator,
+            image_processor,
             moondream,
             tts,
             transport.output(),
@@ -119,7 +151,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         image_requester.set_participant_id(client_id)
 
         # Welcome message
-        await task.queue_frame(TTSSpeakFrame("Hi there! Feel free to ask me what I see."))
+        await task.queue_frame(TTSSpeakFrame("Hi there! Feel free to ask me about what I see."))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
