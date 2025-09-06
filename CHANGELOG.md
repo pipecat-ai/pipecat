@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `SelfClosingTagAggregator` to handle incomplete self-closing tags during
+  streaming (e.g., prevents splitting `<break time="0.1s"/>` when received as
+  `<break time="0.` + `1s"/>`).
+
 - Add the ability to send DTMF to `LiveKitTransport`.
 
 - Expanded support for universal `LLMContext` to the Anthropic LLM service.
