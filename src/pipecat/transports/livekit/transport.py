@@ -12,8 +12,8 @@ event handling for conversational AI applications.
 """
 
 import asyncio
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, List, Optional
 
 from loguru import logger
@@ -23,9 +23,9 @@ from pipecat.audio.utils import create_stream_resampler
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer
 from pipecat.frames.frames import (
     AudioRawFrame,
-    ImageRawFrame,
     CancelFrame,
     EndFrame,
+    ImageRawFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
@@ -47,9 +47,7 @@ try:
     from tenacity import retry, stop_after_attempt, wait_exponential
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`."
-    )
+    logger.error("In order to use LiveKit, you need to `pip install pipecat-ai[livekit]`.")
     raise Exception(f"Missing module: {e}")
 
 # DTMF mapping according to RFC 4733
@@ -209,9 +207,7 @@ class LiveKitTransportClient:
 
         # Set up room event handlers
         self.room.on("participant_connected")(self._on_participant_connected_wrapper)
-        self.room.on("participant_disconnected")(
-            self._on_participant_disconnected_wrapper
-        )
+        self.room.on("participant_disconnected")(self._on_participant_disconnected_wrapper)
         self.room.on("track_subscribed")(self._on_track_subscribed_wrapper)
         self.room.on("track_unsubscribed")(self._on_track_unsubscribed_wrapper)
         self.room.on("data_received")(self._on_data_received_wrapper)
@@ -228,13 +224,9 @@ class LiveKitTransportClient:
         Args:
             frame: The start frame containing initialization parameters.
         """
-        self._out_sample_rate = (
-            self._params.audio_out_sample_rate or frame.audio_out_sample_rate
-        )
+        self._out_sample_rate = self._params.audio_out_sample_rate or frame.audio_out_sample_rate
 
-    @retry(
-        stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10)
-    )
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     async def connect(self):
         """Connect to the LiveKit room with retry logic."""
         async with self._async_lock:
@@ -267,9 +259,7 @@ class LiveKitTransportClient:
                 )
                 options = rtc.TrackPublishOptions()
                 options.source = rtc.TrackSource.SOURCE_MICROPHONE
-                await self.room.local_participant.publish_track(
-                    self._audio_track, options
-                )
+                await self.room.local_participant.publish_track(self._audio_track, options)
 
                 await self._callbacks.on_connected()
 
@@ -458,9 +448,7 @@ class LiveKitTransportClient:
 
     def _on_connected_wrapper(self):
         """Wrapper for connected events."""
-        self._task_manager.create_task(
-            self._async_on_connected(), f"{self}::_async_on_connected"
-        )
+        self._task_manager.create_task(self._async_on_connected(), f"{self}::_async_on_connected")
 
     def _on_disconnected_wrapper(self):
         """Wrapper for disconnected events."""
@@ -477,9 +465,7 @@ class LiveKitTransportClient:
             self._other_participant_has_joined = True
             await self._callbacks.on_first_participant_joined(participant.sid)
 
-    async def _async_on_participant_disconnected(
-        self, participant: rtc.RemoteParticipant
-    ):
+    async def _async_on_participant_disconnected(self, participant: rtc.RemoteParticipant):
         """Handle participant disconnected events."""
         logger.info(f"Participant disconnected: {participant.identity}")
         await self._callbacks.on_participant_disconnected(participant.sid)
@@ -494,9 +480,7 @@ class LiveKitTransportClient:
     ):
         """Handle track subscribed events."""
         if track.kind == rtc.TrackKind.KIND_AUDIO:
-            logger.info(
-                f"Audio track subscribed: {track.sid} from participant {participant.sid}"
-            )
+            logger.info(f"Audio track subscribed: {track.sid} from participant {participant.sid}")
             self._audio_tracks[participant.sid] = track
             audio_stream = rtc.AudioStream(track)
             self._task_manager.create_task(
@@ -505,9 +489,7 @@ class LiveKitTransportClient:
             )
             await self._callbacks.on_audio_track_subscribed(participant.sid)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
-            logger.info(
-                f"Video track subscribed: {track.sid} from participant {participant.sid}"
-            )
+            logger.info(f"Video track subscribed: {track.sid} from participant {participant.sid}")
             self._video_tracks[participant.sid] = track
             video_stream = rtc.VideoStream(track)
             self._task_manager.create_task(
@@ -523,9 +505,7 @@ class LiveKitTransportClient:
         participant: rtc.RemoteParticipant,
     ):
         """Handle track unsubscribed events."""
-        logger.info(
-            f"Track unsubscribed: {publication.sid} from {participant.identity}"
-        )
+        logger.info(f"Track unsubscribed: {publication.sid} from {participant.identity}")
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             await self._callbacks.on_audio_track_unsubscribed(participant.sid)
         elif track.kind == rtc.TrackKind.KIND_VIDEO:
@@ -545,9 +525,7 @@ class LiveKitTransportClient:
         logger.info(f"Disconnected from {self._room_name}. Reason: {reason}")
         await self._callbacks.on_disconnected()
 
-    async def _process_audio_stream(
-        self, audio_stream: rtc.AudioStream, participant_id: str
-    ):
+    async def _process_audio_stream(self, audio_stream: rtc.AudioStream, participant_id: str):
         """Process incoming audio stream from a participant."""
         logger.info(f"Started processing audio stream for participant {participant_id}")
         async for event in audio_stream:
@@ -562,9 +540,7 @@ class LiveKitTransportClient:
             frame, participant_id = await self._audio_queue.get()
             yield frame, participant_id
 
-    async def _process_video_stream(
-        self, video_stream: rtc.VideoStream, participant_id: str
-    ):
+    async def _process_video_stream(self, video_stream: rtc.VideoStream, participant_id: str):
         """Process incoming video stream from a participant."""
         logger.info(f"Started processing video stream for participant {participant_id}")
         async for event in video_stream:
@@ -697,9 +673,7 @@ class LiveKitInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = LiveKitTransportMessageUrgentFrame(
-            message=message, participant_id=sender
-        )
+        frame = LiveKitTransportMessageUrgentFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     async def _audio_in_task_handler(self):
@@ -769,9 +743,7 @@ class LiveKitInputTransport(BaseInputTransport):
         video_frame_event: rtc.VideoFrameEvent,
     ) -> ImageRawFrame:
         """Convert LiveKit video frame to Pipecat video frame."""
-        rgb_frame = video_frame_event.frame.convert(
-            proto_video_frame.VideoBufferType.RGB24
-        )
+        rgb_frame = video_frame_event.frame.convert(proto_video_frame.VideoBufferType.RGB24)
         image_frame = ImageRawFrame(
             image=rgb_frame.data,
             size=(rgb_frame.width, rgb_frame.height),
@@ -860,9 +832,7 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._transport.cleanup()
 
-    async def send_message(
-        self, frame: TransportMessageFrame | TransportMessageUrgentFrame
-    ):
+    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
         """Send a transport message to participants.
 
         Args:
@@ -872,9 +842,7 @@ class LiveKitOutputTransport(BaseOutputTransport):
         if isinstance(message, dict):
             # fix message encoding for dict-like messages, e.g. RTVI messages.
             message = json.dumps(message, ensure_ascii=False)
-        if isinstance(
-            frame, (LiveKitTransportMessageFrame, LiveKitTransportMessageUrgentFrame)
-        ):
+        if isinstance(frame, (LiveKitTransportMessageFrame, LiveKitTransportMessageUrgentFrame)):
             await self._client.send_data(message.encode(), frame.participant_id)
         else:
             await self._client.send_data(message.encode())
@@ -1080,9 +1048,7 @@ class LiveKitTransport(BaseTransport):
     async def _on_participant_disconnected(self, participant_id: str):
         """Handle participant disconnected events."""
         await self._call_event_handler("on_participant_disconnected", participant_id)
-        await self._call_event_handler(
-            "on_participant_left", participant_id, "disconnected"
-        )
+        await self._call_event_handler("on_participant_left", participant_id, "disconnected")
 
     async def _on_audio_track_subscribed(self, participant_id: str):
         """Handle audio track subscribed events."""
@@ -1126,14 +1092,10 @@ class LiveKitTransport(BaseTransport):
             participant_id: Optional specific participant to send to.
         """
         if self._output:
-            frame = LiveKitTransportMessageFrame(
-                message=message, participant_id=participant_id
-            )
+            frame = LiveKitTransportMessageFrame(message=message, participant_id=participant_id)
             await self._output.send_message(frame)
 
-    async def send_message_urgent(
-        self, message: str, participant_id: Optional[str] = None
-    ):
+    async def send_message_urgent(self, message: str, participant_id: Optional[str] = None):
         """Send an urgent message to participants in the room.
 
         Args:
