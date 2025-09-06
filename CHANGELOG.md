@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `daily-python` to 0.19.9.
+
 - Restored `DailyTransport`'s native DTMF support using Daily's `send_dtmf()`
   method instead of generated audio tones.
 
