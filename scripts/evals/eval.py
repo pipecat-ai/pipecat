@@ -47,7 +47,7 @@ from pipecat.transports.daily.transport import DailyParams, DailyTransport
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 PIPELINE_IDLE_TIMEOUT_SECS = 60
-EVAL_TIMEOUT_SECS = 90
+EVAL_TIMEOUT_SECS = 120
 
 EvalPrompt = str | Tuple[str, ImageFile]
 
@@ -266,8 +266,11 @@ async def run_eval_pipeline(
     elif isinstance(prompt, tuple):
         example_prompt, example_image = prompt
 
-    eval_prompt = f"The answer is correct if it's appropriate for the context and matches: {eval}."
-    common_system_prompt = f"Call the eval function with your assessment only if the user answers the question. {eval_prompt}"
+    eval_prompt = f"The answer is correct if it matches: {eval}."
+    common_system_prompt = (
+        "The user might say things other than the answer and that's allowed. "
+        f"You should only call the eval function with your assessment when the user actually answers the question. {eval_prompt}"
+    )
     if user_speaks_first:
         system_prompt = f"You are an LLM eval, be extremly brief. You will start the conversation by saying: '{example_prompt}'. {common_system_prompt}"
     else:
