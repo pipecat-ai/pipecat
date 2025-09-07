@@ -4,12 +4,11 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""OpenAI Realtime Beta LLM service implementation with WebSocket support."""
+"""OpenAI Realtime LLM service implementation with WebSocket support."""
 
 import base64
 import json
 import time
-import warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -90,14 +89,10 @@ class CurrentAudioResponse:
     total_size: int = 0
 
 
-class OpenAIRealtimeBetaLLMService(LLMService):
-    """OpenAI Realtime Beta LLM service providing real-time audio and text communication.
+class OpenAIRealtimeLLMService(LLMService):
+    """OpenAI Realtime LLM service providing real-time audio and text communication.
 
-    .. deprecated:: 0.0.84
-        `OpenAIRealtimeBetaLLMService` is deprecated, use `OpenAIRealtimeLLMService` instead.
-        This class will be removed in version 1.0.0.
-
-    Implements the OpenAI Realtime API Beta with WebSocket communication for low-latency
+    Implements the OpenAI Realtime API with WebSocket communication for low-latency
     bidirectional audio and text interactions. Supports function calling, conversation
     management, and real-time transcription.
     """
@@ -109,14 +104,14 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gpt-4o-realtime-preview-2025-06-03",
+        model: str = "gpt-realtime",
         base_url: str = "wss://api.openai.com/v1/realtime",
         session_properties: Optional[events.SessionProperties] = None,
         start_audio_paused: bool = False,
         send_transcription_frames: bool = True,
         **kwargs,
     ):
-        """Initialize the OpenAI Realtime Beta LLM service.
+        """Initialize the OpenAI Realtime LLM service.
 
         Args:
             api_key: OpenAI API key for authentication.
@@ -129,15 +124,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             send_transcription_frames: Whether to emit transcription frames. Defaults to True.
             **kwargs: Additional arguments passed to parent LLMService.
         """
-        with warnings.catch_warnings():
-            warnings.simplefilter("always")
-            warnings.warn(
-                "OpenAIRealtimeBetaLLMService is deprecated and will be removed in version 1.0.0. "
-                "Use OpenAIRealtimeLLMService instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         full_url = f"{base_url}?model={model}"
         super().__init__(base_url=full_url, **kwargs)
 
@@ -163,6 +149,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
         self._messages_added_manually = {}
         self._user_and_response_message_tuple = None
+        self._pending_function_calls = {}  # Track function calls by call_id
 
         self._register_event_handler("on_conversation_item_created")
         self._register_event_handler("on_conversation_item_updated")
@@ -186,12 +173,17 @@ class OpenAIRealtimeBetaLLMService(LLMService):
 
     def _is_modality_enabled(self, modality: str) -> bool:
         """Check if a specific modality is enabled, "text" or "audio"."""
-        modalities = self._session_properties.modalities or ["audio", "text"]
+        modalities = self._session_properties.output_modalities or ["audio", "text"]
         return modality in modalities
 
     def _get_enabled_modalities(self) -> list[str]:
         """Get the list of enabled modalities."""
-        return self._session_properties.modalities or ["audio", "text"]
+        modalities = self._session_properties.output_modalities or ["audio", "text"]
+        # API only supports single modality responses: either ["text"] or ["audio"]
+        if "audio" in modalities:
+            return ["audio"]
+        elif "text" in modalities:
+            return ["text"]
 
     async def retrieve_conversation_item(self, item_id: str):
         """Retrieve a conversation item by ID from the server.
@@ -258,7 +250,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_interruption(self):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
-        if self._session_properties.turn_detection is False:
+        turn_detection_disabled = (
+            self._session_properties.audio
+            and self._session_properties.audio.input
+            and self._session_properties.audio.input.turn_detection is False
+        )
+        if turn_detection_disabled:
             await self.send_client_event(events.InputAudioBufferClearEvent())
             await self.send_client_event(events.ResponseCancelEvent())
         await self._truncate_current_audio_response()
@@ -275,7 +272,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_user_stopped_speaking(self, frame):
         # None and False are different. Check for False. None means we're using OpenAI's
         # built-in turn detection defaults.
-        if self._session_properties.turn_detection is False:
+        turn_detection_disabled = (
+            self._session_properties.audio
+            and self._session_properties.audio.input
+            and self._session_properties.audio.input.turn_detection is False
+        )
+        if turn_detection_disabled:
             await self.send_client_event(events.InputAudioBufferCommitEvent())
             await self.send_client_event(events.ResponseCreateEvent())
 
@@ -419,7 +421,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 uri=self.base_url,
                 additional_headers={
                     "Authorization": f"Bearer {self.api_key}",
-                    "OpenAI-Beta": "realtime=v1",
                 },
             )
             self._receive_task = self.create_task(self._receive_task_handler())
@@ -479,12 +480,14 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_session_created(evt)
             elif evt.type == "session.updated":
                 await self._handle_evt_session_updated(evt)
-            elif evt.type == "response.audio.delta":
+            elif evt.type == "response.output_audio.delta":
                 await self._handle_evt_audio_delta(evt)
-            elif evt.type == "response.audio.done":
+            elif evt.type == "response.output_audio.done":
                 await self._handle_evt_audio_done(evt)
-            elif evt.type == "conversation.item.created":
-                await self._handle_evt_conversation_item_created(evt)
+            elif evt.type == "conversation.item.added":
+                await self._handle_evt_conversation_item_added(evt)
+            elif evt.type == "conversation.item.done":
+                await self._handle_evt_conversation_item_done(evt)
             elif evt.type == "conversation.item.input_audio_transcription.delta":
                 await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
@@ -497,10 +500,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
                 await self._handle_evt_speech_started(evt)
             elif evt.type == "input_audio_buffer.speech_stopped":
                 await self._handle_evt_speech_stopped(evt)
-            elif evt.type == "response.text.delta":
+            elif evt.type == "response.output_text.delta":
                 await self._handle_evt_text_delta(evt)
-            elif evt.type == "response.audio_transcript.delta":
+            elif evt.type == "response.output_audio_transcript.delta":
                 await self._handle_evt_audio_transcript_delta(evt)
+            elif evt.type == "response.function_call_arguments.done":
+                await self._handle_evt_function_call_arguments_done(evt)
             elif evt.type == "error":
                 if not await self._maybe_handle_evt_retrieve_conversation_item_error(evt):
                     await self._handle_evt_error(evt)
@@ -547,7 +552,16 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             # Don't clear the self._current_audio_response here. We need to wait until we
             # receive a BotStoppedSpeakingFrame from the output transport.
 
-    async def _handle_evt_conversation_item_created(self, evt):
+    async def _handle_evt_conversation_item_added(self, evt):
+        """Handle conversation.item.added event - item is added but may still be processing."""
+        if evt.item.type == "function_call":
+            # Track this function call for when arguments are completed
+            # Only add if not already tracked (prevent duplicates)
+            if evt.item.call_id not in self._pending_function_calls:
+                self._pending_function_calls[evt.item.call_id] = evt.item
+            else:
+                logger.warning(f"Function call {evt.item.call_id} already tracked, skipping")
+
         await self._call_event_handler("on_conversation_item_created", evt.item.id, evt.item)
 
         # This will get sent from the server every time a new "message" is added
@@ -565,6 +579,12 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         elif evt.item.role == "assistant":
             self._current_assistant_response = evt.item
             await self.push_frame(LLMFullResponseStartFrame())
+
+    async def _handle_evt_conversation_item_done(self, evt):
+        """Handle conversation.item.done event - item is fully completed."""
+        await self._call_event_handler("on_conversation_item_updated", evt.item.id, evt.item)
+        # The item is now fully processed and ready
+        # For now, no additional logic needed beyond the event handler call
 
     async def _handle_evt_input_audio_transcription_delta(self, evt):
         if self._send_transcription_frames:
@@ -601,7 +621,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             if assistant["done"]:
                 self._user_and_response_message_tuple = None
                 self._context.add_user_content_item_as_message(user)
-                await self._handle_assistant_output(assistant["output"])
         else:
             # User message without preceding conversation.item.created. Bug?
             logger.warning(f"Transcript for unknown user message: {evt}")
@@ -642,10 +661,10 @@ class OpenAIRealtimeBetaLLMService(LLMService):
             if user.content[0].transcript is not None:
                 self._user_and_response_message_tuple = None
                 self._context.add_user_content_item_as_message(user)
-                await self._handle_assistant_output(assistant["output"])
         else:
-            # Response message without preceding user message. Add it to the context.
-            await self._handle_assistant_output(evt.response.output)
+            # Response message without preceding user message (standalone response)
+            # Function calls in this response were already processed immediately when arguments were complete
+            logger.debug(f"Handling standalone response: {evt.response.id}")
 
     async def _handle_evt_text_delta(self, evt):
         if evt.delta:
@@ -655,6 +674,45 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         if evt.delta:
             await self.push_frame(LLMTextFrame(evt.delta))
             await self.push_frame(TTSTextFrame(evt.delta))
+
+    async def _handle_evt_function_call_arguments_done(self, evt):
+        """Handle completion of function call arguments.
+
+        Args:
+            evt: The response.function_call_arguments.done event.
+        """
+        # Process the function call immediately when arguments are complete
+        # This is needed because function calls might not trigger response.done
+        try:
+            # Parse the arguments
+            args = json.loads(evt.arguments)
+
+            # Get the function call item we tracked earlier
+            function_call_item = self._pending_function_calls.get(evt.call_id)
+            if function_call_item:
+                # Remove from pending calls FIRST to prevent duplicate processing
+                del self._pending_function_calls[evt.call_id]
+
+                # Create the function call and process it
+                function_calls = [
+                    FunctionCallFromLLM(
+                        context=self._context,
+                        tool_call_id=evt.call_id,
+                        function_name=function_call_item.name,
+                        arguments=args,
+                    )
+                ]
+
+                await self.run_function_calls(function_calls)
+                logger.debug(f"Processed function call: {function_call_item.name}")
+            else:
+                logger.warning(f"No tracked function call found for call_id: {evt.call_id}")
+                logger.warning(
+                    f"Available pending calls: {list(self._pending_function_calls.keys())}"
+                )
+
+        except Exception as e:
+            logger.error(f"Failed to process function call arguments: {e}")
 
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
@@ -690,28 +748,6 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_error(self, evt):
         # Errors are fatal to this connection. Send an ErrorFrame.
         await self.push_error(ErrorFrame(error=f"Error: {evt}", fatal=True))
-
-    async def _handle_assistant_output(self, output):
-        # We haven't seen intermixed audio and function_call items in the same response. But let's
-        # try to write logic that handles that, if it does happen.
-        # Also, the assistant output is pushed as LLMTextFrame and TTSTextFrame to be handled by
-        # the assistant context aggregator.
-        function_calls = [item for item in output if item.type == "function_call"]
-        await self._handle_function_call_items(function_calls)
-
-    async def _handle_function_call_items(self, items):
-        function_calls = []
-        for item in items:
-            args = json.loads(item.arguments)
-            function_calls.append(
-                FunctionCallFromLLM(
-                    context=self._context,
-                    tool_call_id=item.call_id,
-                    function_name=item.name,
-                    arguments=args,
-                )
-            )
-        await self.run_function_calls(function_calls)
 
     #
     # state and client events for the current conversation
@@ -756,7 +792,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         await self.start_ttfb_metrics()
         await self.send_client_event(
             events.ResponseCreateEvent(
-                response=events.ResponseProperties(modalities=self._get_enabled_modalities())
+                response=events.ResponseProperties(output_modalities=self._get_enabled_modalities())
             )
         )
 
