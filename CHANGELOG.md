@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `NoisereduceFilter` is now deprecated and will be removed in a future
+  version. Use other audio filters like `KrispFilter` or `AICFilter`.
+
 - Deprecated `OpenAIRealtimeBetaLLMService` and `AzureRealtimeBetaLLMService`.
   Use `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService`, respectively.
   Each service will be removed in an upcoming version, 1.0.0.
