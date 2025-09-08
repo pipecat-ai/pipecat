@@ -898,7 +898,7 @@ class OjinPersonaService(FrameProcessor):
             elif message.payload.code == "FAILED_CREATE_MODEL":
                 is_fatal = True
                 logger.error("Ojin couldn't create a model from supplied persona ID.")
-            elif message.payload.code == "INVALID_PERSONA_ID":
+            elif message.payload.code == "INVALID_PERSONA_ID_CONFIGURATION":
                 is_fatal = True
                 logger.error("Ojin couldn't load the configuration from the supplied persona ID.")
 
