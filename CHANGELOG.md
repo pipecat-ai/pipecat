@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
   access to OpenAI Realtime.
 
+### Fixed
+
+- Add additional fixups to Mistral context messages to ensure they meet
+  Mistral-specific requirements, avoiding Mistral "invalid request" errors.
+
 ### Deprecated
 
 - `NoisereduceFilter` is now deprecated and will be removed in a future
