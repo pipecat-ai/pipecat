@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     LLMFullResponseStartFrame,
     LLMTextFrame,
 )
+from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -84,29 +85,79 @@ class StrandsAgentsProcessor(FrameProcessor):
             text: The user input text to process through the agent or graph.
         """
         logger.debug(f"Invoking Strands agent with: {text}")
-        await self.push_frame(LLMFullResponseStartFrame())
         try:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
+            ttfb_tracking = True
+
             if self.graph:
                 # Graph does not stream; await full result then emit assistant text
                 graph_result = await self.graph.invoke_async(text)
+                if ttfb_tracking:
+                    await self.stop_ttfb_metrics()
+                    ttfb_tracking = False
                 try:
                     node_result = graph_result.results[self.graph_exit_node]
+                    logger.debug(f"Node result: {node_result}")
                     for agent_result in node_result.get_agent_results():
+                        # Push to TTS service
                         message = getattr(agent_result, "message", None)
                         if isinstance(message, dict) and "content" in message:
                             for block in message["content"]:
                                 if isinstance(block, dict) and "text" in block:
                                     await self.push_frame(LLMTextFrame(str(block["text"])))
+                        # Update usage metrics
+                        await self._report_usage_metrics(
+                            agent_result.metrics.accumulated_usage.get('inputTokens', 0), 
+                            agent_result.metrics.accumulated_usage.get('outputTokens', 0), 
+                            agent_result.metrics.accumulated_usage.get('totalTokens', 0)
+                        )
                 except Exception as parse_err:
                     logger.warning(f"Failed to extract messages from GraphResult: {parse_err}")
             else:
                 # Agent supports streaming events via async iterator
                 async for event in self.agent.stream_async(text):
+                    # Push to TTS service
                     if isinstance(event, dict) and "data" in event:
                         await self.push_frame(LLMTextFrame(str(event["data"])))
+                        if ttfb_tracking:
+                            await self.stop_ttfb_metrics()
+                            ttfb_tracking = False
+                    
+                    # Update usage metrics
+                    if isinstance(event, dict) and "event" in event and "metadata" in event['event']:
+                        if 'usage' in event['event']['metadata']:
+                            usage = event['event']['metadata']['usage']
+                            await self._report_usage_metrics(usage.get('inputTokens', 0), usage.get('outputTokens', 0), usage.get('totalTokens', 0))
         except GeneratorExit:
             logger.warning(f"{self} generator was closed prematurely")
         except Exception as e:
             logger.exception(f"{self} an unknown error occurred: {e}")
         finally:
+            if ttfb_tracking:
+                await self.stop_ttfb_metrics()
+                ttfb_tracking = False
+            await self.stop_processing_metrics()
             await self.push_frame(LLMFullResponseEndFrame())
+    
+    def can_generate_metrics(self) -> bool:
+        """Check if this service can generate performance metrics.
+
+        Returns:
+            True as this service supports metrics generation.
+        """
+        return True
+
+    async def _report_usage_metrics(
+        self,
+        prompt_tokens: int,
+        completion_tokens: int,
+        total_tokens: int
+    ):
+        tokens = LLMTokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens
+        )
+        await self.start_llm_usage_metrics(tokens)
