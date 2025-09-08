@@ -12,11 +12,11 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantContextAggregator,
     LLMUserContextAggregator,
 )
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frameworks.strands_agents import StrandsAgentsProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -58,16 +58,18 @@ transport_params = {
     ),
 }
 
+
 def build_agent(model_id: str, max_tokens: int):
     """Create and configure a Strands agent for NAB customer service coaching.
-    
+
     Args:
         model_id: The AWS Bedrock model ID to use
         max_tokens: Maximum tokens for the model
-        
+
     Returns:
         Configured Strands Agent
     """
+
     @tool
     def check_weather(location: str) -> str:
         if location.lower() == "san francisco":
@@ -76,14 +78,14 @@ def build_agent(model_id: str, max_tokens: int):
             return "The weather in Sydney is cloudy and 20 degrees."
         else:
             return "I'm not sure about the weather in that location."
-    
+
     agent = Agent(
         model=BedrockModel(
             model_id=model_id,
             max_tokens=max_tokens,
         ),
         tools=[check_weather],
-        system_prompt="You are a helpful assistant that can check the weather in a given location."
+        system_prompt="You are a helpful assistant that can check the weather in a given location.",
     )
 
     return agent
@@ -102,10 +104,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create Strands agent processor
     try:
-        agent = build_agent(
-            model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0", 
-            max_tokens=8000
-        )
+        agent = build_agent(model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0", max_tokens=8000)
         llm = StrandsAgentsProcessor(agent=agent)
         logger.info("Successfully created Strands agent for NAB customer service coaching")
     except Exception as e:
@@ -120,15 +119,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     tma_in = LLMUserContextAggregator(context=context)
     tma_out = LLMAssistantContextAggregator(context=context)
 
-    pipeline = Pipeline([
-        transport.input(),      # Transport user input
-        stt,                   # Speech-to-text
-        tma_in,               # User context aggregator
-        llm,                  # Strands Agents processor
-        tts,                  # Text-to-speech
-        transport.output(),   # Transport bot output
-        tma_out              # Assistant context aggregator
-    ])
+    pipeline = Pipeline(
+        [
+            transport.input(),  # Transport user input
+            stt,  # Speech-to-text
+            tma_in,  # User context aggregator
+            llm,  # Strands Agents processor
+            tts,  # Text-to-speech
+            transport.output(),  # Transport bot output
+            tma_out,  # Assistant context aggregator
+        ]
+    )
 
     task = PipelineTask(
         pipeline,
