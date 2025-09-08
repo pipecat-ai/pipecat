@@ -1577,6 +1577,16 @@ class UserImageRawFrame(InputImageRawFrame):
         pts = format_pts(self.pts)
         return f"{self.name}(pts: {pts}, user: {self.user_id}, source: {self.transport_source}, size: {self.size}, format: {self.format}, text: {self.text}, append_to_context: {self.append_to_context})"
 
+    
+@dataclass
+class ImageContextRawFrame(InputImageRawFrame):
+    """Copy of UserImageRawFrame but for our special context"""
+    user_id: str
+    
+    def __str__(self):
+        pts = format_pts(self.pts)
+        return f"{self.name}(pts: {pts}, user: {self.user_id}, size: {self.size}, format: {self.format})"
+
 
 @dataclass
 class AssistantImageRawFrame(OutputImageRawFrame):

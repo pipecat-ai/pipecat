@@ -124,9 +124,9 @@ class TransportParams(BaseModel):
     camera_in_enabled: bool = False
     camera_out_enabled: bool = False
     camera_out_is_live: bool = False
-    camera_out_width: int = 1024
-    camera_out_height: int = 768
-    camera_out_bitrate: int = 800000
+    camera_out_width: int = 1440
+    camera_out_height: int = 1080
+    camera_out_bitrate: int = 6000000
     camera_out_framerate: int = 30
     camera_out_color_format: str = "RGB"
     audio_out_enabled: bool = False

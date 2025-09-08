@@ -328,7 +328,7 @@ class LLMService(AIService):
         handler: Any,
         start_callback=None,
         *,
-        cancel_on_interruption: bool = True,
+        cancel_on_interruption: bool = False,
     ):
         """Register a function handler for LLM function calls.
 

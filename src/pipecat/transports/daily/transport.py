@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
+    ImageContextRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transcriptions.language import Language
@@ -1829,9 +1830,11 @@ class DailyInputTransport(BaseInputTransport):
         # Some times we render frames because of a request.
         request_frame = None
 
+        render_frame_timer = False
         if framerate > 0:
             next_time = prev_time + 1 / framerate
-            render_frame = (next_time - curr_time) < 0.1
+            # print("should new frame")
+            render_frame_timer = (next_time - curr_time) < 0.1
 
         if self._video_renderers[participant_id][video_source]["render_next_frame"]:
             request_frame = self._video_renderers[participant_id][video_source][
@@ -1850,6 +1853,13 @@ class DailyInputTransport(BaseInputTransport):
                 request=request_frame,
             )
             frame.transport_source = video_source
+            await self.push_video_frame(frame)
+            self._video_renderers[participant_id][video_source]["timestamp"] = curr_time
+
+        if render_frame_timer:
+            frame = ImageContextRawFrame(
+                user_id=participant_id, image=video_frame.buffer, size=(video_frame.width, video_frame.height), format=video_frame.color_format
+            )
             await self.push_video_frame(frame)
             self._video_renderers[participant_id][video_source]["timestamp"] = curr_time
 
