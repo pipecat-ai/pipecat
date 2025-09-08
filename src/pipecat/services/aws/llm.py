@@ -576,7 +576,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                 if isinstance(msg["content"], list):
                     for item in msg["content"]:
                         if item.get("image"):
-                            item["source"]["bytes"] = "..."
+                            item["image"]["source"]["bytes"] = "..."
             msgs.append(msg)
         return msgs
 
@@ -1018,7 +1018,10 @@ class AWSBedrockLLMService(LLMService):
             if self._settings["latency"] in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings["latency"]}
 
-            logger.debug(f"Calling AWS Bedrock model with: {request_params}")
+            # Log request params with messages redacted for logging
+            log_params = dict(request_params)
+            log_params["messages"] = context.get_messages_for_logging()
+            logger.debug(f"Calling AWS Bedrock model with: {log_params}")
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
