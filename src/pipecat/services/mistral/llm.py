@@ -84,9 +84,11 @@ class MistralLLMService(OpenAILLMService):
 
         # Ensure all tool responses are followed by an assistant message
         assistant_insert_indices = []
-        for i, msg in enumerate(fixed_messages[:-1]):
-            if msg.get("role") == "tool" and not fixed_messages[i + 1].get("role") == "assistant":
-                assistant_insert_indices.append(i + 1)
+        for i, msg in enumerate(fixed_messages):
+            if msg.get("role") == "tool":
+                # If this is the last message or the next message is not assistant
+                if i == len(fixed_messages) - 1 or fixed_messages[i + 1].get("role") != "assistant":
+                    assistant_insert_indices.append(i + 1)
         for idx in reversed(assistant_insert_indices):
             fixed_messages.insert(idx, {"role": "assistant", "content": " "})
 
