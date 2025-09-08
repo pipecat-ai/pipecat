@@ -107,8 +107,6 @@ class MistralLLMService(OpenAILLMService):
         if last_message.get("role") == "assistant" and "prefix" not in last_message:
             last_message["prefix"] = True
 
-        print(f"Fixed messages for Mistral: {fixed_messages}")
-
         return fixed_messages
 
     async def run_function_calls(self, function_calls: Sequence[FunctionCallFromLLM]):
