@@ -9,13 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added video streaming support to `LiveKitTransport`.
+
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
   access to OpenAI Realtime.
-
-### Fixed
-
-- Add additional fixups to Mistral context messages to ensure they meet
-  Mistral-specific requirements, avoiding Mistral "invalid request" errors.
 
 ### Deprecated
 
@@ -25,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecated `OpenAIRealtimeBetaLLMService` and `AzureRealtimeBetaLLMService`.
   Use `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService`, respectively.
   Each service will be removed in an upcoming version, 1.0.0.
+
+### Fixed
+
+- Fixed a `LiveKitTransport` issue where RTVI messages were not properly
+  encoded.
+
+- Add additional fixups to Mistral context messages to ensure they meet
+  Mistral-specific requirements, avoiding Mistral "invalid request" errors.
 
 ## [0.0.84] - 2025-09-05
 
