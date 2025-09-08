@@ -388,7 +388,6 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                     new_content.append({"text": text_content})
                 # handle image_url -> image conversion
                 if item["type"] == "image_url":
-                    print(f"[pk] Converting image_url item: {item}")
                     new_item = {
                         "image": {
                             "format": "jpeg",
