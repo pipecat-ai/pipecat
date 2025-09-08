@@ -42,7 +42,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
-    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -495,12 +494,6 @@ class AnthropicLLMService(LLMService):
             context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             context = AnthropicLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            # This is only useful in very simple pipelines because it creates
-            # a new context. Generally we want a context manager to catch
-            # UserImageRawFrames coming through the pipeline and add them
-            # to the context.
-            context = AnthropicLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
@@ -625,22 +618,6 @@ class AnthropicLLMContext(OpenAILLMContext):
         self = cls(messages=messages)
         self._restructure_from_openai_messages()
         return self
-
-    @classmethod
-    def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
-        """Create context from a vision image frame.
-
-        Args:
-            frame: The vision image frame to process.
-
-        Returns:
-            New Anthropic context with the image message.
-        """
-        context = cls()
-        context.add_image_frame_message(
-            format=frame.format, size=frame.size, image=frame.image, text=frame.text
-        )
-        return context
 
     def set_messages(self, messages: List):
         """Set the messages list and reset cache tracking.

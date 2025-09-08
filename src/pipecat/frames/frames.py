@@ -1254,23 +1254,6 @@ class UserImageRawFrame(InputImageRawFrame):
 
 
 @dataclass
-class VisionImageRawFrame(InputImageRawFrame):
-    """Image frame for vision/image analysis with associated text prompt.
-
-    An image with an associated text to ask for a description of it.
-
-    Parameters:
-        text: Optional text prompt describing what to analyze in the image.
-    """
-
-    text: Optional[str] = None
-
-    def __str__(self):
-        pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
-
-
-@dataclass
 class InputDTMFFrame(DTMFFrame, SystemFrame):
     """DTMF keypress input frame from transport."""
 

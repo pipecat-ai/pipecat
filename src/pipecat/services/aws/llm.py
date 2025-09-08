@@ -39,7 +39,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
-    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -179,22 +178,6 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         self = cls(messages=messages)
         self._restructure_from_openai_messages()
         return self
-
-    @classmethod
-    def from_image_frame(cls, frame: VisionImageRawFrame) -> "AWSBedrockLLMContext":
-        """Create AWS Bedrock context from vision image frame.
-
-        Args:
-            frame: The vision image frame to convert.
-
-        Returns:
-            New AWS Bedrock LLM context instance.
-        """
-        context = cls()
-        context.add_image_frame_message(
-            format=frame.format, size=frame.size, image=frame.image, text=frame.text
-        )
-        return context
 
     def set_messages(self, messages: List):
         """Set the messages list and restructure for Bedrock format.
@@ -399,9 +382,33 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         elif isinstance(content, list):
             new_content = []
             for item in content:
+                # fix empty text
                 if item.get("type", "") == "text":
                     text_content = item["text"] if item["text"] != "" else "(empty)"
                     new_content.append({"text": text_content})
+                # handle image_url -> image conversion
+                if item["type"] == "image_url":
+                    new_item = {
+                        "image": {
+                            "format": "jpeg",
+                            "source": {
+                                "bytes": base64.b64decode(item["image_url"]["url"].split(",")[1])
+                            },
+                        }
+                    }
+                    new_content.append(new_item)
+            # In the case where there's a single image in the list (like what
+            # would result from a UserImageRawFrame), ensure that the image
+            # comes before text
+            image_indices = [i for i, item in enumerate(new_content) if "image" in item]
+            text_indices = [i for i, item in enumerate(new_content) if "text" in item]
+            if len(image_indices) == 1 and text_indices:
+                img_idx = image_indices[0]
+                first_txt_idx = text_indices[0]
+                if img_idx > first_txt_idx:
+                    # Move image before the first text
+                    image_item = new_content.pop(img_idx)
+                new_content.insert(first_txt_idx, image_item)
             return {"role": message["role"], "content": new_content}
 
         return message
@@ -569,7 +576,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                 if isinstance(msg["content"], list):
                     for item in msg["content"]:
                         if item.get("image"):
-                            item["source"]["bytes"] = "..."
+                            item["image"]["source"]["bytes"] = "..."
             msgs.append(msg)
         return msgs
 
@@ -967,7 +974,9 @@ class AWSBedrockLLMService(LLMService):
             }
 
             # Add system message
-            request_params["system"] = context.system
+            system = getattr(context, "system", None)
+            if system:
+                request_params["system"] = system
 
             # Check if messages contain tool use or tool result content blocks
             has_tool_content = False
@@ -1009,7 +1018,10 @@ class AWSBedrockLLMService(LLMService):
             if self._settings["latency"] in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings["latency"]}
 
-            logger.debug(f"Calling AWS Bedrock model with: {request_params}")
+            # Log request params with messages redacted for logging
+            log_params = dict(request_params)
+            log_params["messages"] = context.get_messages_for_logging()
+            logger.debug(f"Calling AWS Bedrock model with: {log_params}")
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
@@ -1120,12 +1132,6 @@ class AWSBedrockLLMService(LLMService):
             raise NotImplementedError("Universal LLMContext is not yet supported for AWS Bedrock.")
         elif isinstance(frame, LLMMessagesFrame):
             context = AWSBedrockLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            # This is only useful in very simple pipelines because it creates
-            # a new context. Generally we want a context manager to catch
-            # UserImageRawFrames coming through the pipeline and add them
-            # to the context.
-            context = AWSBedrockLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:

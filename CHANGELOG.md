@@ -14,7 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
   access to OpenAI Realtime.
 
+### Removed
+
+- Remove `VisionImageRawFrame` in favor of context frames (`LLMContextFrame` or
+  `OpenAILLMContextFrame`).
+
 ### Deprecated
+
+- Deprecate `VisionImageFrameAggregator` because `VisionImageRawFrame` has been
+  removed. See the `12*` examples for the new recommended replacement pattern.
 
 - `NoisereduceFilter` is now deprecated and will be removed in a future
   version. Use other audio filters like `KrispFilter` or `AICFilter`.
