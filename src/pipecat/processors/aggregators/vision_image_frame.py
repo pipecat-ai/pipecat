@@ -21,7 +21,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 class VisionImageFrameAggregator(FrameProcessor):
     """Aggregates consecutive text and image frames into vision frames.
 
-    .. deprecated:: 0.84.0
+    .. deprecated:: 0.0.85
         VisionImageRawFrame has been removed in favor of context frames
         (LLMContextFrame or OpenAILLMContextFrame), so this aggregator is not
         needed anymore. See the 12* examples for the new recommended pattern.
