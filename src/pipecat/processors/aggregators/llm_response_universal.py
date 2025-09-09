@@ -13,7 +13,6 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 
 import asyncio
 import json
-from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from loguru import logger
@@ -23,7 +22,6 @@ from pipecat.audio.interruptions.base_interruption_strategy import BaseInterrupt
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -37,7 +35,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
-    InterruptionFrame,
+    InterruptionTaskFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -311,9 +309,9 @@ class LLMUserAggregator(LLMContextAggregator):
 
                 if should_interrupt:
                     logger.debug(
-                        "Interruption conditions met - pushing BotInterruptionFrame and aggregation"
+                        "Interruption conditions met - pushing InterruptionTaskFrame and aggregation"
                     )
-                    await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+                    await self.push_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
                     await self._process_aggregation()
                 else:
                     logger.debug("Interruption conditions not met - not pushing aggregation")

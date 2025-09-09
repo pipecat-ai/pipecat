@@ -287,9 +287,8 @@ class BaseOutputTransport(FrameProcessor):
         await super().process_frame(frame, direction)
 
         #
-        # System frames (like StartInterruptionFrame) are pushed
-        # immediately. Other frames require order so they are put in the sink
-        # queue.
+        # System frames (like InterruptionFrame) are pushed immediately. Other
+        # frames require order so they are put in the sink queue.
         #
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be

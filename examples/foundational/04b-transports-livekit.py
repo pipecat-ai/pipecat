@@ -14,7 +14,7 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
+    InterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -115,7 +115,7 @@ async def main():
 
         await task.queue_frames(
             [
-                BotInterruptionFrame(),
+                InterruptionFrame(),
                 UserStartedSpeakingFrame(),
                 TranscriptionFrame(
                     user_id=participant_id,
