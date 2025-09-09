@@ -14,6 +14,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -23,8 +24,8 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.aws_nova_sonic import AWSNovaSonicLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 # Load environment variables
 load_dotenv(override=True)
@@ -158,7 +159,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
         # HACK: for now, we need this special way of triggering the first assistant response in AWS
         # Nova Sonic. Note that this trigger requires a special corresponding bit of text in the
         # system instruction. In the future, simply queueing the context frame should be sufficient.

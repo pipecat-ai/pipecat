@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -20,9 +21,10 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.heygen.api import AvatarQuality, NewSessionRequest
 from pipecat.services.heygen.video import HeyGenVideoService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -37,6 +39,7 @@ transport_params = {
         video_out_is_live=True,
         video_out_width=1280,
         video_out_height=720,
+        video_out_bitrate=2_000_000,  # 2MBps
         vad_analyzer=SileroVADAnalyzer(),
     ),
     "webrtc": lambda: TransportParams(
@@ -63,7 +66,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
-        heyGen = HeyGenVideoService(api_key=os.getenv("HEYGEN_API_KEY"), session=session)
+        heyGen = HeyGenVideoService(
+            api_key=os.getenv("HEYGEN_API_KEY"),
+            session=session,
+            session_request=NewSessionRequest(
+                avatar_id="Shawn_Therapist_public", version="v2", quality=AvatarQuality.high
+            ),
+        )
 
         messages = [
             {
@@ -100,6 +109,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         @transport.event_handler("on_client_connected")
         async def on_client_connected(transport, client):
             logger.info(f"Client connected")
+            # Updating publishing settings to enable adaptive bitrate
+            if isinstance(transport, DailyTransport):
+                await transport.update_publishing(
+                    publishing_settings={
+                        "camera": {
+                            "sendSettings": {
+                                "allowAdaptiveLayers": True,
+                            }
+                        }
+                    }
+                )
+
             # Kick off the conversation.
             messages.append(
                 {
@@ -107,7 +128,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     "content": "Start by saying 'Hello' and then a short greeting.",
                 }
             )
-            await task.queue_frames([context_aggregator.user().get_context_frame()])
+            await task.queue_frames([LLMRunFrame()])
 
         @transport.event_handler("on_client_disconnected")
         async def on_client_disconnected(transport, client):

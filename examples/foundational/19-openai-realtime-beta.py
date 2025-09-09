@@ -14,7 +14,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TranscriptionMessage
+from pipecat.frames.frames import LLMRunFrame, TranscriptionMessage
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -31,8 +31,8 @@ from pipecat.services.openai_realtime_beta import (
     SessionProperties,
 )
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
@@ -137,7 +137,7 @@ You have access to the following tools:
 - get_current_weather: Get the current weather for a given location.
 - get_restaurant_recommendation: Get a restaurant recommendation for a given location.
 
-Remember, your responses should be short. Just one or two sentences, usually.""",
+Remember, your responses should be short. Just one or two sentences, usually. Respond in English.""",
     )
 
     llm = OpenAIRealtimeBetaLLMService(
@@ -158,16 +158,6 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     # openai WebSocket API can understand.
     context = OpenAILLMContext(
         [{"role": "user", "content": "Say hello!"}],
-        # [{"role": "user", "content": [{"type": "text", "text": "Say hello!"}]}],
-        #     [
-        #         {
-        #             "role": "user",
-        #             "content": [
-        #                 {"type": "text", "text": "Say"},
-        #                 {"type": "text", "text": "yo what's up!"},
-        #             ],
-        #         }
-        #     ],
         tools,
     )
 
@@ -198,7 +188,7 @@ Remember, your responses should be short. Just one or two sentences, usually."""
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

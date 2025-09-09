@@ -18,9 +18,9 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMRunFrame,
     StartFrame,
     StartInterruptionFrame,
-    StopInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -48,8 +48,8 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
@@ -233,7 +233,6 @@ class TurnDetectionLLM(Pipeline):
             return (
                 isinstance(frame, OpenAILLMContextFrame)
                 or isinstance(frame, StartInterruptionFrame)
-                or isinstance(frame, StopInterruptionFrame)
                 or isinstance(frame, FunctionCallInProgressFrame)
                 or isinstance(frame, FunctionCallResultFrame)
             )
@@ -367,7 +366,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_app_message")
     async def on_app_message(transport, message):

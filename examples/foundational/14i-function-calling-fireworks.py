@@ -13,7 +13,7 @@ from loguru import logger
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import LLMRunFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -25,8 +25,8 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.fireworks.llm import FireworksLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
@@ -75,9 +75,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("get_current_weather", fetch_weather_from_api)
 
-    @llm.event_handler("on_function_calls_started")
-    async def on_function_calls_started(service, function_calls):
-        await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
+    # Disabling for now, as it ends up tripping up the model in this example
+    # ("let me check on that" ends up at the end of the context, which the
+    # model erroneously treats as a nudge to call the tool again; the
+    # ensuing inference then yields wonky results).
+    # @llm.event_handler("on_function_calls_started")
+    # async def on_function_calls_started(service, function_calls):
+    #     await tts.queue_frame(TTSSpeakFrame("Let me check on that."))
 
     weather_function = FunctionSchema(
         name="get_current_weather",
@@ -99,7 +103,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+            "content": "You are a helpful LLM in a WebRTC call. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way. Start by saying hello.",
         },
     ]
 
@@ -131,7 +135,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):

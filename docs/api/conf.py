@@ -47,7 +47,6 @@ autodoc_default_options = {
 
 # Mock imports for optional dependencies
 autodoc_mock_imports = [
-    # Krisp - has build issues on some platforms
     "riva",
     "livekit",
     "pyht",  # Base PlayHT package
@@ -82,6 +81,7 @@ autodoc_mock_imports = [
     "simli",
     "soundfile",
     "soniox",
+    # Krisp - has build issues on some platforms
     "pipecat_ai_krisp",
     "krisp",
     # System-specific GUI libraries

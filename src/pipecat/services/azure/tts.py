@@ -68,6 +68,16 @@ class AzureBaseTTSService(TTSService):
     construction, voice configuration, and parameter management.
     """
 
+    # Define SSML escape mappings based on SSML reserved characters
+    # See - https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-structure
+    SSML_ESCAPE_CHARS = {
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&apos;",
+    }
+
     class InputParams(BaseModel):
         """Input parameters for Azure TTS voice configuration.
 
@@ -154,6 +164,10 @@ class AzureBaseTTSService(TTSService):
 
     def _construct_ssml(self, text: str) -> str:
         language = self._settings["language"]
+
+        # Escape special characters
+        escaped_text = self._escape_text(text)
+
         ssml = (
             f"<speak version='1.0' xml:lang='{language}' "
             "xmlns='http://www.w3.org/2001/10/synthesis' "
@@ -183,7 +197,7 @@ class AzureBaseTTSService(TTSService):
         if self._settings["emphasis"]:
             ssml += f"<emphasis level='{self._settings['emphasis']}'>"
 
-        ssml += text
+        ssml += escaped_text
 
         if self._settings["emphasis"]:
             ssml += "</emphasis>"
@@ -196,6 +210,27 @@ class AzureBaseTTSService(TTSService):
         ssml += "</voice></speak>"
 
         return ssml
+
+    def _escape_text(self, text: str) -> str:
+        """Escapes XML/SSML reserved characters according to Microsoft documentation.
+
+        This method escapes the following characters:
+        - & becomes &amp;
+        - < becomes &lt;
+        - > becomes &gt;
+        - " becomes &quot;
+        - ' becomes &apos;
+
+        Args:
+            text: The text to escape.
+
+        Returns:
+            The escaped text.
+        """
+        escaped_text = text
+        for char, escape_code in AzureBaseTTSService.SSML_ESCAPE_CHARS.items():
+            escaped_text = escaped_text.replace(char, escape_code)
+        return escaped_text
 
 
 class AzureTTSService(AzureBaseTTSService):

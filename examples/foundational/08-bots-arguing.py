@@ -17,7 +17,7 @@ from pipecat.runner.daily import configure
 from pipecat.services.azure import AzureLLMService, AzureTTSService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
-from pipecat.transports.services.daily import DailyTransport
+from pipecat.transports.daily.transport import DailyTransport
 
 load_dotenv(override=True)
 

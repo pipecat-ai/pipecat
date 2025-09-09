@@ -182,7 +182,7 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
     try:
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
-        from pipecat.transports.network.webrtc_connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
@@ -402,6 +402,7 @@ async def _run_daily_direct():
 
         # Direct connections have no request body, so use empty dict
         runner_args = DailyRunnerArguments(room_url=room_url, token=token)
+        runner_args.handle_sigint = True
 
         # Get the bot module and run it directly
         bot_module = _get_bot_module()

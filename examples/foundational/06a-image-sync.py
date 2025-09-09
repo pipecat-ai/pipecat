@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     Frame,
+    LLMRunFrame,
     OutputImageRawFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
@@ -28,7 +29,7 @@ from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
@@ -65,7 +66,7 @@ class ImageSyncAggregator(FrameProcessor):
                 )
             )
 
-        await self.push_frame(frame)
+        await self.push_frame(frame, direction)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -144,7 +145,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
