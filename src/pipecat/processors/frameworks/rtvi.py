@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -72,11 +73,9 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
-from pipecat.services.openai.llm import OpenAIContextAggregatorPair
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 from pipecat.utils.string import match_endofsentence
 
 RTVI_PROTOCOL_VERSION = "1.0.0"
@@ -93,10 +92,9 @@ class RTVIServiceOption(BaseModel):
     Defines a configurable option that can be set for an RTVI service,
     including its name, type, and handler function.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -112,10 +110,9 @@ class RTVIService(BaseModel):
     Represents a service that can be configured and used within the RTVI protocol,
     containing a name and list of configurable options.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     name: str
@@ -135,10 +132,9 @@ class RTVIActionArgumentData(BaseModel):
 
     Contains the name and value of an argument passed to an RTVI action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -150,10 +146,9 @@ class RTVIActionArgument(BaseModel):
 
     Specifies the name and expected type of an argument for an RTVI action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -166,10 +161,9 @@ class RTVIAction(BaseModel):
     Represents an action that can be executed within the RTVI protocol,
     including its service, name, arguments, and handler function.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Actions have been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     service: str
@@ -194,10 +188,9 @@ class RTVIServiceOptionConfig(BaseModel):
 
     Contains the name and value to set for a specific service option.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -209,10 +202,9 @@ class RTVIServiceConfig(BaseModel):
 
     Contains the service name and list of option configurations to apply.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     service: str
@@ -224,10 +216,9 @@ class RTVIConfig(BaseModel):
 
     Contains the full configuration for all RTVI services.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     config: List[RTVIServiceConfig]
@@ -244,10 +235,9 @@ class RTVIUpdateConfig(BaseModel):
 
     Contains new configuration settings and whether to interrupt the bot.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     config: List[RTVIServiceConfig]
@@ -259,10 +249,9 @@ class RTVIActionRunArgument(BaseModel):
 
     Contains the name and value of an argument to pass to an action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     name: str
@@ -274,10 +263,9 @@ class RTVIActionRun(BaseModel):
 
     Contains the service, action name, and optional arguments.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+       Actions have been removed as part of the RTVI protocol 1.0.0.
+       Use custom client and server messages instead.
     """
 
     service: str
@@ -293,10 +281,9 @@ class RTVIActionFrame(DataFrame):
         rtvi_action_run: The action to execute.
         message_id: Optional message ID for response correlation.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     rtvi_action_run: RTVIActionRun
@@ -431,10 +418,9 @@ class RTVIDescribeConfigData(BaseModel):
 
     Contains the list of available services and their options.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     config: List[RTVIService]
@@ -445,10 +431,9 @@ class RTVIDescribeConfig(BaseModel):
 
     Sent in response to a describe-config request.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -462,10 +447,9 @@ class RTVIDescribeActionsData(BaseModel):
 
     Contains the list of available actions that can be executed.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     actions: List[RTVIAction]
@@ -476,10 +460,9 @@ class RTVIDescribeActions(BaseModel):
 
     Sent in response to a describe-actions request.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -493,10 +476,9 @@ class RTVIConfigResponse(BaseModel):
 
     Sent in response to a get-config request.
 
-    DEPRECATED.
-
-    Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Pipeline Configuration has been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -510,10 +492,9 @@ class RTVIActionResponseData(BaseModel):
 
     Contains the result of executing an action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     result: ActionResult
@@ -524,10 +505,9 @@ class RTVIActionResponse(BaseModel):
 
     Sent after successfully executing an action.
 
-    DEPRECATED.
-
-    Actions have been removed as part of the RTVI protocol 1.0.0.
-    Use custom client and server messages instead.
+    .. deprecated:: 0.0.75
+        Actions have been removed as part of the RTVI protocol 1.0.0.
+        Use custom client and server messages instead.
     """
 
     label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
@@ -937,7 +917,10 @@ class RTVIObserver(BaseObserver):
             and self._params.user_transcription_enabled
         ):
             await self._handle_user_transcriptions(frame)
-        elif isinstance(frame, OpenAILLMContextFrame) and self._params.user_llm_enabled:
+        elif (
+            isinstance(frame, (OpenAILLMContextFrame, LLMContextFrame))
+            and self._params.user_llm_enabled
+        ):
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
             await self.push_transport_message_urgent(RTVIBotLLMStartedMessage())
@@ -1038,16 +1021,20 @@ class RTVIObserver(BaseObserver):
         if message:
             await self.push_transport_message_urgent(message)
 
-    async def _handle_context(self, frame: OpenAILLMContextFrame):
+    async def _handle_context(self, frame: OpenAILLMContextFrame | LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""
         try:
-            messages = frame.context.messages
+            if isinstance(frame, OpenAILLMContextFrame):
+                messages = frame.context.messages
+            else:
+                messages = frame.context.get_messages()
             if not messages:
                 return
 
             message = messages[-1]
 
             # Handle Google LLM format (protobuf objects with attributes)
+            # Note: not possible if frame is a universal LLMContextFrame
             if hasattr(message, "role") and message.role == "user" and hasattr(message, "parts"):
                 text = "".join(part.text for part in message.parts if hasattr(part, "text"))
                 if text:
@@ -1137,7 +1124,9 @@ class RTVIProcessor(FrameProcessor):
         self._bot_ready = False
         self._client_ready = False
         self._client_ready_id = ""
-        self._client_version = []
+        # Default to 0.3.0 which is the last version before actually having a
+        # "client-version".
+        self._client_version = [0, 3, 0]
         self._errors_enabled = True
 
         self._registered_actions: Dict[str, RTVIAction] = {}
@@ -1278,9 +1267,6 @@ class RTVIProcessor(FrameProcessor):
             function_name: Name of the function being called.
             llm: The LLM processor making the call.
             context: The LLM context.
-
-        Note:
-            This method is deprecated. Use handle_function_call() instead.
         """
         import warnings
 
@@ -1337,10 +1323,10 @@ class RTVIProcessor(FrameProcessor):
     async def _start(self, frame: StartFrame):
         """Start the RTVI processor tasks."""
         if not self._action_task:
-            self._action_queue = WatchdogQueue(self.task_manager)
+            self._action_queue = asyncio.Queue()
             self._action_task = self.create_task(self._action_task_handler())
         if not self._message_task:
-            self._message_queue = WatchdogQueue(self.task_manager)
+            self._message_queue = asyncio.Queue()
             self._message_task = self.create_task(self._message_task_handler())
         await self._call_event_handler("on_bot_started")
 
@@ -1355,12 +1341,10 @@ class RTVIProcessor(FrameProcessor):
     async def _cancel_tasks(self):
         """Cancel all running tasks."""
         if self._action_task:
-            self._action_queue.cancel()
             await self.cancel_task(self._action_task)
             self._action_task = None
 
         if self._message_task:
-            self._message_queue.cancel()
             await self.cancel_task(self._message_task)
             self._message_task = None
 
@@ -1433,7 +1417,7 @@ class RTVIProcessor(FrameProcessor):
                     await self._handle_function_call_result(data)
                 case "append-to-context":
                     data = RTVIAppendToContextData.model_validate(message.data)
-                    await self._handle_update_context(data, message.id)
+                    await self._handle_update_context(data)
                 case "raw-audio" | "raw-audio-batch":
                     await self._handle_audio_buffer(message.data)
 
@@ -1449,16 +1433,13 @@ class RTVIProcessor(FrameProcessor):
 
     async def _handle_client_ready(self, request_id: str, data: RTVIClientReadyData | None):
         """Handle the client-ready message from the client."""
-        version = data.version if data else "unknown"
+        version = data.version if data else None
         logger.debug(f"Received client-ready: version {version}")
-        if version == "unknown":
-            self._client_version = [0, 3, 0]  # Default to 0.3.0 if unknown
-        else:
+        if version:
             try:
                 self._client_version = [int(v) for v in version.split(".")]
             except ValueError:
                 logger.warning(f"Invalid client version format: {version}")
-                self._client_version = [0, 3, 0]
         about = data.about if data else {"library": "unknown"}
         logger.debug(f"Client Details: {about}")
         if self._input_transport:
@@ -1641,7 +1622,7 @@ class RTVIProcessor(FrameProcessor):
     async def _send_bot_ready(self):
         """Send the bot-ready message to the client."""
         config = None
-        if self._client_version[0] < 1:
+        if self._client_version and self._client_version[0] < 1:
             config = self._config.config
         message = RTVIBotReady(
             id=self._client_ready_id,

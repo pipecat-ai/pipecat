@@ -36,6 +36,8 @@ from pipecat.utils.tracing.service_decorators import traced_stt
 
 try:
     import websockets
+    from websockets.asyncio.client import connect as websocket_connect
+    from websockets.protocol import State
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
@@ -133,7 +135,7 @@ class AWSTranscribeSTTService(STTService):
         while retry_count < max_retries:
             try:
                 await self._connect()
-                if self._ws_client and self._ws_client.open:
+                if self._ws_client and self._ws_client.state is State.OPEN:
                     logger.info("Successfully established WebSocket connection")
                     return
                 logger.warning("WebSocket connection not established after connect")
@@ -174,7 +176,7 @@ class AWSTranscribeSTTService(STTService):
         """
         try:
             # Ensure WebSocket is connected
-            if not self._ws_client or not self._ws_client.open:
+            if not self._ws_client or self._ws_client.state is State.CLOSED:
                 logger.debug("WebSocket not connected, attempting to reconnect...")
                 try:
                     await self._connect()
@@ -208,7 +210,7 @@ class AWSTranscribeSTTService(STTService):
 
     async def _connect(self):
         """Connect to AWS Transcribe with connection state management."""
-        if self._ws_client and self._ws_client.open and self._receive_task:
+        if self._ws_client and self._ws_client.state is State.OPEN and self._receive_task:
             logger.debug(f"{self} Already connected")
             return
 
@@ -238,7 +240,7 @@ class AWSTranscribeSTTService(STTService):
                 )
 
                 # Add required headers
-                extra_headers = {
+                additional_headers = {
                     "Origin": "https://localhost",
                     "Sec-WebSocket-Key": websocket_key,
                     "Sec-WebSocket-Version": "13",
@@ -268,9 +270,9 @@ class AWSTranscribeSTTService(STTService):
                 logger.debug(f"{self} Connecting to WebSocket with URL: {presigned_url[:100]}...")
 
                 # Connect with the required headers and settings
-                self._ws_client = await websockets.connect(
+                self._ws_client = await websocket_connect(
                     presigned_url,
-                    extra_headers=extra_headers,
+                    additional_headers=additional_headers,
                     subprotocols=["mqtt"],
                     ping_interval=None,
                     ping_timeout=None,
@@ -299,7 +301,7 @@ class AWSTranscribeSTTService(STTService):
             self._receive_task = None
 
         try:
-            if self._ws_client and self._ws_client.open:
+            if self._ws_client and self._ws_client.state is State.OPEN:
                 # Send end-stream message
                 end_stream = {"message-type": "event", "event": "end"}
                 await self._ws_client.send(json.dumps(end_stream))
@@ -312,6 +314,10 @@ class AWSTranscribeSTTService(STTService):
     def language_to_service_language(self, language: Language) -> str | None:
         """Convert internal language enum to AWS Transcribe language code.
 
+        Source:
+        https://docs.aws.amazon.com/transcribe/latest/dg/supported-languages.html
+        All language codes that support streaming are included.
+
         Args:
             language: Internal language enumeration value.
 
@@ -319,17 +325,145 @@ class AWSTranscribeSTTService(STTService):
             AWS Transcribe compatible language code, or None if unsupported.
         """
         language_map = {
-            Language.EN: "en-US",
-            Language.ES: "es-US",
-            Language.FR: "fr-FR",
-            Language.DE: "de-DE",
+            # Afrikaans
+            Language.AF: "af-ZA",
+            Language.AF_ZA: "af-ZA",
+            # Arabic
+            Language.AR: "ar-SA",  # Default to Modern Standard Arabic
+            Language.AR_AE: "ar-AE",  # Gulf Arabic
+            Language.AR_SA: "ar-SA",  # Modern Standard Arabic
+            # Basque
+            Language.EU: "eu-ES",
+            Language.EU_ES: "eu-ES",
+            # Catalan
+            Language.CA: "ca-ES",
+            Language.CA_ES: "ca-ES",
+            # Chinese
+            Language.ZH: "zh-CN",  # Default to Simplified
+            Language.ZH_CN: "zh-CN",  # Simplified
+            Language.ZH_TW: "zh-TW",  # Traditional
+            Language.ZH_HK: "zh-HK",  # Cantonese (also yue-HK)
+            Language.YUE: "zh-HK",  # Cantonese fallback
+            # Croatian
+            Language.HR: "hr-HR",
+            Language.HR_HR: "hr-HR",
+            # Czech
+            Language.CS: "cs-CZ",
+            Language.CS_CZ: "cs-CZ",
+            # Danish
+            Language.DA: "da-DK",
+            Language.DA_DK: "da-DK",
+            # Dutch
+            Language.NL: "nl-NL",
+            Language.NL_NL: "nl-NL",
+            # English
+            Language.EN: "en-US",  # Default to US
+            Language.EN_AU: "en-AU",  # Australian
+            Language.EN_GB: "en-GB",  # British
+            Language.EN_IN: "en-IN",  # Indian
+            Language.EN_IE: "en-IE",  # Irish
+            Language.EN_NZ: "en-NZ",  # New Zealand
+            # Note: Scottish (en-AB) and Welsh (en-WL) don't have direct Language enum matches
+            Language.EN_ZA: "en-ZA",  # South African
+            Language.EN_US: "en-US",  # US
+            # Persian/Farsi
+            Language.FA: "fa-IR",
+            Language.FA_IR: "fa-IR",
+            # Finnish
+            Language.FI: "fi-FI",
+            Language.FI_FI: "fi-FI",
+            # French
+            Language.FR: "fr-FR",  # Default to France
+            Language.FR_FR: "fr-FR",
+            Language.FR_CA: "fr-CA",  # Canadian
+            # Galician
+            Language.GL: "gl-ES",
+            Language.GL_ES: "gl-ES",
+            # Georgian
+            Language.KA: "ka-GE",
+            Language.KA_GE: "ka-GE",
+            # German
+            Language.DE: "de-DE",  # Default to Germany
+            Language.DE_DE: "de-DE",
+            Language.DE_CH: "de-CH",  # Swiss
+            # Greek
+            Language.EL: "el-GR",
+            Language.EL_GR: "el-GR",
+            # Hebrew
+            Language.HE: "he-IL",
+            Language.HE_IL: "he-IL",
+            # Hindi
+            Language.HI: "hi-IN",
+            Language.HI_IN: "hi-IN",
+            # Indonesian
+            Language.ID: "id-ID",
+            Language.ID_ID: "id-ID",
+            # Italian
             Language.IT: "it-IT",
-            Language.PT: "pt-BR",
+            Language.IT_IT: "it-IT",
+            # Japanese
             Language.JA: "ja-JP",
+            Language.JA_JP: "ja-JP",
+            # Korean
             Language.KO: "ko-KR",
-            Language.ZH: "zh-CN",
+            Language.KO_KR: "ko-KR",
+            # Latvian
+            Language.LV: "lv-LV",
+            Language.LV_LV: "lv-LV",
+            # Malay
+            Language.MS: "ms-MY",
+            Language.MS_MY: "ms-MY",
+            # Norwegian
+            Language.NB: "no-NO",  # Norwegian Bokmål
+            Language.NB_NO: "no-NO",
+            Language.NO: "no-NO",
+            # Polish
             Language.PL: "pl-PL",
+            Language.PL_PL: "pl-PL",
+            # Portuguese
+            Language.PT: "pt-PT",  # Default to Portugal
+            Language.PT_PT: "pt-PT",
+            Language.PT_BR: "pt-BR",  # Brazilian
+            # Romanian
+            Language.RO: "ro-RO",
+            Language.RO_RO: "ro-RO",
+            # Russian
+            Language.RU: "ru-RU",
+            Language.RU_RU: "ru-RU",
+            # Serbian
+            Language.SR: "sr-RS",
+            Language.SR_RS: "sr-RS",
+            # Slovak
+            Language.SK: "sk-SK",
+            Language.SK_SK: "sk-SK",
+            # Somali
+            Language.SO: "so-SO",
+            Language.SO_SO: "so-SO",
+            # Spanish
+            Language.ES: "es-ES",  # Default to Spain
+            Language.ES_ES: "es-ES",
+            Language.ES_US: "es-US",  # US Spanish
+            # Swedish
+            Language.SV: "sv-SE",
+            Language.SV_SE: "sv-SE",
+            # Tagalog/Filipino
+            Language.TL: "tl-PH",
+            Language.FIL: "tl-PH",  # Filipino maps to Tagalog
+            Language.FIL_PH: "tl-PH",
+            # Thai
+            Language.TH: "th-TH",
+            Language.TH_TH: "th-TH",
+            # Ukrainian
+            Language.UK: "uk-UA",
+            Language.UK_UA: "uk-UA",
+            # Vietnamese
+            Language.VI: "vi-VN",
+            Language.VI_VN: "vi-VN",
+            # Zulu
+            Language.ZU: "zu-ZA",
+            Language.ZU_ZA: "zu-ZA",
         }
+
         return language_map.get(language)
 
     @traced_stt
@@ -341,12 +475,12 @@ class AWSTranscribeSTTService(STTService):
     async def _receive_loop(self):
         """Background task to receive and process messages from AWS Transcribe."""
         while True:
-            if not self._ws_client or not self._ws_client.open:
+            if not self._ws_client or self._ws_client.state is State.CLOSED:
                 logger.warning(f"{self} WebSocket closed in receive loop")
                 break
 
             try:
-                response = await asyncio.wait_for(self._ws_client.recv(), timeout=1.0)
+                response = await self._ws_client.recv()
 
                 headers, payload = decode_event(response)
 
@@ -397,8 +531,6 @@ class AWSTranscribeSTTService(STTService):
                 else:
                     logger.debug(f"{self} Other message type received: {headers}")
                     logger.debug(f"{self} Payload: {payload}")
-            except asyncio.TimeoutError:
-                self.reset_watchdog()
             except websockets.exceptions.ConnectionClosed as e:
                 logger.error(
                     f"{self} WebSocket connection closed in receive loop with code {e.code}: {e.reason}"

@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
 from typing import Optional
 
@@ -12,24 +11,38 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.examples.run import get_transport_client_id, maybe_capture_participant_camera
-from pipecat.frames.frames import Frame, TextFrame, UserImageRequestFrame
+from pipecat.frames.frames import (
+    Frame,
+    LLMContextFrame,
+    TextFrame,
+    TTSSpeakFrame,
+    UserImageRawFrame,
+    UserImageRequestFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
-from pipecat.processors.aggregators.vision_image_frame import VisionImageFrameAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import (
+    create_transport,
+    get_transport_client_id,
+    maybe_capture_participant_camera,
+)
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
 
 class UserImageRequester(FrameProcessor):
+    """Converts incoming text into requests for user images."""
+
     def __init__(self, participant_id: Optional[str] = None):
         super().__init__()
         self._participant_id = participant_id
@@ -42,9 +55,32 @@ class UserImageRequester(FrameProcessor):
 
         if self._participant_id and isinstance(frame, TextFrame):
             await self.push_frame(
-                UserImageRequestFrame(self._participant_id), FrameDirection.UPSTREAM
+                UserImageRequestFrame(self._participant_id, context=frame.text),
+                FrameDirection.UPSTREAM,
             )
-        await self.push_frame(frame, direction)
+        else:
+            await self.push_frame(frame, direction)
+
+
+class UserImageProcessor(FrameProcessor):
+    """Converts incoming user images into context frames."""
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, UserImageRawFrame):
+            if frame.request and frame.request.context:
+                context = LLMContext()
+                context.add_image_frame_message(
+                    image=frame.image,
+                    text=frame.request.context,
+                    size=frame.size,
+                    format=frame.format,
+                )
+                frame = LLMContextFrame(context)
+                await self.push_frame(frame)
+        else:
+            await self.push_frame(frame, direction)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -66,7 +102,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     user_response = UserResponseAggregator()
@@ -74,7 +110,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     # Initialize the image requester without setting the participant ID yet
     image_requester = UserImageRequester()
 
-    vision_aggregator = VisionImageFrameAggregator()
+    image_processor = UserImageProcessor()
 
     stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
@@ -92,7 +128,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             stt,
             user_response,
             image_requester,
-            vision_aggregator,
+            image_processor,
             google,
             tts,
             transport.output(),
@@ -105,6 +141,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     @transport.event_handler("on_client_connected")
@@ -118,19 +155,25 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         image_requester.set_participant_id(client_id)
 
         # Welcome message
-        await tts.say("Hi there! Feel free to ask me what I see.")
+        await task.queue_frame(TTSSpeakFrame("Hi there! Feel free to ask me about what I see."))
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
         await task.cancel()
 
-    runner = PipelineRunner(handle_sigint=handle_sigint)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

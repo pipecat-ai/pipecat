@@ -13,6 +13,7 @@ from typing import Optional
 from loguru import logger
 from pydantic import BaseModel
 
+from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.audio.utils import create_stream_resampler, pcm_to_ulaw, ulaw_to_pcm
 from pipecat.frames.frames import (
     AudioRawFrame,
@@ -21,7 +22,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputDTMFFrame,
-    KeypadEntry,
     StartFrame,
     StartInterruptionFrame,
     TransportMessageFrame,
@@ -132,6 +132,10 @@ class PlivoFrameSerializer(FrameSerializer):
             serialized_data = await pcm_to_ulaw(
                 data, frame.sample_rate, self._plivo_sample_rate, self._output_resampler
             )
+            if serialized_data is None or len(serialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
+
             payload = base64.b64encode(serialized_data).decode("utf-8")
             answer = {
                 "event": "playAudio",
@@ -227,6 +231,10 @@ class PlivoFrameSerializer(FrameSerializer):
             deserialized_data = await ulaw_to_pcm(
                 payload, self._plivo_sample_rate, self._sample_rate, self._input_resampler
             )
+            if deserialized_data is None or len(deserialized_data) == 0:
+                # Ignoring in case we don't have audio
+                return None
+
             audio_frame = InputAudioRawFrame(
                 audio=deserialized_data, num_channels=1, sample_rate=self._sample_rate
             )

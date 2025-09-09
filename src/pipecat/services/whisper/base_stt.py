@@ -186,7 +186,7 @@ class BaseWhisperSTTService(SegmentedSTTService):
             language: The Language enum value to use for transcription.
         """
         logger.info(f"Switching STT language to: [{language}]")
-        self._language = language
+        self._language = self.language_to_service_language(language)
 
     @traced_stt
     async def _handle_transcription(
