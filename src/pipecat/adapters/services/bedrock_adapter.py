@@ -116,6 +116,12 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             system = messages[0]["content"]
             messages.pop(0)
 
+        # Convert any subsequent "system"-role messages to "user"-role
+        # messages, as AWS Bedrock doesn't support system input messages.
+        for message in messages:
+            if message["role"] == "system":
+                message["role"] = "user"
+
         # Merge consecutive messages with the same role.
         i = 0
         while i < len(messages) - 1:
