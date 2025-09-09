@@ -7,20 +7,21 @@
 """SambaNova LLM service implementation using OpenAI-compatible interface."""
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 from openai import AsyncStream
-from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
+from openai.types.chat import ChatCompletionChunk
 
+from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     LLMTextFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.services.llm_service import FunctionCallFromLLM
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -68,24 +69,23 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
         logger.debug(f"Creating SambaNova client with API {base_url}")
         return super().create_client(api_key, base_url, **kwargs)
 
-    async def get_chat_completions(
-        self, context: OpenAILLMContext, messages: List[ChatCompletionMessageParam]
-    ) -> Any:
-        """Get chat completions from SambaNova API endpoint.
+    def build_chat_completion_params(self, params_from_context: OpenAILLMInvocationParams) -> dict:
+        """Build parameters for SambaNova chat completion request.
+
+        SambaNova doesn't support some OpenAI parameters like frequency_penalty,
+        presence_penalty, and seed.
 
         Args:
-            context: OpenAI LLM context containing tools and configuration.
-            messages: List of chat completion message parameters.
+            params_from_context: Parameters, derived from the LLM context, to
+                use for the chat completion. Contains messages, tools, and tool
+                choice.
 
         Returns:
-            Chat completion response stream from SambaNova API.
+            Dictionary of parameters for the chat completion request.
         """
         params = {
             "model": self.model_name,
             "stream": True,
-            "messages": messages,
-            "tools": context.tools,
-            "tool_choice": context.tool_choice,
             "stream_options": {"include_usage": True},
             "temperature": self._settings["temperature"],
             "top_p": self._settings["top_p"],
@@ -93,13 +93,16 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
             "max_completion_tokens": self._settings["max_completion_tokens"],
         }
 
-        params.update(self._settings["extra"])
+        # Messages, tools, tool_choice
+        params.update(params_from_context)
 
-        chunks = await self._client.chat.completions.create(**params)
-        return chunks
+        params.update(self._settings["extra"])
+        return params
 
     @traced_llm  # type: ignore
-    async def _process_context(self, context: OpenAILLMContext) -> AsyncStream[ChatCompletionChunk]:
+    async def _process_context(
+        self, context: OpenAILLMContext | LLMContext
+    ) -> AsyncStream[ChatCompletionChunk]:
         """Process OpenAI LLM context and stream chat completion chunks.
 
         This method handles the streaming response from SambaNova API, including
@@ -122,11 +125,13 @@ class SambaNovaLLMService(OpenAILLMService):  # type: ignore
 
         await self.start_ttfb_metrics()
 
-        chunk_stream: AsyncStream[ChatCompletionChunk] = await self._stream_chat_completions(
-            context
+        chunk_stream = await (
+            self._stream_chat_completions_specific_context(context)
+            if isinstance(context, OpenAILLMContext)
+            else self._stream_chat_completions_universal_context(context)
         )
 
-        async for chunk in WatchdogAsyncIterator(chunk_stream, manager=self.task_manager):
+        async for chunk in chunk_stream:
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,

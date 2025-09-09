@@ -16,7 +16,6 @@ import json
 import os
 import time
 
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_stt
 
 # Suppress gRPC fork warnings
@@ -781,7 +780,6 @@ class GoogleSTTService(STTService):
                     if self._request_queue.empty():
                         # wait for 10ms in case we don't have audio
                         await asyncio.sleep(0.01)
-                        self.reset_watchdog()
                         continue
 
                     # Start bi-directional streaming
@@ -836,9 +834,7 @@ class GoogleSTTService(STTService):
     async def _process_responses(self, streaming_recognize):
         """Process streaming recognition responses."""
         try:
-            async for response in WatchdogAsyncIterator(
-                streaming_recognize, manager=self.task_manager
-            ):
+            async for response in streaming_recognize:
                 # Check streaming limit
                 if (int(time.time() * 1000) - self._stream_start_time) > self.STREAMING_LIMIT:
                     logger.debug("Stream timeout reached in response processing")

@@ -13,13 +13,12 @@ the main pipeline execution.
 
 import asyncio
 import inspect
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from attr import dataclass
 
-from pipecat.observers.base_observer import BaseObserver, FramePushed
+from pipecat.observers.base_observer import BaseObserver, FrameProcessed, FramePushed
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 @dataclass
@@ -86,7 +85,7 @@ class TaskObserver(BaseObserver):
 
         # If we already started, create a new proxy for the observer.
         # Otherwise, it will be created in start().
-        if self._started():
+        if self._proxies:
             proxy = self._create_proxy(observer)
             self._proxies[observer] = proxy
 
@@ -97,7 +96,7 @@ class TaskObserver(BaseObserver):
             observer: The observer to remove.
         """
         # If the observer has a proxy, remove it.
-        if observer in self._proxies:
+        if self._proxies and observer in self._proxies:
             proxy = self._proxies[observer]
             # Remove the proxy so it doesn't get called anymore.
             del self._proxies[observer]
@@ -120,22 +119,35 @@ class TaskObserver(BaseObserver):
         for proxy in self._proxies.values():
             await self._task_manager.cancel_task(proxy.task)
 
+    async def cleanup(self):
+        """Cleanup all proxy observers."""
+        await super().cleanup()
+
+        if not self._proxies:
+            return
+
+        for proxy in self._proxies:
+            await proxy.cleanup()
+
+    async def on_process_frame(self, data: FramePushed):
+        """Queue frame data for all managed observers.
+
+        Args:
+            data: The frame push event data to distribute to observers.
+        """
+        await self._send_to_proxy(data)
+
     async def on_push_frame(self, data: FramePushed):
         """Queue frame data for all managed observers.
 
         Args:
             data: The frame push event data to distribute to observers.
         """
-        for proxy in self._proxies.values():
-            await proxy.queue.put(data)
-
-    def _started(self) -> bool:
-        """Check if the task observer has been started."""
-        return self._proxies is not None
+        await self._send_to_proxy(data)
 
     def _create_proxy(self, observer: BaseObserver) -> Proxy:
         """Create a proxy for a single observer."""
-        queue = WatchdogQueue(self._task_manager)
+        queue = asyncio.Queue()
         task = self._task_manager.create_task(
             self._proxy_task_handler(queue, observer),
             f"TaskObserver::{observer}::_proxy_task_handler",
@@ -151,28 +163,37 @@ class TaskObserver(BaseObserver):
             proxies[observer] = proxy
         return proxies
 
+    async def _send_to_proxy(self, data: Any):
+        for proxy in self._proxies.values():
+            await proxy.queue.put(data)
+
     async def _proxy_task_handler(self, queue: asyncio.Queue, observer: BaseObserver):
         """Handle frame processing for a single observer."""
-        warning_reported = False
+        on_push_frame_deprecated = False
+        signature = inspect.signature(observer.on_push_frame)
+        if len(signature.parameters) > 1:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Observer `on_push_frame(source, destination, frame, direction, timestamp)` is deprecated, us `on_push_frame(data: FramePushed)` instead.",
+                    DeprecationWarning,
+                )
+
+            on_push_frame_deprecated = True
+
         while True:
             data = await queue.get()
 
-            signature = inspect.signature(observer.on_push_frame)
-            if len(signature.parameters) > 1:
-                if not warning_reported:
-                    import warnings
-
-                    with warnings.catch_warnings():
-                        warnings.simplefilter("always")
-                        warnings.warn(
-                            "Observer `on_push_frame(source, destination, frame, direction, timestamp)` is deprecated, us `on_push_frame(data: FramePushed)` instead.",
-                            DeprecationWarning,
-                        )
-                    warning_reported = True
-                await observer.on_push_frame(
-                    data.src, data.dst, data.frame, data.direction, data.timestamp
-                )
-            else:
-                await observer.on_push_frame(data)
+            if isinstance(data, FramePushed):
+                if on_push_frame_deprecated:
+                    await observer.on_push_frame(
+                        data.src, data.dst, data.frame, data.direction, data.timestamp
+                    )
+                else:
+                    await observer.on_push_frame(data)
+            elif isinstance(data, FrameProcessed):
+                await observer.on_process_frame(data)
 
             queue.task_done()

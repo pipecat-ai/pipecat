@@ -36,18 +36,18 @@ class PipelineRunner(BaseObject):
         *,
         name: Optional[str] = None,
         handle_sigint: bool = True,
+        handle_sigterm: bool = False,
         force_gc: bool = False,
         loop: Optional[asyncio.AbstractEventLoop] = None,
-        handle_sigterm: bool = False,
     ):
         """Initialize the pipeline runner.
 
         Args:
             name: Optional name for the runner instance.
             handle_sigint: Whether to automatically handle SIGINT signals.
+            handle_sigterm: Whether to automatically handle SIGTERM signals.
             force_gc: Whether to force garbage collection after task completion.
             loop: Event loop to use. If None, uses the current running loop.
-            handle_sigterm: Whether to automatically handle SIGTERM signals.
         """
         super().__init__(name=name)
 
@@ -71,7 +71,10 @@ class PipelineRunner(BaseObject):
         logger.debug(f"Runner {self} started running {task}")
         self._tasks[task.name] = task
         params = PipelineTaskParams(loop=self._loop)
-        await task.run(params)
+        try:
+            await task.run(params)
+        except asyncio.CancelledError:
+            await self._cancel()
         del self._tasks[task.name]
 
         # Cleanup base object.
@@ -95,6 +98,10 @@ class PipelineRunner(BaseObject):
     async def cancel(self):
         """Cancel all running tasks immediately."""
         logger.debug(f"Cancelling runner {self}")
+        await self._cancel()
+
+    async def _cancel(self):
+        """Cancel all running tasks immediately."""
         await asyncio.gather(*[t.cancel() for t in self._tasks.values()])
 
     def _setup_sigint(self):

@@ -32,6 +32,8 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InputTextRawFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -66,7 +68,6 @@ from pipecat.services.openai.llm import (
     OpenAIUserContextAggregator,
 )
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.string import match_endofsentence
 from pipecat.utils.time import time_now_iso8601
 from pipecat.utils.tracing.service_decorators import traced_gemini_live, traced_stt
@@ -738,6 +739,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for Gemini Multimodal Live."
+            )
+        elif isinstance(frame, InputTextRawFrame):
+            await self._send_user_text(frame.text)
+            await self.push_frame(frame, direction)
         elif isinstance(frame, InputAudioRawFrame):
             await self._send_user_audio(frame)
             await self.push_frame(frame, direction)
@@ -925,7 +933,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _receive_task_handler(self):
         """Handle incoming messages from the WebSocket connection."""
-        async for message in WatchdogAsyncIterator(self._websocket, manager=self.task_manager):
+        async for message in self._websocket:
             evt = events.parse_server_event(message)
             # logger.debug(f"Received event: {message[:500]}")
             # logger.debug(f"Received event: {evt}")
@@ -970,6 +978,23 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._user_audio_buffer.extend(audio)
             length = int((frame.sample_rate * frame.num_channels * 2) * 0.5)
             self._user_audio_buffer = self._user_audio_buffer[-length:]
+
+    async def _send_user_text(self, text: str):
+        """Send user text via Gemini Live API's realtime input stream.
+
+        This method sends text through the realtimeInput stream (via TextInputMessage)
+        rather than the clientContent stream. This ensures text input is synchronized
+        with audio and video inputs, preventing temporal misalignment that can occur
+        when different modalities are processed through separate API pathways.
+
+        For realtimeInput, turn completion is automatically inferred by the API based
+        on user activity, so no explicit turnComplete signal is needed.
+
+        Args:
+            text: The text to send as user input.
+        """
+        evt = events.TextInputMessage.from_text(text)
+        await self.send_client_event(evt)
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""

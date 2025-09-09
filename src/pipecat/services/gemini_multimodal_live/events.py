@@ -114,13 +114,15 @@ class RealtimeInputConfig(BaseModel):
 
 
 class RealtimeInput(BaseModel):
-    """Contains realtime input media chunks.
+    """Contains realtime input media chunks and text.
 
     Parameters:
         mediaChunks: List of media chunks for realtime processing.
+        text: Text for realtime processing.
     """
 
-    mediaChunks: List[MediaChunk]
+    mediaChunks: Optional[List[MediaChunk]] = None
+    text: Optional[str] = None
 
 
 class ClientContent(BaseModel):
@@ -188,6 +190,24 @@ class VideoInputMessage(BaseModel):
         return cls(
             realtimeInput=RealtimeInput(mediaChunks=[MediaChunk(mimeType=f"image/jpeg", data=data)])
         )
+
+
+class TextInputMessage(BaseModel):
+    """Message containing text input data."""
+
+    realtimeInput: RealtimeInput
+
+    @classmethod
+    def from_text(cls, text: str) -> "TextInputMessage":
+        """Create a text input message from a string.
+
+        Args:
+            text: The text to send.
+
+        Returns:
+            A TextInputMessage instance.
+        """
+        return cls(realtimeInput=RealtimeInput(text=text))
 
 
 class ClientContentMessage(BaseModel):

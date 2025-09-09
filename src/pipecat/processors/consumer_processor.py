@@ -12,7 +12,6 @@ from typing import Awaitable, Callable, Optional
 from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.producer_processor import ProducerProcessor, identity_transformer
-from pipecat.utils.asyncio.watchdog_queue import WatchdogQueue
 
 
 class ConsumerProcessor(FrameProcessor):
@@ -66,7 +65,7 @@ class ConsumerProcessor(FrameProcessor):
     async def _start(self, _: StartFrame):
         """Start the consumer task and register with the producer."""
         if not self._consumer_task:
-            self._queue: WatchdogQueue = self._producer.add_consumer()
+            self._queue = self._producer.add_consumer()
             self._consumer_task = self.create_task(self._consumer_task_handler())
 
     async def _stop(self, _: EndFrame):
@@ -77,7 +76,6 @@ class ConsumerProcessor(FrameProcessor):
     async def _cancel(self, _: CancelFrame):
         """Cancel the consumer task."""
         if self._consumer_task:
-            self._queue.cancel()
             await self.cancel_task(self._consumer_task)
 
     async def _consumer_task_handler(self):

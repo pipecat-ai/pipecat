@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
 import tempfile
 
@@ -13,16 +12,19 @@ from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
+from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.gemini_multimodal_live.gemini import (
     GeminiMultimodalLiveLLMService,
 )
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
 
@@ -87,7 +89,7 @@ async def create_sample_file():
             return f.name
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting File API bot")
 
     # Create a sample file to upload
@@ -96,13 +98,13 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
 
     system_instruction = """
     You are a helpful AI assistant with access to a document that has been uploaded for analysis.
-    
+
     The document contains test information.
     You should be able to:
     - Reference and discuss the contents of the uploaded document
     - Answer questions about what's in the document
     - Use the information from the document in our conversation
-    
+
     Your output will be converted to audio so don't include special characters in your answers.
     Be friendly and demonstrate your ability to work with the uploaded file.
     """
@@ -183,6 +185,7 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             enable_metrics=True,
             enable_usage_metrics=True,
         ),
+        idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
     )
 
     # Handle client connection event
@@ -190,20 +193,16 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation using standard context frame
-        await task.queue_frames([context_aggregator.user().get_context_frame()])
+        await task.queue_frames([LLMRunFrame()])
 
     # Handle client disconnection events
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
         logger.info(f"Client disconnected")
-
-    @transport.event_handler("on_client_closed")
-    async def on_client_closed(transport, client):
-        logger.info(f"Client closed connection")
         await task.cancel()
 
     # Run the pipeline
-    runner = PipelineRunner(handle_sigint=False)
+    runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
 
     # Clean up: delete the uploaded file and temporary file
@@ -222,8 +221,14 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
         logger.error(f"Error removing temporary file: {e}")
 
 
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
+
+
 if __name__ == "__main__":
-    from pipecat.examples.run import main
+    from pipecat.runner.run import main
 
     upload_example_file = input("""
 
@@ -239,4 +244,4 @@ if __name__ == "__main__":
     else:
         print(f"Using default file")
 
-    main(run_example, transport_params=transport_params)
+    main()

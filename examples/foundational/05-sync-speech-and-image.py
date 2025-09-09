@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-import argparse
 import os
 from dataclasses import dataclass
 
@@ -16,20 +15,25 @@ from pipecat.frames.frames import (
     DataFrame,
     Frame,
     LLMFullResponseStartFrame,
-    LLMMessagesFrame,
     TextFrame,
 )
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.sync_parallel_pipeline import SyncParallelPipeline
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.aggregators.sentence import SentenceAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+from pipecat.runner.types import RunnerArguments
+from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaHttpTTSService
 from pipecat.services.fal.image import FalImageGenService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
 
 load_dotenv(override=True)
 
@@ -82,7 +86,7 @@ transport_params = {
 }
 
 
-async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_sigint: bool):
+async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     """Run the Calendar Month Narration bot using WebRTC transport.
 
     Args:
@@ -152,9 +156,12 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
                 }
             ]
             frames.append(MonthFrame(month=month))
-            frames.append(LLMMessagesFrame(messages))
+            frames.append(OpenAILLMContextFrame(OpenAILLMContext(messages)))
 
-        task = PipelineTask(pipeline)
+        task = PipelineTask(
+            pipeline,
+            idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
+        )
 
         # Set up transport event handlers
         @transport.event_handler("on_client_connected")
@@ -169,11 +176,17 @@ async def run_example(transport: BaseTransport, _: argparse.Namespace, handle_si
             await task.cancel()
 
         # Run the pipeline
-        runner = PipelineRunner(handle_sigint=handle_sigint)
+        runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
         await runner.run(task)
 
 
-if __name__ == "__main__":
-    from pipecat.examples.run import main
+async def bot(runner_args: RunnerArguments):
+    """Main bot entry point compatible with Pipecat Cloud."""
+    transport = await create_transport(runner_args, transport_params)
+    await run_bot(transport, runner_args)
 
-    main(run_example, transport_params=transport_params)
+
+if __name__ == "__main__":
+    from pipecat.runner.run import main
+
+    main()

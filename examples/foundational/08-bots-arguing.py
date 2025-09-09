@@ -4,16 +4,20 @@ import os
 from typing import Tuple
 
 import aiohttp
-from daily_runner import configure
 from dotenv import load_dotenv
 
-from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMMessagesFrame, TextFrame
+from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators import SentenceAggregator
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
+from pipecat.runner.daily import configure
 from pipecat.services.azure import AzureLLMService, AzureTTSService
 from pipecat.services.elevenlabs import ElevenLabsTTSService
 from pipecat.services.fal import FalImageGenService
-from pipecat.transports.services.daily import DailyTransport
+from pipecat.transports.daily.transport import DailyTransport
 
 load_dotenv(override=True)
 
@@ -79,7 +83,7 @@ async def main():
             sentence_aggregator = SentenceAggregator()
             pipeline = Pipeline([llm, sentence_aggregator, tts1], source_queue, sink_queue)
 
-            await source_queue.put(LLMMessagesFrame(messages))
+            await source_queue.put(OpenAILLMContextFrame(OpenAILLMContext(messages)))
             await source_queue.put(EndFrame())
             await pipeline.run_pipeline()
 

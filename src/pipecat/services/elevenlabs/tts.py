@@ -38,7 +38,6 @@ from pipecat.services.tts_service import (
     WordTTSService,
 )
 from pipecat.transcriptions.language import Language
-from pipecat.utils.asyncio.watchdog_async_iterator import WatchdogAsyncIterator
 from pipecat.utils.tracing.service_decorators import traced_tts
 
 # See .env.example for ElevenLabs configuration needed
@@ -245,6 +244,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             auto_mode: Whether to enable automatic mode optimization.
             enable_ssml_parsing: Whether to parse SSML tags in text.
             enable_logging: Whether to enable ElevenLabs logging.
+            apply_text_normalization: Text normalization mode ("auto", "on", "off").
         """
 
         language: Optional[Language] = None
@@ -256,13 +256,14 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         auto_mode: Optional[bool] = True
         enable_ssml_parsing: Optional[bool] = None
         enable_logging: Optional[bool] = None
+        apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
 
     def __init__(
         self,
         *,
         api_key: str,
         voice_id: str,
-        model: str = "eleven_flash_v2_5",
+        model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -274,7 +275,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         Args:
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
-            model: TTS model to use (e.g., "eleven_flash_v2_5").
+            model: TTS model to use (e.g., "eleven_turbo_v2_5").
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
@@ -320,6 +321,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             "auto_mode": str(params.auto_mode).lower(),
             "enable_ssml_parsing": params.enable_ssml_parsing,
             "enable_logging": params.enable_logging,
+            "apply_text_normalization": params.apply_text_normalization,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -370,13 +372,49 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         await self._connect()
 
     async def _update_settings(self, settings: Mapping[str, Any]):
-        """Update service settings and reconnect if voice changed."""
+        """Update service settings and reconnect if voice, model, or language changed."""
+        # Track previous values for settings that require reconnection
         prev_voice = self._voice_id
+        prev_model = self.model_name
+        prev_language = self._settings.get("language")
+        # Create snapshot of current voice settings to detect changes after update
+        prev_voice_settings = self._voice_settings.copy() if self._voice_settings else None
+
         await super()._update_settings(settings)
-        if not prev_voice == self._voice_id:
-            logger.info(f"Switching TTS voice to: [{self._voice_id}]")
+
+        # Update voice settings for the next context creation
+        self._voice_settings = self._set_voice_settings()
+
+        # Check if URL-level settings changed (these require reconnection)
+        url_changed = (
+            prev_voice != self._voice_id
+            or prev_model != self.model_name
+            or prev_language != self._settings.get("language")
+        )
+
+        # Check if only voice settings changed (speed, stability, etc.)
+        voice_settings_changed = prev_voice_settings != self._voice_settings
+
+        if url_changed:
+            # These settings are in the WebSocket URL, so we need to reconnect
+            logger.debug(
+                f"URL-level setting changed (voice/model/language), reconnecting WebSocket"
+            )
             await self._disconnect()
             await self._connect()
+        elif voice_settings_changed and self._context_id:
+            # Voice settings can be updated by closing current context
+            # so new one gets created with updated voice settings
+            logger.debug(f"Voice settings changed, closing current context to apply changes")
+            try:
+                if self._websocket:
+                    await self._websocket.send(
+                        json.dumps({"context_id": self._context_id, "close_context": True})
+                    )
+            except Exception as e:
+                logger.warning(f"Error closing context for voice settings update: {e}")
+            self._context_id = None
+            self._started = False
 
     async def start(self, frame: StartFrame):
         """Start the ElevenLabs TTS service.
@@ -465,6 +503,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             if self._settings["enable_logging"]:
                 url += f"&enable_logging={self._settings['enable_logging']}"
 
+            if self._settings["apply_text_normalization"] is not None:
+                url += f"&apply_text_normalization={self._settings['apply_text_normalization']}"
+
             # Language can only be used with the ELEVENLABS_MULTILINGUAL_MODELS
             language = self._settings["language"]
             if model in ELEVENLABS_MULTILINGUAL_MODELS and language is not None:
@@ -495,6 +536,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 if self._context_id:
                     await self._websocket.send(json.dumps({"close_socket": True}))
                 await self._websocket.close()
+                logger.debug("Disconnected from ElevenLabs")
         except Exception as e:
             logger.error(f"{self} error closing websocket: {e}")
         finally:
@@ -531,9 +573,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def _receive_messages(self):
         """Handle incoming WebSocket messages from ElevenLabs."""
-        async for message in WatchdogAsyncIterator(
-            self._get_websocket(), manager=self.task_manager
-        ):
+        async for message in self._get_websocket():
             msg = json.loads(message)
 
             received_ctx_id = msg.get("contextId")
@@ -546,10 +586,18 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                 continue
 
             # Check if this message belongs to the current context.
-            # This should never happen, so warn about it.
             if not self.audio_context_available(received_ctx_id):
-                logger.warning(f"Ignoring message from unavailable context: {received_ctx_id}")
-                continue
+                if self._context_id == received_ctx_id:
+                    logger.debug(
+                        f"Received a delayed message, recreating the context: {self._context_id}"
+                    )
+                    await self.create_audio_context(self._context_id)
+                else:
+                    # This can happen if a message is received _after_ we have closed a context
+                    # due to user interruption but _before_ the `isFinal` message for the context
+                    # is received.
+                    logger.debug(f"Ignoring message from unavailable context: {received_ctx_id}")
+                    continue
 
             if msg.get("audio"):
                 await self.stop_ttfb_metrics()
@@ -584,9 +632,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
     async def _keepalive_task_handler(self):
         """Send periodic keepalive messages to maintain WebSocket connection."""
-        KEEPALIVE_SLEEP = 10 if self.task_manager.task_watchdog_enabled else 3
+        KEEPALIVE_SLEEP = 10
         while True:
-            self.reset_watchdog()
             await asyncio.sleep(KEEPALIVE_SLEEP)
             try:
                 if self._websocket and self._websocket.state is State.OPEN:
@@ -636,9 +683,16 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
-                    # Create new context ID and register it
-                    self._context_id = str(uuid.uuid4())
-                    await self.create_audio_context(self._context_id)
+                    # If a context ID does not exist, create a new one and
+                    # register it. If an ID exists, that means the Pipeline is
+                    # configured for allow_interruptions=False, so continue
+                    # using the current ID. When interruptions are enabled
+                    # (e.g. allow_interruptions=True), user speech results in
+                    # an interruption, which resets the context ID.
+                    if not self._context_id:
+                        self._context_id = str(uuid.uuid4())
+                    if not self.audio_context_available(self._context_id):
+                        await self.create_audio_context(self._context_id)
 
                     # Initialize context with voice settings
                     msg = {"text": " ", "context_id": self._context_id}
@@ -680,6 +734,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             style: Style control for voice expression (0.0 to 1.0).
             use_speaker_boost: Whether to use speaker boost enhancement.
             speed: Voice speed control (0.25 to 4.0).
+            apply_text_normalization: Text normalization mode ("auto", "on", "off").
         """
 
         language: Optional[Language] = None
@@ -689,6 +744,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         style: Optional[float] = None
         use_speaker_boost: Optional[bool] = None
         speed: Optional[float] = None
+        apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
 
     def __init__(
         self,
@@ -696,7 +752,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         api_key: str,
         voice_id: str,
         aiohttp_session: aiohttp.ClientSession,
-        model: str = "eleven_flash_v2_5",
+        model: str = "eleven_turbo_v2_5",
         base_url: str = "https://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
@@ -708,7 +764,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
             aiohttp_session: aiohttp ClientSession for HTTP requests.
-            model: TTS model to use (e.g., "eleven_flash_v2_5").
+            model: TTS model to use (e.g., "eleven_turbo_v2_5").
             base_url: Base URL for ElevenLabs HTTP API.
             sample_rate: Audio sample rate. If None, uses default.
             params: Additional input parameters for voice customization.
@@ -739,6 +795,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             "style": params.style,
             "use_speaker_boost": params.use_speaker_boost,
             "speed": params.speed,
+            "apply_text_normalization": params.apply_text_normalization,
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
@@ -922,6 +979,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
         }
         if self._settings["optimize_streaming_latency"] is not None:
             params["optimize_streaming_latency"] = self._settings["optimize_streaming_latency"]
+        if self._settings["apply_text_normalization"] is not None:
+            params["apply_text_normalization"] = self._settings["apply_text_normalization"]
 
         try:
             await self.start_ttfb_metrics()

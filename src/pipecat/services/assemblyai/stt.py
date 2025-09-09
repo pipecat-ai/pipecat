@@ -219,10 +219,7 @@ class AssemblyAISTTService(STTService):
                 await self._websocket.send(json.dumps({"type": "Terminate"}))
 
                 try:
-                    await asyncio.wait_for(
-                        self._termination_event.wait(),
-                        timeout=5.0,
-                    )
+                    await asyncio.wait_for(self._termination_event.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     logger.warning("Timed out waiting for termination message from server")
 
@@ -247,11 +244,9 @@ class AssemblyAISTTService(STTService):
         try:
             while self._connected:
                 try:
-                    message = await asyncio.wait_for(self._websocket.recv(), timeout=1.0)
+                    message = await self._websocket.recv()
                     data = json.loads(message)
                     await self._handle_message(data)
-                except asyncio.TimeoutError:
-                    self.reset_watchdog()
                 except websockets.exceptions.ConnectionClosedOK:
                     break
                 except Exception as e:
