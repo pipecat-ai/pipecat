@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `StartInterruptionFrame` is now deprected, use `InterruptionFrame` instead.
+
 - Deprecate `VisionImageFrameAggregator` because `VisionImageRawFrame` has been
   removed. See the `12*` examples for the new recommended replacement pattern.
 

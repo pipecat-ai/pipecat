@@ -33,10 +33,10 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
+    InterruptionFrame,
     MetricsFrame,
     SpeechControlParamsFrame,
     StartFrame,
-    StartInterruptionFrame,
     StopFrame,
     SystemFrame,
     UserSpeakingFrame,
@@ -340,7 +340,7 @@ class BaseInputTransport(FrameProcessor):
         logger.debug("Bot interruption")
         if self.interruptions_allowed:
             await self._start_interruption()
-            await self.push_frame(StartInterruptionFrame())
+            await self.push_frame(InterruptionFrame())
 
     async def _handle_user_interruption(self, vad_state: VADState, emulated: bool = False):
         """Handle user interruption events based on speaking state."""
@@ -366,7 +366,7 @@ class BaseInputTransport(FrameProcessor):
                 # Push an out-of-band frame (i.e. not using the ordered push
                 # frame task) to stop everything, specially at the output
                 # transport.
-                await self.push_frame(StartInterruptionFrame())
+                await self.push_frame(InterruptionFrame())
             elif self.interruption_strategies and self._bot_speaking:
                 logger.debug(
                     "User started speaking while bot is speaking with interruption config - "

@@ -19,7 +19,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    StartInterruptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
@@ -195,7 +195,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (StartInterruptionFrame, CancelFrame)):
+        if isinstance(frame, (InterruptionFrame, CancelFrame)):
             # Push frame first otherwise our emitted transcription update frame
             # might get cleaned up.
             await self.push_frame(frame, direction)

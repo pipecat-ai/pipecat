@@ -24,6 +24,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -32,7 +33,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -364,7 +364,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
         elif isinstance(frame, UserStartedSpeakingFrame):
             await self._handle_user_started_speaking(frame)
@@ -659,7 +659,7 @@ class OpenAIRealtimeBetaLLMService(LLMService):
     async def _handle_evt_speech_started(self, evt):
         await self._truncate_current_audio_response()
         await self._start_interruption()  # cancels this processor task
-        await self.push_frame(StartInterruptionFrame())  # cancels downstream tasks
+        await self.push_frame(InterruptionFrame())  # cancels downstream tasks
         await self.push_frame(UserStartedSpeakingFrame())
 
     async def _handle_evt_speech_stopped(self, evt):

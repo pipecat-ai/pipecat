@@ -37,6 +37,7 @@ from pipecat.frames.frames import (
     FunctionCallsStartedFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextAssistantTimestampFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
@@ -48,7 +49,6 @@ from pipecat.frames.frames import (
     LLMSetToolsFrame,
     SpeechControlParamsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserImageRawFrame,
@@ -579,7 +579,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, LLMFullResponseStartFrame):
@@ -645,7 +645,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         if frame.run_llm:
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
-    async def _handle_interruptions(self, frame: StartInterruptionFrame):
+    async def _handle_interruptions(self, frame: InterruptionFrame):
         await self._push_aggregation()
         self._started = 0
         await self.reset()
