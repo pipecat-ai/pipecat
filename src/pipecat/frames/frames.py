@@ -789,43 +789,6 @@ class FatalErrorFrame(ErrorFrame):
 
 
 @dataclass
-class EndTaskFrame(SystemFrame):
-    """Frame to request graceful pipeline task closure.
-
-    This is used to notify the pipeline task that the pipeline should be
-    closed nicely (flushing all the queued frames) by pushing an EndFrame
-    downstream. This frame should be pushed upstream.
-    """
-
-    pass
-
-
-@dataclass
-class CancelTaskFrame(SystemFrame):
-    """Frame to request immediate pipeline task cancellation.
-
-    This is used to notify the pipeline task that the pipeline should be
-    stopped immediately by pushing a CancelFrame downstream. This frame
-    should be pushed upstream.
-    """
-
-    pass
-
-
-@dataclass
-class StopTaskFrame(SystemFrame):
-    """Frame to request pipeline task stop while keeping processors running.
-
-    This is used to notify the pipeline task that it should be stopped as
-    soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state. This frame should be pushed
-    upstream.
-    """
-
-    pass
-
-
-@dataclass
 class FrameProcessorPauseUrgentFrame(SystemFrame):
     """Frame to pause frame processing immediately.
 
@@ -1287,6 +1250,62 @@ class SpeechControlParamsFrame(SystemFrame):
 
     vad_params: Optional[VADParams] = None
     turn_params: Optional[SmartTurnParams] = None
+
+
+#
+# Task frames
+#
+
+
+@dataclass
+class TaskFrame(SystemFrame):
+    """Base frame for task frames.
+
+    This is a base class for frames that are meant to be sent and handled
+    upstream by the pipeline task. This might result in a corresponding frame
+    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
+    `EndTaskFrame` / `EndFrame`).
+
+    """
+
+    pass
+
+
+@dataclass
+class EndTaskFrame(TaskFrame):
+    """Frame to request graceful pipeline task closure.
+
+    This is used to notify the pipeline task that the pipeline should be
+    closed nicely (flushing all the queued frames) by pushing an EndFrame
+    downstream. This frame should be pushed upstream.
+    """
+
+    pass
+
+
+@dataclass
+class CancelTaskFrame(TaskFrame):
+    """Frame to request immediate pipeline task cancellation.
+
+    This is used to notify the pipeline task that the pipeline should be
+    stopped immediately by pushing a CancelFrame downstream. This frame
+    should be pushed upstream.
+    """
+
+    pass
+
+
+@dataclass
+class StopTaskFrame(TaskFrame):
+    """Frame to request pipeline task stop while keeping processors running.
+
+    This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state. This frame should be pushed
+    upstream.
+    """
+
+    pass
 
 
 #
