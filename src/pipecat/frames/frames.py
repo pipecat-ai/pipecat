@@ -820,7 +820,7 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
 
 
 @dataclass
-class StartInterruptionFrame(SystemFrame):
+class InterruptionFrame(SystemFrame):
     """Frame indicating user started speaking (interruption detected).
 
     Emitted by the BaseInputTransport to indicate that a user has started
@@ -830,6 +830,34 @@ class StartInterruptionFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class StartInterruptionFrame(InterruptionFrame):
+    """Frame indicating user started speaking (interruption detected).
+
+    .. deprecated:: 0.0.85
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `InterruptionFrame`.
+
+    Emitted by the BaseInputTransport to indicate that a user has started
+    speaking (i.e. is interrupting). This is similar to
+    UserStartedSpeakingFrame except that it should be pushed concurrently
+    with other frames (so the order is not guaranteed).
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "StartInterruptionFrame is deprecated and will be removed in a future version. "
+                "Instead, use InterruptionFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass

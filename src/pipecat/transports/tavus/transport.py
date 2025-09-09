@@ -25,9 +25,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     StartFrame,
-    StartInterruptionFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
@@ -618,7 +618,7 @@ class TavusOutputTransport(BaseOutputTransport):
             direction: The direction of frame flow in the pipeline.
         """
         await super().process_frame(frame, direction)
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._handle_interruptions()
 
     async def _handle_interruptions(self):

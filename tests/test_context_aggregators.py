@@ -17,11 +17,11 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     OpenAILLMContextAssistantTimestampFrame,
     SpeechControlParamsFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -618,7 +618,7 @@ class BaseTestAssistantContextAggreagator:
             TextFrame(text="Pipecat."),
             LLMFullResponseEndFrame(),
             SleepFrame(AGGREGATION_SLEEP),
-            StartInterruptionFrame(),
+            InterruptionFrame(),
             LLMFullResponseStartFrame(),
             TextFrame(text="How are "),
             TextFrame(text="you?"),
@@ -626,7 +626,7 @@ class BaseTestAssistantContextAggreagator:
         ]
         expected_down_frames = [
             *self.EXPECTED_CONTEXT_FRAMES,
-            StartInterruptionFrame,
+            InterruptionFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
         await run_test(

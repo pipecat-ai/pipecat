@@ -28,8 +28,8 @@ from pipecat.frames.frames import (
     FrameProcessorPauseUrgentFrame,
     FrameProcessorResumeFrame,
     FrameProcessorResumeUrgentFrame,
+    InterruptionFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage, MetricsData
@@ -588,7 +588,7 @@ class FrameProcessor(BaseObject):
 
         if isinstance(frame, StartFrame):
             await self.__start(frame)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._start_interruption()
             await self.stop_all_metrics()
         elif isinstance(frame, CancelFrame):
