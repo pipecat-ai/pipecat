@@ -815,14 +815,10 @@ class AWSBedrockLLMService(LLMService):
             messages = []
             system = []
             if isinstance(context, LLMContext):
-                # Future code will be something like this:
-                # adapter = self.get_llm_adapter()
-                # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
-                # messages = params["messages"]
-                # system = params["system_instruction"] # [{"text": "system message"}]
-                raise NotImplementedError(
-                    "Universal LLMContext is not yet supported for AWS Bedrock."
-                )
+                adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+                params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+                messages = params["messages"]
+                system = params["system"]  # [{"text": "system message"}]
             else:
                 context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
                 messages = context.messages

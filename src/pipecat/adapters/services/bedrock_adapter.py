@@ -29,7 +29,7 @@ from pipecat.processors.aggregators.llm_context import (
 class AWSBedrockLLMInvocationParams(TypedDict):
     """Context-based parameters for invoking AWS Bedrock's LLM API."""
 
-    system: Optional[str]
+    system: Optional[List[dict[str, Any]]]  # [{"text": "system message"}]
     messages: List[dict[str, Any]]
     tools: List[dict[str, Any]]
     tool_choice: LLMContextToolChoice
