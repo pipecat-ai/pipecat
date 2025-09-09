@@ -174,11 +174,16 @@ class AssemblyAISTTService(STTService):
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with query parameters using urllib.parse.urlencode."""
-        params = {
-            k: str(v).lower() if isinstance(v, bool) else v
-            for k, v in self._connection_params.model_dump().items()
-            if v is not None
-        }
+        def _encode_param(v: Any) -> Any:
+            if isinstance(v, bool):
+                return str(v).lower()
+            if isinstance(v, list):
+                return json.dumps(v)
+            return v
+
+        dumped = self._connection_params.model_dump(exclude_none=True)
+        params: Dict[str, Any] = {k: _encode_param(v) for k, v in dumped.items()}
+
         if params:
             query_string = urlencode(params)
             return f"{self._api_endpoint_base_url}?{query_string}"
@@ -302,7 +307,7 @@ class AssemblyAISTTService(STTService):
             return
         await self.stop_ttfb_metrics()
         if message.end_of_turn and (
-            not self._connection_params.formatted_finals or message.turn_is_formatted
+            not self._connection_params.format_turns or message.turn_is_formatted
         ):
             await self.push_frame(
                 TranscriptionFrame(
