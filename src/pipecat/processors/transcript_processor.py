@@ -86,7 +86,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
     transcript messages. Utterances are completed when:
 
     - The bot stops speaking (BotStoppedSpeakingFrame)
-    - The bot is interrupted (StartInterruptionFrame)
+    - The bot is interrupted (InterruptionFrame)
     - The pipeline ends (EndFrame)
     """
 
@@ -185,7 +185,7 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
 
         - TTSTextFrame: Aggregates text for current utterance
         - BotStoppedSpeakingFrame: Completes current utterance
-        - StartInterruptionFrame: Completes current utterance due to interruption
+        - InterruptionFrame: Completes current utterance due to interruption
         - EndFrame: Completes current utterance at pipeline end
         - CancelFrame: Completes current utterance due to cancellation
 

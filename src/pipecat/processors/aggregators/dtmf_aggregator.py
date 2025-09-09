@@ -16,15 +16,15 @@ from typing import Optional
 
 from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     Frame,
     InputDTMFFrame,
+    InterruptionTaskFrame,
     StartFrame,
     TranscriptionFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -105,7 +105,7 @@ class DTMFAggregator(FrameProcessor):
 
         # For first digit, schedule interruption.
         if is_first_digit:
-            await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
 
         # Check for immediate flush conditions
         if frame.button == self._termination_digit:

@@ -19,12 +19,12 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    InterruptionTaskFrame,
     StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -756,7 +756,7 @@ class SpeechmaticsSTTService(STTService):
         if self._params.enable_vad and not self._is_speaking:
             logger.debug("User started speaking")
             self._is_speaking = True
-            upstream_frames += [BotInterruptionFrame()]
+            upstream_frames += [InterruptionTaskFrame()]
             downstream_frames += [UserStartedSpeakingFrame()]
 
         # If final, then re-parse into TranscriptionFrame

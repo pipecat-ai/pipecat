@@ -936,20 +936,6 @@ class VADUserStoppedSpeakingFrame(SystemFrame):
 
 
 @dataclass
-class BotInterruptionFrame(SystemFrame):
-    """Frame indicating the bot should be interrupted.
-
-    Emitted when the bot should be interrupted. This will mainly cause the
-    same actions as if the user interrupted except that the
-    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
-    This frame should be pushed upstreams. It results in the BaseInputTransport
-    starting an interruption by pushing a StartInterruptionFrame downstream.
-    """
-
-    pass
-
-
-@dataclass
 class BotStartedSpeakingFrame(SystemFrame):
     """Frame indicating the bot started speaking.
 
@@ -1334,6 +1320,47 @@ class StopTaskFrame(TaskFrame):
     """
 
     pass
+
+
+@dataclass
+class InterruptionTaskFrame(TaskFrame):
+    """Frame indicating the bot should be interrupted.
+
+    Emitted when the bot should be interrupted. This will mainly cause the
+    same actions as if the user interrupted except that the
+    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
+    This frame should be pushed upstream.
+    """
+
+    pass
+
+
+@dataclass
+class BotInterruptionFrame(InterruptionTaskFrame):
+    """Frame indicating the bot should be interrupted.
+
+    .. deprecated:: 0.0.85
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `InterruptionTaskFrame`.
+
+    Emitted when the bot should be interrupted. This will mainly cause the
+    same actions as if the user interrupted except that the
+    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
+    This frame should be pushed upstream.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "BotInterruptionFrame is deprecated and will be removed in a future version. "
+                "Instead, use InterruptionTaskFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 #

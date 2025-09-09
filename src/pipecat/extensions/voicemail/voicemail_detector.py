@@ -21,9 +21,9 @@ from typing import List, Optional
 from loguru import logger
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     EndFrame,
     Frame,
+    InterruptionTaskFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMTextFrame,
@@ -360,7 +360,7 @@ class ClassificationProcessor(FrameProcessor):
             await self._voicemail_notifier.notify()  # Clear buffered TTS frames
 
             # Interrupt the current pipeline to stop any ongoing processing
-            await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+            await self.push_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
 
             # Set the voicemail event to trigger the voicemail handler
             self._voicemail_event.clear()

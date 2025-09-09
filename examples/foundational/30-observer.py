@@ -48,7 +48,7 @@ class CustomObserver(BaseObserver):
     """Observer to log interruptions and bot speaking events to the console.
 
     Logs all frame instances of:
-    - StartInterruptionFrame
+    - InterruptionFrame
     - BotStartedSpeakingFrame
     - BotStoppedSpeakingFrame
 
