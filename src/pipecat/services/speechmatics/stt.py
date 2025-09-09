@@ -24,7 +24,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
-    InterruptionTaskFrame,
     StartFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -749,14 +748,13 @@ class SpeechmaticsSTTService(STTService):
             return
 
         # Frames to send
-        upstream_frames: list[Frame] = []
         downstream_frames: list[Frame] = []
 
         # If VAD is enabled, then send a speaking frame
         if self._params.enable_vad and not self._is_speaking:
             logger.debug("User started speaking")
             self._is_speaking = True
-            upstream_frames += [InterruptionTaskFrame()]
+            await self.push_interruption_task_frame_and_wait()
             downstream_frames += [UserStartedSpeakingFrame()]
 
         # If final, then re-parse into TranscriptionFrame
@@ -793,10 +791,6 @@ class SpeechmaticsSTTService(STTService):
             logger.debug("User stopped speaking")
             self._is_speaking = False
             downstream_frames += [UserStoppedSpeakingFrame()]
-
-        # Send UPSTREAM frames
-        for frame in upstream_frames:
-            await self.push_frame(frame, FrameDirection.UPSTREAM)
 
         # Send the DOWNSTREAM frames
         for frame in downstream_frames:

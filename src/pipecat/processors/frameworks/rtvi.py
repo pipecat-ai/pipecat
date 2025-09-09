@@ -41,7 +41,6 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
-    InterruptionTaskFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -1206,7 +1205,7 @@ class RTVIProcessor(FrameProcessor):
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
-        await self.push_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
+        await self.push_interruption_task_frame_and_wait()
 
     async def send_server_message(self, data: Any):
         """Send a server message to the client."""

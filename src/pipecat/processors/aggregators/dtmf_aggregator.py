@@ -20,7 +20,6 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputDTMFFrame,
-    InterruptionTaskFrame,
     StartFrame,
     TranscriptionFrame,
 )
@@ -105,7 +104,7 @@ class DTMFAggregator(FrameProcessor):
 
         # For first digit, schedule interruption.
         if is_first_digit:
-            await self.push_frame(InterruptionTaskFrame(), FrameDirection.UPSTREAM)
+            await self.push_interruption_task_frame_and_wait()
 
         # Check for immediate flush conditions
         if frame.button == self._termination_digit:
