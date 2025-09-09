@@ -13,6 +13,7 @@ from loguru import logger
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
+    LLMContextFrame,
     TextFrame,
     TTSSpeakFrame,
     UserImageRawFrame,
@@ -21,10 +22,7 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.user_response import UserResponseAggregator
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
@@ -73,14 +71,14 @@ class UserImageProcessor(FrameProcessor):
         if isinstance(frame, UserImageRawFrame):
             if frame.request and frame.request.context:
                 # Note: AWS Bedrock does not yet support the universal LLMContext
-                context = OpenAILLMContext()
+                context = LLMContext()
                 context.add_image_frame_message(
                     image=frame.image,
                     text=frame.request.context,
                     size=frame.size,
                     format=frame.format,
                 )
-                frame = OpenAILLMContextFrame(context)
+                frame = LLMContextFrame(context)
                 await self.push_frame(frame)
         else:
             await self.push_frame(frame, direction)
