@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added new base `TaskFrame` (which is a system frame). This is the base class
+  for all task frames (`EndTaskFrame`, `CancelTaskFrame`, etc.) that are meant
+  to be pushed upstream to reach the pipeline task.
+
 - Expanded support for universal `LLMContext` to the AWS Bedrock LLM service.
   Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
   a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
