@@ -640,9 +640,12 @@ class PipelineTask(BasePipelineTask):
             logger.debug(f"{self}: received stop task frame {frame}")
             await self.queue_frame(StopFrame())
         elif isinstance(frame, InterruptionTaskFrame):
-            # Tell the task we should interrupt the pipeline.
+            # Tell the task we should interrupt the pipeline. Note that we are
+            # bypassing the push queue and directly queue into the
+            # pipeline. This is in case the push task is blocked waiting for a
+            # pipeline-ending frame to finish traversing the pipeline.
             logger.debug(f"{self}: received interruption task frame {frame}")
-            await self.queue_frame(InterruptionFrame())
+            await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")

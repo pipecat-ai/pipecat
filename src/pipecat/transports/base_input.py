@@ -32,8 +32,6 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
-    InterruptionFrame,
-    InterruptionTaskFrame,
     MetricsFrame,
     SpeechControlParamsFrame,
     StartFrame,
@@ -353,11 +351,7 @@ class BaseInputTransport(FrameProcessor):
 
             # Make sure we notify about interruptions quickly out-of-band.
             if should_push_immediate_interruption and self.interruptions_allowed:
-                await self._start_interruption()
-                # Push an out-of-band frame (i.e. not using the ordered push
-                # frame task) to stop everything, specially at the output
-                # transport.
-                await self.push_frame(InterruptionFrame())
+                await self.push_interruption_task_frame_and_wait()
             elif self.interruption_strategies and self._bot_speaking:
                 logger.debug(
                     "User started speaking while bot is speaking with interruption config - "
@@ -371,9 +365,6 @@ class BaseInputTransport(FrameProcessor):
             downstream_frame = UserStoppedSpeakingFrame(emulated=emulated)
             await self.push_frame(downstream_frame)
             await self.push_frame(upstream_frame, FrameDirection.UPSTREAM)
-
-            if self.interruptions_allowed:
-                await self._stop_interruption()
 
     #
     # Handle bot speaking state
