@@ -98,7 +98,10 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = AWSBedrockLLMService(
         aws_region="us-west-2",
         model="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-        params=AWSBedrockLLMService.InputParams(temperature=0.8, latency="optimized"),
+        # Note: usually, prefer providing latency="optimized" param.
+        # Here we can't because AWS Bedrock doesn't support it for Claude 3.7,
+        # which we need for image input.
+        params=AWSBedrockLLMService.InputParams(temperature=0.8),
     )
     llm.register_function("get_weather", get_weather)
     llm.register_function("get_image", get_image)
