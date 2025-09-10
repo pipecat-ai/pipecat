@@ -47,6 +47,40 @@ autodoc_default_options = {
 
 # Mock imports for optional dependencies
 autodoc_mock_imports = [
+    "riva",
+    "livekit",
+    "pyht",  # Base PlayHT package
+    "pyht.async_client",  # PlayHT specific imports
+    "pyht.client",
+    "pyht.protos",
+    "pyht.protos.api_pb2",
+    "pipecat_ai_playht",  # PlayHT wrapper
+    "aiortc",
+    "aiortc.mediastreams",
+    "cv2",
+    "av",
+    "pyneuphonic",
+    "mem0",
+    "mlx_whisper",
+    "anthropic",
+    "assemblyai",
+    "boto3",
+    "azure",
+    "cartesia",
+    "deepgram",
+    "elevenlabs",
+    "fal",
+    "gladia",
+    "google",
+    "krisp",
+    "langchain",
+    "lmnt",
+    "murf",
+    "noisereduce",
+    "openpipe",
+    "simli",
+    "soundfile",
+    "soniox",
     # Krisp - has build issues on some platforms
     "pipecat_ai_krisp",
     "krisp",
