@@ -162,6 +162,8 @@ class TwilioFrameSerializer(FrameSerializer):
             account_sid = self._account_sid
             auth_token = self._auth_token
             call_sid = self._call_sid
+            region = self._region
+            edge = self._edge
 
             if not call_sid or not account_sid or not auth_token:
                 missing = []
@@ -176,9 +178,15 @@ class TwilioFrameSerializer(FrameSerializer):
                     f"Cannot hang up Twilio call: missing required parameters: {', '.join(missing)}"
                 )
                 return
-            
-            region_prefix = f"{self._region}." if self._region else ""
-            edge_prefix = f"{self._edge}." if self._edge else ""
+
+            if (region and not edge) or (edge and not region):
+                logger.warning(
+                    "Cannot hang up Twilio call: both edge and region are required if one is set"
+                )
+                return
+
+            region_prefix = f"{region}." if region else ""
+            edge_prefix = f"{edge}." if edge else ""
 
             # Twilio API endpoint for updating calls
             endpoint = (
