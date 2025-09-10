@@ -13,6 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
   a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
 
+- Added `to` and `from` phone number information to the development runner for
+  Twilio, Telnyx, Plivo, and Exotel. Note: for Twilio and Plivo, `to` and `from`
+  phone number information must be manually provided.
+
+  - Twilio: TwiML returned must contain:
+    ```
+    <Stream url="wss://server.com/ws">
+        <Parameter name="from" value="{{From}}"/>
+        <Parameter name="to" value="{{To}}"/>
+    </Stream>
+    ```
+  - Plivo: Add `to` and `from` information as `extraHeaders` in the XML `Stream`
+    property.
+
+  This phone information acts as an identifer for inbound calls, allowing you
+  to programmatically inject information to your bot file based on corresponding
+  user information.
+
+- Added the ability to retrieve custom data from the development runner for
+  Twilio, Telnyx, Plivo, and Exotel. This provides the ability to inject custom
+  data into the call for outbound calling cases.
+
 - Added video streaming support to `LiveKitTransport`.
 
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide

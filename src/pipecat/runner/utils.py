@@ -99,14 +99,20 @@ async def parse_telephony_websocket(websocket: WebSocket):
         tuple: (transport_type: str, call_data: dict)
 
         call_data contains provider-specific fields:
-        - Twilio: {"stream_id": str, "call_id": str}
-        - Telnyx: {"stream_id": str, "call_control_id": str, "outbound_encoding": str}
-        - Plivo: {"stream_id": str, "call_id": str}
-        - Exotel: {"stream_id": str, "call_id": str, "account_sid": str}
+        - Twilio: {"stream_id": str, "call_id": str, "from": str, "to": str}
+        - Telnyx: {"stream_id": str, "call_control_id": str, "outbound_encoding": str, "from": str, "to": str}
+        - Plivo: {"stream_id": str, "call_id": str, "from": str, "to": str}
+        - Exotel: {"stream_id": str, "call_id": str, "account_sid": str, "from": str, "to": str}
 
     Example usage::
 
         transport_type, call_data = await parse_telephony_websocket(websocket)
+
+        # Access call information (works for all providers when available)
+        from_number = call_data.get("from", "")
+        to_number = call_data.get("to", "")
+
+        # Access provider-specific fields
         if transport_type == "telnyx":
             outbound_encoding = call_data["outbound_encoding"]
     """
@@ -151,9 +157,13 @@ async def parse_telephony_websocket(websocket: WebSocket):
         # Extract provider-specific data
         if transport_type == "twilio":
             start_data = call_data_raw.get("start", {})
+            custom_params = start_data.get("customParameters", {})
+
             call_data = {
                 "stream_id": start_data.get("streamSid"),
                 "call_id": start_data.get("callSid"),
+                "from": custom_params.get("from", ""),
+                "to": custom_params.get("to", ""),
             }
 
         elif transport_type == "telnyx":
@@ -163,13 +173,47 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "outbound_encoding": call_data_raw.get("start", {})
                 .get("media_format", {})
                 .get("encoding"),
+                "from": call_data_raw.get("start", {}).get("from", ""),
+                "to": call_data_raw.get("start", {}).get("to", ""),
             }
 
         elif transport_type == "plivo":
             start_data = call_data_raw.get("start", {})
+            custom_params = start_data.get("customParameters", {})
+
+            # Extract from/to from extra_headers if available
+            from_number = ""
+            to_number = ""
+
+            # First try customParameters (for query parameter approach)
+            if custom_params.get("from"):
+                from_number = custom_params.get("from", "")
+            if custom_params.get("to"):
+                to_number = custom_params.get("to", "")
+
+            # If not found in customParameters, try extra_headers
+            if not from_number or not to_number:
+                # Check for extra_headers in both root level and start event
+                extra_headers = call_data_raw.get("extra_headers", "") or start_data.get(
+                    "extra_headers", ""
+                )
+                if extra_headers:
+                    # Parse format: "{X-PH-from: 14129162450, X-PH-to: 17242775935}"
+                    import re
+
+                    from_match = re.search(r"X-PH-from:\s*([^,\s}]+)", extra_headers)
+                    to_match = re.search(r"X-PH-to:\s*([^,\s}]+)", extra_headers)
+
+                    if from_match and not from_number:
+                        from_number = from_match.group(1).strip()
+                    if to_match and not to_number:
+                        to_number = to_match.group(1).strip()
+
             call_data = {
                 "stream_id": start_data.get("streamId"),
                 "call_id": start_data.get("callId"),
+                "from": from_number,
+                "to": to_number,
             }
 
         elif transport_type == "exotel":
@@ -178,6 +222,8 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "stream_id": start_data.get("stream_sid"),
                 "call_id": start_data.get("call_sid"),
                 "account_sid": start_data.get("account_sid"),
+                "from": start_data.get("from", ""),
+                "to": start_data.get("to", ""),
             }
 
         else:
