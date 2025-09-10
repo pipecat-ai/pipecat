@@ -14,16 +14,29 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.metrics.sentry import SentryMetrics
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.respeecher.tts import RespeecherTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
 from pipecat.transports.services.daily import DailyParams
+from pipecat.processors.transcript_processor import TranscriptProcessor
 
 load_dotenv(override=True)
+
+import sentry_sdk
+
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    # Add data like request headers and IP for users,
+    # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+    traces_sample_rate=1.0
+)
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets
@@ -50,7 +63,14 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        metrics = SentryMetrics(),
+    )
+    #stt = OpenAISTTService(
+    #    api_key=os.getenv("OPENAI_API_KEY"),
+    #    metrics = SentryMetrics(),
+    #)
 
     tts = RespeecherTTSService(
         api_key=os.getenv("RESPEECHER_API_KEY"),
@@ -62,9 +82,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 # "temperature": 0.5
             },
         ),
+        metrics = SentryMetrics(),
     )
+    #tts = CartesiaTTSService(
+    #    api_key=os.getenv("CARTESIA_API_KEY"),
+    #    voice_id="71a7ad14-091c-4e8e-a314-022ece01c121",  # British Reading Lady
+    #    metrics = SentryMetrics(),
+    #)
 
-    llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
+    llm = OpenAILLMService(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        metrics = SentryMetrics(),
+    )
 
     messages = [
         {
