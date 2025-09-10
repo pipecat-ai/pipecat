@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add additional fixups to Mistral context messages to ensure they meet
   Mistral-specific requirements, avoiding Mistral "invalid request" errors.
 
+- Fixed `DailyTransport` transcription handling to gracefully handle missing
+  `rawResponse` field in transcription messages, preventing KeyError crashes.
+
 ## [0.0.84] - 2025-09-05
 
 ### Added
