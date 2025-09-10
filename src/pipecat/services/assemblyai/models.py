@@ -103,7 +103,7 @@ class AssemblyAIConnectionParams(BaseModel):
     Parameters:
         sample_rate: Audio sample rate in Hz. Defaults to 16000.
         encoding: Audio encoding format. Defaults to "pcm_s16le".
-        format_turns: Whether to enable transcript formatting. Defaults to True.
+        formatted_finals: Whether to enable transcript formatting. Defaults to True.
         end_of_turn_confidence_threshold: Confidence threshold for end-of-turn detection.
         min_end_of_turn_silence_when_confident: Minimum silence duration when confident about end-of-turn.
         max_turn_silence: Maximum silence duration before forcing end-of-turn.
@@ -112,7 +112,7 @@ class AssemblyAIConnectionParams(BaseModel):
 
     sample_rate: int = 16000
     encoding: Literal["pcm_s16le", "pcm_mulaw"] = "pcm_s16le"
-    format_turns: bool = True
+    formatted_finals: bool = True
     end_of_turn_confidence_threshold: Optional[float] = None
     min_end_of_turn_silence_when_confident: Optional[int] = None
     max_turn_silence: Optional[int] = None
