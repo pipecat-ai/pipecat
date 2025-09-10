@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `SelfClosingTagAggregator` to handle incomplete self-closing tags during
+  streaming (e.g., prevents splitting `<break time="0.1s"/>` when received as
+  `<break time="0.` + `1s"/>`).
+
 - Added video streaming support to `LiveKitTransport`.
 
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
