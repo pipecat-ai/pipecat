@@ -61,6 +61,8 @@ class TwilioFrameSerializer(FrameSerializer):
         call_sid: Optional[str] = None,
         account_sid: Optional[str] = None,
         auth_token: Optional[str] = None,
+        region: Optional[str] = None,
+        edge: Optional[str] = None,
         params: Optional[InputParams] = None,
     ):
         """Initialize the TwilioFrameSerializer.
@@ -76,6 +78,8 @@ class TwilioFrameSerializer(FrameSerializer):
         self._call_sid = call_sid
         self._account_sid = account_sid
         self._auth_token = auth_token
+        self._region = region
+        self._edge = edge
         self._params = params or TwilioFrameSerializer.InputParams()
 
         self._twilio_sample_rate = self._params.twilio_sample_rate
@@ -172,10 +176,13 @@ class TwilioFrameSerializer(FrameSerializer):
                     f"Cannot hang up Twilio call: missing required parameters: {', '.join(missing)}"
                 )
                 return
+            
+            region_prefix = f"{self._region}." if self._region else ""
+            edge_prefix = f"{self._edge}." if self._edge else ""
 
             # Twilio API endpoint for updating calls
             endpoint = (
-                f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
+                f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
             )
 
             # Create basic auth from account_sid and auth_token
