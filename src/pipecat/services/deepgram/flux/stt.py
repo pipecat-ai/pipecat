@@ -88,7 +88,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             eot_threshold: End-of-turn confidence required to finish a turn (default 0.7).
                 Lower values = turns end sooner (more interruptions, faster responses).
                 Higher values = turns end later (fewer interruptions, more complete utterances).
-            eot_timeout_ms: Time in milliseconds after speech to finish a turn regardless of EOT confidence (default 3000).
+            eot_timeout_ms: Time in milliseconds after speech to finish a turn regardless of EOT confidence (default 5000).
                 A turn will be finished when this much time has passed after speech, regardless of EOT confidence.
             keyterm: List of keyterms to boost recognition accuracy for specialized terminology.
                 Pass multiple keyterms to improve recognition of domain-specific words.
@@ -100,7 +100,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         flux_encoding: str = "linear16"
         preflight_threshold: float = 0.3
         eot_threshold: float = 0.7
-        eot_timeout_ms: int = 3000
+        eot_timeout_ms: int = 5000
         keyterm: list = []
         mip_opt_out: bool = False
         tag: list = []
