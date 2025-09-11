@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Local PyTorch turn analyzer for on-device ML inference using the smart-turn-v3 model.
+"""Local turn analyzer for on-device ML inference using the smart-turn-v3 model.
 
 This module provides a smart turn analyzer that uses an ONNX model for
 local end-of-turn detection without requiring network connectivity.
@@ -28,16 +28,23 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
-    """Local turn analyzer using the smart-turn-v2 PyTorch model.
+def build_session(onnx_path):
+    so = ort.SessionOptions()
+    so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    so.inter_op_num_threads = 1
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    return ort.InferenceSession(onnx_path, sess_options=so)
 
-    Provides end-of-turn detection using locally-stored PyTorch models,
-    enabling offline operation without network dependencies. Uses
-    Wav2Vec2 architecture for audio sequence classification.
+
+class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
+    """Local turn analyzer using the smart-turn-v3 ONNX model.
+
+    Provides end-of-turn detection using locally-stored ONNX model,
+    enabling offline operation without network dependencies.
     """
 
     def __init__(self, *, smart_turn_model_path: str, **kwargs):
-        """Initialize the local PyTorch smart-turn-v3 analyzer.
+        """Initialize the local ONNX smart-turn-v3 analyzer.
 
         Args:
             smart_turn_model_path: Path to the ONNX model file.
@@ -51,7 +58,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         logger.debug("Loading Local Smart Turn v3 model...")
 
         self._feature_extractor = WhisperFeatureExtractor(chunk_length=8)
-        self._session = ort.InferenceSession(smart_turn_model_path)
+        self._session = build_session(smart_turn_model_path)
 
         logger.debug("Loaded Local Smart Turn v3")
 
