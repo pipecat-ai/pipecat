@@ -153,7 +153,11 @@ You can get started with Pipecat running on your local machine, then move your a
 2. Install development and testing dependencies:
 
    ```bash
-   uv sync --group dev --all-extras --no-extra gstreamer --no-extra krisp --no-extra local
+   uv sync --group dev --all-extras \
+     --no-extra gstreamer \
+     --no-extra krisp \
+     --no-extra local \
+     --no-extra ultravox # (ultravox not fully supported on macOS)
    ```
 
 3. Install the git pre-commit hooks:
@@ -161,23 +165,6 @@ You can get started with Pipecat running on your local machine, then move your a
    ```bash
    uv run pre-commit install
    ```
-
-### Python 3.13+ Compatibility
-
-Some features require PyTorch, which doesn't yet support Python 3.13+. Install using:
-
-```bash
-uv sync --group dev --all-extras \
-  --no-extra gstreamer \
-  --no-extra krisp \
-  --no-extra local \
-  --no-extra local-smart-turn \
-  --no-extra mlx-whisper \
-  --no-extra moondream \
-  --no-extra ultravox
-```
-
-> **Tip:** For full compatibility, use Python 3.12: `uv python pin 3.12`
 
 > **Note**: Some extras (local, gstreamer) require system dependencies. See documentation if you encounter build errors.
 
