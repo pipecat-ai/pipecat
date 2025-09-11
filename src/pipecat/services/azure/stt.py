@@ -19,9 +19,9 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
-    InterimTranscriptionFrame,
 )
 from pipecat.services.azure.common import language_to_azure_language
 from pipecat.services.stt_service import STTService

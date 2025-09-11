@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `AzureSTTService` now pushes interim transcriptions.
+
 - Added `voice_cloning_key` to `GoogleTTSService` to support custom cloned
   voices.
 
