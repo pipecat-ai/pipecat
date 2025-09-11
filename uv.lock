@@ -4307,6 +4307,12 @@ local-smart-turn = [
     { name = "torchaudio" },
     { name = "transformers" },
 ]
+local-smart-turn-v3 = [
+    { name = "onnxruntime" },
+    { name = "torch" },
+    { name = "torchaudio" },
+    { name = "transformers" },
+]
 mcp = [
     { name = "mcp", extra = ["cli"] },
 ]
@@ -4460,7 +4466,8 @@ requires-dist = [
     { name = "numba", specifier = "==0.61.2" },
     { name = "numpy", specifier = ">=1.26.4,<3" },
     { name = "nvidia-riva-client", marker = "extra == 'riva'", specifier = "~=2.21.1" },
-    { name = "onnxruntime", marker = "extra == 'silero'", specifier = "~=1.20.1" },
+    { name = "onnxruntime", marker = "extra == 'local-smart-turn-v3'", specifier = ">=1.20.1,<2" },
+    { name = "onnxruntime", marker = "extra == 'silero'", specifier = ">=1.20.1,<2" },
     { name = "openai", specifier = ">=1.74.0,<=1.99.1" },
     { name = "opencv-python", marker = "extra == 'webrtc'", specifier = "~=4.11.0.86" },
     { name = "openpipe", marker = "extra == 'openpipe'", specifier = "~=4.50.0" },
@@ -4488,8 +4495,11 @@ requires-dist = [
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = "~=1.0.13" },
     { name = "torch", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
+    { name = "torch", marker = "extra == 'local-smart-turn-v3'", specifier = ">=2.5.0,<3" },
     { name = "torchaudio", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
+    { name = "torchaudio", marker = "extra == 'local-smart-turn-v3'", specifier = ">=2.5.0,<3" },
     { name = "transformers", marker = "extra == 'local-smart-turn'" },
+    { name = "transformers", marker = "extra == 'local-smart-turn-v3'" },
     { name = "transformers", marker = "extra == 'moondream'", specifier = ">=4.48.0" },
     { name = "transformers", marker = "extra == 'ultravox'", specifier = ">=4.48.0" },
     { name = "uvicorn", marker = "extra == 'runner'", specifier = ">=0.32.0,<1.0.0" },
@@ -4513,7 +4523,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'soniox'", specifier = ">=13.1,<15.0" },
     { name = "websockets", marker = "extra == 'websocket'", specifier = ">=13.1,<15.0" },
 ]
-provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "whisper"]
+provides-extras = ["aic", "anthropic", "assemblyai", "asyncai", "aws", "aws-nova-sonic", "azure", "cartesia", "cerebras", "deepseek", "daily", "deepgram", "elevenlabs", "fal", "fireworks", "fish", "gladia", "google", "grok", "groq", "gstreamer", "heygen", "inworld", "krisp", "koala", "langchain", "livekit", "lmnt", "local", "mcp", "mem0", "mistral", "mlx-whisper", "moondream", "nim", "neuphonic", "noisereduce", "openai", "openpipe", "openrouter", "perplexity", "playht", "qwen", "rime", "riva", "runner", "sambanova", "sarvam", "sentry", "local-smart-turn", "local-smart-turn-v3", "remote-smart-turn", "silero", "simli", "soniox", "soundfile", "speechmatics", "tavus", "together", "tracing", "ultravox", "webrtc", "websocket", "whisper"]
 
 [package.metadata.requires-dev]
 dev = [
