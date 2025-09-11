@@ -109,7 +109,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         self,
         *,
         api_key: str,
-        url: str = "wss://api.preview.deepgram.com/v2/listen",
+        url: str = "wss://api.deepgram.com/v2/listen",
         sample_rate: Optional[int] = None,
         model: str = "flux-general-en",
         params: Optional[InputParams] = None,
