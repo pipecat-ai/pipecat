@@ -9,7 +9,7 @@
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, TypedDict
 
 from anthropic import NOT_GIVEN, NotGiven
 from anthropic.types.message_param import MessageParam
@@ -28,10 +28,7 @@ from pipecat.processors.aggregators.llm_context import (
 
 
 class AnthropicLLMInvocationParams(TypedDict):
-    """Context-based parameters for invoking Anthropic's LLM API.
-
-    This is a placeholder until support for universal LLMContext machinery is added for Anthropic.
-    """
+    """Context-based parameters for invoking Anthropic's LLM API."""
 
     system: str | NotGiven
     messages: List[MessageParam]
@@ -49,8 +46,6 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         self, context: LLMContext, enable_prompt_caching: bool
     ) -> AnthropicLLMInvocationParams:
         """Get Anthropic-specific LLM invocation parameters from a universal LLM context.
-
-        This is a placeholder until support for universal LLMContext machinery is added for Anthropic.
 
         Args:
             context: The LLM context containing messages, tools, etc.
@@ -75,8 +70,6 @@ class AnthropicLLMAdapter(BaseLLMAdapter[AnthropicLLMInvocationParams]):
         """Get messages from a universal LLM context in a format ready for logging about Anthropic.
 
         Removes or truncates sensitive data like image content for safe logging.
-
-        This is a placeholder until support for universal LLMContext machinery is added for Anthropic.
 
         Args:
             context: The LLM context containing messages.
