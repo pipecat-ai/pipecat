@@ -45,6 +45,54 @@ from pipecat.runner.types import (
 from pipecat.transports.base_transport import BaseTransport
 
 
+def _parse_plivo_extra_headers(extra_headers_str: str) -> dict:
+    """Parse Plivo extra headers string into a dictionary.
+
+    Args:
+        extra_headers_str: String in format "X-PH-key: value, X-PH-key2: value2"
+
+    Returns:
+        Dictionary with parsed headers (X-PH- prefix removed)
+    """
+    if not isinstance(extra_headers_str, str) or not extra_headers_str:
+        return {}
+
+    # Plivo uses "X-PH-key: value" format
+    pattern = r"X-PH-(\w+):\s*([^,}]+)"
+    matches = re.findall(pattern, extra_headers_str)
+
+    return {key: value.strip() for key, value in matches}
+
+
+def _extract_plivo_custom_parameters(parsed_headers: dict) -> dict:
+    """Extract custom parameters from Plivo headers, excluding built-in ones.
+
+    Args:
+        parsed_headers: Dictionary of all parsed headers
+
+    Returns:
+        Dictionary containing only custom parameters
+    """
+    # Built-in Plivo headers that should not be treated as custom parameters
+    builtin_headers = {
+        "from",
+        "to",
+        "ALegRequestUUID",
+        "ALegUUID",
+        "BillRate",
+        "CallStatus",
+        "Direction",
+        "Event",
+        "ParentAuthID",
+        "RequestUUID",
+        "RouteType",
+        "STIRAttestation",
+        "STIRVerification",
+    }
+
+    return {key: value for key, value in parsed_headers.items() if key not in builtin_headers}
+
+
 def _detect_transport_type_from_message(message_data: dict) -> str:
     """Attempt to auto-detect transport type from WebSocket message structure."""
     logger.trace("=== Auto-Detection Analysis ===")
@@ -104,9 +152,27 @@ async def parse_telephony_websocket(websocket: WebSocket):
             "call_id": str,
             "body": dict
         }
-        - Telnyx: {"stream_id": str, "call_control_id": str, "outbound_encoding": str, "from": str, "to": str}
-        - Plivo: {"stream_id": str, "call_id": str, "from": str, "to": str}
-        - Exotel: {"stream_id": str, "call_id": str, "account_sid": str, "from": str, "to": str}
+        - Telnyx: {
+            "stream_id": str,
+            "call_control_id": str,
+            "outbound_encoding": str,
+            "from": str,
+            "to": str,
+        }
+        - Plivo: {
+            "stream_id": str,
+            "call_id": str,
+            "from": str,
+            "to": str,
+            "custom_parameters": dict,
+        }
+        - Exotel: {
+            "stream_id": str,
+            "call_id": str,
+            "account_sid": str,
+            "from": str,
+            "to": str,
+        }
 
     Example usage::
 
@@ -177,41 +243,18 @@ async def parse_telephony_websocket(websocket: WebSocket):
 
         elif transport_type == "plivo":
             start_data = call_data_raw.get("start", {})
-            custom_params = start_data.get("customParameters", {})
+            extra_headers_str = call_data_raw.get("extra_headers", "")
 
-            # Extract from/to from extra_headers if available
-            from_number = ""
-            to_number = ""
-
-            # First try customParameters (for query parameter approach)
-            if custom_params.get("from"):
-                from_number = custom_params.get("from", "")
-            if custom_params.get("to"):
-                to_number = custom_params.get("to", "")
-
-            # If not found in customParameters, try extra_headers
-            if not from_number or not to_number:
-                # Check for extra_headers in both root level and start event
-                extra_headers = call_data_raw.get("extra_headers", "") or start_data.get(
-                    "extra_headers", ""
-                )
-                if extra_headers:
-                    # Parse format: "{X-PH-from: 14129162450, X-PH-to: 17242775935}"
-                    import re
-
-                    from_match = re.search(r"X-PH-from:\s*([^,\s}]+)", extra_headers)
-                    to_match = re.search(r"X-PH-to:\s*([^,\s}]+)", extra_headers)
-
-                    if from_match and not from_number:
-                        from_number = from_match.group(1).strip()
-                    if to_match and not to_number:
-                        to_number = to_match.group(1).strip()
+            # Parse Plivo extra headers (format: "X-PH-key: value, X-PH-key2: value2")
+            parsed_headers = _parse_plivo_extra_headers(extra_headers_str)
+            custom_parameters = _extract_plivo_custom_parameters(parsed_headers)
 
             call_data = {
                 "stream_id": start_data.get("streamId"),
                 "call_id": start_data.get("callId"),
-                "from": from_number,
-                "to": to_number,
+                "from": parsed_headers.get("from"),
+                "to": parsed_headers.get("to"),
+                "custom_parameters": custom_parameters,
             }
 
         elif transport_type == "exotel":
