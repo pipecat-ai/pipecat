@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a `speed` arg to `OpenAITTSService` to control the speed of the voice
+  response.
+
 - Added `FrameProcessor.push_interruption_task_frame_and_wait()`. Use this
   method to programatically interrupt the bot from any part of the
   pipeline. This guarantees that all the processors in the pipeline are
