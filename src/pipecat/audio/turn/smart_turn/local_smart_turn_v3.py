@@ -66,7 +66,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
             elif len(audio_array) < max_samples:
                 # Pad with zeros at the beginning
                 padding = max_samples - len(audio_array)
-                return np.pad(audio_array, (padding, 0), mode='constant', constant_values=0)
+                return np.pad(audio_array, (padding, 0), mode="constant", constant_values=0)
             return audio_array
 
         # Truncate to 8 seconds (keeping the end) or pad to 8 seconds
