@@ -10,7 +10,7 @@ This module provides a smart turn analyzer that uses an ONNX model for
 local end-of-turn detection without requiring network connectivity.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 from loguru import logger
@@ -35,19 +35,37 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
     enabling offline operation without network dependencies.
     """
 
-    def __init__(self, *, smart_turn_model_path: str, **kwargs):
+    def __init__(self, *, smart_turn_model_path: Optional[str] = None, **kwargs):
         """Initialize the local ONNX smart-turn-v3 analyzer.
 
         Args:
-            smart_turn_model_path: Path to the ONNX model file.
+            smart_turn_model_path: Path to the ONNX model file. If this is not
+                set, the bundled smart-turn-v3.0 model will be used.
             **kwargs: Additional arguments passed to BaseSmartTurn.
         """
         super().__init__(**kwargs)
 
-        if not smart_turn_model_path:
-            raise ValueError("smart_turn_model_path must be provided")
-
         logger.debug("Loading Local Smart Turn v3 model...")
+
+        if not smart_turn_model_path:
+            # Load bundled model
+            model_name = "smart-turn-v3.0.onnx"
+            package_path = "pipecat.audio.turn.smart_turn.data"
+
+            try:
+                import importlib_resources as impresources
+
+                smart_turn_model_path = str(impresources.files(package_path).joinpath(model_name))
+            except BaseException:
+                from importlib import resources as impresources
+
+                try:
+                    with impresources.path(package_path, model_name) as f:
+                        smart_turn_model_path = f
+                except BaseException:
+                    smart_turn_model_path = str(
+                        impresources.files(package_path).joinpath(model_name)
+                    )
 
         so = ort.SessionOptions()
         so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
