@@ -14,7 +14,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
-    StartInterruptionFrame,
+    InterruptionFrame,
     TranscriptionFrame,
     TranscriptionMessage,
     TranscriptionUpdateFrame,
@@ -238,7 +238,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             TTSTextFrame(text="Hello"),
             TTSTextFrame(text="world!"),
             SleepFrame(),
-            StartInterruptionFrame(),  # User interrupts here
+            InterruptionFrame(),  # User interrupts here
             SleepFrame(),
             BotStartedSpeakingFrame(),
             TTSTextFrame(text="New"),
@@ -252,7 +252,7 @@ class TestUserTranscriptProcessor(unittest.IsolatedAsyncioTestCase):
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "Hello"
             TTSTextFrame,  # "world!"
-            StartInterruptionFrame,
+            InterruptionFrame,
             TranscriptionUpdateFrame,  # First message (emitted due to interruption)
             BotStartedSpeakingFrame,
             TTSTextFrame,  # "New"

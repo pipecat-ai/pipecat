@@ -33,6 +33,7 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputImageRawFrame,
     InputTextRawFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -41,7 +42,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -752,7 +752,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         elif isinstance(frame, InputImageRawFrame):
             await self._send_user_video(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):
