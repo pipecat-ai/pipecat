@@ -18,22 +18,14 @@ from loguru import logger
 from pipecat.audio.turn.smart_turn.base_smart_turn import BaseSmartTurn
 
 try:
-    from transformers import WhisperFeatureExtractor
     import onnxruntime as ort
+    from transformers import WhisperFeatureExtractor
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error(
         "In order to use LocalSmartTurnAnalyzerV3, you need to `pip install pipecat-ai[local-smart-turn-v3]`."
     )
     raise Exception(f"Missing module: {e}")
-
-
-def build_session(onnx_path):
-    so = ort.SessionOptions()
-    so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-    so.inter_op_num_threads = 1
-    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    return ort.InferenceSession(onnx_path, sess_options=so)
 
 
 class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
@@ -57,8 +49,13 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
         logger.debug("Loading Local Smart Turn v3 model...")
 
+        so = ort.SessionOptions()
+        so.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+        so.inter_op_num_threads = 1
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
         self._feature_extractor = WhisperFeatureExtractor(chunk_length=8)
-        self._session = build_session(smart_turn_model_path)
+        self._session = ort.InferenceSession(smart_turn_model_path, sess_options=so)
 
         logger.debug("Loaded Local Smart Turn v3")
 
