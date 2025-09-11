@@ -671,7 +671,7 @@ class BaseOutputTransport(FrameProcessor):
                         frame = self._audio_queue.get_nowait()
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await self._mixer.mix(frame.audio)
-                        last_frame_time = time.time()
+                            last_frame_time = time.time()
                         yield frame
                     except asyncio.QueueEmpty:
                         # Notify the bot stopped speaking upstream if necessary.
