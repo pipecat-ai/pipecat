@@ -65,27 +65,11 @@ class FluxEventType(str, Enum):
     UPDATE = "Update"
 
 
-def language_to_deepgram_flux_language(language: Language) -> Optional[str]:
-    """Convert a Language enum to Deepgram Flux language code.
-
-    Args:
-        language: The Language enum value to convert.
-
-    Returns:
-        The corresponding Deepgram Flux language code, or None if not supported.
-    """
-    BASE_LANGUAGES = {
-        Language.EN: "en",
-    }
-
-    return BASE_LANGUAGES.get(language)
-
-
 class DeepgramFluxSTTService(WebsocketSTTService):
     """Deepgram Flux speech-to-text service.
 
     Provides real-time speech recognition using Deepgram's WebSocket API with Flux capabilities.
-    Supports configurable models, languages, VAD events, and various audio processing options
+    Supports configurable models, VAD events, and various audio processing options
     including advanced turn detection and preflight events for improved conversational AI performance.
     """
 
@@ -96,7 +80,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         based on the official documentation.
 
         Attributes:
-            language: Language of the audio input. Defaults to English.
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
             preflight_threshold: End-of-turn confidence required to fire a preflight event (default 0.3).
@@ -114,7 +97,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             tag: List of tags to label requests for identification during usage reporting.
         """
 
-        language: Optional[Language] = Language.EN
         flux_encoding: str = "linear16"
         preflight_threshold: float = 0.3
         eot_threshold: float = 0.7
@@ -176,7 +158,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         self._url = url
         self._model = model
         self._params = params
-        self._language = self.language_to_service_language(params.language)
+        # This is the currently only supported language
+        self._language = Language.EN
         self._websocket_url = None
         self._receive_task = None
 
@@ -271,21 +254,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             True, as Deepgram service supports metrics generation.
         """
         return True
-
-    def language_to_service_language(self, language: Language) -> Optional[str]:
-        """Convert a Language enum to service-specific language code.
-
-        Transforms a generic Language enum value into the specific language code
-        format expected by the Deepgram Flux API.
-
-        Args:
-            language: The language to convert from the Language enum.
-
-        Returns:
-            The Deepgram Flux-specific language code string, or None if the
-            language is not supported by the service.
-        """
-        return language_to_deepgram_flux_language(language)
 
     async def start(self, frame: StartFrame):
         """Start the Deepgram Flux STT service.
