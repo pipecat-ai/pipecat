@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `voice_cloning_key` to `GoogleTTSService` to support custom cloned
+  voices.
+
+- Added `speaking_rate` to `GoogleTTSService.InputParams` to control the
+  speaking rate.
+
 - Added a `speed` arg to `OpenAITTSService` to control the speed of the voice
   response.
 
@@ -35,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
   access to OpenAI Realtime.
+
+### Changed
+
+- `pipeline.tests.utils.run_test()` now allows passing `PipelineParams` instead
+  of individual parameters.
 
 ### Removed
 
@@ -167,8 +178,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
           # Handle navigation failure
   ```
 
-- Added `voice_cloning_key` to `GoogleTTSService` to support custom cloned voices.
-- Added `speaking_rate` to `GoogleTTSService.InputParams` to control the speaking rate.
 - `BaseOutputTransport` now implements `write_dtmf()` by loading DTMF audio and
   sending it through the transport. This makes sending DTMF generic across all
   output transports.
