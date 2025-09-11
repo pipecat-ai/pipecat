@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
   access to OpenAI Realtime.
 
+- Added `BeyVideoService`. This is an integration for Beyond Presence AI video avatars.
+  (see <https://beyondpresence.ai>)
+
 ### Removed
 
 - Remove `VisionImageRawFrame` in favor of context frames (`LLMContextFrame` or
