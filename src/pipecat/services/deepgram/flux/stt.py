@@ -82,7 +82,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Attributes:
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
-            preflight_threshold: End-of-turn confidence required to fire a preflight event (default 0.3).
+            preflight_threshold: Preflight/SpeechResumed are off by default. You can turn them on by setting preflight_threshold to a valid value.
                 Lower values = more aggressive preflighting (faster response, more LLM calls).
                 Higher values = more conservative preflighting (slower response, fewer LLM calls).
             eot_threshold: End-of-turn confidence required to finish a turn (default 0.7).
