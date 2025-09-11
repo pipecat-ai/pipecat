@@ -167,6 +167,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
           # Handle navigation failure
   ```
 
+- Added `voice_cloning_key` to `GoogleTTSService` to support custom cloned voices.
+- Added `speaking_rate` to `GoogleTTSService.InputParams` to control the speaking rate.
 - `BaseOutputTransport` now implements `write_dtmf()` by loading DTMF audio and
   sending it through the transport. This makes sending DTMF generic across all
   output transports.
