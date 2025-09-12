@@ -39,6 +39,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
   a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
 
+- Added new fields to the development runner's `parse_telephony_websocket`
+  method in support of providing dynamic data to a bot.
+
+  - Twilio: Added a new `body` parameter, which parses the websocket message
+    for `customParameters`. Provide data via the `Parameter` nouns in your
+    TwiML to use this feature.
+  - Telnyx & Exotel: Both providers make the `to` and `from` phone numbers
+    available in the websocket messages. You can now access these numbers as
+    `call_data["to"]` and `call_data["from"]`.
+
+  Note: Each telephony provider offers different features. Refer to the
+  corresponding example in `pipecat-examples` to see how to pass custom data
+  to your bot.
+
+- Added `body` to the `WebsocketRunnerArguments` as an optional parameter.
+  Custom `body` information can be passed from the server into the bot file via
+  the `bot()` method using this new parameter.
+
 - Added video streaming support to `LiveKitTransport`.
 
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
