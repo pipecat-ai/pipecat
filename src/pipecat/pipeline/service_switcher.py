@@ -112,6 +112,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             """Process a frame through the filter, handling special internal filter-updating frames."""
             if isinstance(frame, ServiceSwitcher.ServiceSwitcherFilterFrame):
                 self.active_service = frame.active_service
+                # Two ServiceSwitcherFilters "sandwich" a service. Push the
+                # frame only to update the other side of the sandwich, but
+                # otherwise don't let it leave the sandwich.
+                if direction == self._direction:
+                    await self.push_frame(frame, direction)
                 return
 
             await super().process_frame(frame, direction)
