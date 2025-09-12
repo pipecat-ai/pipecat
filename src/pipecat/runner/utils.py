@@ -99,16 +99,35 @@ async def parse_telephony_websocket(websocket: WebSocket):
         tuple: (transport_type: str, call_data: dict)
 
         call_data contains provider-specific fields:
-        - Twilio: {"stream_id": str, "call_id": str}
-        - Telnyx: {"stream_id": str, "call_control_id": str, "outbound_encoding": str}
-        - Plivo: {"stream_id": str, "call_id": str}
-        - Exotel: {"stream_id": str, "call_id": str, "account_sid": str}
+        - Twilio: {
+            "stream_id": str,
+            "call_id": str,
+            "body": dict
+        }
+        - Telnyx: {
+            "stream_id": str,
+            "call_control_id": str,
+            "outbound_encoding": str,
+            "from": str,
+            "to": str,
+        }
+        - Plivo: {
+            "stream_id": str,
+            "call_id": str,
+        }
+        - Exotel: {
+            "stream_id": str,
+            "call_id": str,
+            "account_sid": str,
+            "from": str,
+            "to": str,
+        }
 
     Example usage::
 
         transport_type, call_data = await parse_telephony_websocket(websocket)
-        if transport_type == "telnyx":
-            outbound_encoding = call_data["outbound_encoding"]
+        if transport_type == "twilio":
+            user_id = call_data["body"]["user_id"]
     """
     # Read first two messages
     start_data = websocket.iter_text()
@@ -151,9 +170,12 @@ async def parse_telephony_websocket(websocket: WebSocket):
         # Extract provider-specific data
         if transport_type == "twilio":
             start_data = call_data_raw.get("start", {})
+            body_data = start_data.get("customParameters", {})
             call_data = {
                 "stream_id": start_data.get("streamSid"),
                 "call_id": start_data.get("callSid"),
+                # All custom parameters
+                "body": body_data,
             }
 
         elif transport_type == "telnyx":
@@ -163,6 +185,8 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "outbound_encoding": call_data_raw.get("start", {})
                 .get("media_format", {})
                 .get("encoding"),
+                "from": call_data_raw.get("start", {}).get("from", ""),
+                "to": call_data_raw.get("start", {}).get("to", ""),
             }
 
         elif transport_type == "plivo":
@@ -178,6 +202,8 @@ async def parse_telephony_websocket(websocket: WebSocket):
                 "stream_id": start_data.get("stream_sid"),
                 "call_id": start_data.get("call_sid"),
                 "account_sid": start_data.get("account_sid"),
+                "from": start_data.get("from", ""),
+                "to": start_data.get("to", ""),
             }
 
         else:
