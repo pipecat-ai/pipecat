@@ -128,7 +128,7 @@ async def run_test(
     expected_up_frames: Optional[Sequence[type]] = None,
     ignore_start: bool = True,
     observers: Optional[List[BaseObserver]] = None,
-    start_metadata: Optional[Dict[str, Any]] = None,
+    pipeline_params: Optional[PipelineParams] = None,
     send_end_frame: bool = True,
 ) -> Tuple[Sequence[Frame], Sequence[Frame]]:
     """Run a test pipeline with the specified processor and validate frame flow.
@@ -144,7 +144,7 @@ async def run_test(
         expected_up_frames: Expected frame types flowing upstream (optional).
         ignore_start: Whether to ignore StartFrames in frame validation.
         observers: Optional list of observers to attach to the pipeline.
-        start_metadata: Optional metadata to include with the StartFrame.
+        pipeline_params: Optional pipeline parameters.
         send_end_frame: Whether to send an EndFrame at the end of the test.
 
     Returns:
@@ -154,7 +154,7 @@ async def run_test(
         AssertionError: If the received frames don't match the expected frame types.
     """
     observers = observers or []
-    start_metadata = start_metadata or {}
+    pipeline_params = pipeline_params or PipelineParams()
 
     received_up = asyncio.Queue()
     received_down = asyncio.Queue()
@@ -173,7 +173,7 @@ async def run_test(
 
     task = PipelineTask(
         pipeline,
-        params=PipelineParams(start_metadata=start_metadata),
+        params=pipeline_params,
         observers=observers,
         cancel_on_idle_timeout=False,
     )
