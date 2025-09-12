@@ -508,7 +508,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             transcript: maybe the first few words of the turn.
         """
         logger.debug("User started speaking")
-        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+        await self.push_interruption_task_frame_and_wait()
         await self.push_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
         await self.start_metrics()
         if transcript:
