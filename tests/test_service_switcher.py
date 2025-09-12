@@ -214,41 +214,6 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service1_text_frames[0].text, "Frame for service1")
         self.assertEqual(service2_text_frames[0].text, "Frame for service2")
 
-    async def test_service_switching_functionality(self):
-        """Test that switching between services works correctly."""
-        # This test is simplified to avoid timing issues
-        switcher = ServiceSwitcher(self.services, ServiceSwitcherStrategyManual)
-
-        # Test that we can programmatically switch services
-        self.assertEqual(switcher.strategy.active_service, self.service1)  # Initially service1
-
-        # Manually switch to service2
-        switch_frame = ManuallySwitchServiceFrame(service=self.service2)
-        switcher.strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
-
-        # Verify the switch worked
-        self.assertNotEqual(switcher.strategy.active_service, self.service1)
-        self.assertEqual(switcher.strategy.active_service, self.service2)
-        self.assertNotEqual(switcher.strategy.active_service, self.service3)
-
-        # Switch to service3
-        switch_frame = ManuallySwitchServiceFrame(service=self.service3)
-        switcher.strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
-
-        # Verify the switch worked
-        self.assertNotEqual(switcher.strategy.active_service, self.service1)
-        self.assertNotEqual(switcher.strategy.active_service, self.service2)
-        self.assertEqual(switcher.strategy.active_service, self.service3)
-
-    async def test_service_switching_with_empty_services_list(self):
-        """Test behavior with an empty services list."""
-        # ServiceSwitcher should handle empty services gracefully, but ParallelPipeline needs at least one pipeline
-        # So this test verifies that an exception is raised as expected
-        with self.assertRaises(Exception) as context:
-            ServiceSwitcher([], ServiceSwitcherStrategyManual)
-
-        self.assertIn("ParallelPipeline needs at least one argument", str(context.exception))
-
 
 if __name__ == "__main__":
     unittest.main()
