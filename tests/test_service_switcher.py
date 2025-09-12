@@ -9,7 +9,12 @@
 import asyncio
 import unittest
 
-from pipecat.frames.frames import Frame, ManuallySwitchServiceFrame, TextFrame
+from pipecat.frames.frames import (
+    Frame,
+    ManuallySwitchServiceControlFrame,
+    ManuallySwitchServiceFrame,
+    TextFrame,
+)
 from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
@@ -72,7 +77,7 @@ class TestServiceSwitcherStrategyManual(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(strategy.services, [])
         self.assertIsNone(strategy.active_service)
 
-    def test_handle_frame_manually_switch_service(self):
+    def test_handle_manually_switch_service_frame(self):
         """Test manual service switching with ManuallySwitchServiceFrame."""
         strategy = ServiceSwitcherStrategyManual(self.services)
 
@@ -90,6 +95,30 @@ class TestServiceSwitcherStrategyManual(unittest.IsolatedAsyncioTestCase):
 
         # Switch to service3
         switch_frame = ManuallySwitchServiceFrame(service=self.service3)
+        strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
+
+        self.assertNotEqual(strategy.active_service, self.service1)
+        self.assertNotEqual(strategy.active_service, self.service2)
+        self.assertEqual(strategy.active_service, self.service3)
+
+    def test_handle_manually_switch_service_control_frame(self):
+        """Test manual service switching with ManuallySwitchServiceControlFrame."""
+        strategy = ServiceSwitcherStrategyManual(self.services)
+
+        # Initially service1 should be active
+        self.assertEqual(strategy.active_service, self.service1)
+        self.assertNotEqual(strategy.active_service, self.service2)
+
+        # Switch to service2
+        switch_frame = ManuallySwitchServiceControlFrame(service=self.service2)
+        strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
+
+        self.assertNotEqual(strategy.active_service, self.service1)
+        self.assertEqual(strategy.active_service, self.service2)
+        self.assertNotEqual(strategy.active_service, self.service3)
+
+        # Switch to service3
+        switch_frame = ManuallySwitchServiceControlFrame(service=self.service3)
         strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
 
         self.assertNotEqual(strategy.active_service, self.service1)
@@ -178,8 +207,8 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
         for i, frame in enumerate(text_frames):
             self.assertEqual(frame.text, f"Hello {i + 1}")
 
-    async def test_service_switching(self):
-        """Test that after service switching the new active service receives frames while others don't."""
+    async def test_service_switching_in_order(self):
+        """Test that after service switching using ManuallySwitchServiceControlFrame, the new active service receives frames while others don't."""
         switcher = ServiceSwitcher(self.services, ServiceSwitcherStrategyManual)
 
         # Reset counters
@@ -191,10 +220,10 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
             switcher,
             frames_to_send=[
                 TextFrame("Frame for service1"),
-                ManuallySwitchServiceFrame(service=self.service2),
+                ManuallySwitchServiceControlFrame(service=self.service2),
                 TextFrame("Frame for service2"),
             ],
-            expected_down_frames=[TextFrame, ManuallySwitchServiceFrame, TextFrame],
+            expected_down_frames=[TextFrame, ManuallySwitchServiceControlFrame, TextFrame],
         )
 
         # Verify service2 received the frame
@@ -213,6 +242,43 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(service3_text_frames), 0)
         self.assertEqual(service1_text_frames[0].text, "Frame for service1")
         self.assertEqual(service2_text_frames[0].text, "Frame for service2")
+
+    async def test_service_switching_immediate(self):
+        """Test that after service switching using ManuallySwitchServiceFrame, the new active service receives frames while others don't."""
+        switcher = ServiceSwitcher(self.services, ServiceSwitcherStrategyManual)
+
+        # Reset counters
+        for service in self.services:
+            service.reset_counters()
+
+        # Send a test frame, a switch frame, and another test frame
+        await run_test(
+            switcher,
+            frames_to_send=[
+                # Out of order on purpose - ManuallySwitchServiceFrame should jump the queue
+                TextFrame("Frame 1 for service2"),
+                ManuallySwitchServiceFrame(service=self.service2),
+                TextFrame("Frame 2 for service2"),
+            ],
+            expected_down_frames=[ManuallySwitchServiceFrame, TextFrame, TextFrame],
+        )
+
+        # Verify service2 received the frame
+        service1_text_frames = [
+            f for f in self.service1.processed_frames if isinstance(f, TextFrame)
+        ]
+        service2_text_frames = [
+            f for f in self.service2.processed_frames if isinstance(f, TextFrame)
+        ]
+        service3_text_frames = [
+            f for f in self.service3.processed_frames if isinstance(f, TextFrame)
+        ]
+
+        self.assertEqual(len(service1_text_frames), 0)
+        self.assertEqual(len(service2_text_frames), 2)
+        self.assertEqual(len(service3_text_frames), 0)
+        self.assertEqual(service2_text_frames[0].text, "Frame 1 for service2")
+        self.assertEqual(service2_text_frames[1].text, "Frame 2 for service2")
 
 
 if __name__ == "__main__":
