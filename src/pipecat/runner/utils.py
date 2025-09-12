@@ -45,54 +45,6 @@ from pipecat.runner.types import (
 from pipecat.transports.base_transport import BaseTransport
 
 
-def _parse_plivo_extra_headers(extra_headers_str: str) -> dict:
-    """Parse Plivo extra headers string into a dictionary.
-
-    Args:
-        extra_headers_str: String in format "X-PH-key: value, X-PH-key2: value2"
-
-    Returns:
-        Dictionary with parsed headers (X-PH- prefix removed)
-    """
-    if not isinstance(extra_headers_str, str) or not extra_headers_str:
-        return {}
-
-    # Plivo uses "X-PH-key: value" format
-    pattern = r"X-PH-(\w+):\s*([^,}]+)"
-    matches = re.findall(pattern, extra_headers_str)
-
-    return {key: value.strip() for key, value in matches}
-
-
-def _extract_plivo_custom_parameters(parsed_headers: dict) -> dict:
-    """Extract custom parameters from Plivo headers, excluding built-in ones.
-
-    Args:
-        parsed_headers: Dictionary of all parsed headers
-
-    Returns:
-        Dictionary containing only custom parameters
-    """
-    # Built-in Plivo headers that should not be treated as custom parameters
-    builtin_headers = {
-        "from",
-        "to",
-        "ALegRequestUUID",
-        "ALegUUID",
-        "BillRate",
-        "CallStatus",
-        "Direction",
-        "Event",
-        "ParentAuthID",
-        "RequestUUID",
-        "RouteType",
-        "STIRAttestation",
-        "STIRVerification",
-    }
-
-    return {key: value for key, value in parsed_headers.items() if key not in builtin_headers}
-
-
 def _detect_transport_type_from_message(message_data: dict) -> str:
     """Attempt to auto-detect transport type from WebSocket message structure."""
     logger.trace("=== Auto-Detection Analysis ===")
@@ -162,9 +114,6 @@ async def parse_telephony_websocket(websocket: WebSocket):
         - Plivo: {
             "stream_id": str,
             "call_id": str,
-            "from": str,
-            "to": str,
-            "custom_parameters": dict,
         }
         - Exotel: {
             "stream_id": str,
@@ -222,7 +171,6 @@ async def parse_telephony_websocket(websocket: WebSocket):
         if transport_type == "twilio":
             start_data = call_data_raw.get("start", {})
             body_data = start_data.get("customParameters", {})
-
             call_data = {
                 "stream_id": start_data.get("streamSid"),
                 "call_id": start_data.get("callSid"),
@@ -243,18 +191,9 @@ async def parse_telephony_websocket(websocket: WebSocket):
 
         elif transport_type == "plivo":
             start_data = call_data_raw.get("start", {})
-            extra_headers_str = call_data_raw.get("extra_headers", "")
-
-            # Parse Plivo extra headers (format: "X-PH-key: value, X-PH-key2: value2")
-            parsed_headers = _parse_plivo_extra_headers(extra_headers_str)
-            custom_parameters = _extract_plivo_custom_parameters(parsed_headers)
-
             call_data = {
                 "stream_id": start_data.get("streamId"),
                 "call_id": start_data.get("callId"),
-                "from": parsed_headers.get("from"),
-                "to": parsed_headers.get("to"),
-                "custom_parameters": custom_parameters,
             }
 
         elif transport_type == "exotel":
