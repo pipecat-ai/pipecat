@@ -13,27 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
   a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
 
-- Added `to` and `from` phone number information to the development runner for
-  Twilio, Telnyx, Plivo, and Exotel. Note: for Twilio and Plivo, `to` and `from`
-  phone number information must be manually provided.
+- Added new fields to the development runner's `parse_telephony_websocket`
+  method in support of providing dynamic data to a bot.
 
-  - Twilio: TwiML returned must contain:
-    ```
-    <Stream url="wss://server.com/ws">
-        <Parameter name="from" value="{{From}}"/>
-        <Parameter name="to" value="{{To}}"/>
-    </Stream>
-    ```
-  - Plivo: Add `to` and `from` information as `extraHeaders` in the XML `Stream`
-    property.
+  - Twilio: Added a new `body` parameter, which parses the websocket message
+    for `customParameters`. Provide data via the `Parameter` nouns in your
+    TwiML to use this feature.
+  - Telnyx & Exotel: Both providers make the `to` and `from` phone numbers
+    available in the websocket messages. You can now access these numbers as
+    `call_data["to"]` and `call_data["from"]`.
 
-  This phone information acts as an identifer for inbound calls, allowing you
-  to programmatically inject information to your bot file based on corresponding
-  user information.
-
-- Added the ability to retrieve custom data from the development runner for
-  Twilio, Telnyx, Plivo, and Exotel. This provides the ability to inject custom
-  data into the call for outbound calling cases.
+  Note: Each telephony provider offers different features. Refer to the
+  corresponding example in `pipecat-examples` to see how to pass custom data
+  to your bot.
 
 - Added video streaming support to `LiveKitTransport`.
 
