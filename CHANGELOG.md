@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corresponding example in `pipecat-examples` to see how to pass custom data
   to your bot.
 
+- Added `body` to the `WebsocketRunnerArguments` as an optional parameter.
+  Custom `body` information can be passed from the server into the bot file via
+  the `bot()` method using this new parameter.
+
 - Added video streaming support to `LiveKitTransport`.
 
 - Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
