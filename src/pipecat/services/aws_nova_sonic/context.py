@@ -21,13 +21,13 @@ from pipecat.frames.frames import (
     DataFrame,
     Frame,
     FunctionCallResultFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
     LLMMessagesUpdateFrame,
     LLMSetToolChoiceFrame,
     LLMSetToolsFrame,
-    StartInterruptionFrame,
     TextFrame,
     UserImageRawFrame,
 )
@@ -306,7 +306,7 @@ class AWSNovaSonicAssistantContextAggregator(OpenAIAssistantContextAggregator):
         if isinstance(
             frame,
             (
-                StartInterruptionFrame,
+                InterruptionFrame,
                 LLMFullResponseStartFrame,
                 LLMFullResponseEndFrame,
                 TextFrame,

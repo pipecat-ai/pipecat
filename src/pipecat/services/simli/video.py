@@ -15,8 +15,8 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterruptionFrame,
     OutputImageRawFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStoppedFrame,
     UserStartedSpeakingFrame,
@@ -179,7 +179,7 @@ class SimliVideoService(FrameProcessor):
             return
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
-        elif isinstance(frame, (StartInterruptionFrame, UserStartedSpeakingFrame)):
+        elif isinstance(frame, (InterruptionFrame, UserStartedSpeakingFrame)):
             if not self._previously_interrupted:
                 await self._simli_client.clearBuffer()
             self._previously_interrupted = self._is_trinity_avatar

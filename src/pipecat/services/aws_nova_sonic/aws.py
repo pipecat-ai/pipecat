@@ -247,12 +247,13 @@ class AWSNovaSonicLLMService(LLMService):
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
-        self._assistant_response_trigger_audio: Optional[bytes] = (
-            None  # Not cleared on _disconnect()
-        )
         self._disconnecting = False
         self._connected_time: Optional[float] = None
         self._wants_connection = False
+
+        file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
+        with wave.open(file_path.open("rb"), "rb") as wav_file:
+            self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
 
     #
     # standard AIService frame handling
@@ -1099,20 +1100,13 @@ class AWSNovaSonicLLMService(LLMService):
 
         self._triggering_assistant_response = True
 
-        # Read audio bytes, if we don't already have them cached
-        if not self._assistant_response_trigger_audio:
-            file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
-            with wave.open(file_path.open("rb"), "rb") as wav_file:
-                self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
-
         # Send the trigger audio, if we're fully connected and set up
-        if self._connected_time is not None:
+        if self._connected_time:
             await self._send_assistant_response_trigger()
 
     async def _send_assistant_response_trigger(self):
-        if (
-            not self._assistant_response_trigger_audio or self._connected_time is None
-        ):  # should never happen
+        if not self._connected_time:
+            # should never happen
             return
 
         try:

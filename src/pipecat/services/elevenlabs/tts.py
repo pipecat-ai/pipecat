@@ -25,9 +25,9 @@ from pipecat.frames.frames import (
     EndFrame,
     ErrorFrame,
     Frame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     StartFrame,
-    StartInterruptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -460,7 +460,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+        if isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
             self._started = False
             if isinstance(frame, TTSStoppedFrame):
                 await self.add_word_timestamps([("Reset", 0)])
@@ -549,7 +549,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             return self._websocket
         raise Exception("Websocket not connected")
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         """Handle interruption by closing the current context."""
         await super()._handle_interruption(frame, direction)
 
@@ -558,7 +558,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             logger.trace(f"Closing context {self._context_id} due to interruption")
             try:
                 # ElevenLabs requires that Pipecat manages the contexts and closes them
-                # when they're not longer in use. Since a StartInterruptionFrame is pushed
+                # when they're not longer in use. Since an InterruptionFrame is pushed
                 # every time the user speaks, we'll use this as a trigger to close the context
                 # and reset the state.
                 # Note: We do not need to call remove_audio_context here, as the context is
@@ -856,7 +856,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
             direction: The direction to push the frame.
         """
         await super().push_frame(frame, direction)
-        if isinstance(frame, (StartInterruptionFrame, TTSStoppedFrame)):
+        if isinstance(frame, (InterruptionFrame, TTSStoppedFrame)):
             # Reset timing on interruption or stop
             self._reset_state()
 

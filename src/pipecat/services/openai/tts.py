@@ -64,6 +64,7 @@ class OpenAITTSService(TTSService):
         model: str = "gpt-4o-mini-tts",
         sample_rate: Optional[int] = None,
         instructions: Optional[str] = None,
+        speed: Optional[float] = None,
         **kwargs,
     ):
         """Initialize OpenAI TTS service.
@@ -75,6 +76,7 @@ class OpenAITTSService(TTSService):
             model: TTS model to use. Defaults to "gpt-4o-mini-tts".
             sample_rate: Output audio sample rate in Hz. If None, uses OpenAI's default 24kHz.
             instructions: Optional instructions to guide voice synthesis behavior.
+            speed: Voice speed control (0.25 to 4.0, default 1.0).
             **kwargs: Additional keyword arguments passed to TTSService.
         """
         if sample_rate and sample_rate != self.OPENAI_SAMPLE_RATE:
@@ -84,6 +86,7 @@ class OpenAITTSService(TTSService):
             )
         super().__init__(sample_rate=sample_rate, **kwargs)
 
+        self._speed = speed
         self.set_model_name(model)
         self.set_voice(voice)
         self._instructions = instructions
@@ -133,17 +136,22 @@ class OpenAITTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            # Setup extra body parameters
-            extra_body = {}
+            # Setup API parameters
+            create_params = {
+                "input": text,
+                "model": self.model_name,
+                "voice": VALID_VOICES[self._voice_id],
+                "response_format": "pcm",
+            }
+
             if self._instructions:
-                extra_body["instructions"] = self._instructions
+                create_params["instructions"] = self._instructions
+
+            if self._speed:
+                create_params["speed"] = self._speed
 
             async with self._client.audio.speech.with_streaming_response.create(
-                input=text,
-                model=self.model_name,
-                voice=VALID_VOICES[self._voice_id],
-                response_format="pcm",
-                extra_body=extra_body,
+                **create_params
             ) as r:
                 if r.status_code != 200:
                     error = await r.text()

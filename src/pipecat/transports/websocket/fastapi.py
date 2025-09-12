@@ -26,9 +26,9 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     OutputAudioRawFrame,
     StartFrame,
-    StartInterruptionFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
 )
@@ -398,7 +398,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await self._write_frame(frame)
             self._next_send_time = 0
 

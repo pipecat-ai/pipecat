@@ -32,6 +32,8 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
+    InterruptionFrame,
+    InterruptionTaskFrame,
     MetricsFrame,
     StartFrame,
     StopFrame,
@@ -627,13 +629,23 @@ class PipelineTask(BasePipelineTask):
 
         if isinstance(frame, EndTaskFrame):
             # Tell the task we should end nicely.
+            logger.debug(f"{self}: received end task frame {frame}")
             await self.queue_frame(EndFrame())
         elif isinstance(frame, CancelTaskFrame):
             # Tell the task we should end right away.
+            logger.debug(f"{self}: received cancel task frame {frame}")
             await self.queue_frame(CancelFrame())
         elif isinstance(frame, StopTaskFrame):
             # Tell the task we should stop nicely.
+            logger.debug(f"{self}: received stop task frame {frame}")
             await self.queue_frame(StopFrame())
+        elif isinstance(frame, InterruptionTaskFrame):
+            # Tell the task we should interrupt the pipeline. Note that we are
+            # bypassing the push queue and directly queue into the
+            # pipeline. This is in case the push task is blocked waiting for a
+            # pipeline-ending frame to finish traversing the pipeline.
+            logger.debug(f"{self}: received interruption task frame {frame}")
+            await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")
@@ -642,7 +654,7 @@ class PipelineTask(BasePipelineTask):
                 # Tell the task we should stop.
                 await self.queue_frame(StopTaskFrame())
             else:
-                logger.warning(f"Something went wrong: {frame}")
+                logger.warning(f"{self}: Something went wrong: {frame}")
 
     async def _sink_push_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames coming downstream from the pipeline.

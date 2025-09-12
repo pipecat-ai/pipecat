@@ -32,6 +32,9 @@ class TranscriptionLogger(FrameProcessor):
         if isinstance(frame, TranscriptionFrame):
             print(f"Transcription: {frame.text}")
 
+        # Push all frames through
+        await self.push_frame(frame, direction)
+
 
 async def main():
     transport = LocalAudioTransport(

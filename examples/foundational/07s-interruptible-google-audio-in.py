@@ -16,10 +16,10 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMRunFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -181,9 +181,7 @@ class TranscriptionContextFixup(FrameProcessor):
 
         if isinstance(frame, MagicDemoTranscriptionFrame):
             self._transcript = frame.text
-        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(
-            frame, StartInterruptionFrame
-        ):
+        elif isinstance(frame, LLMFullResponseEndFrame) or isinstance(frame, InterruptionFrame):
             self.swap_user_audio()
             self.add_transcript_back_to_inference_output()
             self._transcript = ""

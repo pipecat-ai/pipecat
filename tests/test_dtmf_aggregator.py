@@ -10,6 +10,7 @@ from pipecat.audio.dtmf.types import KeypadEntry
 from pipecat.frames.frames import (
     EndFrame,
     InputDTMFFrame,
+    InterruptionFrame,
     TranscriptionFrame,
 )
 from pipecat.processors.aggregators.dtmf_aggregator import DTMFAggregator
@@ -28,6 +29,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             InputDTMFFrame,
+            InterruptionFrame,
             InputDTMFFrame,
             InputDTMFFrame,
             InputDTMFFrame,
@@ -59,9 +61,11 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             InputDTMFFrame,
+            InterruptionFrame,
             InputDTMFFrame,
             TranscriptionFrame,  # First aggregation "12"
             InputDTMFFrame,
+            InterruptionFrame,
             TranscriptionFrame,  # Second aggregation "3"
         ]
 
@@ -93,10 +97,12 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             InputDTMFFrame,
+            InterruptionFrame,
             InputDTMFFrame,
             InputDTMFFrame,
             TranscriptionFrame,  # "12#"
             InputDTMFFrame,
+            InterruptionFrame,
             InputDTMFFrame,
             TranscriptionFrame,  # "45"
         ]
@@ -125,6 +131,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             InputDTMFFrame,
+            InterruptionFrame,
             InputDTMFFrame,
             TranscriptionFrame,  # Should flush before EndFrame
             EndFrame,
@@ -152,6 +159,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             InputDTMFFrame,
+            InterruptionFrame,
             InputDTMFFrame,
             TranscriptionFrame,
         ]
@@ -178,6 +186,7 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
         expected_down_frames = [
             InputDTMFFrame,
+            InterruptionFrame,
             InputDTMFFrame,
             InputDTMFFrame,
             TranscriptionFrame,
@@ -214,7 +223,11 @@ class TestDTMFAggregator(unittest.IsolatedAsyncioTestCase):
         ]
 
         # All the InputDTMFFrames plus one TranscriptionFrame
-        expected_down_frames = [InputDTMFFrame] * len(frames_to_send) + [TranscriptionFrame]
+        expected_down_frames = (
+            [InputDTMFFrame, InterruptionFrame]
+            + [InputDTMFFrame] * (len(frames_to_send) - 1)
+            + [TranscriptionFrame]
+        )
 
         received_down_frames, _ = await run_test(
             aggregator,
