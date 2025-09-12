@@ -36,7 +36,6 @@ load_dotenv(override=True)
 audiobuffer = AudioBufferProcessor(
     num_channels=2,  # 1 for mono, 2 for stereo (user left, bot right)
     enable_turn_audio=False,  # Enable per-turn audio recording
-    user_continuous_stream=True,  # User has continuous audio stream
 )
 
 
