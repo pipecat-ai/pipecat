@@ -329,7 +329,12 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
     async def start_metrics(self):
         """Start TTFB and processing metrics collection."""
-        await self.start_ttfb_metrics()
+        # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
+        # Ideally, TTFB should measure the time from when a user starts speaking
+        # until we receive the first transcript. However, Deepgram Flux delivers
+        # both the "user started speaking" event and the first transcript simultaneously,
+        # making this timing measurement meaningless in this context.
+        # await self.start_ttfb_metrics()
         await self.start_processing_metrics()
 
     @traced_stt
@@ -508,8 +513,6 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         await self.start_metrics()
         if transcript:
             logger.trace(f"Start of turn transcript: {transcript}")
-            # TODO: decide if we should keep the TTFB metrics
-            await self.stop_ttfb_metrics()
 
     async def _handle_speech_resumed(self, event: str):
         """Handle SpeechResumed events from Deepgram Flux.
@@ -614,4 +617,9 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
         if transcript:
             logger.trace(f"Update event: {transcript}")
-            await self.stop_ttfb_metrics()
+            # TTFB (Time To First Byte) metrics are currently disabled for Deepgram Flux.
+            # Ideally, TTFB should measure the time from when a user starts speaking
+            # until we receive the first transcript. However, Deepgram Flux delivers
+            # both the "user started speaking" event and the first transcript simultaneously,
+            # making this timing measurement meaningless in this context.
+            # await self.stop_ttfb_metrics()
