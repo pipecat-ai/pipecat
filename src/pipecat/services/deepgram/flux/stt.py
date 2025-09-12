@@ -46,8 +46,8 @@ class FluxMessageType(str, Enum):
     Deepgram Flux WebSocket connection.
     """
 
-    RECEIVE_CONNECTED = "receiveConnected"
-    RECEIVE_FATAL_ERROR = "receiveFatalError"
+    RECEIVE_CONNECTED = "Connected"
+    RECEIVE_FATAL_ERROR = "Error"
     TURN_INFO = "TurnInfo"
 
 
@@ -477,7 +477,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         match flux_event_type:
             case FluxEventType.START_OF_TURN:
-                await self._handle_start_of_turn()
+                await self._handle_start_of_turn(transcript)
             case FluxEventType.SPEECH_RESUMED:
                 await self._handle_speech_resumed(event)
             case FluxEventType.END_OF_TURN:
@@ -487,7 +487,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             case FluxEventType.UPDATE:
                 await self._handle_update(transcript)
 
-    async def _handle_start_of_turn(self):
+    async def _handle_start_of_turn(self, transcript: str):
         """Handle StartOfTurn events from Deepgram Flux.
 
         StartOfTurn events are fired when Deepgram Flux detects the beginning
@@ -498,11 +498,18 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         - Send a BotInterruptionFrame upstream to stop bot speech
         - Send a UserStartedSpeakingFrame downstream to notify other components
         - Start metrics collection for measuring response times
+
+        Args:
+            transcript: maybe the first few words of the turn.
         """
         logger.debug("User started speaking")
         await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
         await self.push_frame(UserStartedSpeakingFrame(), FrameDirection.DOWNSTREAM)
         await self.start_metrics()
+        if transcript:
+            logger.trace(f"Start of turn transcript: {transcript}")
+            # TODO: decide if we should keep the TTFB metrics
+            await self.stop_ttfb_metrics()
 
     async def _handle_speech_resumed(self, event: str):
         """Handle SpeechResumed events from Deepgram Flux.
