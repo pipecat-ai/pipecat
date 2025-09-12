@@ -1,0 +1,155 @@
+#
+# Copyright (c) 2024–2025, Daily
+#
+# SPDX-License-Identifier: BSD 2-Clause License
+#
+
+"""SmallWebRTC request handler for managing peer connections.
+
+This module provides a client for handling web requests and managing WebRTC connections.
+"""
+
+import asyncio
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Optional
+
+from loguru import logger
+
+from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
+
+
+@dataclass
+class SmallWebRTCRequest:
+    """Small WebRTC transport session arguments for the runner.
+
+    Parameters:
+        sdp: The SDP string (Session Description Protocol).
+        type: The type of the SDP, either "offer" or "answer".
+        pc_id: Optional identifier for the peer connection.
+        restart_pc: Optional whether to restart the peer connection.
+        request_data: Optional custom data sent by the customer.
+    """
+
+    sdp: str
+    type: str
+    pc_id: Optional[str] = None
+    restart_pc: Optional[bool] = None
+    request_data: Optional[Any] = None
+
+
+class SmallWebRTCRequestHandler:
+    """SmallWebRTC request handler for managing peer connections.
+
+    This class is responsible for:
+      - Handling incoming SmallWebRTC requests.
+      - Creating and managing WebRTC peer connections.
+      - Supporting ESP32-specific SDP munging if enabled.
+      - Invoking callbacks for newly initialized connections.
+    """
+
+    def __init__(
+        self,
+        ice_servers: Optional[List[IceServer]] = None,
+        esp32_mode: bool = False,
+        host: Optional[str] = None,
+    ) -> None:
+        """Initialize a SmallWebRTC request handler.
+
+        Args:
+            ice_servers (Optional[List[IceServer]]): List of ICE servers to use for WebRTC
+                connections.
+            esp32_mode (bool): If True, enables ESP32-specific SDP munging.
+            host (Optional[str]): Host address used for SDP munging in ESP32 mode.
+                Ignored if `esp32_mode` is False.
+        """
+        self._ice_servers = ice_servers
+        self._esp32_mode = esp32_mode
+        self._host = host
+
+        # Store connections by pc_id
+        self._pcs_map: Dict[str, SmallWebRTCConnection] = {}
+
+    async def handle_web_request(
+        self,
+        request: SmallWebRTCRequest,
+        pending_answer: asyncio.Future,
+        webrtc_connection_callback: Callable[[Any], Awaitable[None]],
+    ) -> None:
+        """Handle a SmallWebRTC request and resolve the pending answer.
+
+        This method will:
+          - Reuse an existing WebRTC connection if `pc_id` exists.
+          - Otherwise, create a new `SmallWebRTCConnection`.
+          - Invoke the provided callback with the connection.
+          - Manage ESP32-specific munging if enabled.
+          - Resolve or reject the `pending_answer` future in the runner arguments.
+
+        Args:
+            request (SmallWebRTCRequest): The incoming WebRTC request, containing
+                SDP, type, and optionally a `pc_id`.
+            pending_answer (asyncio.Future): A future that will be resolved with the
+                SDP answer once the request is processed.
+            webrtc_connection_callback (Callable[[Any], Awaitable[None]]): An
+                asynchronous callback function that is invoked with the WebRTC connection.
+
+        Raises:
+            Exception: Any exception raised during request handling or callback execution
+                will be logged and propagated.
+        """
+        try:
+            pc_id = request.pc_id
+
+            if pc_id and pc_id in self._pcs_map:
+                pipecat_connection = self._pcs_map[pc_id]
+                logger.info(f"Reusing existing connection for pc_id: {pc_id}")
+                await pipecat_connection.renegotiate(
+                    sdp=request.sdp,
+                    type=request.type,
+                    restart_pc=request.restart_pc or False,
+                )
+            else:
+                pipecat_connection = SmallWebRTCConnection(ice_servers=self._ice_servers)
+                await pipecat_connection.initialize(sdp=request.sdp, type=request.type)
+
+                @pipecat_connection.event_handler("closed")
+                async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
+                    logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
+                    self._pcs_map.pop(webrtc_connection.pc_id, None)
+
+                # Invoke callback provided in runner arguments
+                try:
+                    await webrtc_connection_callback(pipecat_connection)
+                    logger.debug(
+                        f"webrtc_connection_callback executed successfully for peer: {pipecat_connection.pc_id}"
+                    )
+                except Exception as callback_error:
+                    logger.error(
+                        f"webrtc_connection_callback failed for peer {pipecat_connection.pc_id}: {callback_error}"
+                    )
+
+            answer = pipecat_connection.get_answer()
+
+            if self._esp32_mode and self._host and self._host != "localhost":
+                from pipecat.runner.utils import smallwebrtc_sdp_munging
+
+                answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], self._host)
+
+            self._pcs_map[answer["pc_id"]] = pipecat_connection
+
+            # Resolve the pending answer future
+            if not pending_answer.done():
+                pending_answer.set_result(answer)
+
+        except Exception as e:
+            logger.error(f"Error processing SmallWebRTC request: {e}")
+            logger.debug(f"SmallWebRTC request details: {request}")
+
+            if not pending_answer.done():
+                pending_answer.set_exception(e)
+            raise
+
+    async def close(self):
+        """Clear the connection map."""
+        coros = [pc.disconnect() for pc in self._pcs_map.values()]
+        await asyncio.gather(*coros)
+        self._pcs_map.clear()
