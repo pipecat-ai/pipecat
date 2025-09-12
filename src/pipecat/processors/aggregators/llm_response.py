@@ -493,6 +493,9 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._aggregation_event = asyncio.Event()
         self._aggregation_task = None
 
+        self.latest_cached_frame = None
+
+
     async def reset(self):
         """Reset the aggregation state and interruption strategies."""
         await super().reset()
@@ -564,11 +567,41 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
             self._vad_params = frame.vad_params
             self._turn_params = frame.turn_params
             await self.push_frame(frame, direction)
+        elif isinstance(frame, InputImageRawFrame):
+            self.latest_cached_frame = frame
         else:
             await self.push_frame(frame, direction)
 
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
+
+
+        print("processing aggregation")
+        msgs = []
+        for message in self._context.messages:
+            msg = copy.deepcopy(message)
+            if "content" in msg:
+                if isinstance(msg["content"], list):
+                    continue
+            if "mime_type" in msg and msg["mime_type"].startswith("image/"):
+                continue
+            msgs.append(msg)
+        self._context.set_messages(msgs)
+
+    
+        image_prompt = "if the user wants information about what the drone sees or whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks"
+        # if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
+        if self.latest_cached_frame:
+            print("adding image frame message")
+            self._context.add_image_frame_message(
+                format=self.latest_cached_frame.format,
+                size=self.latest_cached_frame.size,
+                image=self.latest_cached_frame.image,
+                text=image_prompt,
+            )
+        self.latest_cached_frame = None
+
+
         aggregation = self._aggregation
         await self.reset()
         await self.handle_aggregation(aggregation)
@@ -1163,60 +1196,3 @@ class LLMAssistantResponseAggregator(LLMAssistantContextAggregator):
             frame = LLMMessagesFrame(self._context.messages)
             await self.push_frame(frame)
 
-
-class TranscriptionAggregator(LLMUserContextAggregator):
-    """Enhanced version of LLMUserContextAggregator with image caching functionality."""
-
-    def __init__(self, context: OpenAILLMContext):
-        super().__init__(
-            context=context,
-            accumulator_frame=TranscriptionFrame,
-            interim_accumulator_frame=InterimTranscriptionFrame,
-        )
-        self.latest_cached_frame = None
-
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
-        await super().process_frame(frame, direction)
-        if isinstance(frame, InputImageRawFrame):
-            # print("caching latest")
-            self.latest_cached_frame = frame
-    
-    async def _push_aggregation(self):
-        if len(self._aggregation) > 0:
-            # print("cleaning old messages")
-            # new_messages = []
-            # for messages in self._context.get_messages():
-            #     new_messages 
-            # this is where we flush old images
-            msgs = []
-            for message in self._context.messages:
-                msg = copy.deepcopy(message)
-                if "content" in msg:
-                    if isinstance(msg["content"], list):
-                        continue
-                if "mime_type" in msg and msg["mime_type"].startswith("image/"):
-                    continue
-                msgs.append(msg)
-        
-        
-            self._context.set_messages(msgs)
-            
-            vision_substrings = ["see", "look", "frame", "vision", "view"]
-            image_prompt = "if the user wants information about what the drone sees or whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks"
-            # if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
-            if self.latest_cached_frame:
-                self._context.add_image_frame_message(
-                    format=self.latest_cached_frame.format,
-                    size=self.latest_cached_frame.size,
-                    image=self.latest_cached_frame.image,
-                    text=image_prompt,
-                )
-                self.latest_cached_frame = None
-            self._context.add_message({"role": self._role, "content": self._aggregation})
-            # Reset the aggregation. Reset it before pushing it down, otherwise
-            # if the tasks gets cancelled we won't be able to clear things up.
-            self._aggregation = ""
-            frame = OpenAILLMContextFrame(self._context)
-            await self.push_frame(frame)
-            # Reset our accumulator state.
-            self._reset()
