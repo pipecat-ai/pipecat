@@ -574,9 +574,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
 
     async def _process_aggregation(self):
         """Process the current aggregation and push it downstream."""
-
-
-        print("processing aggregation")
         msgs = []
         for message in self._context.messages:
             msg = copy.deepcopy(message)
@@ -592,7 +589,6 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         image_prompt = "if the user wants information about what the drone sees or whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks"
         # if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
         if self.latest_cached_frame:
-            print("adding image frame message")
             self._context.add_image_frame_message(
                 format=self.latest_cached_frame.format,
                 size=self.latest_cached_frame.size,
