@@ -962,7 +962,7 @@ class GoogleLLMService(LLMService):
         self, context: OpenAILLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         logger.debug(
-            f"{self}: Generating chat from LLM-specific context [{context.system_message}] | {context.get_messages_for_logging()}"
+            f"{self}: Generating chat from LLM-specific context [{context.system_message}] | {json.dumps(context.get_messages_for_logging(), indent=2)}"
         )
 
         params = GeminiLLMInvocationParams(

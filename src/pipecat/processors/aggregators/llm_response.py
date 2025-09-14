@@ -586,7 +586,7 @@ class LLMUserContextAggregator(LLMContextResponseAggregator):
         self._context.set_messages(msgs)
 
     
-        image_prompt = "if the user wants information about what the drone sees or whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks"
+        image_prompt = "[SYSTEM] if the user wants information about what the drone sees or whats in the image, use this image as context. If the user doesn't reference the image or what the drone sees, ignore it completely and just do as the user asks"
         # if self.latest_cached_frame and any(sub in self._aggregation.lower() for sub in vision_substrings) :
         if self.latest_cached_frame:
             self._context.add_image_frame_message(
