@@ -33,6 +33,15 @@ For Anthropic adapter:
 5. System messages: first extracted as system parameter, later ones converted to user messages
 6. Consecutive messages with same role are merged into multi-content-block messages
 7. Empty text content is converted to "(empty)"
+
+For AWS Bedrock adapter:
+1. LLMStandardMessage objects are converted to AWS Bedrock format
+2. LLMSpecificMessage objects with llm='anthropic' are included unchanged (uses Anthropic format)
+3. LLMSpecificMessage objects with llm != 'anthropic' are filtered out
+4. Complex message structures (image, multi-text) are converted to appropriate AWS Bedrock format
+5. System messages: first extracted as system parameter, later ones converted to user messages
+6. Consecutive messages with same role are merged into multi-content-block messages
+7. Empty text content is converted to "(empty)"
 """
 
 import unittest
@@ -41,6 +50,7 @@ from google.genai.types import Content, Part
 from openai.types.chat import ChatCompletionMessage
 
 from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import (
@@ -802,6 +812,271 @@ class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(params["messages"]), 1)
         self.assertEqual(params["messages"][0]["role"], "user")
         self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
+
+
+class TestAWSBedrockGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        """Sets up a common adapter instance for all tests."""
+        self.adapter = AWSBedrockLLMAdapter()
+
+    def test_standard_messages_converted_to_aws_bedrock_format(self):
+        """Test that LLMStandardMessage objects are converted to AWS Bedrock format."""
+        # Create standard messages
+        standard_messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I'm doing well, thank you!"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=standard_messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Verify system instruction is extracted (in AWS Bedrock format)
+        self.assertIsInstance(params["system"], list)
+        self.assertEqual(len(params["system"]), 1)
+        self.assertEqual(params["system"][0]["text"], "You are a helpful assistant.")
+
+        # Verify messages are in the params (2 messages after system extraction)
+        self.assertIn("messages", params)
+        self.assertEqual(len(params["messages"]), 2)
+
+        # Check first message (user) - should be converted to AWS Bedrock format
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        self.assertIsInstance(user_msg["content"], list)
+        self.assertEqual(len(user_msg["content"]), 1)
+        self.assertEqual(user_msg["content"][0]["text"], "Hello, how are you?")
+
+        # Check second message (assistant) - should be converted to AWS Bedrock format
+        assistant_msg = params["messages"][1]
+        self.assertEqual(assistant_msg["role"], "assistant")
+        self.assertIsInstance(assistant_msg["content"], list)
+        self.assertEqual(len(assistant_msg["content"]), 1)
+        self.assertEqual(assistant_msg["content"][0]["text"], "I'm doing well, thank you!")
+
+    def test_anthropic_specific_messages_included_unchanged(self):
+        """Test that LLMSpecificMessage objects with llm='anthropic' are included unchanged (AWS Bedrock uses Anthropic format)."""
+        # Create anthropic-specific message content (which is what AWS Bedrock uses)
+        anthropic_message_content = {
+            "role": "user",
+            "content": [
+                {"text": "Hello"},
+                {"image": {"format": "jpeg", "source": {"bytes": b"fake_image_data"}}},
+            ],
+        }
+
+        messages = [
+            LLMSpecificMessage(llm="anthropic", message=anthropic_message_content),
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Verify the anthropic-specific message is preserved
+        self.assertEqual(len(params["messages"]), 2)
+        anthropic_msg = params["messages"][0]
+        self.assertEqual(anthropic_msg["role"], "user")
+        self.assertIsInstance(anthropic_msg["content"], list)
+        self.assertEqual(len(anthropic_msg["content"]), 2)
+        self.assertEqual(anthropic_msg["content"][0]["text"], "Hello")
+        self.assertIn("image", anthropic_msg["content"][1])
+
+    def test_non_anthropic_specific_messages_filtered_out(self):
+        """Test that LLMSpecificMessage objects with llm != 'anthropic' are filtered out."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            LLMSpecificMessage(
+                llm="openai", message={"role": "user", "content": "OpenAI specific"}
+            ),
+            LLMSpecificMessage(
+                llm="google", message={"role": "user", "content": "Google specific"}
+            ),
+            {"role": "assistant", "content": "Response"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Should only have the 2 standard messages (openai and google specific filtered out)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][0]["content"][0]["text"], "Hello")
+        self.assertEqual(params["messages"][1]["content"][0]["text"], "Response")
+
+    def test_consecutive_same_role_messages_merged(self):
+        """Test that consecutive messages with the same role are merged into multi-content blocks."""
+        messages = [
+            {"role": "user", "content": "First user message"},
+            {"role": "user", "content": "Second user message"},
+            {"role": "user", "content": "Third user message"},
+            {"role": "assistant", "content": "First assistant message"},
+            {"role": "assistant", "content": "Second assistant message"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Should have 2 messages after merging (1 user, 1 assistant)
+        self.assertEqual(len(params["messages"]), 2)
+
+        # Check merged user message
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        self.assertIsInstance(user_msg["content"], list)
+        self.assertEqual(len(user_msg["content"]), 3)
+        self.assertEqual(user_msg["content"][0]["text"], "First user message")
+        self.assertEqual(user_msg["content"][1]["text"], "Second user message")
+        self.assertEqual(user_msg["content"][2]["text"], "Third user message")
+
+        # Check merged assistant message
+        assistant_msg = params["messages"][1]
+        self.assertEqual(assistant_msg["role"], "assistant")
+        self.assertIsInstance(assistant_msg["content"], list)
+        self.assertEqual(len(assistant_msg["content"]), 2)
+        self.assertEqual(assistant_msg["content"][0]["text"], "First assistant message")
+        self.assertEqual(assistant_msg["content"][1]["text"], "Second assistant message")
+
+    def test_empty_text_converted_to_empty_placeholder(self):
+        """Test that empty text content is converted to "(empty)" string."""
+        messages = [
+            {"role": "user", "content": ""},  # Empty string
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": ""},  # Empty text in list content
+                    {"type": "text", "text": "Valid text"},
+                ],
+            },
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Check that empty string content was converted
+        user_msg = params["messages"][0]
+        self.assertIsInstance(user_msg["content"], list)
+        self.assertEqual(user_msg["content"][0]["text"], "(empty)")
+
+        # Check that empty text in list content was converted
+        assistant_msg = params["messages"][1]
+        self.assertIsInstance(assistant_msg["content"], list)
+        self.assertEqual(assistant_msg["content"][0]["text"], "(empty)")
+        self.assertEqual(assistant_msg["content"][1]["text"], "Valid text")
+
+    def test_complex_message_content_preserved(self):
+        """Test that complex message structures (text + image) are properly converted to AWS Bedrock format."""
+        # Create a complex message with both text and image content
+        # Use a valid base64 string for the image
+        complex_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What do you see in this image?"},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": "data:image/jpeg;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+                    },
+                },
+                {"type": "text", "text": "Please describe it in detail."},
+            ],
+        }
+
+        messages = [
+            complex_message,
+            {"role": "assistant", "content": "I can see the image clearly."},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # Verify complex message structure is preserved and converted
+        self.assertEqual(len(params["messages"]), 2)
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        self.assertIsInstance(user_msg["content"], list)
+        self.assertEqual(len(user_msg["content"]), 3)
+
+        # Note: AWS Bedrock adapter reorders single images to come before text, like Anthropic
+        # Check image part (should be moved to first position and converted from image_url to image)
+        self.assertIn("image", user_msg["content"][0])
+        self.assertEqual(user_msg["content"][0]["image"]["format"], "jpeg")
+        self.assertIn("source", user_msg["content"][0]["image"])
+        self.assertIn("bytes", user_msg["content"][0]["image"]["source"])
+
+        # Check first text part (moved to second position)
+        self.assertEqual(user_msg["content"][1]["text"], "What do you see in this image?")
+
+        # Check second text part (moved to third position)
+        self.assertEqual(user_msg["content"][2]["text"], "Please describe it in detail.")
+
+    def test_multiple_system_instructions_handling(self):
+        """Test that first system instruction is extracted, later ones converted to user messages."""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+            {"role": "system", "content": "Remember to be concise."},  # Later system message
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # System instruction should be extracted from first message (in AWS Bedrock format)
+        self.assertIsInstance(params["system"], list)
+        self.assertEqual(len(params["system"]), 1)
+        self.assertEqual(params["system"][0]["text"], "You are a helpful assistant.")
+
+        # Should have 3 messages remaining (system message was removed, later system converted to user)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"][0]["text"], "Hello")
+        self.assertEqual(params["messages"][1]["role"], "assistant")
+        self.assertEqual(params["messages"][1]["content"][0]["text"], "Hi there!")
+
+        # Later system message should be converted to user role
+        self.assertEqual(params["messages"][2]["role"], "user")
+        self.assertEqual(params["messages"][2]["content"][0]["text"], "Remember to be concise.")
+
+    def test_single_system_message_handling(self):
+        """Test that a single system message is extracted as system parameter and no messages remain."""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context)
+
+        # System should be extracted (in AWS Bedrock format)
+        self.assertIsInstance(params["system"], list)
+        self.assertEqual(len(params["system"]), 1)
+        self.assertEqual(params["system"][0]["text"], "You are a helpful assistant.")
+
+        # No messages should remain after system extraction
+        self.assertEqual(len(params["messages"]), 0)
 
 
 if __name__ == "__main__":
