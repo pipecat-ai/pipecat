@@ -11,8 +11,10 @@ This module provides a client for handling web requests and managing WebRTC conn
 
 import asyncio
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
+from fastapi import HTTPException
 from loguru import logger
 
 from pipecat.transports.smallwebrtc.connection import IceServer, SmallWebRTCConnection
@@ -37,6 +39,13 @@ class SmallWebRTCRequest:
     request_data: Optional[Any] = None
 
 
+class ConnectionMode(Enum):
+    """Enum defining the connection handling modes."""
+
+    SINGLE = "single"  # Only one active connection allowed
+    MULTIPLE = "multiple"  # Multiple simultaneous connections allowed
+
+
 class SmallWebRTCRequestHandler:
     """SmallWebRTC request handler for managing peer connections.
 
@@ -45,6 +54,7 @@ class SmallWebRTCRequestHandler:
       - Creating and managing WebRTC peer connections.
       - Supporting ESP32-specific SDP munging if enabled.
       - Invoking callbacks for newly initialized connections.
+      - Supporting both single and multiple connection modes.
     """
 
     def __init__(
@@ -52,6 +62,7 @@ class SmallWebRTCRequestHandler:
         ice_servers: Optional[List[IceServer]] = None,
         esp32_mode: bool = False,
         host: Optional[str] = None,
+        connection_mode: ConnectionMode = ConnectionMode.MULTIPLE,
     ) -> None:
         """Initialize a SmallWebRTC request handler.
 
@@ -61,13 +72,49 @@ class SmallWebRTCRequestHandler:
             esp32_mode (bool): If True, enables ESP32-specific SDP munging.
             host (Optional[str]): Host address used for SDP munging in ESP32 mode.
                 Ignored if `esp32_mode` is False.
+            connection_mode (ConnectionMode): Mode of operation for handling connections.
+                SINGLE allows only one active connection, MULTIPLE allows several.
         """
         self._ice_servers = ice_servers
         self._esp32_mode = esp32_mode
         self._host = host
+        self._connection_mode = connection_mode
 
         # Store connections by pc_id
         self._pcs_map: Dict[str, SmallWebRTCConnection] = {}
+
+    def _check_single_connection_constraints(self, pc_id: Optional[str]) -> None:
+        """Check if the connection request satisfies single connection mode constraints.
+
+        Args:
+            pc_id: The peer connection ID from the request
+
+        Raises:
+            HTTPException: If constraints are violated in single connection mode
+        """
+        if self._connection_mode != ConnectionMode.SINGLE:
+            return
+
+        if not self._pcs_map:  # No existing connections
+            return
+
+        # Get the existing connection (should be only one in single mode)
+        existing_connection = next(iter(self._pcs_map.values()))
+
+        if existing_connection.pc_id != pc_id and pc_id:
+            logger.warning(
+                f"Connection pc_id mismatch: existing={existing_connection.pc_id}, received={pc_id}"
+            )
+            raise HTTPException(status_code=400, detail="PC ID mismatch with existing connection")
+
+        if not pc_id:
+            logger.warning(
+                "Cannot create new connection: existing connection found but no pc_id received"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot create new connection with existing connection active",
+            )
 
     async def handle_web_request(
         self,
@@ -81,6 +128,7 @@ class SmallWebRTCRequestHandler:
           - Otherwise, create a new `SmallWebRTCConnection`.
           - Invoke the provided callback with the connection.
           - Manage ESP32-specific munging if enabled.
+          - Enforce single/multiple connection mode constraints.
 
         Args:
             request (SmallWebRTCRequest): The incoming WebRTC request, containing
@@ -89,14 +137,21 @@ class SmallWebRTCRequestHandler:
                 asynchronous callback function that is invoked with the WebRTC connection.
 
         Raises:
+            HTTPException: If connection mode constraints are violated
             Exception: Any exception raised during request handling or callback execution
                 will be logged and propagated.
         """
         try:
             pc_id = request.pc_id
 
-            if pc_id and pc_id in self._pcs_map:
-                pipecat_connection = self._pcs_map[pc_id]
+            # Check connection mode constraints first
+            self._check_single_connection_constraints(pc_id)
+
+            # After constraints are satisfied, get the existing connection if any
+            existing_connection = self._pcs_map.get(pc_id) if pc_id else None
+
+            if existing_connection:
+                pipecat_connection = existing_connection
                 logger.info(f"Reusing existing connection for pc_id: {pc_id}")
                 await pipecat_connection.renegotiate(
                     sdp=request.sdp,
