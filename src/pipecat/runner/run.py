@@ -183,8 +183,6 @@ def _create_server_app(
 def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "localhost"):
     """Set up WebRTC-specific routes."""
     try:
-        from asyncio import Future
-
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
