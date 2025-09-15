@@ -208,8 +208,6 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
     @app.post("/api/offer")
     async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
         """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
-        # Create a future to receive the answer from the handler
-        pending_answer: Future = Future()
 
         # Prepare runner arguments with the callback to run your bot
         async def webrtc_connection_callback(connection):
@@ -218,14 +216,10 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
             background_tasks.add_task(bot_module.bot, runner_args)
 
         # Delegate handling to SmallWebRTCRequestHandler
-        await small_webrtc_handler.handle_web_request(
+        answer = await small_webrtc_handler.handle_web_request(
             request=request,
-            pending_answer=pending_answer,
             webrtc_connection_callback=webrtc_connection_callback,
         )
-
-        # Wait for the handler to resolve the answer
-        answer = await pending_answer
         return answer
 
     @asynccontextmanager

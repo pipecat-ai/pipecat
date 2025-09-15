@@ -72,7 +72,6 @@ class SmallWebRTCRequestHandler:
     async def handle_web_request(
         self,
         request: SmallWebRTCRequest,
-        pending_answer: asyncio.Future,
         webrtc_connection_callback: Callable[[Any], Awaitable[None]],
     ) -> None:
         """Handle a SmallWebRTC request and resolve the pending answer.
@@ -82,13 +81,10 @@ class SmallWebRTCRequestHandler:
           - Otherwise, create a new `SmallWebRTCConnection`.
           - Invoke the provided callback with the connection.
           - Manage ESP32-specific munging if enabled.
-          - Resolve or reject the `pending_answer` future in the runner arguments.
 
         Args:
             request (SmallWebRTCRequest): The incoming WebRTC request, containing
                 SDP, type, and optionally a `pc_id`.
-            pending_answer (asyncio.Future): A future that will be resolved with the
-                SDP answer once the request is processed.
             webrtc_connection_callback (Callable[[Any], Awaitable[None]]): An
                 asynchronous callback function that is invoked with the WebRTC connection.
 
@@ -136,16 +132,10 @@ class SmallWebRTCRequestHandler:
 
             self._pcs_map[answer["pc_id"]] = pipecat_connection
 
-            # Resolve the pending answer future
-            if not pending_answer.done():
-                pending_answer.set_result(answer)
-
+            return answer
         except Exception as e:
             logger.error(f"Error processing SmallWebRTC request: {e}")
             logger.debug(f"SmallWebRTC request details: {request}")
-
-            if not pending_answer.done():
-                pending_answer.set_exception(e)
             raise
 
     async def close(self):
