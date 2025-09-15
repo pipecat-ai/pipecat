@@ -24,6 +24,15 @@ For Gemini adapter:
 5. System messages are extracted as system_instruction (without duplication)
 6. Single system instruction is converted to user message when no other messages exist
 7. Multiple system instructions: first extracted, later ones converted to user messages
+
+For Anthropic adapter:
+1. LLMStandardMessage objects are converted to Anthropic MessageParam format
+2. LLMSpecificMessage objects with llm='anthropic' are included unchanged
+3. LLMSpecificMessage objects with llm != 'anthropic' are filtered out
+4. Complex message structures (image, multi-text) are converted to appropriate Anthropic format
+5. System messages: first extracted as system parameter, later ones converted to user messages
+6. Consecutive messages with same role are merged into multi-content-block messages
+7. Empty text content is converted to "(empty)"
 """
 
 import unittest
@@ -31,6 +40,7 @@ import unittest
 from google.genai.types import Content, Part
 from openai.types.chat import ChatCompletionMessage
 
+from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
 from pipecat.adapters.services.gemini_adapter import GeminiLLMAdapter
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMAdapter
 from pipecat.processors.aggregators.llm_context import (
@@ -525,6 +535,273 @@ class TestGeminiGetLLMInvocationParams(unittest.TestCase):
         self.assertEqual(len(user_messages), 4)
         # Should have 2 model messages (converted from assistant)
         self.assertEqual(len(model_messages), 2)
+
+
+class TestAnthropicGetLLMInvocationParams(unittest.TestCase):
+    def setUp(self) -> None:
+        """Sets up a common adapter instance for all tests."""
+        self.adapter = AnthropicLLMAdapter()
+
+    def test_standard_messages_converted_to_anthropic_format(self):
+        """Test that LLMStandardMessage objects are converted to Anthropic MessageParam format."""
+        # Create standard messages
+        standard_messages: list[LLMStandardMessage] = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello, how are you?"},
+            {"role": "assistant", "content": "I'm doing well, thank you!"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=standard_messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # Verify system instruction is extracted
+        self.assertEqual(params["system"], "You are a helpful assistant.")
+
+        # Verify messages are in the params (2 messages after system extraction)
+        self.assertIn("messages", params)
+        self.assertEqual(len(params["messages"]), 2)
+
+        # Check first message (user)
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        self.assertEqual(user_msg["content"], "Hello, how are you?")
+
+        # Check second message (assistant)
+        assistant_msg = params["messages"][1]
+        self.assertEqual(assistant_msg["role"], "assistant")
+        self.assertEqual(assistant_msg["content"], "I'm doing well, thank you!")
+
+    def test_anthropic_specific_messages_included_unchanged(self):
+        """Test that LLMSpecificMessage objects with llm='anthropic' are included unchanged."""
+        # Create anthropic-specific message content
+        anthropic_message_content = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Hello"},
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": "image/jpeg", "data": "fake_data"},
+                },
+            ],
+        }
+
+        messages = [
+            LLMSpecificMessage(llm="anthropic", message=anthropic_message_content),
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # Verify the anthropic-specific message is preserved
+        self.assertEqual(len(params["messages"]), 2)
+        anthropic_msg = params["messages"][0]
+        self.assertEqual(anthropic_msg["role"], "user")
+        self.assertIsInstance(anthropic_msg["content"], list)
+        self.assertEqual(len(anthropic_msg["content"]), 2)
+        self.assertEqual(anthropic_msg["content"][0]["type"], "text")
+        self.assertEqual(anthropic_msg["content"][0]["text"], "Hello")
+        self.assertEqual(anthropic_msg["content"][1]["type"], "image")
+
+    def test_non_anthropic_specific_messages_filtered_out(self):
+        """Test that LLMSpecificMessage objects with llm != 'anthropic' are filtered out."""
+        messages = [
+            {"role": "user", "content": "Hello"},
+            LLMSpecificMessage(
+                llm="openai", message={"role": "user", "content": "OpenAI specific"}
+            ),
+            LLMSpecificMessage(
+                llm="google", message={"role": "user", "content": "Google specific"}
+            ),
+            {"role": "assistant", "content": "Response"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # Should only have the 2 standard messages (openai and google specific filtered out)
+        self.assertEqual(len(params["messages"]), 2)
+        self.assertEqual(params["messages"][0]["content"], "Hello")
+        self.assertEqual(params["messages"][1]["content"], "Response")
+
+    def test_consecutive_same_role_messages_merged(self):
+        """Test that consecutive messages with the same role are merged into multi-content blocks."""
+        messages = [
+            {"role": "user", "content": "First user message"},
+            {"role": "user", "content": "Second user message"},
+            {"role": "user", "content": "Third user message"},
+            {"role": "assistant", "content": "First assistant message"},
+            {"role": "assistant", "content": "Second assistant message"},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # Should have 2 messages after merging (1 user, 1 assistant)
+        self.assertEqual(len(params["messages"]), 2)
+
+        # Check merged user message
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        self.assertIsInstance(user_msg["content"], list)
+        self.assertEqual(len(user_msg["content"]), 3)
+        self.assertEqual(user_msg["content"][0]["type"], "text")
+        self.assertEqual(user_msg["content"][0]["text"], "First user message")
+        self.assertEqual(user_msg["content"][1]["type"], "text")
+        self.assertEqual(user_msg["content"][1]["text"], "Second user message")
+        self.assertEqual(user_msg["content"][2]["type"], "text")
+        self.assertEqual(user_msg["content"][2]["text"], "Third user message")
+
+        # Check merged assistant message
+        assistant_msg = params["messages"][1]
+        self.assertEqual(assistant_msg["role"], "assistant")
+        self.assertIsInstance(assistant_msg["content"], list)
+        self.assertEqual(len(assistant_msg["content"]), 2)
+        self.assertEqual(assistant_msg["content"][0]["type"], "text")
+        self.assertEqual(assistant_msg["content"][0]["text"], "First assistant message")
+        self.assertEqual(assistant_msg["content"][1]["type"], "text")
+        self.assertEqual(assistant_msg["content"][1]["text"], "Second assistant message")
+
+    def test_empty_text_converted_to_empty_placeholder(self):
+        """Test that empty text content is converted to "(empty)" string."""
+        messages = [
+            {"role": "user", "content": ""},  # Empty string
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": ""},  # Empty text in list content
+                    {"type": "text", "text": "Valid text"},
+                ],
+            },
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # Check that empty string content was converted
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["content"], "(empty)")
+
+        # Check that empty text in list content was converted
+        assistant_msg = params["messages"][1]
+        self.assertIsInstance(assistant_msg["content"], list)
+        self.assertEqual(assistant_msg["content"][0]["text"], "(empty)")
+        self.assertEqual(assistant_msg["content"][1]["text"], "Valid text")
+
+    def test_complex_message_content_preserved(self):
+        """Test that complex message structures (text + image) are properly converted to Anthropic format."""
+        # Create a complex message with both text and image content
+        complex_message = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "What do you see in this image?"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/jpeg;base64,fake_image_data"},
+                },
+                {"type": "text", "text": "Please describe it in detail."},
+            ],
+        }
+
+        messages = [
+            complex_message,
+            {"role": "assistant", "content": "I can see the image clearly."},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # Verify complex message structure is preserved and converted
+        self.assertEqual(len(params["messages"]), 2)
+        user_msg = params["messages"][0]
+        self.assertEqual(user_msg["role"], "user")
+        self.assertIsInstance(user_msg["content"], list)
+        self.assertEqual(len(user_msg["content"]), 3)
+
+        # Note: Anthropic adapter reorders single images to come before text, as per Anthropic docs
+        # Check image part (should be moved to first position and converted from image_url to image)
+        self.assertEqual(user_msg["content"][0]["type"], "image")
+        self.assertIn("source", user_msg["content"][0])
+        self.assertEqual(user_msg["content"][0]["source"]["type"], "base64")
+        self.assertEqual(user_msg["content"][0]["source"]["media_type"], "image/jpeg")
+        self.assertEqual(user_msg["content"][0]["source"]["data"], "fake_image_data")
+
+        # Check first text part (moved to second position)
+        self.assertEqual(user_msg["content"][1]["type"], "text")
+        self.assertEqual(user_msg["content"][1]["text"], "What do you see in this image?")
+
+        # Check second text part (moved to third position)
+        self.assertEqual(user_msg["content"][2]["type"], "text")
+        self.assertEqual(user_msg["content"][2]["text"], "Please describe it in detail.")
+
+    def test_multiple_system_instructions_handling(self):
+        """Test that first system instruction is extracted, later ones converted to user messages."""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+            {"role": "system", "content": "Remember to be concise."},  # Later system message
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # System instruction should be extracted from first message
+        self.assertEqual(params["system"], "You are a helpful assistant.")
+
+        # Should have 3 messages remaining (system message was removed, later system converted to user)
+        self.assertEqual(len(params["messages"]), 3)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "Hello")
+        self.assertEqual(params["messages"][1]["role"], "assistant")
+        self.assertEqual(params["messages"][1]["content"], "Hi there!")
+
+        # Later system message should be converted to user role
+        self.assertEqual(params["messages"][2]["role"], "user")
+        self.assertEqual(params["messages"][2]["content"], "Remember to be concise.")
+
+    def test_single_system_message_converted_to_user(self):
+        """Test that a single system message is converted to user role when no other messages exist."""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+        ]
+
+        # Create context
+        context = LLMContext(messages=messages)
+
+        # Get invocation params
+        params = self.adapter.get_llm_invocation_params(context, enable_prompt_caching=False)
+
+        # System should be NOT_GIVEN since we only have one message
+        from anthropic import NOT_GIVEN
+
+        self.assertEqual(params["system"], NOT_GIVEN)
+
+        # Single system message should be converted to user role
+        self.assertEqual(len(params["messages"]), 1)
+        self.assertEqual(params["messages"][0]["role"], "user")
+        self.assertEqual(params["messages"][0]["content"], "You are a helpful assistant.")
 
 
 if __name__ == "__main__":
