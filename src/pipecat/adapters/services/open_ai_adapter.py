@@ -24,6 +24,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMContextToolChoice,
+    LLMSpecificMessage,
     NotGiven,
 )
 
@@ -110,8 +111,15 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
     def _from_universal_context_messages(
         self, messages: List[LLMContextMessage]
     ) -> List[ChatCompletionMessageParam]:
-        # Just a pass-through: messages are already the right type
-        return messages
+        result = []
+        for message in messages:
+            if isinstance(message, LLMSpecificMessage):
+                # Extract the actual message content from LLMSpecificMessage
+                result.append(message.message)
+            else:
+                # Standard message, pass through unchanged
+                result.append(message)
+        return result
 
     def _from_standard_tool_choice(
         self, tool_choice: LLMContextToolChoice | NotGiven
