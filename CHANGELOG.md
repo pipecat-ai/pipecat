@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `FastAPIWebsocketTransport` and `SmallWebRTCTransport` issue where
+  `on_client_disconnected` would be triggered when the bot ends the
+  conversation. That is, `on_client_disconnected` should only be triggered when
+  the remote client actually disconnects.
+
 - Fixed an issue in `HeyGenVideoService` where the `BotStartedSpeakingFrame`
   was blocked from moving through the Pipeline.
 

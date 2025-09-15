@@ -478,7 +478,11 @@ class SmallWebRTCClient:
         self._screen_video_track = None
         self._audio_output_track = None
         self._video_output_track = None
-        await self._callbacks.on_client_disconnected(self._webrtc_connection)
+
+        # Trigger `on_client_disconnected` if the client actually disconnects,
+        # that is, we are not the ones disconnecting.
+        if not self._closing:
+            await self._callbacks.on_client_disconnected(self._webrtc_connection)
 
     async def _handle_app_message(self, message: Any):
         """Handle incoming application messages."""
