@@ -811,60 +811,55 @@ class AWSBedrockLLMService(LLMService):
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        try:
-            messages = []
-            system = []
-            if isinstance(context, LLMContext):
-                adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
-                params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
-                messages = params["messages"]
-                system = params["system"]  # [{"text": "system message"}]
-            else:
-                context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
-                messages = context.messages
-                system = getattr(context, "system", None)  # [{"text": "system message"}]
+        messages = []
+        system = []
+        if isinstance(context, LLMContext):
+            adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            messages = params["messages"]
+            system = params["system"]  # [{"text": "system message"}]
+        else:
+            context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
+            messages = context.messages
+            system = getattr(context, "system", None)  # [{"text": "system message"}]
 
-            # Determine if we're using Claude or Nova based on model ID
-            model_id = self.model_name
+        # Determine if we're using Claude or Nova based on model ID
+        model_id = self.model_name
 
-            # Prepare request parameters
-            request_params = {
-                "modelId": model_id,
-                "messages": messages,
-                "inferenceConfig": {
-                    "maxTokens": 8192,
-                    "temperature": 0.7,
-                    "topP": 0.9,
-                },
-            }
+        # Prepare request parameters
+        request_params = {
+            "modelId": model_id,
+            "messages": messages,
+            "inferenceConfig": {
+                "maxTokens": 8192,
+                "temperature": 0.7,
+                "topP": 0.9,
+            },
+        }
 
-            if system:
-                request_params["system"] = system
+        if system:
+            request_params["system"] = system
 
-            async with self._aws_session.client(
-                service_name="bedrock-runtime", **self._aws_params
-            ) as client:
-                # Call Bedrock without streaming
-                response = await client.converse(**request_params)
+        async with self._aws_session.client(
+            service_name="bedrock-runtime", **self._aws_params
+        ) as client:
+            # Call Bedrock without streaming
+            response = await client.converse(**request_params)
 
-                # Extract the response text
-                if (
-                    "output" in response
-                    and "message" in response["output"]
-                    and "content" in response["output"]["message"]
-                ):
-                    content = response["output"]["message"]["content"]
-                    if isinstance(content, list):
-                        for item in content:
-                            if item.get("text"):
-                                return item["text"]
-                    elif isinstance(content, str):
-                        return content
+            # Extract the response text
+            if (
+                "output" in response
+                and "message" in response["output"]
+                and "content" in response["output"]["message"]
+            ):
+                content = response["output"]["message"]["content"]
+                if isinstance(content, list):
+                    for item in content:
+                        if item.get("text"):
+                            return item["text"]
+                elif isinstance(content, str):
+                    return content
 
-                return None
-
-        except Exception as e:
-            logger.error(f"Bedrock summary generation failed: {e}", exc_info=True)
             return None
 
     async def _create_converse_stream(self, client, request_params):
