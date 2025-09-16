@@ -40,6 +40,9 @@ class TranscriptionLogger(FrameProcessor):
         elif isinstance(frame, TranslationFrame):
             print(f"Translation ({frame.language}): {frame.text}")
 
+        # Push all frames through
+        await self.push_frame(frame, direction)
+
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
 # instantiated. The function will be called when the desired transport gets

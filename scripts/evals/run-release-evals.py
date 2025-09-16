@@ -135,6 +135,25 @@ TESTS_14 = [
     ("14r-function-calling-aws.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14v-function-calling-openai.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14w-function-calling-mistral.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
+    ("14x-function-calling-universal-context.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
+    (
+        "14y-function-calling-google-universal-context.py",
+        PROMPT_WEATHER,
+        EVAL_WEATHER,
+        BOT_SPEAKS_FIRST,
+    ),
+    (
+        "14z-function-calling-anthropic-universal-context.py",
+        PROMPT_WEATHER,
+        EVAL_WEATHER,
+        BOT_SPEAKS_FIRST,
+    ),
+    (
+        "14aa-function-calling-aws-universal-context.py",
+        PROMPT_WEATHER,
+        EVAL_WEATHER,
+        BOT_SPEAKS_FIRST,
+    ),
     # Currently not working.
     # ("14c-function-calling-together.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     # ("14l-function-calling-deepseek.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
@@ -148,6 +167,7 @@ TESTS_15 = [
 TESTS_19 = [
     ("19-openai-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("19a-azure-realtime-beta.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
+    ("19b-openai-realtime-text.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("19b-openai-realtime-beta-text.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
 ]
 

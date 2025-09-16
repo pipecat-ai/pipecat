@@ -30,7 +30,6 @@ from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -1206,7 +1205,7 @@ class RTVIProcessor(FrameProcessor):
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
-        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+        await self.push_interruption_task_frame_and_wait()
 
     async def send_server_message(self, data: Any):
         """Send a server message to the client."""

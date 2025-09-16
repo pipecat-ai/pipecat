@@ -789,43 +789,6 @@ class FatalErrorFrame(ErrorFrame):
 
 
 @dataclass
-class EndTaskFrame(SystemFrame):
-    """Frame to request graceful pipeline task closure.
-
-    This is used to notify the pipeline task that the pipeline should be
-    closed nicely (flushing all the queued frames) by pushing an EndFrame
-    downstream. This frame should be pushed upstream.
-    """
-
-    pass
-
-
-@dataclass
-class CancelTaskFrame(SystemFrame):
-    """Frame to request immediate pipeline task cancellation.
-
-    This is used to notify the pipeline task that the pipeline should be
-    stopped immediately by pushing a CancelFrame downstream. This frame
-    should be pushed upstream.
-    """
-
-    pass
-
-
-@dataclass
-class StopTaskFrame(SystemFrame):
-    """Frame to request pipeline task stop while keeping processors running.
-
-    This is used to notify the pipeline task that it should be stopped as
-    soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state. This frame should be pushed
-    upstream.
-    """
-
-    pass
-
-
-@dataclass
 class FrameProcessorPauseUrgentFrame(SystemFrame):
     """Frame to pause frame processing immediately.
 
@@ -857,7 +820,7 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
 
 
 @dataclass
-class StartInterruptionFrame(SystemFrame):
+class InterruptionFrame(SystemFrame):
     """Frame indicating user started speaking (interruption detected).
 
     Emitted by the BaseInputTransport to indicate that a user has started
@@ -867,6 +830,34 @@ class StartInterruptionFrame(SystemFrame):
     """
 
     pass
+
+
+@dataclass
+class StartInterruptionFrame(InterruptionFrame):
+    """Frame indicating user started speaking (interruption detected).
+
+    .. deprecated:: 0.0.85
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `InterruptionFrame`.
+
+    Emitted by the BaseInputTransport to indicate that a user has started
+    speaking (i.e. is interrupting). This is similar to
+    UserStartedSpeakingFrame except that it should be pushed concurrently
+    with other frames (so the order is not guaranteed).
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "StartInterruptionFrame is deprecated and will be removed in a future version. "
+                "Instead, use InterruptionFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass
@@ -940,20 +931,6 @@ class VADUserStartedSpeakingFrame(SystemFrame):
 @dataclass
 class VADUserStoppedSpeakingFrame(SystemFrame):
     """Frame emitted when VAD definitively detects user stopped speaking."""
-
-    pass
-
-
-@dataclass
-class BotInterruptionFrame(SystemFrame):
-    """Frame indicating the bot should be interrupted.
-
-    Emitted when the bot should be interrupted. This will mainly cause the
-    same actions as if the user interrupted except that the
-    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
-    This frame should be pushed upstreams. It results in the BaseInputTransport
-    starting an interruption by pushing a StartInterruptionFrame downstream.
-    """
 
     pass
 
@@ -1254,23 +1231,6 @@ class UserImageRawFrame(InputImageRawFrame):
 
 
 @dataclass
-class VisionImageRawFrame(InputImageRawFrame):
-    """Image frame for vision/image analysis with associated text prompt.
-
-    An image with an associated text to ask for a description of it.
-
-    Parameters:
-        text: Optional text prompt describing what to analyze in the image.
-    """
-
-    text: Optional[str] = None
-
-    def __str__(self):
-        pts = format_pts(self.pts)
-        return f"{self.name}(pts: {pts}, text: [{self.text}], size: {self.size}, format: {self.format})"
-
-
-@dataclass
 class InputDTMFFrame(DTMFFrame, SystemFrame):
     """DTMF keypress input frame from transport."""
 
@@ -1304,6 +1264,103 @@ class SpeechControlParamsFrame(SystemFrame):
 
     vad_params: Optional[VADParams] = None
     turn_params: Optional[SmartTurnParams] = None
+
+
+#
+# Task frames
+#
+
+
+@dataclass
+class TaskFrame(SystemFrame):
+    """Base frame for task frames.
+
+    This is a base class for frames that are meant to be sent and handled
+    upstream by the pipeline task. This might result in a corresponding frame
+    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
+    `EndTaskFrame` / `EndFrame`).
+
+    """
+
+    pass
+
+
+@dataclass
+class EndTaskFrame(TaskFrame):
+    """Frame to request graceful pipeline task closure.
+
+    This is used to notify the pipeline task that the pipeline should be
+    closed nicely (flushing all the queued frames) by pushing an EndFrame
+    downstream. This frame should be pushed upstream.
+    """
+
+    pass
+
+
+@dataclass
+class CancelTaskFrame(TaskFrame):
+    """Frame to request immediate pipeline task cancellation.
+
+    This is used to notify the pipeline task that the pipeline should be
+    stopped immediately by pushing a CancelFrame downstream. This frame
+    should be pushed upstream.
+    """
+
+    pass
+
+
+@dataclass
+class StopTaskFrame(TaskFrame):
+    """Frame to request pipeline task stop while keeping processors running.
+
+    This is used to notify the pipeline task that it should be stopped as
+    soon as possible (flushing all the queued frames) but that the pipeline
+    processors should be kept in a running state. This frame should be pushed
+    upstream.
+    """
+
+    pass
+
+
+@dataclass
+class InterruptionTaskFrame(TaskFrame):
+    """Frame indicating the bot should be interrupted.
+
+    Emitted when the bot should be interrupted. This will mainly cause the
+    same actions as if the user interrupted except that the
+    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
+    This frame should be pushed upstream.
+    """
+
+    pass
+
+
+@dataclass
+class BotInterruptionFrame(InterruptionTaskFrame):
+    """Frame indicating the bot should be interrupted.
+
+    .. deprecated:: 0.0.85
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `InterruptionTaskFrame`.
+
+    Emitted when the bot should be interrupted. This will mainly cause the
+    same actions as if the user interrupted except that the
+    UserStartedSpeakingFrame and UserStoppedSpeakingFrame won't be generated.
+    This frame should be pushed upstream.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "BotInterruptionFrame is deprecated and will be removed in a future version. "
+                "Instead, use InterruptionTaskFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 #

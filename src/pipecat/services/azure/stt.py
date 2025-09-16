@@ -19,6 +19,7 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
+    InterimTranscriptionFrame,
     StartFrame,
     TranscriptionFrame,
 )
@@ -140,6 +141,7 @@ class AzureSTTService(STTService):
         self._speech_recognizer = SpeechRecognizer(
             speech_config=self._speech_config, audio_config=audio_config
         )
+        self._speech_recognizer.recognizing.connect(self._on_handle_recognizing)
         self._speech_recognizer.recognized.connect(self._on_handle_recognized)
         self._speech_recognizer.start_continuous_recognition_async()
 
@@ -195,5 +197,17 @@ class AzureSTTService(STTService):
             )
             asyncio.run_coroutine_threadsafe(
                 self._handle_transcription(event.result.text, True, language), self.get_event_loop()
+            )
+            asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())
+
+    def _on_handle_recognizing(self, event):
+        if event.result.reason == ResultReason.RecognizingSpeech and len(event.result.text) > 0:
+            language = getattr(event.result, "language", None) or self._settings.get("language")
+            frame = InterimTranscriptionFrame(
+                event.result.text,
+                self._user_id,
+                time_now_iso8601(),
+                language,
+                result=event,
             )
             asyncio.run_coroutine_threadsafe(self.push_frame(frame), self.get_event_loop())

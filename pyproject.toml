@@ -96,8 +96,9 @@ sambanova = []
 sarvam = [ "websockets>=13.1,<15.0" ]
 sentry = [ "sentry-sdk~=2.23.1" ]
 local-smart-turn = [ "coremltools>=8.0", "transformers", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3" ]
+local-smart-turn-v3 = [ "transformers", "torch>=2.5.0,<3", "torchaudio>=2.5.0,<3", "onnxruntime>=1.20.1, <2" ]
 remote-smart-turn = []
-silero = [ "onnxruntime~=1.20.1" ]
+silero = [ "onnxruntime>=1.20.1, <2" ]
 simli = [ "simli-ai~=0.1.10"]
 soniox = [ "websockets>=13.1,<15.0" ]
 soundfile = [ "soundfile~=0.13.0" ]
@@ -155,6 +156,7 @@ where = ["src"]
     "src/pipecat/audio/dtmf/dtmf-star.wav",
 ]
 "pipecat.services.aws_nova_sonic" = ["src/pipecat/services/aws_nova_sonic/ready.wav"]
+"pipecat.audio.turn.smart_turn.data" = ["src/pipecat/audio/turn/smart_turn/data/smart-turn-v3.0.onnx"]
 
 [tool.pytest.ini_options]
 addopts = "--verbose"

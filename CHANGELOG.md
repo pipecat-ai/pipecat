@@ -9,12 +9,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
-  access to OpenAI Realtime.
+- Added `on_pipeline_finished` event to `PipelineTask`. This event will get
+  fired when the pipeline is done running. This can be the result of a
+  `StopFrame`, `CancelFrame` or `EndFrame`.
+
+  ```python
+  @task.event_handler("on_pipeline_finished")
+  async def on_pipeline_finished(task: PipelineTask, frame: Frame):
+      ...
+  ```
 
 - Added `PinchAudioService` with procide access to Pinch Translation.
 
 ### Deprecated
+
+- `PipelineTask` events `on_pipeline_stopped`, `on_pipeline_ended` and
+  `on_pipeline_cancelled` are now deprecated. Use `on_pipeline_finished`
+  instead.
+
+### Fixed
+
+- Fixed an issue in `AudioBufferProcessor` where a recording is not created
+  when a bot speaks and user input is blocked.
+
+- Fixed a `FastAPIWebsocketTransport` and `SmallWebRTCTransport` issue where
+  `on_client_disconnected` would be triggered when the bot ends the
+  conversation. That is, `on_client_disconnected` should only be triggered when
+  the remote client actually disconnects.
+
+- Fixed an issue in `HeyGenVideoService` where the `BotStartedSpeakingFrame`
+  was blocked from moving through the Pipeline.
+
+## [0.0.85] - 2025-09-12
+
+### Added
+
+- `AzureSTTService` now pushes interim transcriptions.
+
+- Added `voice_cloning_key` to `GoogleTTSService` to support custom cloned
+  voices.
+
+- Added `speaking_rate` to `GoogleTTSService.InputParams` to control the
+  speaking rate.
+
+- Added a `speed` arg to `OpenAITTSService` to control the speed of the voice
+  response.
+
+- Added `FrameProcessor.push_interruption_task_frame_and_wait()`. Use this
+  method to programatically interrupt the bot from any part of the
+  pipeline. This guarantees that all the processors in the pipeline are
+  interrupted in order (from upstream to downstream). Internally, this works by
+  first pushing an `InterruptionTaskFrame` upstream until it reaches the
+  pipeline task. The pipeline task then generates an `InterruptionFrame`, which
+  flows downstream through all processors. Once the `InterruptionFrame` has
+  reaches the processor waiting for the interruption, the function returns and
+  execution continues after the call. Think of it as sending an upstream request
+  for interruption and waiting until the acknowledgment flows back downstream.
+
+- Added new base `TaskFrame` (which is a system frame). This is the base class
+  for all task frames (`EndTaskFrame`, `CancelTaskFrame`, etc.) that are meant
+  to be pushed upstream to reach the pipeline task.
+
+- Expanded support for universal `LLMContext` to the AWS Bedrock LLM service.
+  Using the universal `LLMContext` and associated `LLMContextAggregatorPair` is
+  a pre-requisite for using `LLMSwitcher` to switch between LLMs at runtime.
+
+- Added new fields to the development runner's `parse_telephony_websocket`
+  method in support of providing dynamic data to a bot.
+
+  - Twilio: Added a new `body` parameter, which parses the websocket message
+    for `customParameters`. Provide data via the `Parameter` nouns in your
+    TwiML to use this feature.
+  - Telnyx & Exotel: Both providers make the `to` and `from` phone numbers
+    available in the websocket messages. You can now access these numbers as
+    `call_data["to"]` and `call_data["from"]`.
+
+  Note: Each telephony provider offers different features. Refer to the
+  corresponding example in `pipecat-examples` to see how to pass custom data
+  to your bot.
+
+- Added `body` to the `WebsocketRunnerArguments` as an optional parameter.
+  Custom `body` information can be passed from the server into the bot file via
+  the `bot()` method using this new parameter.
+
+- Added video streaming support to `LiveKitTransport`.
+
+- Added `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService` which provide
+  access to OpenAI Realtime.
+
+### Changed
+
+- `pipeline.tests.utils.run_test()` now allows passing `PipelineParams` instead
+  of individual parameters.
+
+### Removed
+
+- Remove `VisionImageRawFrame` in favor of context frames (`LLMContextFrame` or
+  `OpenAILLMContextFrame`).
+
+### Deprecated
+
+- `BotInterruptionFrame` is now deprecated, use `InterruptionTaskFrame` instead.
+
+- `StartInterruptionFrame` is now deprected, use `InterruptionFrame` instead.
+
+- Deprecate `VisionImageFrameAggregator` because `VisionImageRawFrame` has been
+  removed. See the `12*` examples for the new recommended replacement pattern.
 
 - `NoisereduceFilter` is now deprecated and will be removed in a future
   version. Use other audio filters like `KrispFilter` or `AICFilter`.
@@ -22,6 +122,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deprecated `OpenAIRealtimeBetaLLMService` and `AzureRealtimeBetaLLMService`.
   Use `OpenAIRealtimeLLMService` and `AzureRealtimeLLMService`, respectively.
   Each service will be removed in an upcoming version, 1.0.0.
+
+### Fixed
+
+- Fixed a `BaseOutputTransport` issue that caused incorrect detection of when
+  the bot stopped talking while using an audio mixer.
+
+- Fixed a `LiveKitTransport` issue where RTVI messages were not properly
+  encoded.
+
+- Add additional fixups to Mistral context messages to ensure they meet
+  Mistral-specific requirements, avoiding Mistral "invalid request" errors.
+
+- Fixed `DailyTransport` transcription handling to gracefully handle missing
+  `rawResponse` field in transcription messages, preventing KeyError crashes.
 
 ## [0.0.84] - 2025-09-05
 

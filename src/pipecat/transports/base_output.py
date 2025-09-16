@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputTransportMessageUrgentFrame,
+    InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -39,7 +40,6 @@ from pipecat.frames.frames import (
     SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -287,9 +287,8 @@ class BaseOutputTransport(FrameProcessor):
         await super().process_frame(frame, direction)
 
         #
-        # System frames (like StartInterruptionFrame) are pushed
-        # immediately. Other frames require order so they are put in the sink
-        # queue.
+        # System frames (like InterruptionFrame) are pushed immediately. Other
+        # frames require order so they are put in the sink queue.
         #
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
@@ -299,7 +298,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
         elif isinstance(frame, TransportMessageUrgentFrame) and not isinstance(
@@ -340,7 +339,7 @@ class BaseOutputTransport(FrameProcessor):
 
         sender = self._media_senders[frame.transport_destination]
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await sender.handle_interruptions(frame)
         elif isinstance(frame, OutputAudioRawFrame):
             await sender.handle_audio_frame(frame)
@@ -491,7 +490,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
-        async def handle_interruptions(self, _: StartInterruptionFrame):
+        async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
             Args:
@@ -672,7 +671,7 @@ class BaseOutputTransport(FrameProcessor):
                         frame = self._audio_queue.get_nowait()
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await self._mixer.mix(frame.audio)
-                        last_frame_time = time.time()
+                            last_frame_time = time.time()
                         yield frame
                     except asyncio.QueueEmpty:
                         # Notify the bot stopped speaking upstream if necessary.
