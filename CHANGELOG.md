@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update `livekit` to 1.0.13.
+
 - `torch` and `torchaudio` are no longer required for running Smart Turn
   locally. This avoids gigabytes of dependencies being installed.
 
