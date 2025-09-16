@@ -400,7 +400,7 @@ class OjinPersonaFSM:
                 image_frame = OutputImageRawFrame(
                     image=idle_frame.image,
                     size=self._settings.image_size,
-                    format="BGR",
+                    format="RGB",
                 )
                 image_frame.pts = self._playback_loop.get_current_frame_idx()
                 return image_frame
@@ -412,8 +412,7 @@ class OjinPersonaFSM:
 
                 if frame is None:
                     self._num_frames_missed += 1
-                    if self._num_frames_missed % 100 == 0:
-                        logger.debug(f"Frames missed {self._num_frames_missed}")
+                    logger.debug(f"Frames missed {self._num_frames_missed}")
 
                     if self._previous_speech_frame is not None:
                         return self._previous_speech_frame
@@ -424,7 +423,7 @@ class OjinPersonaFSM:
                     image_frame = OutputImageRawFrame(
                         image=idle_frame.image,
                         size=self._settings.image_size,
-                        format="BGR",
+                        format="RGB",
                     )
                     image_frame.pts = self._playback_loop.get_current_frame_idx()
 
@@ -450,6 +449,7 @@ IDLE_FILTER_AMOUNT = 1000.0
 IDLE_MOUTH_OPENING_SCALE = 0.0
 SPEECH_MOUTH_OPENING_SCALE = 1.0
 
+IDLE_ANIMATION_KEYFRAMES_SLOT = 0
 
 @dataclass
 class OjinPersonaInteraction:
@@ -474,6 +474,8 @@ class OjinPersonaInteraction:
     ending_timestamp: float = 0.0
     mouth_opening_scale: float = 0.0
     received_all_interaction_inputs: bool = False
+    source_keyframes_index: int = IDLE_ANIMATION_KEYFRAMES_SLOT
+    destination_keyframes_index: int = -1
 
     def __post_init__(self):
         """Initialize queues after instance creation."""
@@ -582,7 +584,9 @@ class OjinPersonaService(FrameProcessor):
                     "start_frame_idx": self._interaction.start_frame_idx,
                     "filter_amount": self._interaction.filter_amount,
                     "mouth_opening_scale": self._interaction.mouth_opening_scale,
-                },
+                    "source_keyframes_index": self._interaction.source_keyframes_index,
+                    "destination_keyframes_index": self._interaction.destination_keyframes_index,
+                }
             )
         )
 
@@ -600,7 +604,11 @@ class OjinPersonaService(FrameProcessor):
         if new_state == PersonaState.INITIALIZING:
             self._server_fps_tracker.start()
             # Send silence to persona with idle_sequence_duration
-            await self._start_interaction(is_speech=False)
+            await self._start_interaction(
+                is_speech=False,
+                active_keyframes_slot=IDLE_ANIMATION_KEYFRAMES_SLOT,
+                keyframe_slot_to_update=IDLE_ANIMATION_KEYFRAMES_SLOT
+            )
             assert self._interaction is not None
             self._interaction.set_state(InteractionState.ALL_AUDIO_PROCESSED)
             await self._generate_and_send_silence(self._settings.idle_sequence_duration, True)
@@ -837,7 +845,7 @@ class OjinPersonaService(FrameProcessor):
             image_frame = OutputImageRawFrame(
                 image=message.video_frame_bytes,
                 size=self._settings.image_size,
-                format="BGR",
+                format="RGB",
             )
             image_frame.pts = self._interaction.frame_idx
             # Push the image frame to the FSM if it exists for advanced processing or directly to the output to outsource the processing to the client
@@ -877,12 +885,12 @@ class OjinPersonaService(FrameProcessor):
                 self._interaction is not None
                 and self._interaction.state == InteractionState.WAITING_READY
             ):
-                self._interaction.start_frame_idx = self._fsm.get_transition_frame_idx()
-                self._interaction.frame_idx = self._fsm.get_transition_frame_idx()
                 self._interaction.set_state(InteractionState.ACTIVE)
                 await self._fsm.on_conversation_signal(
                     ConversationSignal.SPEECH_AUDIO_STARTED_PROCESSING
                 )
+                self._interaction.start_frame_idx = self._fsm.get_transition_frame_idx()
+                self._interaction.frame_idx = self._fsm.get_transition_frame_idx()
 
         elif isinstance(message, ErrorResponseMessage):
             is_fatal = False
@@ -984,7 +992,7 @@ class OjinPersonaService(FrameProcessor):
         elif isinstance(frame, StartInterruptionFrame):
             logger.debug("StartInterruptionFrame")
             # only interrupt if we are allowed to send TTS input
-            if self.is_pending_initialization():
+            if not self.is_pending_initialization() and self.is_tts_input_allowed():
                 await self._interrupt()
 
             await self.push_frame(frame, direction)
@@ -1021,6 +1029,8 @@ class OjinPersonaService(FrameProcessor):
         self,
         new_interaction: Optional[OjinPersonaInteraction] = None,
         is_speech: bool = False,
+        active_keyframes_slot: int = IDLE_ANIMATION_KEYFRAMES_SLOT,
+        keyframe_slot_to_update: int = -1
     ):
         """Start a new interaction with the persona.
 
@@ -1056,6 +1066,8 @@ class OjinPersonaService(FrameProcessor):
         logger.debug(f"Started interaction with id: {interaction_id}")
         self._interaction.interaction_id = interaction_id
         self._interaction.set_state(InteractionState.WAITING_READY)
+        self._interaction.source_keyframes_index   = active_keyframes_slot
+        self._interaction.destination_keyframes_index = keyframe_slot_to_update
 
     async def _end_interaction(self):
         """End the current interaction.
@@ -1117,22 +1129,10 @@ class OjinPersonaService(FrameProcessor):
 
             assert self._interaction is not None and self._interaction.audio_input_queue is not None
 
-            # TODO(mouad): should we set the start_frame_idx in StartInteraction instead?
-            # Queue the audio for later processing
-            start_frame_idx = 0
-            if self._interaction.pending_first_input:
-                start_frame_idx = self._interaction.start_frame_idx or 0
-
-            logger.info(f"start index: {start_frame_idx}")
             await self._interaction.audio_input_queue.put(
                 OjinPersonaInteractionInputMessage(
                     interaction_id=self._interaction.interaction_id,
                     audio_int16_bytes=resampled_audio,
-                    params={
-                        "start_frame_idx": start_frame_idx,
-                        "filter_amount": self._interaction.filter_amount,
-                        "mouth_opening_scale": self._interaction.mouth_opening_scale,
-                    },
                 )
             )
             self._interaction.pending_first_input = False
@@ -1200,7 +1200,7 @@ class OjinPersonaService(FrameProcessor):
                 if is_final_message:
                     # TODO Tell server to end interaction by finish processing pending data. No more audio frames expected.
                     logger.warning("Pushing final message with empty audio")
-                    silence_duration = 0.1
+                    silence_duration = 0.01
                     num_samples = int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
                     silence_audio = b"\x00\x00" * num_samples
                     message = OjinPersonaInteractionInputMessage(
@@ -1211,12 +1211,21 @@ class OjinPersonaService(FrameProcessor):
                     logger.error(
                         f"Audio queue empty! state = {self._interaction.state} is_final_message = {is_final_message}"
                     )
+                    continue
+
 
             if is_final_message:
                 logger.debug("sending last audio input")
                 self._interaction.set_state(InteractionState.ALL_AUDIO_PROCESSED)
                 message.is_last_input = True
 
+            message.params ={
+                "start_frame_idx": self._interaction.start_frame_idx,
+                "filter_amount": self._interaction.filter_amount,
+                "mouth_opening_scale": self._interaction.mouth_opening_scale,
+                "source_keyframes_index": self._interaction.source_keyframes_index,
+                "destination_keyframes_index": self._interaction.destination_keyframes_index,
+            }
             logger.debug(
                 f"Sending audio int16: {len(message.audio_int16_bytes)} is_final: {message.is_last_input}"
             )
@@ -1410,12 +1419,6 @@ def mirror_index(index: int, size: int) -> int:
         int: The mirrored index that creates the ping-pong effect
 
     """
-    turn = index // size
-    res = index % size
-    if turn % 2 == 0:
-        return res
-    else:
-        return size - res - 1
 
     # Calculate period length (going up and down)
     period = (size - 1) * 2
@@ -1428,4 +1431,4 @@ def mirror_index(index: int, size: int) -> int:
         return normalized_idx
     else:
         # If in second half, return the mirrored index
-        return period - normalized_idx
+        return period - normalized_idx - 1
