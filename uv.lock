@@ -4309,8 +4309,6 @@ local-smart-turn = [
 ]
 local-smart-turn-v3 = [
     { name = "onnxruntime" },
-    { name = "torch" },
-    { name = "torchaudio" },
     { name = "transformers" },
 ]
 mcp = [
@@ -4495,9 +4493,7 @@ requires-dist = [
     { name = "tenacity", marker = "extra == 'livekit'", specifier = ">=8.2.3,<10.0.0" },
     { name = "timm", marker = "extra == 'moondream'", specifier = "~=1.0.13" },
     { name = "torch", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
-    { name = "torch", marker = "extra == 'local-smart-turn-v3'", specifier = ">=2.5.0,<3" },
     { name = "torchaudio", marker = "extra == 'local-smart-turn'", specifier = ">=2.5.0,<3" },
-    { name = "torchaudio", marker = "extra == 'local-smart-turn-v3'", specifier = ">=2.5.0,<3" },
     { name = "transformers", marker = "extra == 'local-smart-turn'" },
     { name = "transformers", marker = "extra == 'local-smart-turn-v3'" },
     { name = "transformers", marker = "extra == 'moondream'", specifier = ">=4.48.0" },
