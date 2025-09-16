@@ -8,11 +8,10 @@
 
 This module provides integration with the Pinch platform for real-time translation
 with audio streaming. It manages translation sessions and provides real-time
-audio streaming capabilities through LiveKit and the Pinch API.
+audio streaming capabilities through Pinch API.
 """
 
 import asyncio
-import base64
 import json
 from typing import Awaitable, Callable, Optional
 
@@ -63,13 +62,13 @@ class PinchCallbacks(BaseModel):
 
 
 class PinchClient:
-    """A client for interacting with Pinch's Translation API via LiveKit.
+    """A client for interacting with Pinch's Translation API.
 
-    This client manages LiveKit connections for real-time translation streaming,
+    This client manages audio connections for real-time translation streaming,
     handling bi-directional audio communication and transcript messages.
 
     The client manages the following:
-    1. LiveKit connection for audio input/output
+    1. Connection for audio input/output
     2. Data messages for transcript exchange
     3. Audio resampling for optimal quality
 
@@ -164,7 +163,7 @@ class PinchClient:
     async def start(self, frame: StartFrame) -> None:
         """Start the client and establish all necessary connections.
 
-        Initializes LiveKit connection using the provided configuration.
+        Initializes connection using the provided configuration.
         Sets up audio processing with the specified sample rates.
 
         Args:
@@ -216,7 +215,7 @@ class PinchClient:
 
             @self._livekit_room.on("disconnected")
             def on_room_disconnected():
-                logger.warning("LiveKit room disconnected, attempting reconnect")
+                logger.warning("Pinch disconnected, attempting reconnect")
                 self._session_active = False
                 self._connected = False
                 asyncio.create_task(self._attempt_reconnect())
@@ -272,7 +271,7 @@ class PinchClient:
                 logger.info("Connected to Pinch audio streaming service")
                 self._connected = True
             except Exception as e:
-                logger.error(f"Failed to connect to LiveKit room: {e}")
+                logger.error(f"Failed to connect to Pinch audio streaming: {e}")
                 raise
 
         except Exception as e:
@@ -281,7 +280,7 @@ class PinchClient:
             raise PinchConnectionError(f"Failed to connect to Pinch audio streaming: {str(e)}", e)
 
     async def _handle_data_message(self, message: dict) -> None:
-        """Handle data messages received from LiveKit."""
+        """Handle data messages received."""
         msg_type = message.get("type")
 
         if msg_type == "original_transcript":
@@ -369,7 +368,7 @@ class PinchClient:
             # Send via LiveKit audio track instead of DataChannel
             if self._audio_source:
                 try:
-                    # Convert to LiveKit audio frame
+                    # Convert audio frame
                     bytes_per_sample = 2  # 16-bit audio
                     total_samples = len(resampled_audio) // bytes_per_sample
                     samples_per_channel = total_samples // 1  # Mono
@@ -381,13 +380,13 @@ class PinchClient:
                         samples_per_channel=samples_per_channel,
                     )
 
-                    # Publish audio frame via LiveKit audio track
+                    # Publish audio frame via audio track
                     await self._audio_source.capture_frame(audio_frame)
 
                     # Only log audio sends every 100 frames to reduce spam
                     if self._audio_frame_counter % 100 == 0:
                         logger.debug(
-                            f"Sent audio via LiveKit audio track (frame #{self._audio_frame_counter})"
+                            f"Sent audio via Pinch audio track (frame #{self._audio_frame_counter})"
                         )
 
                 except Exception as e:
