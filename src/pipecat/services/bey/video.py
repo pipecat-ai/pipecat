@@ -11,8 +11,6 @@ starting from voice agents.
 """
 
 import asyncio
-import os
-from typing import Optional
 
 import aiohttp
 
@@ -27,10 +25,9 @@ from pipecat.frames.frames import (
     TTSAudioRawFrame,
     TTSStartedFrame,
 )
-from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.transports.services.daily import DailyParams, DailyTransport, DailyTransportClient
-from pipecat.transports.services.helpers.daily_rest import DailyRESTHelper
+from pipecat.transports.services.daily import DailyTransportClient
 
 BASE_API_URL = "https://api.bey.dev/v1"
 FRAME_RATE = 25
@@ -47,10 +44,7 @@ class BeyVideoService(AIService):
         self,
         api_key: str,
         avatar_id: str,
-        # TODO: Is it possible to elegantly infer this from the pipeline's transport?
-        # NOTE: Unlike other providers, bey posts video directly to the room,
-        # likely resulting in lower latency
-        room_url: str,
+        transport_client: DailyTransportClient,
         session: aiohttp.ClientSession,
         **kwargs,
     ) -> None:
@@ -59,18 +53,16 @@ class BeyVideoService(AIService):
         Args:
             api_key: Beyond Presence API key used for authentication.
             avatar_id: ID of the Beyond Presence avatar to use for video synthesis.
-            room_url: URL of the Daily room the speech-to-video service will connect to.
+            transport_client: DailyTransportClient for managing WebRTC connections.
             session: Async HTTP session used for communication with Beyond Presence.
             **kwargs: Additional arguments passed to the parent AIService class.
         """
         super().__init__(**kwargs)
 
         self._api_key = api_key
-        self._room_url = room_url
         self._avatar_id = avatar_id
+        self._transport_client = transport_client
         self._session = session
-
-        self._client: Optional[DailyTransportClient] = None
 
         self._resampler = create_stream_resampler()
         self._queue = asyncio.Queue()
@@ -78,35 +70,6 @@ class BeyVideoService(AIService):
         self._audio_buffer = bytearray()
         self._transport_destination: str = "bey-custom-track"
         self._http_session: aiohttp.ClientSession | None = None
-
-    async def setup(self, setup: FrameProcessorSetup):
-        """Set up the Beyond Presence video service.
-
-        Args:
-            setup: Frame processor setup configuration.
-        """
-        await super().setup(setup)
-
-        daily_rest_helper = DailyRESTHelper(
-            daily_api_key=key,
-            aiohttp_session=self._session,
-        )
-        token_expiry_time: float = 60 * 60  # 1 hour
-        token = await daily_rest_helper.get_token(url, expiry_time)
-        # TODO: Fix this hacky way of obtaining the DailyTransportClient
-        self._client = DailyTransport(
-            self._room_url,
-            token,
-            "Bey example Bot",
-            DailyParams(
-                audio_in_enabled=True,
-                video_out_enabled=False,
-                video_out_is_live=False,
-                microphone_out_enabled=False,
-                vad_analyzer=SileroVADAnalyzer(),
-            ),
-        )._client
-        await self._client.setup(setup)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames through the service.
@@ -118,13 +81,16 @@ class BeyVideoService(AIService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            await self._start_session(room_url=self._client.room_url, token=self._client._token)
-            await self._client.register_audio_destination(self._transport_destination)
+            await self._start_session(
+                room_url=self._transport_client.room_url,
+                token=self._transport_client._token,
+            )
+            await self._transport_client.register_audio_destination(self._transport_destination)
             await self.push_frame(frame, direction)
         elif isinstance(frame, StartInterruptionFrame):
             frame.transport_destination = self._transport_destination
             transport_frame = TransportMessageFrame(message="interrupt")
-            await self._client.send_message(transport_frame)
+            await self._transport_client.send_message(transport_frame)
         elif isinstance(frame, TTSAudioRawFrame):
             in_sample_rate = frame.sample_rate
             chunk_size = int((self._out_sample_rate * 2) / FRAME_RATE)
@@ -143,7 +109,7 @@ class BeyVideoService(AIService):
                 chunk.transport_destination = self._transport_destination
 
                 self._audio_buffer = self._audio_buffer[chunk_size:]
-                await self._client.write_audio_frame(chunk)
+                await self._transport_client.write_audio_frame(chunk)
         elif isinstance(frame, TTSStartedFrame):
             await self.start_ttfb_metrics()
         elif isinstance(frame, BotStartedSpeakingFrame):
