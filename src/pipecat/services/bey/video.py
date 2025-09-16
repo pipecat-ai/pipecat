@@ -129,7 +129,7 @@ class BeyVideoService(AIService):
         return True
 
     async def _start_session(self, room_url: str, token: str) -> None:
-        async with self._session().post(
+        async with self._session.post(
             f"{BASE_API_URL}/session",
             headers={
                 "x-api-key": self._api_key,
