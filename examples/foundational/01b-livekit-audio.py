@@ -11,7 +11,7 @@ import sys
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.frames.frames import TextFrame
+from pipecat.frames.frames import TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
@@ -50,7 +50,7 @@ async def main():
     async def on_first_participant_joined(transport, participant_id):
         await asyncio.sleep(1)
         await task.queue_frame(
-            TextFrame(
+            TTSSpeakFrame(
                 "Hello there! How are you doing today? Would you like to talk about the weather?"
             )
         )
