@@ -74,7 +74,7 @@ class BeyVideoService(AIService):
 
         self._resampler = create_stream_resampler()
         self._queue = asyncio.Queue()
-        self._out_sample_rate = 16000
+        self._out_sample_rate = 24000
         self._audio_buffer = bytearray()
         self._transport_destination: str = "bey-custom-track"
         self._http_session: aiohttp.ClientSession | None = None
