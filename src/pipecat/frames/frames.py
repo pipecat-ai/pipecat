@@ -1603,46 +1603,17 @@ class MixerEnableFrame(MixerControlFrame):
 
 
 @dataclass
-class ManuallySwitchServiceBaseFrame:
-    """Base class for frames that request a manual service switch from a ServiceSwitcher.
+class ServiceSwitcherFrame(ControlFrame):
+    """A base class for frames that affect ServiceSwitcher behavior."""
 
-    Must be inherited alongside either ServiceSwitcherFrame or ServiceSwitcherControlFrame.
+    pass
+
+
+@dataclass
+class ManuallySwitchServiceFrame(ServiceSwitcherFrame):
+    """A frame to request a manual switch in the active service in a ServiceSwitcher.
+
+    Handled by ServiceSwitcherStrategyManual to switch the active service.
     """
 
     service: "FrameProcessor"
-
-
-@dataclass
-class ServiceSwitcherFrame(SystemFrame):
-    """A base class for frames that affect ServiceSwitcher behavior immediately."""
-
-    pass
-
-
-@dataclass
-class ManuallySwitchServiceFrame(ServiceSwitcherFrame, ManuallySwitchServiceBaseFrame):
-    """A frame to request an immediate manual switch in the active service in a ServiceSwitcher.
-
-    Handled by ServiceSwitcherStrategyManual to switch the active service.
-    """
-
-    pass
-
-
-@dataclass
-class ServiceSwitcherControlFrame(ControlFrame):
-    """A base class for frames that affect ServiceSwitcher behavior, in order."""
-
-    pass
-
-
-@dataclass
-class ManuallySwitchServiceControlFrame(
-    ServiceSwitcherControlFrame, ManuallySwitchServiceBaseFrame
-):
-    """A frame to request a manual switch in the active service in a ServiceSwitcher, in order.
-
-    Handled by ServiceSwitcherStrategyManual to switch the active service.
-    """
-
-    pass

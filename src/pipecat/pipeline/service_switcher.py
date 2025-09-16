@@ -12,10 +12,8 @@ from typing import Any, Generic, List, Optional, Type, TypeVar
 from pipecat.frames.frames import (
     ControlFrame,
     Frame,
-    ManuallySwitchServiceBaseFrame,
-    ServiceSwitcherControlFrame,
+    ManuallySwitchServiceFrame,
     ServiceSwitcherFrame,
-    SystemFrame,
 )
 from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.processors.filters.function_filter import FunctionFilter
@@ -30,9 +28,7 @@ class ServiceSwitcherStrategy:
         self.services = services
         self.active_service: Optional[FrameProcessor] = None
 
-    def handle_frame(
-        self, frame: ServiceSwitcherFrame | ServiceSwitcherControlFrame, direction: FrameDirection
-    ):
+    def handle_frame(self, frame: ServiceSwitcherFrame, direction: FrameDirection):
         """Handle a frame that controls service switching.
 
         This method can be overridden by subclasses to implement specific logic
@@ -57,16 +53,14 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
         super().__init__(services)
         self.active_service = services[0] if services else None
 
-    def handle_frame(
-        self, frame: ServiceSwitcherFrame | ServiceSwitcherControlFrame, direction: FrameDirection
-    ):
+    def handle_frame(self, frame: ServiceSwitcherFrame, direction: FrameDirection):
         """Handle a frame that controls service switching.
 
         Args:
             frame: The frame to handle.
             direction: The direction of the frame (upstream or downstream).
         """
-        if isinstance(frame, ManuallySwitchServiceBaseFrame):
+        if isinstance(frame, ManuallySwitchServiceFrame):
             self._set_active(frame.service)
         else:
             raise ValueError(f"Unsupported frame type: {type(frame)}")
@@ -116,7 +110,7 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
 
         async def process_frame(self, frame, direction):
             """Process a frame through the filter, handling special internal filter-updating frames."""
-            if isinstance(frame, ServiceSwitcher.ServiceSwitcherFilterBaseFrame):
+            if isinstance(frame, ServiceSwitcher.ServiceSwitcherFilterFrame):
                 self.active_service = frame.active_service
                 # Two ServiceSwitcherFilters "sandwich" a service. Push the
                 # frame only to update the other side of the sandwich, but
@@ -128,22 +122,10 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             await super().process_frame(frame, direction)
 
     @dataclass
-    class ServiceSwitcherFilterBaseFrame:
-        """Base class for internal frames used by ServiceSwitcher to filter frames based on active service."""
-
-        active_service: FrameProcessor
-
-    @dataclass
-    class ServiceSwitcherFilterFrame(SystemFrame, ServiceSwitcherFilterBaseFrame):
+    class ServiceSwitcherFilterFrame(ControlFrame):
         """An internal frame used by ServiceSwitcher to filter frames based on active service."""
 
-        pass
-
-    @dataclass
-    class ServiceSwitcherFilterControlFrame(ControlFrame, ServiceSwitcherFilterBaseFrame):
-        """An internal control frame used by ServiceSwitcher to filter frames based on active service."""
-
-        pass
+        active_service: FrameProcessor
 
     @staticmethod
     def _make_pipeline_definitions(
@@ -181,19 +163,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, (ServiceSwitcherFrame, ServiceSwitcherControlFrame)):
+        if isinstance(frame, ServiceSwitcherFrame):
             self.strategy.handle_frame(frame, direction)
-            if isinstance(frame, ServiceSwitcherFrame):
-                # Apply immediate update (system frame)
-                service_switcher_filter_frame = ServiceSwitcher.ServiceSwitcherFilterFrame(
-                    active_service=self.strategy.active_service
-                )
-            else:
-                # Apply in-order update (control frame)
-                service_switcher_filter_frame = ServiceSwitcher.ServiceSwitcherFilterControlFrame(
-                    active_service=self.strategy.active_service
-                )
-            # Queue frame that updates filters with new active service
-            # (Hack: we need access ParallelPipeline internals here to queue the frame in each of the pipelines)
+            service_switcher_filter_frame = ServiceSwitcher.ServiceSwitcherFilterFrame(
+                active_service=self.strategy.active_service
+            )
+            # Hack: we need access ParallelPipeline internals here to queue the frame in each of the pipelines
             for p in self._pipelines:
                 await p.queue_frame(service_switcher_filter_frame, direction)
