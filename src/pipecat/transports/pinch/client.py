@@ -12,27 +12,26 @@ audio streaming capabilities through LiveKit and the Pinch API.
 """
 
 import asyncio
+import base64
 import json
 from typing import Awaitable, Callable, Optional
-import base64
+
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.frames.frames import (
-    StartFrame
-)
+from pipecat.audio.utils import create_stream_resampler
+from pipecat.frames.frames import StartFrame
 from pipecat.processors.frame_processor import FrameProcessorSetup
+from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.pinch.api import (
     PinchApi,
+    PinchConfigurationError,
+    PinchConnectionError,
     PinchSession,
     PinchSessionRequest,
-    PinchConnectionError,
-    PinchConfigurationError,
 )
-from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.asyncio.task_manager import BaseTaskManager
-from pipecat.audio.utils import create_stream_resampler
 
 try:
     from livekit import rtc
@@ -202,14 +201,14 @@ class PinchClient:
             @self._livekit_room.on("participant_connected")
             def on_participant_connected(participant: rtc.RemoteParticipant):
                 # Check if this is the Pinch service participant (use identity as primary, fallback to metadata)
-                if (participant.identity == "pinch-translation-agent"):
+                if participant.identity == "pinch-translation-agent":
                     self._session_active = True
                     logger.info("Pinch translation service participant connected")
                     self._call_event_callback(self._callbacks.on_session_started)
 
             @self._livekit_room.on("participant_disconnected")
             def on_participant_disconnected(participant: rtc.RemoteParticipant):
-                if (participant.identity == "pinch-translation-agent"):
+                if participant.identity == "pinch-translation-agent":
                     self._session_active = False
                     logger.info("Pinch translation service participant disconnected")
                     # Attempt simple reconnect after a brief delay
@@ -237,7 +236,7 @@ class PinchClient:
             @self._livekit_room.on("data_received")
             def on_data_received(data_packet: rtc.DataPacket):
                 try:
-                    message_str = data_packet.data.decode('utf-8')
+                    message_str = data_packet.data.decode("utf-8")
                     message = json.loads(message_str)
                     asyncio.create_task(self._handle_data_message(message))
                 except json.JSONDecodeError as e:
@@ -255,12 +254,13 @@ class PinchClient:
                     rtc.RoomOptions(
                         auto_subscribe=True,
                         dynacast=True,
-                    )
+                    ),
                 )
-                
+
                 # Set up audio source and track for sending user audio to Pinch
                 self._audio_source = rtc.AudioSource(
-                    PINCH_INPUT_SAMPLE_RATE, 1  # 16kHz mono for Pinch input
+                    PINCH_INPUT_SAMPLE_RATE,
+                    1,  # 16kHz mono for Pinch input
                 )
                 self._audio_track = rtc.LocalAudioTrack.create_audio_track(
                     "pinch-user-audio", self._audio_source
@@ -268,13 +268,13 @@ class PinchClient:
                 options = rtc.TrackPublishOptions()
                 options.source = rtc.TrackSource.SOURCE_MICROPHONE
                 await self._livekit_room.local_participant.publish_track(self._audio_track, options)
-                
+
                 logger.info("Connected to Pinch audio streaming service")
                 self._connected = True
             except Exception as e:
                 logger.error(f"Failed to connect to LiveKit room: {e}")
                 raise
-            
+
         except Exception as e:
             logger.error(f"Audio streaming connection error: {e}")
             self._livekit_room = None
@@ -283,7 +283,7 @@ class PinchClient:
     async def _handle_data_message(self, message: dict) -> None:
         """Handle data messages received from LiveKit."""
         msg_type = message.get("type")
-        
+
         if msg_type == "original_transcript":
             text = message.get("text", "")
             is_final = message.get("is_final", True)
@@ -297,19 +297,19 @@ class PinchClient:
 
             if self._callbacks.on_translated_transcript:
                 self._call_event_callback(self._callbacks.on_translated_transcript, text, is_final)
-                
+
         elif msg_type == "session_started":
             self._session_active = True
             logger.info("Pinch session started via data message")
             if self._callbacks.on_session_started:
                 self._call_event_callback(self._callbacks.on_session_started)
-                
+
         elif msg_type == "session_ended":
             self._session_active = False
             logger.info("Pinch session ended via data message")
             if self._callbacks.on_session_ended:
                 self._call_event_callback(self._callbacks.on_session_ended)
-                
+
         else:
             logger.debug(f"Received unknown message type: {msg_type}")
 
@@ -357,7 +357,9 @@ class PinchClient:
             # Resample audio to 16kHz for Pinch if needed
             if sample_rate != PINCH_INPUT_SAMPLE_RATE:
                 if self._audio_frame_counter % 100 == 0:
-                    logger.debug(f"Resampling audio from {sample_rate}Hz to {PINCH_INPUT_SAMPLE_RATE}Hz")
+                    logger.debug(
+                        f"Resampling audio from {sample_rate}Hz to {PINCH_INPUT_SAMPLE_RATE}Hz"
+                    )
                 resampled_audio = await self._resampler.resample(
                     audio, sample_rate, PINCH_INPUT_SAMPLE_RATE
                 )
@@ -384,7 +386,9 @@ class PinchClient:
 
                     # Only log audio sends every 100 frames to reduce spam
                     if self._audio_frame_counter % 100 == 0:
-                        logger.debug(f"Sent audio via LiveKit audio track (frame #{self._audio_frame_counter})")
+                        logger.debug(
+                            f"Sent audio via LiveKit audio track (frame #{self._audio_frame_counter})"
+                        )
 
                 except Exception as e:
                     # Only log audio errors every 100 frames to reduce spam
@@ -397,7 +401,6 @@ class PinchClient:
         except Exception as e:
             logger.error(f"Error sending audio to Pinch: {e}")
             raise
-
 
     # Audio processing to receive translated audio
     async def _process_audio_frames(self, stream: rtc.AudioStream):

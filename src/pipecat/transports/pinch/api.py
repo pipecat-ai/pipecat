@@ -9,8 +9,8 @@
 API to communicate with Pinch Translation API.
 """
 
-from typing import Any, Dict, Optional, Literal
 import os
+from typing import Any, Dict, Literal, Optional
 
 import aiohttp
 from loguru import logger
@@ -191,16 +191,16 @@ class PinchApi:
             "targetLanguage": request_data.target_language,
             "voiceType": request_data.voice_type,
         }
-        
+
         if request_data.voice_type == "custom" and request_data.voice_id:
             params["voiceId"] = request_data.voice_id
-            
+
         if not request_data.enable_audio_output:
             params["enableAudioOutput"] = False
-            
+
         if request_data.enable_video_output:
             params["enableVideoOutput"] = False
-        
+
         session_info = await self._request("/session", params)
 
         if not session_info:
@@ -221,7 +221,7 @@ class PinchApi:
             raise PinchApiError("Missing url in API response", 500, str(session_info))
         if not session_data.get("access_token"):
             raise PinchApiError("Missing token in API response", 500, str(session_info))
-        
+
         return PinchSession.model_validate(session_data)
 
     async def end_session(self, session_id: str) -> None:

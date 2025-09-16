@@ -37,13 +37,13 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.services.ai_service import AIService
+from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.pinch.api import (
-    PinchSessionRequest,
-    PinchConnectionError,
     PinchConfigurationError,
+    PinchConnectionError,
+    PinchSessionRequest,
 )
 from pipecat.transports.pinch.client import PINCH_OUTPUT_SAMPLE_RATE, PinchCallbacks, PinchClient
-from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import time_now_iso8601
 
 
@@ -134,8 +134,7 @@ class PinchAudioService(AIService):
 
         # Start audio processing task
         self._audio_task = setup.task_manager.create_task(
-            self._process_audio_queue(),
-            f"{self}::audio_queue_processor"
+            self._process_audio_queue(), f"{self}::audio_queue_processor"
         )
 
     async def cleanup(self):
@@ -227,7 +226,6 @@ class PinchAudioService(AIService):
         # Use standard audio chunk size
         await self._client.start(frame)
 
-
     async def stop(self, frame: EndFrame):
         """Stop the Pinch audio service gracefully.
 
@@ -291,7 +289,7 @@ class PinchAudioService(AIService):
             try:
                 await asyncio.wait_for(
                     self._audio_queue.put((frame.audio, frame.sample_rate)),
-                    timeout=0.1  # Short timeout to avoid blocking
+                    timeout=0.1,  # Short timeout to avoid blocking
                 )
             except asyncio.TimeoutError:
                 logger.warning("Audio queue full, dropping frame to prevent latency buildup")
