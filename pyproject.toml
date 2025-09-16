@@ -34,7 +34,7 @@ dependencies = [
     "pyloudnorm~=0.1.1",
     "resampy~=0.4.3",
     "soxr~=0.5.0",
-    "openai>=1.74.0,<=1.99.1",
+    "openai>=1.74.0,<2.0.0",
     # Pinning numba to resolve package dependencies
     "numba==0.61.2",
     "wait_for2>=0.4.1; python_version<'3.12'",
@@ -74,7 +74,7 @@ langchain = [ "langchain~=0.3.20", "langchain-community~=0.3.20", "langchain-ope
 livekit = [ "livekit~=0.22.0", "livekit-api~=0.8.2", "tenacity>=8.2.3,<10.0.0" ]
 lmnt = [ "websockets>=13.1,<15.0" ]
 local = [ "pyaudio~=0.2.14" ]
-mcp = [ "mcp[cli]~=1.9.4" ]
+mcp = [ "mcp[cli]>=1.11.0,<2.0.0" ]
 mem0 = [ "mem0ai~=0.1.94" ]
 mistral = []
 mlx-whisper = [ "mlx-whisper~=0.4.2" ]
@@ -83,8 +83,8 @@ nim = []
 neuphonic = [ "websockets>=13.1,<15.0" ]
 noisereduce = [ "noisereduce~=3.0.3" ]
 openai = [ "websockets>=13.1,<15.0" ]
-openai-agent = [ "openai-agents~=1.0.0" ]
-openpipe = [ "openpipe~=4.50.0" ]
+openai-agent = [ "openai-agents~=0.3.0" ]
+# openpipe = [ "openpipe~=4.50.0" ]  # Temporarily disabled due to openai version conflict
 openrouter = []
 perplexity = []
 playht = [ "websockets>=13.1,<15.0" ]

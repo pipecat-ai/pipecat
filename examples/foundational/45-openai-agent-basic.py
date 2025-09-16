@@ -18,6 +18,8 @@ Requirements:
 import os
 import random
 
+# Import agents SDK for tools and agent creation
+from agents import Agent, function_tool
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -28,6 +30,7 @@ from pipecat.pipeline.task import PipelineTask
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai_agent.agent_service import OpenAIAgentService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -37,32 +40,46 @@ load_dotenv(override=True)
 
 # Transport configuration
 transport_params = {
-    "daily": lambda: DailyParams(audio_out_enabled=True),
-    "twilio": lambda: FastAPIWebsocketParams(audio_out_enabled=True),
-    "webrtc": lambda: TransportParams(audio_out_enabled=True),
+    "daily": lambda: DailyParams(audio_out_enabled=True, audio_in_enabled=True),
+    "twilio": lambda: FastAPIWebsocketParams(audio_out_enabled=True, audio_in_enabled=True),
+    "webrtc": lambda: TransportParams(audio_out_enabled=True, audio_in_enabled=True),
 }
 
 
-def get_weather_tool():
-    """Example tool function for weather information."""
+@function_tool
+def get_weather(location: str) -> str:
+    """Get the current weather for a location.
 
-    def get_weather(location: str) -> str:
-        """Get the current weather for a location.
+    Args:
+        location: The location to get weather for
 
-        Args:
-            location: The city or location to get weather for.
+    Returns:
+        A weather description string
+    """
+    # Mock weather data - in real usage, integrate with weather API
+    weather_data = {
+        "San Francisco": "Foggy, 65°F",
+        "New York": "Sunny, 72°F",
+        "London": "Rainy, 59°F",
+        "Tokyo": "Partly cloudy, 68°F",
+    }
+    return weather_data.get(location, f"Weather data not available for {location}")
 
-        Returns:
-            A weather description string.
-        """
-        # Simulate weather data
-        conditions = ["sunny", "cloudy", "rainy", "snowy", "windy"]
-        temp = random.randint(-10, 35)
-        condition = random.choice(conditions)
 
-        return f"The weather in {location} is {condition} with a temperature of {temp}°C."
+@function_tool
+def get_random_fact() -> str:
+    """Get a random interesting fact.
 
-    return get_weather
+    Returns:
+        A random fact string
+    """
+    facts = [
+        "Honey never spoils. Archaeologists have found edible honey in ancient Egyptian tombs.",
+        "Octopuses have three hearts and blue blood.",
+        "The Great Wall of China isn't visible from space with the naked eye.",
+        "Bananas are berries, but strawberries aren't.",
+    ]
+    return random.choice(facts)
 
 
 def get_random_fact_tool():
@@ -89,6 +106,12 @@ def get_random_fact_tool():
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting OpenAI Agent bot")
 
+    # Set up STT for speech recognition
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY", ""),
+        model="nova-2",
+    )
+
     # Set up TTS for voice output
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
@@ -97,12 +120,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # Create tools for the agent
     tools = [
-        get_weather_tool(),
-        get_random_fact_tool(),
+        get_weather,
+        get_random_fact,
     ]
 
-    # Initialize the OpenAI Agent service
-    agent_service = OpenAIAgentService(
+    # Create the agent with tools
+    agent = Agent(
         name="Assistant",
         instructions="""You are a helpful assistant with access to weather information and random facts. 
         You can:
@@ -112,6 +135,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         
         Be friendly, informative, and engaging in your responses.""",
         tools=tools,
+    )
+
+    # Initialize the OpenAI Agent service with the pre-configured agent
+    agent_service = OpenAIAgentService(
+        agent=agent,
         api_key=os.getenv("OPENAI_API_KEY"),
         streaming=True,
     )
@@ -119,9 +147,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # Create the processing pipeline
     pipeline = Pipeline(
         [
-            agent_service,
-            tts,
-            transport.output(),
+            transport.input(),  # Receive audio input
+            stt,  # Convert speech to text
+            agent_service,  # Process with OpenAI Agent
+            tts,  # Convert text to speech
+            transport.output(),  # Send audio output
         ]
     )
 

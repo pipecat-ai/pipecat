@@ -13,7 +13,7 @@ guardrails, sessions, and tools from the OpenAI Agents SDK.
 
 import asyncio
 import os
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, override
 
 from loguru import logger
 
@@ -108,8 +108,7 @@ class OpenAIAgentService(AIService):
                 tools=tools or [],
                 input_guardrails=input_guardrails or [],
                 output_guardrails=output_guardrails or [],
-                model_config=model_config,
-                **kwargs,
+                model=model_config.get("model", "gpt-4o") if model_config else "gpt-4o",
             )
 
         self._streaming = streaming
@@ -141,7 +140,7 @@ class OpenAIAgentService(AIService):
         instructions: Optional[str] = None,
         model_config: Optional[Dict[str, Any]] = None,
         **kwargs,
-    ):
+    ) -> None:
         """Update agent configuration dynamically.
 
         Args:
@@ -206,7 +205,8 @@ class OpenAIAgentService(AIService):
 
         await super().cancel(frame)
 
-    async def process_frame(self, frame: Frame, direction: FrameDirection):
+    @override
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Process frames and handle agent interactions.
 
         Processes text input frames by running them through the OpenAI Agent
