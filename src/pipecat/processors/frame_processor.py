@@ -220,6 +220,11 @@ class FrameProcessor(BaseObject):
         self.__process_event: Optional[asyncio.Event] = None
         self.__process_frame_task: Optional[asyncio.Task] = None
 
+        # To interrupt a pipeline, we push an `InterruptionTaskFrame` upstream.
+        # Then we wait for the corresponding `InterruptionFrame` to travel from
+        # the start of the pipeline back to the processor that sent the
+        # `InterruptionTaskFrame`. This wait is handled using the following
+        # event.
         self._wait_for_interruption = False
         self._wait_interruption_event = asyncio.Event()
 
@@ -632,7 +637,9 @@ class FrameProcessor(BaseObject):
 
         await self.__internal_push_frame(frame, direction)
 
-        if isinstance(frame, InterruptionFrame):
+        # If we are waiting for an interruption and we get an interruption, then
+        # we can unblock `push_interruption_task_frame_and_wait()`.
+        if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
             self._wait_interruption_event.set()
 
     async def push_interruption_task_frame_and_wait(self):
