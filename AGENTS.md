@@ -214,7 +214,6 @@ async def on_error(transport, error):
 
     # Shutdown the pipeline
     await task.queue_frame(EndFrame())
- 
 ```
 
 ### Service Configuration
