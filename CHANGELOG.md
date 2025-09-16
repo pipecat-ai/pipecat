@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   async def on_pipeline_finished(task: PipelineTask, frame: Frame):
       ...
   ```
-  
+
 ### Changed
 
 - `torch` and `torchaudio` are no longer required for running Smart Turn
@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `websockets` dependency to support version 15.0. Removed deprecated
   usage of `ConnectionClosed.code` and `ConnectionClosed.reason` attributes in
   `AWSTranscribeSTTService` for compatibility.
+
+- Refactored `pyproject.toml` to reduce websockets dependency repetition using
+  self-referencing extras. All websockets-dependent services now reference a
+  shared `websockets-base` extra.
 
 ### Deprecated
 
