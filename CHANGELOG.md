@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   async def on_pipeline_finished(task: PipelineTask, frame: Frame):
       ...
   ```
+  
+### Changed
+
+- `torch` and `torchaudio` are no longer required for running Smart Turn
+  locally. This avoids gigabytes of dependencies being installed.
 
 ### Deprecated
 
