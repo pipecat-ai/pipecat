@@ -30,6 +30,7 @@ except ModuleNotFoundError as e:
 
 ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
 
+
 class MCPClient(BaseObject):
     """Client for Model Context Protocol (MCP) servers.
 
