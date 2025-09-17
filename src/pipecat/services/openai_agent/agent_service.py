@@ -161,7 +161,6 @@ class OpenAIAgentService(AIService):
         self._session_config = session_config or {}
         self._current_session = None
         self._accumulated_text = ""
-        self._processing_task: Optional[asyncio.Task] = None
 
         # Set model name for metrics
         if model_config and "model" in model_config:
@@ -225,15 +224,6 @@ class OpenAIAgentService(AIService):
             frame: The end frame.
         """
         logger.info(f"Stopping OpenAI Agent service: {self._agent.name}")
-
-        # Cancel any ongoing processing
-        if self._processing_task and not self._processing_task.done():
-            self._processing_task.cancel()
-            try:
-                await self._processing_task
-            except asyncio.CancelledError:
-                pass
-
         await super().stop(frame)
 
     async def cancel(self, frame: CancelFrame):
@@ -245,11 +235,6 @@ class OpenAIAgentService(AIService):
             frame: The cancel frame.
         """
         logger.info(f"Cancelling OpenAI Agent service: {self._agent.name}")
-
-        # Cancel any ongoing processing
-        if self._processing_task and not self._processing_task.done():
-            self._processing_task.cancel()
-
         await super().cancel(frame)
 
     @override
@@ -266,16 +251,17 @@ class OpenAIAgentService(AIService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TextFrame):
-            # Process text input through the agent
-            if self._processing_task and not self._processing_task.done():
-                logger.warning("Already processing a request, cancelling previous task")
-                self._processing_task.cancel()
-                try:
-                    await self._processing_task
-                except asyncio.CancelledError:
-                    pass
-
-            self._processing_task = asyncio.create_task(self._process_agent_request(frame.text))
+            # Process text input through the agent directly
+            try:
+                await self.push_frame(LLMFullResponseStartFrame())
+                await self._process_agent_request(frame.text)
+                await self.push_frame(LLMFullResponseEndFrame())
+            except Exception as e:
+                logger.error(f"Error processing agent request: {e}")
+                await self.push_error(ErrorFrame(f"Agent processing error: {e}"))
+        else:
+            # For frames we don't handle, pass them through with direction
+            await self.push_frame(frame, direction)
 
     async def _process_agent_request(self, input_text: str):
         """Process an agent request and stream the results.
@@ -283,23 +269,12 @@ class OpenAIAgentService(AIService):
         Args:
             input_text: The user input text to process.
         """
-        try:
-            logger.debug(f"Processing agent request: {input_text}")
+        logger.debug(f"Processing agent request: {input_text}")
 
-            # Start the LLM response
-            await self.push_frame(LLMFullResponseStartFrame())
-
-            if self._streaming:
-                await self._process_streaming_response(input_text)
-            else:
-                await self._process_non_streaming_response(input_text)
-
-            # End the LLM response
-            await self.push_frame(LLMFullResponseEndFrame())
-
-        except Exception as e:
-            logger.error(f"Error processing agent request: {e}")
-            await self.push_error(ErrorFrame(f"Agent processing error: {e}"))
+        if self._streaming:
+            await self._process_streaming_response(input_text)
+        else:
+            await self._process_non_streaming_response(input_text)
 
     async def _process_streaming_response(self, input_text: str):
         """Process a streaming agent response.
