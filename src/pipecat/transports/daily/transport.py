@@ -225,6 +225,7 @@ class DailyCallbacks(BaseModel):
         on_active_speaker_changed: Called when the active speaker of the call has changed.
         on_joined: Called when bot successfully joined a room.
         on_left: Called when bot left a room.
+        on_before_leave: Called when bot is about to leave the room.
         on_error: Called when an error occurs.
         on_app_message: Called when receiving an app message.
         on_call_state_updated: Called when call state changes.
@@ -254,6 +255,7 @@ class DailyCallbacks(BaseModel):
     on_active_speaker_changed: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_joined: Callable[[Mapping[str, Any]], Awaitable[None]]
     on_left: Callable[[], Awaitable[None]]
+    on_before_leave: Callable[[], Awaitable[None]]
     on_error: Callable[[str], Awaitable[None]]
     on_app_message: Callable[[Any, str], Awaitable[None]]
     on_call_state_updated: Callable[[str], Awaitable[None]]
@@ -729,6 +731,9 @@ class DailyTransportClient(EventHandler):
         self._joined_event.clear()
 
         logger.info(f"Leaving {self._room_url}")
+
+        # Call callback before leaving.
+        await self._callbacks.on_before_leave()
 
         if self._params.transcription_enabled:
             await self.stop_transcription()
@@ -1903,6 +1908,7 @@ class DailyTransport(BaseTransport):
             on_active_speaker_changed=self._on_active_speaker_changed,
             on_joined=self._on_joined,
             on_left=self._on_left,
+            on_before_leave=self._on_before_leave,
             on_error=self._on_error,
             on_app_message=self._on_app_message,
             on_call_state_updated=self._on_call_state_updated,
@@ -1966,6 +1972,10 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_recording_started")
         self._register_event_handler("on_recording_stopped")
         self._register_event_handler("on_recording_error")
+        self._register_event_handler("on_before_disconnect", sync=True)
+        # Deprecated
+        self._register_event_handler("on_joined")
+        self._register_event_handler("on_left")
 
     #
     # BaseTransport
@@ -2217,6 +2227,10 @@ class DailyTransport(BaseTransport):
         """Handle room left events."""
         await self._call_event_handler("on_left")
 
+    async def _on_before_leave(self):
+        """Handle before leave room events."""
+        await self._call_event_handler("on_before_disconnect")
+
     async def _on_error(self, error):
         """Handle error events and push error frames."""
         await self._call_event_handler("on_error", error)
@@ -2356,7 +2370,7 @@ class DailyTransport(BaseTransport):
         """Handle participant updated events."""
         await self._call_event_handler("on_participant_updated", participant)
 
-    async def _on_transcription_message(self, message: Dict[str, Any]) -> None:
+    async def _on_transcription_message(self, message: Mapping[str, Any]) -> None:
         """Handle transcription message events."""
         await self._call_event_handler("on_transcription_message", message)
 
