@@ -149,6 +149,7 @@ class AsyncAITTSService(WebsocketWordTTSService):
         self._keepalive_task = None
         self._started = False
         self._current_text = ""  # Track current text for generating timestamps
+        self._transcription_generated = False  # Track if transcription was already generated
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -289,11 +290,14 @@ class AsyncAITTSService(WebsocketWordTTSService):
                 await self.stop_ttfb_metrics()
 
                 # Start word timestamps and add the entire text as one "word"
-                # This generates transcription frames for the bot
-                self.start_word_timestamps()
-                if self._current_text.strip():
+                # This generates transcription frames for the bot - but only once per text
+                if not self._transcription_generated and self._current_text.strip():
+                    self.start_word_timestamps()
                     # Add the entire text as a single timestamp at time 0
                     await self.add_word_timestamps([(self._current_text, 0.0)])
+                    # Add stop markers to end the word timestamps
+                    await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
+                    self._transcription_generated = True
 
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
@@ -301,9 +305,6 @@ class AsyncAITTSService(WebsocketWordTTSService):
                     num_channels=1,
                 )
                 await self.push_frame(frame)
-
-                # Add stop markers to end the word timestamps
-                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
 
             elif msg.get("error_code"):
                 logger.error(f"{self} error: {msg}")
@@ -350,6 +351,7 @@ class AsyncAITTSService(WebsocketWordTTSService):
 
             # Store the current text for generating timestamps
             self._current_text = text
+            self._transcription_generated = False  # Reset for new text
             msg = self._build_msg(text=text, force=True)
 
             try:
