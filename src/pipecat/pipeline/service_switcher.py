@@ -169,6 +169,11 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             service_switcher_filter_frame = ServiceSwitcher.ServiceSwitcherFilterFrame(
                 active_service=self.strategy.active_service
             )
-            # Hack: we need access ParallelPipeline internals here to queue the frame in each of the pipelines
+            # Hack: we need access ParallelPipeline internals here to queue the
+            # frame in each of the pipelines.
+            # Why not just call super().process_frame(service_switcher_filter_frame, direction),
+            # you ask? Because that would also send this internal-only frame
+            # down the "main" pipeline instead of only down the individual
+            # branches of the parallel pipeline, which we want to avoid.
             for p in self._pipelines:
                 await p.queue_frame(service_switcher_filter_frame, direction)
