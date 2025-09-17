@@ -26,8 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `torch` and `torchaudio` are no longer required for running Smart Turn
   locally. This avoids gigabytes of dependencies being installed.
 
-### Changed
-
 - Updated `websockets` dependency to support version 15.0. Removed deprecated
   usage of `ConnectionClosed.code` and `ConnectionClosed.reason` attributes in
   `AWSTranscribeSTTService` for compatibility.
@@ -44,10 +42,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in `AsyncAITTSService`, where `TTSTextFrames` were not being
+  pushed.
+
 - Fixed an issue that would cause `push_interruption_task_frame_and_wait()` to
   not wait if a previous interruption had already happened.
 
 - Fixed a couple of bugs in `ServiceSwitcher`:
+
   - Using multiple `ServiceSwitcher`s in a pipeline would result in an error.
   - `ServiceSwitcherFrame`s (such as `ManuallySwitchServiceFrame`s) were having
     an effect too early, essentially "jumping the queue" in terms of pipeline
