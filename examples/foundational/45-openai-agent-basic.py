@@ -172,7 +172,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                     "I can help you with weather information, share interesting facts, "
                     "or just have a conversation. What would you like to know?"
                 ),
-                EndFrame(),
+                # Don't send EndFrame() here - that closes the pipeline!
+                # The conversation should continue after the greeting
             ]
         )
 
