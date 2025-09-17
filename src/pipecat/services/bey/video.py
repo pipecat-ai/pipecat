@@ -27,8 +27,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
-from pipecat.transports.services.daily import DailyTransportClient
-from pipecat.transports.services.helpers.daily_rest import (
+from pipecat.transports.daily.transport import DailyTransportClient
+from pipecat.transports.daily.utils import (
     DailyRESTHelper,
     DailyMeetingTokenParams,
     DailyMeetingTokenProperties,
