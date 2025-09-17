@@ -247,10 +247,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info("Client connected, sending greeting")
         # Kick off the conversation by adding system message and running LLM
-        messages.append({
-            "role": "system", 
-            "content": "Please introduce yourself to the user as an AI assistant coordinator who works with specialists for weather, trivia, and math topics."
-        })
+        messages.append(
+            {
+                "role": "system",
+                "content": "Please introduce yourself to the user as an AI assistant coordinator who works with specialists for weather, trivia, and math topics.",
+            }
+        )
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
