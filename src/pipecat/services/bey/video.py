@@ -162,5 +162,5 @@ class BeyVideoService(AIService):
         ) as response:
             if not response.ok:
                 text = await response.text()
-                raise Exception("Server returned an error", status_code=response.status, body=text)
+                raise Exception(f"Server returned error {response.status}: {text}")
             return
