@@ -154,35 +154,40 @@ class BaseObject(ABC):
 
         event_handler = self._event_handlers[event_name]
 
-        if event_handler.is_sync:
-            # Just run the handler.
-            await self._run_handler(event_handler, *args, **kwargs)
-        else:
-            # Create the task.
-            task = asyncio.create_task(self._run_handler(event_handler, *args, **kwargs))
+        for handler in event_handler.handlers:
+            if event_handler.is_sync:
+                # Just run the handler.
+                await self._run_handler(event_handler.name, handler, *args, **kwargs)
+            else:
+                # Create the task. Note that this is a task per each function
+                # handler. Users can register to an event handler multiple
+                # times.
+                task = asyncio.create_task(
+                    self._run_handler(event_handler.name, handler, *args, **kwargs)
+                )
 
-            # Add it to our list of event tasks.
-            self._event_tasks.add((event_name, task))
+                # Add it to our list of event tasks.
+                self._event_tasks.add((event_name, task))
 
-            # Remove the task from the event tasks list when the task completes.
-            task.add_done_callback(self._event_task_finished)
+                # Remove the task from the event tasks list when the task completes.
+                task.add_done_callback(self._event_task_finished)
 
-    async def _run_handler(self, event_handler: EventHandler, *args, **kwargs):
+    async def _run_handler(self, event_name: str, handler, *args, **kwargs):
         """Execute all handlers for an event.
 
         Args:
-            event_handler: The event handler to run.
+            event_name: The event name for this handler.
+            handler: The handler function to run.
             *args: Positional arguments to pass to handlers.
             **kwargs: Keyword arguments to pass to handlers.
         """
         try:
-            for handler in event_handler.handlers:
-                if inspect.iscoroutinefunction(handler):
-                    await handler(self, *args, **kwargs)
-                else:
-                    handler(self, *args, **kwargs)
+            if inspect.iscoroutinefunction(handler):
+                await handler(self, *args, **kwargs)
+            else:
+                handler(self, *args, **kwargs)
         except Exception as e:
-            logger.exception(f"Exception in event handler {event_handler.name}: {e}")
+            logger.exception(f"Exception in event handler {event_name}: {e}")
 
     def _event_task_finished(self, task: asyncio.Task):
         """Clean up completed event handler tasks.

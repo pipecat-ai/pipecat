@@ -65,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue where multiple handlers for an event would not run in parallel.
+
 - Fixed `DailyTransport.sip_call_transfer()` to automatically use the session
   ID from the `on_dialin_connected` event, when not explicitly provided. Now
   supports cold transfers (from incoming dial-in calls) by automatically
