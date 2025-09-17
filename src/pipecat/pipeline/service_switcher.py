@@ -102,16 +102,16 @@ class ServiceSwitcher(ParallelPipeline, Generic[StrategyType]):
             """Initialize the service switcher filter with a strategy and direction."""
 
             async def filter(_: Frame) -> bool:
-                return self.wrapped_service == self.active_service
+                return self._wrapped_service == self._active_service
 
             super().__init__(filter, direction)
-            self.wrapped_service = wrapped_service
-            self.active_service = active_service
+            self._wrapped_service = wrapped_service
+            self._active_service = active_service
 
         async def process_frame(self, frame, direction):
             """Process a frame through the filter, handling special internal filter-updating frames."""
             if isinstance(frame, ServiceSwitcher.ServiceSwitcherFilterFrame):
-                self.active_service = frame.active_service
+                self._active_service = frame.active_service
                 # Two ServiceSwitcherFilters "sandwich" a service. Push the
                 # frame only to update the other side of the sandwich, but
                 # otherwise don't let it leave the sandwich.
