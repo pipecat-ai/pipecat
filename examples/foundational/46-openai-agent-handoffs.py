@@ -18,18 +18,21 @@ Requirements:
 
 import os
 import random
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from loguru import logger
+from openai.types.chat import ChatCompletionMessageParam
 
-from pipecat.frames.frames import EndFrame, TextFrame
+from pipecat.frames.frames import LLMRunFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
+from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.openai_agent.agent_service import OpenAIAgentService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -39,9 +42,9 @@ load_dotenv(override=True)
 
 # Transport configuration
 transport_params = {
-    "daily": lambda: DailyParams(audio_out_enabled=True),
-    "twilio": lambda: FastAPIWebsocketParams(audio_out_enabled=True),
-    "webrtc": lambda: TransportParams(audio_out_enabled=True),
+    "daily": lambda: DailyParams(audio_out_enabled=True, audio_in_enabled=True),
+    "twilio": lambda: FastAPIWebsocketParams(audio_out_enabled=True, audio_in_enabled=True),
+    "webrtc": lambda: TransportParams(audio_out_enabled=True, audio_in_enabled=True),
 }
 
 
@@ -178,6 +181,12 @@ async def create_specialist_agents():
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info("Starting OpenAI Agent bot with handoffs")
 
+    # Set up STT for speech recognition
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY", ""),
+        model="nova-2",
+    )
+
     # Set up TTS for voice output
     tts = CartesiaTTSService(
         api_key=os.getenv("CARTESIA_API_KEY", ""),
@@ -199,19 +208,32 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         
         If the request doesn't clearly fit a specialist, you can handle general conversation
         yourself. Always be friendly and explain when you're connecting them to a specialist.""",
-        handoffs=[weather_agent.agent, trivia_agent.agent, math_agent.agent],
+        handoffs=[weather_agent.agent, trivia_agent.agent, math_agent.agent],  # type: ignore
         api_key=os.getenv("OPENAI_API_KEY"),
         streaming=True,
     )
 
-    # Create the processing pipeline (using just the triage agent)
-    # Note: In a real implementation, you might want to handle handoffs
-    # by switching the active agent in the pipeline dynamically
+    # Set up conversation context with initial system message
+    messages: List[ChatCompletionMessageParam] = [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant coordinator with access to weather information, trivia, and math tools. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
+
+    context = OpenAILLMContext(messages)
+    context_aggregator = triage_agent.create_context_aggregator(context)
+
+    # Create the processing pipeline with context aggregators
     pipeline = Pipeline(
         [
-            triage_agent,
-            tts,
-            transport.output(),
+            transport.input(),  # Transport user input
+            stt,  # Speech to text
+            context_aggregator.user(),  # User responses
+            triage_agent,  # OpenAI Agent processing
+            tts,  # Text to speech
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -224,19 +246,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected, sending greeting")
-        await task.queue_frames(
-            [
-                TextFrame(
-                    "Hello! I'm your AI assistant coordinator. I work with a team of specialists "
-                    "who can help you with different topics:\n\n"
-                    "🌤️ Weather Specialist - for weather information and forecasts\n"
-                    "🧠 Trivia Master - for interesting facts and trivia\n"
-                    "🔢 Math Helper - for calculations and math problems\n\n"
-                    "What would you like help with today?"
-                ),
-                EndFrame(),
-            ]
-        )
+        # Kick off the conversation by adding system message and running LLM
+        messages.append({
+            "role": "system", 
+            "content": "Please introduce yourself to the user as an AI assistant coordinator who works with specialists for weather, trivia, and math topics."
+        })
+        await task.queue_frames([LLMRunFrame()])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await task.cancel()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
