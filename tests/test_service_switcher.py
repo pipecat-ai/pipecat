@@ -13,6 +13,7 @@ from pipecat.frames.frames import (
     ManuallySwitchServiceFrame,
     TextFrame,
 )
+from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.service_switcher import ServiceSwitcher, ServiceSwitcherStrategyManual
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.tests.utils import run_test
@@ -160,6 +161,7 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
             switcher,
             frames_to_send=frames_to_send,
             expected_down_frames=[TextFrame, TextFrame, TextFrame],
+            expected_up_frames=[],  # Expect no error frames
         )
 
         # Only service1 should have processed the text frames
@@ -198,6 +200,7 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
                 TextFrame("Hello 2"),
             ],
             expected_down_frames=[TextFrame, ManuallySwitchServiceFrame, TextFrame],
+            expected_up_frames=[],  # Expect no error frames
         )
 
         # Verify service2 received the frame
@@ -217,6 +220,96 @@ class TestServiceSwitcher(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(service1_text_frames[0].text, "Hello 1")
         self.assertEqual(service2_text_frames[0].text, "Hello 2")
+
+    async def test_multi_service_switcher_targeting(self):
+        """Test that ManuallySwitchServiceFrame targets the correct ServiceSwitcher in a multi-switcher pipeline."""
+        # Create services for first switcher
+        switcher1_service1 = MockFrameProcessor("switcher1_service1")
+        switcher1_service2 = MockFrameProcessor("switcher1_service2")
+        switcher1_services = [switcher1_service1, switcher1_service2]
+
+        # Create services for second switcher
+        switcher2_service1 = MockFrameProcessor("switcher2_service1")
+        switcher2_service2 = MockFrameProcessor("switcher2_service2")
+        switcher2_services = [switcher2_service1, switcher2_service2]
+
+        # Create two service switchers
+        switcher1 = ServiceSwitcher(switcher1_services, ServiceSwitcherStrategyManual)
+        switcher2 = ServiceSwitcher(switcher2_services, ServiceSwitcherStrategyManual)
+
+        # Create a pipeline with both switchers: switcher1 -> switcher2
+        pipeline = Pipeline([switcher1, switcher2])
+
+        # Reset counters
+        for service in switcher1_services + switcher2_services:
+            service.reset_counters()
+
+        # Initially, both switchers should use their first services
+        self.assertEqual(switcher1.strategy.active_service, switcher1_service1)
+        self.assertEqual(switcher2.strategy.active_service, switcher2_service1)
+
+        # Send frames to test the pipeline:
+        # 1. Text frame (should go through both switchers' active services)
+        # 2. Switch frame targeting switcher1's second service
+        # 3. Text frame (should go through switcher1's new service and switcher2's original service)
+        # 4. Switch frame targeting switcher2's second service
+        # 5. Text frame (should go through switcher1's current service and switcher2's new service)
+        await run_test(
+            pipeline,
+            frames_to_send=[
+                TextFrame("Before any switches"),
+                ManuallySwitchServiceFrame(service=switcher1_service2),  # Switch first switcher
+                TextFrame("After switching first switcher"),
+                ManuallySwitchServiceFrame(service=switcher2_service2),  # Switch second switcher
+                TextFrame("After switching second switcher"),
+            ],
+            expected_down_frames=[
+                TextFrame,
+                ManuallySwitchServiceFrame,
+                TextFrame,
+                ManuallySwitchServiceFrame,
+                TextFrame,
+            ],
+            expected_up_frames=[],  # Expect no error frames
+        )
+
+        # Verify the active services changed correctly
+        self.assertEqual(switcher1.strategy.active_service, switcher1_service2)
+        self.assertEqual(switcher2.strategy.active_service, switcher2_service2)
+
+        # Verify frame distribution:
+        # First text frame should go through switcher1_service1 and switcher2_service1
+        switcher1_service1_texts = [
+            f for f in switcher1_service1.processed_frames if isinstance(f, TextFrame)
+        ]
+        switcher2_service1_texts = [
+            f for f in switcher2_service1.processed_frames if isinstance(f, TextFrame)
+        ]
+
+        # Second text frame should go through switcher1_service2 and switcher2_service1
+        switcher1_service2_texts = [
+            f for f in switcher1_service2.processed_frames if isinstance(f, TextFrame)
+        ]
+
+        # Third text frame should go through switcher1_service2 and switcher2_service2
+        switcher2_service2_texts = [
+            f for f in switcher2_service2.processed_frames if isinstance(f, TextFrame)
+        ]
+
+        # Verify frame counts and content
+        self.assertEqual(len(switcher1_service1_texts), 1)
+        self.assertEqual(switcher1_service1_texts[0].text, "Before any switches")
+
+        self.assertEqual(len(switcher1_service2_texts), 2)
+        self.assertEqual(switcher1_service2_texts[0].text, "After switching first switcher")
+        self.assertEqual(switcher1_service2_texts[1].text, "After switching second switcher")
+
+        self.assertEqual(len(switcher2_service1_texts), 2)
+        self.assertEqual(switcher2_service1_texts[0].text, "Before any switches")
+        self.assertEqual(switcher2_service1_texts[1].text, "After switching first switcher")
+
+        self.assertEqual(len(switcher2_service2_texts), 1)
+        self.assertEqual(switcher2_service2_texts[0].text, "After switching second switcher")
 
 
 if __name__ == "__main__":
