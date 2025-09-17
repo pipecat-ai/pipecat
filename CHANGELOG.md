@@ -44,6 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a couple of bugs in `ServiceSwitcher`:
+  - Using multiple `ServiceSwitcher`s in a pipeline would result in an error.
+  - `ServiceSwitcherFrame`s (such as `ManuallySwitchServiceFrame`s) were having
+    an effect too early, essentially "jumping the queue" in terms of pipeline
+    frame ordering.
+
 - Fixed a self-cancellation deadlock in `UserIdleProcessor` when returning
   `False` from an idle callback. The task now terminates naturally instead of
   attempting to cancel itself.
