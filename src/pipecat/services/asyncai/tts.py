@@ -292,12 +292,20 @@ class AsyncAITTSService(WebsocketWordTTSService):
                 # Start word timestamps and add the entire text as one "word"
                 # This generates transcription frames for the bot - but only once per text
                 if not self._transcription_generated and self._current_text.strip():
+                    logger.debug(
+                        f"{self}: Generating transcription for text: '{self._current_text}'"
+                    )
                     self.start_word_timestamps()
                     # Add the entire text as a single timestamp at time 0
                     await self.add_word_timestamps([(self._current_text, 0.0)])
                     # Add stop markers to end the word timestamps
                     await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
                     self._transcription_generated = True
+                    logger.debug(f"{self}: Transcription flag set to True")
+                else:
+                    logger.debug(
+                        f"{self}: Skipping transcription generation - already generated: {self._transcription_generated}, text: '{self._current_text}'"
+                    )
 
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
@@ -352,6 +360,9 @@ class AsyncAITTSService(WebsocketWordTTSService):
             # Store the current text for generating timestamps
             self._current_text = text
             self._transcription_generated = False  # Reset for new text
+            # Reset word timestamps for new text to ensure clean state
+            self.reset_word_timestamps()
+            logger.debug(f"{self}: New text set: '{text}', transcription flag reset to False")
             msg = self._build_msg(text=text, force=True)
 
             try:
