@@ -27,7 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.tts_service import InterruptibleTTSService, TTSService
+from pipecat.services.tts_service import TTSService, WebsocketWordTTSService
 from pipecat.transcriptions.language import Language
 from pipecat.utils.tracing.service_decorators import traced_tts
 
@@ -71,7 +71,7 @@ def language_to_async_language(language: Language) -> Optional[str]:
     return result
 
 
-class AsyncAITTSService(InterruptibleTTSService):
+class AsyncAITTSService(WebsocketWordTTSService):
     """Async TTS service with WebSocket streaming.
 
     Provides text-to-speech using Async's streaming WebSocket API.
@@ -148,6 +148,7 @@ class AsyncAITTSService(InterruptibleTTSService):
         self._receive_task = None
         self._keepalive_task = None
         self._started = False
+        self._current_text = ""  # Track current text for generating timestamps
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -286,12 +287,24 @@ class AsyncAITTSService(InterruptibleTTSService):
 
             elif msg.get("audio"):
                 await self.stop_ttfb_metrics()
+
+                # Start word timestamps and add the entire text as one "word"
+                # This generates transcription frames for the bot
+                self.start_word_timestamps()
+                if self._current_text.strip():
+                    # Add the entire text as a single timestamp at time 0
+                    await self.add_word_timestamps([(self._current_text, 0.0)])
+
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
                     sample_rate=self.sample_rate,
                     num_channels=1,
                 )
                 await self.push_frame(frame)
+
+                # Add stop markers to end the word timestamps
+                await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
+
             elif msg.get("error_code"):
                 logger.error(f"{self} error: {msg}")
                 await self.push_frame(TTSStoppedFrame())
@@ -335,6 +348,8 @@ class AsyncAITTSService(InterruptibleTTSService):
                 yield TTSStartedFrame()
                 self._started = True
 
+            # Store the current text for generating timestamps
+            self._current_text = text
             msg = self._build_msg(text=text, force=True)
 
             try:
@@ -346,7 +361,6 @@ class AsyncAITTSService(InterruptibleTTSService):
                 await self._disconnect()
                 await self._connect()
                 return
-            yield None
         except Exception as e:
             logger.error(f"{self} exception: {e}")
 
