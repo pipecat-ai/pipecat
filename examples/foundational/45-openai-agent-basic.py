@@ -17,6 +17,7 @@ Requirements:
 
 import os
 import random
+from typing import Any
 
 # Import agents SDK for tools and agent creation
 from agents import Agent, function_tool
@@ -119,7 +120,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     # Create tools for the agent
-    tools = [
+    tools: list[Any] = [
         get_weather,
         get_random_fact,
     ]

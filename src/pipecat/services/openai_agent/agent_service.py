@@ -6,19 +6,31 @@
 
 """OpenAI Agents SDK integration service.
 
-Provides integration with the OpenAI Agents SDK for building agentic AI applications
+Provides integration with the OpenAI Agents SDK for building AI applications
 within Pipecat pipelines. This service allows leveraging agent loops, handoffs,
 guardrails, sessions, and tools from the OpenAI Agents SDK.
 """
 
 import asyncio
 import os
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, override
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Union,
+    override,
+    runtime_checkable,
+)
 
 from loguru import logger
 
 try:
-    from agents import Agent, InputGuardrail, OutputGuardrail, Runner
+    from agents import Agent, InputGuardrail, OutputGuardrail, Runner, Tool
     from agents.result import RunResult, RunResultStreaming
     from agents.stream_events import StreamEvent
 except ImportError as e:
@@ -45,6 +57,26 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 
 
+@runtime_checkable
+class ToolLike(Protocol):
+    """Protocol for tool-like objects."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Tool call interface."""
+        ...
+
+
+@runtime_checkable
+class AgentLike(Protocol):
+    """Protocol for agent-like objects."""
+
+    name: str
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Agent call interface."""
+        ...
+
+
 class OpenAIAgentService(AIService):
     """OpenAI Agents SDK service for Pipecat.
 
@@ -61,11 +93,11 @@ class OpenAIAgentService(AIService):
         *,
         agent: Optional[Agent] = None,
         name: str = "Assistant",
-        instructions: str = "You are a helpful assistant.",
-        handoffs: Optional[List[Agent]] = None,
-        tools: Optional[List[Callable]] = None,
-        input_guardrails: Optional[List[InputGuardrail]] = None,
-        output_guardrails: Optional[List[OutputGuardrail]] = None,
+        instructions: Union[str, Sequence[str]] = "You are a helpful assistant.",
+        handoffs: Optional[Sequence[AgentLike]] = None,
+        tools: Optional[Sequence[ToolLike]] = None,
+        input_guardrails: Optional[Sequence[InputGuardrail]] = None,
+        output_guardrails: Optional[Sequence[OutputGuardrail]] = None,
         model_config: Optional[Dict[str, Any]] = None,
         session_config: Optional[Dict[str, Any]] = None,
         api_key: Optional[str] = None,
@@ -101,13 +133,27 @@ class OpenAIAgentService(AIService):
         if agent:
             self._agent = agent
         else:
+            # Convert sequences to lists and handle string instructions
+            agent_handoffs: List[Any] = list(handoffs) if handoffs else []
+            agent_tools: List[Any] = list(tools) if tools else []
+            agent_input_guardrails: List[Any] = list(input_guardrails) if input_guardrails else []
+            agent_output_guardrails: List[Any] = (
+                list(output_guardrails) if output_guardrails else []
+            )
+
+            # Handle instructions - convert sequence to string if needed
+            if isinstance(instructions, str):
+                agent_instructions = instructions
+            else:
+                agent_instructions = " ".join(str(instr) for instr in instructions)
+
             self._agent = Agent(
                 name=name,
-                instructions=instructions,
-                handoffs=handoffs or [],
-                tools=tools or [],
-                input_guardrails=input_guardrails or [],
-                output_guardrails=output_guardrails or [],
+                instructions=agent_instructions,
+                handoffs=agent_handoffs,
+                tools=agent_tools,
+                input_guardrails=agent_input_guardrails,
+                output_guardrails=agent_output_guardrails,
                 model=model_config.get("model", "gpt-4o") if model_config else "gpt-4o",
             )
 
@@ -153,7 +199,8 @@ class OpenAIAgentService(AIService):
             logger.info(f"Updated agent instructions for {self._agent.name}")
 
         if model_config:
-            self._agent.model_config = model_config
+            # Note: OpenAI Agents SDK handles model configuration during agent creation
+            # We can't update model_config after agent is created, but we can update our model name
             if "model" in model_config:
                 self.set_model_name(model_config["model"])
             logger.info(f"Updated model config for {self._agent.name}")
@@ -270,8 +317,11 @@ class OpenAIAgentService(AIService):
             async for event in result.stream_events():
                 if event.type == "raw_response_event":
                     # Handle token-by-token streaming
-                    if hasattr(event.data, "delta") and event.data.delta:
-                        await self.push_frame(LLMTextFrame(text=event.data.delta))
+                    # Only check for delta on events that are known to have it
+                    if hasattr(event.data, "delta") and getattr(event.data, "delta", None):
+                        delta_text = getattr(event.data, "delta", "")
+                        if delta_text:
+                            await self.push_frame(LLMTextFrame(text=delta_text))
 
                 elif event.type == "run_item_stream_event":
                     # Handle completed items
@@ -286,10 +336,13 @@ class OpenAIAgentService(AIService):
                             self._accumulated_text = message_text
 
                     elif event.item.type == "tool_call_item":
-                        logger.debug(f"Tool called: {event.item.tool_name}")
+                        # Use getattr for safe attribute access
+                        tool_name = getattr(event.item, "tool_name", "unknown")
+                        logger.debug(f"Tool called: {tool_name}")
 
                     elif event.item.type == "tool_call_output_item":
-                        logger.debug(f"Tool output: {event.item.output}")
+                        output = getattr(event.item, "output", "no output")
+                        logger.debug(f"Tool output: {output}")
 
                 elif event.type == "agent_updated_stream_event":
                     logger.debug(f"Agent updated: {event.new_agent.name}")
@@ -352,25 +405,33 @@ class OpenAIAgentService(AIService):
             logger.warning(f"Could not extract text from message item: {e}")
             return ""
 
-    async def add_tool(self, tool_function: Callable):
+    async def add_tool(self, tool_function: ToolLike):
         """Add a tool function to the agent.
 
         Args:
-            tool_function: A callable function to add as a tool.
+            tool_function: A callable function or Tool object to add as a tool.
         """
         if hasattr(self._agent, "tools"):
-            self._agent.tools.append(tool_function)
-            logger.info(f"Added tool {tool_function.__name__} to agent {self._agent.name}")
+            # Cast to Any to handle the type variance issue
+            tools_list: List[Any] = self._agent.tools
+            tools_list.append(tool_function)
+            tool_name = getattr(
+                tool_function, "__name__", getattr(tool_function, "name", "unknown")
+            )
+            logger.info(f"Added tool {tool_name} to agent {self._agent.name}")
 
-    async def add_handoff_agent(self, agent: Agent):
+    async def add_handoff_agent(self, agent: AgentLike):
         """Add a handoff agent.
 
         Args:
-            agent: Another Agent instance that this agent can hand off to.
+            agent: Another Agent instance or handoff object that this agent can hand off to.
         """
         if hasattr(self._agent, "handoffs"):
-            self._agent.handoffs.append(agent)
-            logger.info(f"Added handoff agent {agent.name} to agent {self._agent.name}")
+            # Cast to Any to handle the type variance issue
+            handoffs_list: List[Any] = self._agent.handoffs
+            handoffs_list.append(agent)
+            agent_name = getattr(agent, "name", "unknown")
+            logger.info(f"Added handoff agent {agent_name} to agent {self._agent.name}")
 
     def get_session_context(self) -> Dict[str, Any]:
         """Get the current session context.
