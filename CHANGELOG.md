@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Update `livekit` to 1.0.13.
+- Updated `livekit` to 1.0.13.
 
 - `torch` and `torchaudio` are no longer required for running Smart Turn
   locally. This avoids gigabytes of dependencies being installed.
@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead.
 
 ### Fixed
+
+- Fixed an issue that would cause `push_interruption_task_frame_and_wait()` to
+  not wait if a previous interruption had already happened.
 
 - Fixed a couple of bugs in `ServiceSwitcher`:
   - Using multiple `ServiceSwitcher`s in a pipeline would result in an error.
