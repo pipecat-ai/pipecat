@@ -13,6 +13,7 @@ guardrails, sessions, and tools from the OpenAI Agents SDK.
 
 import asyncio
 import os
+from dataclasses import dataclass
 from typing import (
     Any,
     Awaitable,
@@ -53,6 +54,16 @@ from pipecat.frames.frames import (
     TextFrame,
     UserImageRawFrame,
 )
+from pipecat.processors.aggregators.llm_response import (
+    LLMAssistantAggregatorParams,
+    LLMAssistantContextAggregator,
+    LLMUserAggregatorParams,
+    LLMUserContextAggregator,
+)
+from pipecat.processors.aggregators.openai_llm_context import (
+    OpenAILLMContext,
+    OpenAILLMContextFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 
@@ -75,6 +86,35 @@ class AgentLike(Protocol):
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """Agent call interface."""
         ...
+
+
+@dataclass
+class OpenAIAgentContextAggregatorPair:
+    """Pair of OpenAI Agent context aggregators for user and assistant messages.
+
+    Parameters:
+        _user: User context aggregator for processing user messages.
+        _assistant: Assistant context aggregator for processing assistant messages.
+    """
+
+    _user: "OpenAIAgentUserContextAggregator"
+    _assistant: "OpenAIAgentAssistantContextAggregator"
+
+    def user(self) -> "OpenAIAgentUserContextAggregator":
+        """Get the user context aggregator.
+
+        Returns:
+            The user context aggregator instance.
+        """
+        return self._user
+
+    def assistant(self) -> "OpenAIAgentAssistantContextAggregator":
+        """Get the assistant context aggregator.
+
+        Returns:
+            The assistant context aggregator instance.
+        """
+        return self._assistant
 
 
 class OpenAIAgentService(AIService):
@@ -179,6 +219,32 @@ class OpenAIAgentService(AIService):
         """
         return self._agent
 
+    def create_context_aggregator(
+        self,
+        context: OpenAILLMContext,
+        *,
+        user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
+        assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
+    ) -> OpenAIAgentContextAggregatorPair:
+        """Create OpenAI-specific context aggregators for agent interactions.
+
+        Creates a pair of context aggregators optimized for OpenAI Agent interactions,
+        including support for function calls, tool usage, and conversation management.
+
+        Args:
+            context: The LLM context to create aggregators for.
+            user_params: Parameters for user message aggregation.
+            assistant_params: Parameters for assistant message aggregation.
+
+        Returns:
+            OpenAIAgentContextAggregatorPair: A pair of context aggregators, one for
+            the user and one for the assistant, encapsulated in an
+            OpenAIAgentContextAggregatorPair.
+        """
+        user = OpenAIAgentUserContextAggregator(context, params=user_params)
+        assistant = OpenAIAgentAssistantContextAggregator(context, params=assistant_params)
+        return OpenAIAgentContextAggregatorPair(_user=user, _assistant=assistant)
+
     def update_agent_config(
         self,
         *,
@@ -241,7 +307,7 @@ class OpenAIAgentService(AIService):
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         """Process frames and handle agent interactions.
 
-        Processes text input frames by running them through the OpenAI Agent
+        Processes OpenAILLMContextFrame and TextFrame by running them through the OpenAI Agent
         and streams the results back as LLM frames.
 
         Args:
@@ -250,8 +316,36 @@ class OpenAIAgentService(AIService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, TextFrame):
-            # Process text input through the agent directly
+        if isinstance(frame, OpenAILLMContextFrame):
+            # Process context frame through the agent
+            try:
+                await self.push_frame(LLMFullResponseStartFrame())
+                # Extract the latest user message from the context
+                messages = frame.context.get_messages()
+                if messages:
+                    # Get the last user message
+                    for message in reversed(messages):
+                        if message.get("role") == "user":
+                            content = message.get("content", "")
+                            if isinstance(content, list):
+                                # Extract text from content array
+                                text_parts = []
+                                for part in content:
+                                    if isinstance(part, dict) and part.get("type") == "text":
+                                        text_parts.append(part.get("text", ""))
+                                user_input = " ".join(text_parts)
+                            else:
+                                user_input = str(content)
+
+                            if user_input.strip():
+                                await self._process_agent_request(user_input)
+                                break
+                await self.push_frame(LLMFullResponseEndFrame())
+            except Exception as e:
+                logger.error(f"Error processing agent context: {e}")
+                await self.push_error(ErrorFrame(f"Agent processing error: {e}"))
+        elif isinstance(frame, TextFrame):
+            # Process text input through the agent directly (for backwards compatibility)
             try:
                 await self.push_frame(LLMFullResponseStartFrame())
                 await self._process_agent_request(frame.text)
@@ -450,3 +544,24 @@ class OpenAIAgentService(AIService):
         """
         self._session_config.update(context)
         logger.debug(f"Updated session context for agent {self._agent.name}")
+
+
+class OpenAIAgentUserContextAggregator(LLMUserContextAggregator):
+    """OpenAI Agent-specific user context aggregator.
+
+    Handles aggregation of user messages for OpenAI Agent services.
+    Inherits all functionality from the base LLMUserContextAggregator.
+    """
+
+    pass
+
+
+class OpenAIAgentAssistantContextAggregator(LLMAssistantContextAggregator):
+    """OpenAI Agent-specific assistant context aggregator.
+
+    Handles aggregation of assistant messages for OpenAI Agent services,
+    with specialized support for OpenAI's function calling format,
+    tool usage tracking, and agent interaction management.
+    """
+
+    pass

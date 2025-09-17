@@ -17,17 +17,19 @@ Requirements:
 
 import os
 import random
-from typing import Any
+from typing import Any, List
 
 # Import agents SDK for tools and agent creation
 from agents import Agent, function_tool
 from dotenv import load_dotenv
 from loguru import logger
+from openai.types.chat import ChatCompletionMessageParam
 
-from pipecat.frames.frames import EndFrame, TextFrame
+from pipecat.frames.frames import LLMRunFrame, TextFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
+from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
@@ -145,14 +147,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         streaming=True,
     )
 
-    # Create the processing pipeline
+    # Set up conversation context with initial system message
+    messages: List[ChatCompletionMessageParam] = [
+        {
+            "role": "system",
+            "content": "You are a helpful assistant with access to weather information and random facts. Your goal is to demonstrate your capabilities in a succinct way. Your output will be converted to audio so don't include special characters in your answers. Respond to what the user said in a creative and helpful way.",
+        },
+    ]
+
+    context = OpenAILLMContext(messages)
+    context_aggregator = agent_service.create_context_aggregator(context)
+
+    # Create the processing pipeline with context aggregators
     pipeline = Pipeline(
         [
-            transport.input(),  # Receive audio input
-            stt,  # Convert speech to text
-            agent_service,  # Process with OpenAI Agent
-            tts,  # Convert text to speech
-            transport.output(),  # Send audio output
+            transport.input(),  # Transport user input
+            stt,  # Speech to text
+            context_aggregator.user(),  # User responses
+            agent_service,  # OpenAI Agent processing
+            tts,  # Text to speech
+            transport.output(),  # Transport bot output
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -165,17 +180,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Client connected, sending greeting")
-        await task.queue_frames(
-            [
-                TextFrame(
-                    "Hello! I'm an AI assistant powered by the OpenAI Agents SDK. "
-                    "I can help you with weather information, share interesting facts, "
-                    "or just have a conversation. What would you like to know?"
-                ),
-                # Don't send EndFrame() here - that closes the pipeline!
-                # The conversation should continue after the greeting
-            ]
-        )
+        # Kick off the conversation by adding system message and running LLM
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
+        await task.queue_frames([LLMRunFrame()])
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        logger.info("Client disconnected")
+        await task.cancel()
 
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
     await runner.run(task)
