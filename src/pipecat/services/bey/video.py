@@ -28,6 +28,11 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.ai_service import AIService
 from pipecat.transports.services.daily import DailyTransportClient
+from pipecat.transports.services.helpers.daily_rest import (
+    DailyRESTHelper,
+    DailyMeetingTokenParams,
+    DailyMeetingTokenProperties,
+)
 
 BASE_API_URL = "https://api.bey.dev/v1"
 FRAME_RATE = 25
@@ -44,7 +49,9 @@ class BeyVideoService(AIService):
         self,
         api_key: str,
         avatar_id: str,
+        bot_name: str,
         transport_client: DailyTransportClient,
+        rest_helper: DailyRESTHelper,
         session: aiohttp.ClientSession,
         **kwargs,
     ) -> None:
@@ -53,7 +60,9 @@ class BeyVideoService(AIService):
         Args:
             api_key: Beyond Presence API key used for authentication.
             avatar_id: ID of the Beyond Presence avatar to use for video synthesis.
+            bot_name: Name of the bot as it appears in the Daily room.
             transport_client: DailyTransportClient for managing WebRTC connections.
+            rest_helper: DailyRESTHelper for REST API interactions with Daily.
             session: Async HTTP session used for communication with Beyond Presence.
             **kwargs: Additional arguments passed to the parent AIService class.
         """
@@ -61,7 +70,9 @@ class BeyVideoService(AIService):
 
         self._api_key = api_key
         self._avatar_id = avatar_id
+        self._bot_name = bot_name
         self._transport_client = transport_client
+        self._rest_helper = rest_helper
         self._session = session
 
         self._resampler = create_stream_resampler()
@@ -81,9 +92,16 @@ class BeyVideoService(AIService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
+            token = await self._rest_helper.get_token(
+                room_url=self._transport_client.room_url,
+                params=DailyMeetingTokenParams(
+                    properties=DailyMeetingTokenProperties(user_name=self._bot_name),
+                ),
+                expiry_time=3600,  # 1 hour
+            )
             await self._start_session(
                 room_url=self._transport_client.room_url,
-                token=self._transport_client._token,
+                token=token,
             )
             await self._transport_client.register_audio_destination(self._transport_destination)
             await self.push_frame(frame, direction)
