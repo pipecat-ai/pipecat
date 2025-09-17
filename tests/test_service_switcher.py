@@ -100,19 +100,6 @@ class TestServiceSwitcherStrategyManual(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(strategy.active_service, self.service2)
         self.assertEqual(strategy.active_service, self.service3)
 
-    def test_handle_frame_invalid_service(self):
-        """Test that switching to an invalid service raises an error."""
-        strategy = ServiceSwitcherStrategyManual(self.services)
-        invalid_service = MockFrameProcessor("invalid")
-
-        switch_frame = ManuallySwitchServiceFrame(service=invalid_service)
-
-        with self.assertRaises(ValueError) as context:
-            strategy.handle_frame(switch_frame, FrameDirection.DOWNSTREAM)
-
-        self.assertIn("Service", str(context.exception))
-        self.assertIn("is not in the list of available services", str(context.exception))
-
     def test_handle_frame_unsupported_frame_type(self):
         """Test that unsupported frame types raise an error."""
         strategy = ServiceSwitcherStrategyManual(self.services)

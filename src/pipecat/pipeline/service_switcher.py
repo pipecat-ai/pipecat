@@ -61,20 +61,21 @@ class ServiceSwitcherStrategyManual(ServiceSwitcherStrategy):
             direction: The direction of the frame (upstream or downstream).
         """
         if isinstance(frame, ManuallySwitchServiceFrame):
-            self._set_active(frame.service)
+            self._set_active_if_available(frame.service)
         else:
             raise ValueError(f"Unsupported frame type: {type(frame)}")
 
-    def _set_active(self, service: FrameProcessor):
-        """Set the active service to the given one.
+    def _set_active_if_available(self, service: FrameProcessor):
+        """Set the active service to the given one, if it is in the list of available services.
+
+        If it's not in the list, the request is ignored, as it may have been
+        intended for another ServiceSwitcher in the pipeline.
 
         Args:
             service: The service to set as active.
         """
         if service in self.services:
             self.active_service = service
-        else:
-            raise ValueError(f"Service {service} is not in the list of available services.")
 
 
 StrategyType = TypeVar("StrategyType", bound=ServiceSwitcherStrategy)
