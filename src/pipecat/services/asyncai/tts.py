@@ -302,10 +302,6 @@ class AsyncAITTSService(WebsocketWordTTSService):
                     await self.add_word_timestamps([("TTSStoppedFrame", 0), ("Reset", 0)])
                     self._transcription_generated = True
                     logger.debug(f"{self}: Transcription flag set to True")
-                else:
-                    logger.debug(
-                        f"{self}: Skipping transcription generation - already generated: {self._transcription_generated}, text: '{self._current_text}'"
-                    )
 
                 frame = TTSAudioRawFrame(
                     audio=base64.b64decode(msg["audio"]),
@@ -346,7 +342,7 @@ class AsyncAITTSService(WebsocketWordTTSService):
         Yields:
             Frame: Audio frames containing the synthesized speech.
         """
-        logger.debug(f"{self}: Generating TTS [{text}]")
+        logger.debug(f"{self}: AsyncAI Generating TTS [{text}]")
 
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
