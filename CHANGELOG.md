@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `on_before_disconnect` synchronous event to `DailyTransport`.
+- Added `on_before_disconnect` synchronous event to `DailyTransport` and
+  `LiveKitTransport`.
 
 - It is now possible to register synchronous event handlers. By default, all
   event handlers are executed in a separate task. However, in some cases we want
