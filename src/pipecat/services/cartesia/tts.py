@@ -27,6 +27,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.tts_text_transformer import TTSTextTransformer
 from pipecat.services.tts_service import AudioContextWordTTSService, TTSService
 from pipecat.transcriptions.language import Language, resolve_language
 from pipecat.utils.text.base_text_aggregator import BaseTextAggregator
@@ -227,6 +228,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
 
         self._context_id = None
         self._receive_task = None
+
+        # Text preprocessor for better pronunciation
+        self._text_transformer = TTSTextTransformer()
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -502,7 +506,9 @@ class CartesiaTTSService(AudioContextWordTTSService):
                 self._context_id = str(uuid.uuid4())
                 await self.create_audio_context(self._context_id)
 
-            msg = self._build_msg(text=text)
+            # Call the text transformer for better pronunciation
+            transformed_text = self._text_transformer.transform(text)
+            msg = self._build_msg(text=transformed_text)
 
             try:
                 await self._get_websocket().send(msg)
