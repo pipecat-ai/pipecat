@@ -21,6 +21,8 @@
 
 🧭 Looking to build structured conversations? Check out [Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) for managing complex conversational states and transitions.
 
+🔍 Looking for help debugging your pipeline and processors? Check out [Whisker](https://github.com/pipecat-ai/whisker), a real-time Pipecat debugger.
+
 ## 🧠 Why Pipecat?
 
 - **Voice-first**: Integrates speech recognition, text-to-speech, and conversation handling
