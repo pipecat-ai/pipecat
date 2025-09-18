@@ -160,14 +160,27 @@ class SmallWebRTCTrack:
         return await self._track.recv()
 
     async def _idle_watcher(self):
-        """Disable receiving if idle for more than _idle_timeout."""
+        """Disable receiving if idle for more than _idle_timeout and monitor queue size."""
+        last_warned_queue_size = 0
+
         while self._receiver._enabled:
             await asyncio.sleep(self._idle_timeout)
             idle_duration = time.time() - self._last_recv_time
+
+            if isinstance(self._track, RemoteStreamTrack) and hasattr(self._track, "_queue"):
+                queue_size = self._track._queue.qsize()
+
+                # Show warning each time queue grows 10 frames beyond last warning
+                if queue_size >= last_warned_queue_size + 10:
+                    logger.warning(
+                        f"{self._track.kind} track queue size is high: {queue_size} frames"
+                    )
+                    last_warned_queue_size = queue_size
+
             if idle_duration >= self._idle_timeout:
-                # discard old frames from the receiver queue to prevent growth
+                # discard old frames to prevent memory growth
                 logger.debug(
-                    f"Disabling receiver for {self._track.kind} track to prevent memory growth."
+                    f"Disabling receiver for {self._track.kind} track after {idle_duration:.2f}s idle"
                 )
                 await self.discard_old_frames()
                 self._receiver._enabled = False
@@ -490,6 +503,10 @@ class SmallWebRTCConnection(BaseObject):
 
     async def _close(self):
         """Close the peer connection and cleanup resources."""
+        for track in self._track_map.values():
+            if track:
+                track.stop()
+        self._track_map.clear()
         if self._pc:
             await self._pc.close()
         self._message_queue.clear()
