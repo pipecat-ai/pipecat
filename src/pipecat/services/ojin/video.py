@@ -5,7 +5,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Awaitable, Callable, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Optional, Tuple
 
 # Will use numpy when implementing persona-specific processing
 from loguru import logger
@@ -101,7 +101,7 @@ class OjinPersonaSettings:
     )  # whether to push bot stopped speaking frames to the output
     frame_count_threshold_for_end_interaction: int = field(
         default=35
-    ) # If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
+    )  # If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
 
 class ConversationSignal(Enum):
@@ -163,8 +163,12 @@ class OjinPersonaFSM:
         self._transition_timestamp: float = -1.0
         self.num_speech_frames_played: int = 0
 
-    async def start(self):
+    async def start(self, parameters: Dict[str, Any] | None):
         await self.set_state(PersonaState.INITIALIZING)
+        if parameters is not None:
+            self._playback_loop.is_mirrored_loop = parameters.get(
+                "is_mirrored_loop", False
+            )
 
     async def close(self):
         await self._stop_playback()
@@ -918,7 +922,7 @@ class OjinPersonaService(FrameProcessor):
 
         elif isinstance(message, OjinPersonaSessionReadyMessage):
             if self._fsm is not None:
-                await self._fsm.start()
+                await self._fsm.start(message.parameters)
 
         elif isinstance(message, OjinPersonaInteractionReadyMessage):
             logger.debug("Received interaction ready message")
@@ -1216,9 +1220,9 @@ class OjinPersonaService(FrameProcessor):
                 await asyncio.sleep(0.001)
                 continue
 
-            
             if self._interaction.audio_input_queue.empty() and (
-                self._fsm.num_speech_frames_played + self._settings.frame_count_threshold_for_end_interaction
+                self._fsm.num_speech_frames_played
+                + self._settings.frame_count_threshold_for_end_interaction
                 > self._interaction.expected_frames
             ):
                 logger.debug(
@@ -1304,6 +1308,7 @@ class PersonaPlaybackLoop:
     duration: int = 0  # seconds
     frames: list[AnimationKeyframe] = []  # Keyframes of the idle animation
     playback_time: float = 0  # Total elapsed playback time in seconds
+    is_mirrored_loop: bool = False  # whether to mirror the idle loop
 
     def __init__(
         self,
@@ -1336,7 +1341,7 @@ class PersonaPlaybackLoop:
         frame_idx = len(self.frames)
         expected_frames = self.duration * self.fps
         keyframe = AnimationKeyframe(
-            mirror_frame_idx=mirror_index(frame_idx, expected_frames),
+            mirror_frame_idx=mirror_index(frame_idx, expected_frames, 2 if self.is_mirrored_loop else 1),
             frame_idx=frame_idx,
             image=image,
         )
@@ -1373,7 +1378,7 @@ class PersonaPlaybackLoop:
         # Get total frames passed
         current_frame_idx = math.floor(playback_time * self.fps)
 
-        mirror_frame_idx = mirror_index(current_frame_idx, len(self.frames))
+        mirror_frame_idx = mirror_index(current_frame_idx, len(self.frames), 2 if self.is_mirrored_loop else 1)
 
         return self.frames[mirror_frame_idx]
 
@@ -1426,31 +1431,24 @@ class PersonaPlaybackLoop:
         """
         self.playback_time += delta_time
 
-
-def mirror_index(index: int, size: int) -> int:
+def mirror_index(index: int, size: int, period: int = 2):
     """Calculate a mirrored index for creating a ping-pong animation effect.
 
-    This method maps a continuously increasing index to a back-and-forth pattern
-    within the given size, creating a ping-pong effect for smooth looping animations.
+        This method maps a continuously increasing index to a back-and-forth pattern
+        within the given size, creating a ping-pong effect for smooth looping animations.
 
-    Args:
-        index (int): The original frame index
-        size (int): The number of available frames
+        Args:
+            index (int): The original frame index
+            size (int): The number of available frames
+            period (int): Period of the mirrored indices
 
-    Returns:
-        int: The mirrored index that creates the ping-pong effect
+        Returns:
+            int: The mirrored index that creates the ping-pong effect
 
-    """
-
-    # Calculate period length (going up and down)
-    period = (size - 1) * 2
-
-    # Get position within one period
-    normalized_idx = index % period
-
-    # If in first half, return the index directly
-    if normalized_idx < size:
-        return normalized_idx
+    #"""
+    turn = index // size
+    res = index % size
+    if turn % period == 0:
+        return res
     else:
-        # If in second half, return the mirrored index
-        return period - normalized_idx - 1
+        return size - res - 1
