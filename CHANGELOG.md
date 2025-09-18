@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated Silero VAD model to v6.
+
 - Updated `livekit` to 1.0.13.
 
 - `torch` and `torchaudio` are no longer required for running Smart Turn
