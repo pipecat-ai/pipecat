@@ -6,11 +6,12 @@
 
 """Turn context provider for OpenTelemetry tracing in Pipecat.
 
-This module provides a singleton context provider that manages the current
-turn's tracing context, allowing services to create child spans that are
-properly associated with the conversation turn.
+This module provides a turn context provider that manages turn tracing contexts,
+allowing services to create child spans that are properly associated with their
+specific conversation turn.
 """
 
+import uuid
 from typing import TYPE_CHECKING, Optional
 
 # Import types for type checking only
@@ -26,18 +27,22 @@ if is_tracing_available():
 
 
 class TurnContextProvider:
-    """Provides access to the current turn's tracing context.
+    """Provides access to a turn's tracing context.
 
-    This is a singleton that services can use to get the current turn's
-    span context to create child spans.
+    This class manages the tracing context for a specific turn.
+    Multiple instances can exist to support concurrent conversations.
     """
 
+    # Keep singleton pattern for backward compatibility
     _instance = None
-    _current_turn_context: Optional["Context"] = None
+
+    def __init__(self):
+        """Initialize a new turn context provider."""
+        self._current_turn_context: Optional["Context"] = None
 
     @classmethod
     def get_instance(cls):
-        """Get the singleton instance.
+        """Get the singleton instance (for backward compatibility).
 
         Returns:
             The singleton TurnContextProvider instance.
@@ -69,13 +74,3 @@ class TurnContextProvider:
             The current turn context or None if not available.
         """
         return self._current_turn_context
-
-
-def get_current_turn_context() -> Optional["Context"]:
-    """Get the OpenTelemetry context for the current turn.
-
-    Returns:
-        The current turn context or None if not available.
-    """
-    provider = TurnContextProvider.get_instance()
-    return provider.get_current_turn_context()

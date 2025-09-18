@@ -32,6 +32,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMGeneratedTextFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
@@ -886,6 +887,7 @@ class GoogleLLMService(LLMService):
 
         grounding_metadata = None
         search_result = ""
+        text_generation_signaled = False
 
         try:
             # Generate content using either OpenAILLMContext or universal LLMContext
@@ -913,6 +915,11 @@ class GoogleLLMService(LLMService):
                     if candidate.content and candidate.content.parts:
                         for part in candidate.content.parts:
                             if not part.thought and part.text:
+                                # Signal that the LLM has started producing textual content
+                                if not text_generation_signaled:
+                                    await self.push_frame(LLMGeneratedTextFrame())
+                                    text_generation_signaled = True
+
                                 search_result += part.text
                                 await self.push_frame(LLMTextFrame(part.text))
                             elif part.function_call:

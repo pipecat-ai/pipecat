@@ -34,6 +34,7 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         url: str,
         aiohttp_session: aiohttp.ClientSession,
         headers: Optional[Dict[str, str]] = None,
+        service_context: Optional[Any] = None,
         **kwargs,
     ):
         """Initialize the HTTP smart turn analyzer.
@@ -42,12 +43,14 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
             url: HTTP endpoint URL for the smart turn ML service.
             aiohttp_session: HTTP client session for making requests.
             headers: Optional HTTP headers to include in requests.
+            service_context: Optional service context for request tracking.
             **kwargs: Additional arguments passed to BaseSmartTurn.
         """
         super().__init__(**kwargs)
         self._url = url
         self._headers = headers or {}
         self._aiohttp_session = aiohttp_session
+        self._service_context = service_context
 
     def _serialize_array(self, audio_array: np.ndarray) -> bytes:
         """Serialize NumPy audio array to bytes for HTTP transmission."""
@@ -62,6 +65,10 @@ class HttpSmartTurnAnalyzer(BaseSmartTurn):
         """Send raw audio data to the HTTP endpoint for prediction."""
         headers = {"Content-Type": "application/octet-stream"}
         headers.update(self._headers)
+
+        # Add service context as header if available
+        if hasattr(self, "_service_context") and self._service_context is not None:
+            headers["X-Service-Context"] = str(self._service_context)
 
         try:
             timeout = aiohttp.ClientTimeout(total=self._params.stop_secs)

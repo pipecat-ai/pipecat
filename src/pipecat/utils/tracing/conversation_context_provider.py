@@ -6,9 +6,9 @@
 
 """Conversation context provider for OpenTelemetry tracing in Pipecat.
 
-This module provides a singleton context provider that manages the current
-conversation's tracing context, allowing services to create child spans
-that are properly associated with the conversation.
+This module provides a conversation context provider that manages conversation
+tracing contexts, allowing services to create child spans that are properly
+associated with their specific conversation.
 """
 
 import uuid
@@ -27,19 +27,23 @@ if is_tracing_available():
 
 
 class ConversationContextProvider:
-    """Provides access to the current conversation's tracing context.
+    """Provides access to a conversation's tracing context.
 
-    This is a singleton that can be used to get the current conversation's
-    span context to create child spans (like turns).
+    This class manages the tracing context for a specific conversation.
+    Multiple instances can exist to support concurrent conversations.
     """
 
+    def __init__(self):
+        """Initialize a new conversation context provider."""
+        self._current_conversation_context: Optional["Context"] = None
+        self._conversation_id: Optional[str] = None
+
+    # Keep singleton pattern for backward compatibility
     _instance = None
-    _current_conversation_context: Optional["Context"] = None
-    _conversation_id: Optional[str] = None
 
     @classmethod
     def get_instance(cls):
-        """Get the singleton instance.
+        """Get the singleton instance (for backward compatibility).
 
         Returns:
             The singleton ConversationContextProvider instance.
@@ -92,23 +96,3 @@ class ConversationContextProvider:
             A new randomly generated UUID string.
         """
         return str(uuid.uuid4())
-
-
-def get_current_conversation_context() -> Optional["Context"]:
-    """Get the OpenTelemetry context for the current conversation.
-
-    Returns:
-        The current conversation context or None if not available.
-    """
-    provider = ConversationContextProvider.get_instance()
-    return provider.get_current_conversation_context()
-
-
-def get_conversation_id() -> Optional[str]:
-    """Get the ID for the current conversation.
-
-    Returns:
-        The current conversation ID or None if not available.
-    """
-    provider = ConversationContextProvider.get_instance()
-    return provider.get_conversation_id()
