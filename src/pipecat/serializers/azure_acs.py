@@ -68,8 +68,8 @@ class ACSFrameSerializer(FrameSerializer):
                 audio_data = base64.b64decode(audio_b64)
                 return InputAudioRawFrame(
                     audio=audio_data,
-                    num_channels=self.channels,
-                    sample_rate=self.sample_rate,
+                    num_channels=self.channels or 1,
+                    sample_rate=self.sample_rate or 16000,
                 )
         elif kind == "AudioMetadata":
             meta = message.get("audioMetadata", {})
