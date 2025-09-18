@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for global location in `GoogleVertexLLMService`. The service now
+  supports both regional locations (e.g., "us-east4") and the "global" location
+  for Vertex AI endpoints. When using "global" location, the service will use
+  `aiplatform.googleapis.com` as the API host instead of the regional format.
+
 - Added `on_pipeline_finished` event to `PipelineTask`. This event will get
   fired when the pipeline is done running. This can be the result of a
   `StopFrame`, `CancelFrame` or `EndFrame`.
