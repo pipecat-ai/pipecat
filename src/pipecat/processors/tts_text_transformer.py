@@ -17,8 +17,6 @@ PRONUNCIATION_DICTIONARY = {
     "twelfth": "twɛlfθ",
     "sixth": "sɪksθ"
 }
-import logging
-logger = logging.getLogger(__name__)
 
 class TTSTextTransformer:
     """
@@ -507,7 +505,6 @@ class TTSTextTransformer:
             Transformed text with improved pronunciation patterns
         """
         # Apply transformations in order of priority
-        logger.info(f"TTSTextTransformer: Transforming text: {text}")
         result = text
         
         # 1. Time patterns (highest priority - colon patterns or AM/PM)
