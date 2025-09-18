@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `DailyTransport.sip_call_transfer()` to automatically use the session
+  ID from the `on_dialin_connected` event, when not explicitly provided. Now
+  supports cold transfers (from incoming dial-in calls) by automatically
+  tracking session IDs from connection events.
+
 - Fixed a memory leak in `SmallWebRTCTransport`. In `aiortc`, when you receive
   a `MediaStreamTrack` (audio or video), frames are produced asynchronously. If
   the code never consumes these frames, they are queued in memory, causing a
