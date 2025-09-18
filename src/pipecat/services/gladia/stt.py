@@ -579,6 +579,7 @@ class GladiaSTTService(STTService):
                     language = utterance["language"]
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
+
                     if confidence >= self._confidence:
                         if is_final:
                             await self.push_frame(
@@ -605,6 +606,10 @@ class GladiaSTTService(STTService):
                                     result=content,
                                 )
                             )
+                    else:
+                        logger.debug(
+                            f"{self} Skipping transcript due to low confidence: '{transcript}' (confidence: {confidence} < {self._confidence})"
+                        )
                 elif content["type"] == "translation":
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]
