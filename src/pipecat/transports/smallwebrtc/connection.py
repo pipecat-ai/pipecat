@@ -249,6 +249,7 @@ class SmallWebRTCConnection(BaseObject):
         self._last_received_time = None
         self._message_queue = []
         self._pending_app_messages = []
+        self._connecting_timeout_task = None
 
     def _setup_listeners(self):
         """Set up event listeners for the peer connection."""
