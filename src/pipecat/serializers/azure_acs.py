@@ -63,7 +63,8 @@ class ACSFrameSerializer(FrameSerializer):
         
         kind = message.get("kind")
         if kind == "AudioData":
-            audio_b64 = message.get("audioData", {}).get("data")
+            audio_data = message.get("audioData") or {}
+            audio_b64 = audio_data.get("data")
             if audio_b64:
                 audio_data = base64.b64decode(audio_b64)
                 return InputAudioRawFrame(
