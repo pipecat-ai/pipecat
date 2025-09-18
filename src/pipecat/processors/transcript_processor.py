@@ -24,6 +24,8 @@ from pipecat.frames.frames import (
     TranscriptionMessage,
     TranscriptionUpdateFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.utils.time import time_now_iso8601
@@ -70,6 +72,11 @@ class UserTranscriptProcessor(BaseTranscriptProcessor):
         """
         await super().process_frame(frame, direction)
 
+        if isinstance(
+            frame, (UserStartedSpeakingFrame, UserStoppedSpeakingFrame, InterruptionFrame)
+        ):
+            logger.debug(f"{self} {frame}")
+
         if isinstance(frame, TranscriptionFrame):
             message = TranscriptionMessage(
                 role="user", user_id=frame.user_id, content=frame.text, timestamp=frame.timestamp
@@ -90,15 +97,17 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
     - The pipeline ends (EndFrame)
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, correct_aggregation_callback=None, **kwargs):
         """Initialize processor with aggregation state.
 
         Args:
+            correct_aggregation_callback: Optional callback to correct corrupted text
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
         self._current_text_parts: List[str] = []
         self._aggregation_start_time: Optional[str] = None
+        self._correct_aggregation_callback = correct_aggregation_callback
 
     async def _emit_aggregated_text(self):
         """Aggregates and emits text fragments as a transcript message.
@@ -162,6 +171,13 @@ class AssistantTranscriptProcessor(BaseTranscriptProcessor):
 
             # Clean up any excessive whitespace
             content = content.strip()
+
+            # Apply correction if callback is provided
+            if content and self._correct_aggregation_callback:
+                try:
+                    content = self._correct_aggregation_callback(content)
+                except Exception as e:
+                    logger.error(f"Error in transcript correction callback: {e}")
 
             if content:
                 logger.trace(f"Emitting aggregated assistant message: {content}")
@@ -248,11 +264,16 @@ class TranscriptProcessor:
             print(f"New messages: {frame.messages}")
     """
 
-    def __init__(self):
-        """Initialize factory."""
+    def __init__(self, assistant_correct_aggregation_callback=None):
+        """Initialize factory.
+
+        Args:
+            assistant_correct_aggregation_callback: Optional callback for assistant text correction
+        """
         self._user_processor = None
         self._assistant_processor = None
         self._event_handlers = {}
+        self._assistant_correct_aggregation_callback = assistant_correct_aggregation_callback
 
     def user(self, **kwargs) -> UserTranscriptProcessor:
         """Get the user transcript processor.
@@ -284,7 +305,10 @@ class TranscriptProcessor:
             The assistant transcript processor instance.
         """
         if self._assistant_processor is None:
-            self._assistant_processor = AssistantTranscriptProcessor(**kwargs)
+            # Pass the correction callback to the assistant processor
+            self._assistant_processor = AssistantTranscriptProcessor(
+                correct_aggregation_callback=self._assistant_correct_aggregation_callback, **kwargs
+            )
             # Apply any registered event handlers
             for event_name, handler in self._event_handlers.items():
 

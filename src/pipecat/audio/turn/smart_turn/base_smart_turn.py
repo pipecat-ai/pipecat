@@ -41,8 +41,7 @@ class SmartTurnParams(BaseModel):
     stop_secs: float = STOP_SECS
     pre_speech_ms: float = PRE_SPEECH_MS
     max_duration_secs: float = MAX_DURATION_SECONDS
-    # not exposing this for now yet until the model can handle it.
-    # use_only_last_vad_segment: bool = USE_ONLY_LAST_VAD_SEGMENT
+    use_only_last_vad_segment: bool = USE_ONLY_LAST_VAD_SEGMENT
 
 
 class SmartTurnTimeoutException(Exception):
@@ -77,6 +76,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
         self._speech_triggered = False
         self._silence_ms = 0
         self._speech_start_time = 0
+        # Store timeout metrics when end of turn is triggered by timeout
+        self._timeout_metrics: Optional[MetricsData] = None
 
     @property
     def speech_triggered(self) -> bool:
@@ -129,6 +130,15 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                         f"End of Turn complete due to stop_secs. Silence in ms: {self._silence_ms}"
                     )
                     state = EndOfTurnState.COMPLETE
+                    # Create metrics for timeout-based end of turn
+                    self._timeout_metrics = SmartTurnMetricsData(
+                        processor="BaseSmartTurn",
+                        is_complete=True,
+                        probability=1.0,  # Certain due to timeout
+                        inference_time_ms=0.0,  # No inference was done
+                        server_total_time_ms=0.0,  # No server call
+                        e2e_processing_time_ms=self._stop_ms,  # Instant decision
+                    )
                     self._clear(state)
             else:
                 # Trim buffer to prevent unbounded growth before speech
@@ -152,9 +162,8 @@ class BaseSmartTurn(BaseTurnAnalyzer):
             from the ML model analysis.
         """
         state, result = await self._process_speech_segment(self._audio_buffer)
-        if state == EndOfTurnState.COMPLETE or USE_ONLY_LAST_VAD_SEGMENT:
+        if state == EndOfTurnState.COMPLETE or self._params.use_only_last_vad_segment:
             self._clear(state)
-        logger.debug(f"End of Turn result: {state}")
         return state, result
 
     def clear(self):
@@ -227,6 +236,10 @@ class BaseSmartTurn(BaseTurnAnalyzer):
                     inference_time_ms=inference_time * 1000,
                     server_total_time_ms=total_time * 1000,
                     e2e_processing_time_ms=e2e_processing_time_ms,
+                )
+
+                logger.debug(
+                    f"End of Turn result: {state} (processing time: {e2e_processing_time_ms:.2f} ms)"
                 )
 
                 logger.trace(

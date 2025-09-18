@@ -29,6 +29,7 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
+    LLMGeneratedTextFrame,
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
@@ -272,9 +273,23 @@ class BaseOpenAILLMService(LLMService):
     async def _stream_chat_completions_specific_context(
         self, context: OpenAILLMContext
     ) -> AsyncStream[ChatCompletionChunk]:
-        logger.debug(
-            f"{self}: Generating chat from LLM-specific context {context.get_messages_for_logging()}"
-        )
+        # Truncate messages for logging to avoid overwhelming the logs
+        messages_for_log = context.get_messages_for_logging()
+        for i, message in enumerate(messages_for_log):
+            # Handle both string and dict message types
+            if isinstance(message, dict):
+                # For dict messages, process the 'content' field if it exists
+                if "content" in message and isinstance(message["content"], str):
+                    words = message["content"].split()
+                    if len(words) > 120:
+                        message["content"] = " ".join(words[:20] + ["......"] + words[-100:])
+                    messages_for_log[i] = message
+            elif isinstance(message, str):
+                words = message.split()
+                if len(words) > 120:
+                    messages_for_log[i] = " ".join(words[:20] + ["......"] + words[-100:])
+
+        logger.debug(f"{self}: Generating chat from LLM-specific context {messages_for_log}")
 
         messages: List[ChatCompletionMessageParam] = context.get_messages()
 
@@ -324,6 +339,9 @@ class BaseOpenAILLMService(LLMService):
         tool_call_id = ""
 
         await self.start_ttfb_metrics()
+
+        # Track if we've sent the LLMGeneratedTextFrame signal for this response
+        text_generation_signaled = False
 
         # Generate chat completions using either OpenAILLMContext or universal LLMContext
         chunk_stream = await (
@@ -377,6 +395,11 @@ class BaseOpenAILLMService(LLMService):
                     # Keep iterating through the response to collect all the argument fragments
                     arguments += tool_call.function.arguments
             elif chunk.choices[0].delta.content:
+                # Send a frame that signals that some text was generated in the current generation
+                if not text_generation_signaled:
+                    await self.push_frame(LLMGeneratedTextFrame())
+                    text_generation_signaled = True
+
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.content))
 
             # When gpt-4o-audio / gpt-4o-mini-audio is used for llm or stt+llm

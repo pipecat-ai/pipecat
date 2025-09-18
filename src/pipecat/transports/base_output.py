@@ -49,7 +49,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.transports.base_transport import TransportParams
 from pipecat.utils.time import nanoseconds_to_seconds
 
-BOT_VAD_STOP_SECS = 0.35
+# Send bot stopped speaking immediately when using mixer
+BOT_VAD_STOP_SECS = 0
 
 
 class BaseOutputTransport(FrameProcessor):
@@ -711,7 +712,11 @@ class BaseOutputTransport(FrameProcessor):
                 # it's actually speaking.
                 is_speaking = False
                 if isinstance(frame, TTSAudioRawFrame):
-                    is_speaking = True
+                    # Lets handle the case where we are adding silence between
+                    # sentences in AudioContextWordTTSService. We don't want to
+                    # trigger another BotStartedSpeaking in case of silence.
+                    has_sound = any(byte != 0 for byte in frame.audio)
+                    is_speaking = has_sound
                 elif isinstance(frame, SpeechOutputAudioRawFrame):
                     if not is_silence(frame.audio):
                         is_speaking = True
@@ -729,7 +734,7 @@ class BaseOutputTransport(FrameProcessor):
                             BotSpeakingFrame(), FrameDirection.UPSTREAM
                         )
                         bot_speaking_counter = 0
-                    bot_speaking_counter += 1
+                    bot_speaking_counter += 1  # +1 every 20 ms, so per 10 counter, its 200ms
 
                 # No need to push EndFrame, it's pushed from process_frame().
                 if isinstance(frame, EndFrame):

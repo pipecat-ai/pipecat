@@ -31,7 +31,7 @@ def is_tracing_available() -> bool:
     Returns:
         True if tracing is available, False otherwise.
     """
-    return OPENTELEMETRY_AVAILABLE
+    return OPENTELEMETRY_AVAILABLE and os.environ.get("ENABLE_TRACING", "false").lower() == "true"
 
 
 def setup_tracing(

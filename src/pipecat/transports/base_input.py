@@ -87,6 +87,11 @@ class BaseInputTransport(FrameProcessor):
         # if passthrough is enabled.
         self._audio_task = None
 
+        # We will set this flag if we have received EndFrame in the
+        # transport. This will enable us to stop queueing emulated
+        # user starting frame.
+        self._close_initiated = False
+
         # If the transport is stopped with `StopFrame` we might still be
         # receiving frames from the transport but we really don't want to push
         # them downstream until we get another `StartFrame`.
@@ -212,6 +217,7 @@ class BaseInputTransport(FrameProcessor):
             frame: The end frame signaling transport shutdown.
         """
         # Cancel and wait for the audio input task to finish.
+        self._close_initiated = True
         await self._cancel_audio_task()
         # Stop audio filter.
         if self._params.audio_in_filter:
@@ -236,6 +242,7 @@ class BaseInputTransport(FrameProcessor):
             frame: The cancel frame signaling immediate cancellation.
         """
         # Cancel and wait for the audio input task to finish.
+        self._close_initiated = True
         await self._cancel_audio_task()
 
     async def set_transport_ready(self, frame: StartFrame):
@@ -294,9 +301,19 @@ class BaseInputTransport(FrameProcessor):
             await self._handle_bot_stopped_speaking(frame)
             await self.push_frame(frame, direction)
         elif isinstance(frame, EmulateUserStartedSpeakingFrame):
+            if self._close_initiated:
+                logger.debug(
+                    "Ignoring emulated user started speaking frame because transport is closing"
+                )
+                return
             logger.debug("Emulating user started speaking")
             await self._handle_user_interruption(VADState.SPEAKING, emulated=True)
         elif isinstance(frame, EmulateUserStoppedSpeakingFrame):
+            if self._close_initiated:
+                logger.debug(
+                    "Ignoring emulated user stopped speaking frame because transport is closing"
+                )
+                return
             logger.debug("Emulating user stopped speaking")
             await self._handle_user_interruption(VADState.QUIET, emulated=True)
         # All other system frames
@@ -306,6 +323,7 @@ class BaseInputTransport(FrameProcessor):
         elif isinstance(frame, EndFrame):
             # Push EndFrame before stop(), because stop() waits on the task to
             # finish and the task finishes when EndFrame is processed.
+            logger.debug(f"Received EndFrame, stopping {self}")
             await self.push_frame(frame, direction)
             await self.stop(frame)
         elif isinstance(frame, StopFrame):
@@ -455,6 +473,14 @@ class BaseInputTransport(FrameProcessor):
         # If silence exceeds threshold, we are going to receive EndOfTurnState.COMPLETE
         end_of_turn_state = self._params.turn_analyzer.append_audio(frame.audio, is_speech)
         if end_of_turn_state == EndOfTurnState.COMPLETE:
+            # Check if the turn analyzer has timeout metrics to emit
+            if (
+                hasattr(self._params.turn_analyzer, "_timeout_metrics")
+                and self._params.turn_analyzer._timeout_metrics
+            ):
+                await self._handle_prediction_result(self._params.turn_analyzer._timeout_metrics)
+                self._params.turn_analyzer._timeout_metrics = None
+
             await self._handle_end_of_turn_complete(end_of_turn_state)
         # Otherwise we are going to trigger to check if the turn is completed based on the VAD
         elif vad_state == VADState.QUIET and vad_state != previous_vad_state:
