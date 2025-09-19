@@ -78,10 +78,6 @@ from pipecat.runner.types import (
     SmallWebRTCRunnerArguments,
     WebSocketRunnerArguments,
 )
-from pipecat.transports.smallwebrtc.request_handler import (
-    SmallWebRTCRequest,
-    SmallWebRTCRequestHandler,
-)
 
 try:
     import uvicorn
@@ -186,6 +182,10 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.request_handler import (
+            SmallWebRTCRequest,
+            SmallWebRTCRequestHandler,
+        )
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
