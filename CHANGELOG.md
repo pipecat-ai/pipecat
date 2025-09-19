@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       ...
   ```
 
+- Added support for new RTVI `send-text` event, along with the ability to toggle the audio response off (skip tts) while handling the new context.
+
 ### Changed
 
 - Updated Silero VAD model to v6.
@@ -62,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PipelineTask` events `on_pipeline_stopped`, `on_pipeline_ended` and
   `on_pipeline_cancelled` are now deprecated. Use `on_pipeline_finished`
   instead.
+
+- Support for the RTVI `append-to-context` event, in lieu of the new `send-text` event and making way for future events like `send-image`.
 
 ### Fixed
 
