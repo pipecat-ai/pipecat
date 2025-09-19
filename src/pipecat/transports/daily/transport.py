@@ -25,7 +25,6 @@ from pydantic import BaseModel
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
-    ControlFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -42,6 +41,7 @@ from pipecat.frames.frames import (
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
+    ControlFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transcriptions.language import Language
@@ -114,7 +114,7 @@ class DailyUpdateRemoteParticipantsFrame(ControlFrame):
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
-    remote_participants: Optional[Any] = None
+    remote_participants: Mapping[str, Any] = None
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -1807,7 +1807,6 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
-            logger.debug(f"Got a DailyUpdateRemoteParticipantsFrame: {frame}")
             await self._client.update_remote_participants(frame.remote_participants)
 
     async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
