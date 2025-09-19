@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `on_before_disconnect` synchronous event to `DailyTransport` and
+  `LiveKitTransport`.
+
+- It is now possible to register synchronous event handlers. By default, all
+  event handlers are executed in a separate task. However, in some cases we want
+  to guarantee order of execution, for example, executing something before
+  disconnecting a transport.
+
+  ```python
+  self._register_event_handler("on_event_name", sync=True)
+  ```
+
 - Added support for global location in `GoogleVertexLLMService`. The service now
   supports both regional locations (e.g., "us-east4") and the "global" location
   for Vertex AI endpoints. When using "global" location, the service will use
@@ -52,6 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead.
 
 ### Fixed
+
+- Fixed an issue where multiple handlers for an event would not run in parallel.
 
 - Fixed `DailyTransport.sip_call_transfer()` to automatically use the session
   ID from the `on_dialin_connected` event, when not explicitly provided. Now
