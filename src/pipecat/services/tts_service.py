@@ -330,10 +330,10 @@ class TTSService(AIService):
         elif isinstance(frame, TTSSpeakFrame):
             # Store if we were processing text or not so we can set it back.
             processing_text = self._processing_text
-            await self._push_tts_frames(frame.text)
             # We pause processing incoming frames because we are sending data to
             # the TTS. We pause to avoid audio overlapping.
-            await self._maybe_pause_frame_processing()
+            await self._maybe_pause_frame_processing(force=True)
+            await self._push_tts_frames(frame.text)
             await self.flush_audio()
             self._processing_text = processing_text
         elif isinstance(frame, TTSUpdateSettingsFrame):
@@ -380,8 +380,11 @@ class TTSService(AIService):
         for filter in self._text_filters:
             await filter.handle_interruption()
 
-    async def _maybe_pause_frame_processing(self):
-        if self._processing_text and self._pause_frame_processing:
+    async def _maybe_pause_frame_processing(self, force: bool = False):
+        if not self._processing_text and not force:
+            return
+
+        if self._pause_frame_processing:
             await self.pause_processing_frames()
 
     async def _maybe_resume_frame_processing(self):
