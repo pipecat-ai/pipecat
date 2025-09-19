@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
+    ControlFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -41,7 +42,6 @@ from pipecat.frames.frames import (
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
-    DataFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transcriptions.language import Language
@@ -105,8 +105,9 @@ class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
 
     participant_id: Optional[str] = None
 
+
 @dataclass
-class DailyUpdateRemoteParticipantsFrame(DataFrame):
+class DailyUpdateRemoteParticipantsFrame(ControlFrame):
     """Frame to update remote participants in Daily calls.
 
     Parameters:
@@ -114,6 +115,7 @@ class DailyUpdateRemoteParticipantsFrame(DataFrame):
     """
 
     remote_participants: Optional[Any] = None
+
 
 class WebRTCVADAnalyzer(VADAnalyzer):
     """Voice Activity Detection analyzer using WebRTC.
@@ -1794,7 +1796,7 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
-    
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process outgoing frames, including transport messages.
 
