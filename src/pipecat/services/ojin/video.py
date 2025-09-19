@@ -589,7 +589,7 @@ class OjinPersonaService(FrameProcessor):
 
         self._interaction: Optional[OjinPersonaInteraction] = None
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
-
+        self._receive_task: Optional[asyncio.Task] = None
         self._resampler = create_default_resampler()
         self._server_fps_tracker = FPSTracker("OjinPersonaService")
         self.should_generate_silence: bool = False
@@ -1437,15 +1437,16 @@ def mirror_index(index: int, size: int, period: int = 2):
         This method maps a continuously increasing index to a back-and-forth pattern
         within the given size, creating a ping-pong effect for smooth looping animations.
 
-        Args:
+    Args:
             index (int): The original frame index
             size (int): The number of available frames
             period (int): Period of the mirrored indices
 
-        Returns:
+    Returns:
             int: The mirrored index that creates the ping-pong effect
 
-    #"""
+    #
+    """
     turn = index // size
     res = index % size
     if turn % period == 0:
