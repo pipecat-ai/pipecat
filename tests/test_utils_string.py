@@ -31,6 +31,7 @@ class TestUtilsString(unittest.IsolatedAsyncioTestCase):
         assert match_endofsentence("Valid scientific notation 1.23e4.") == 33
         assert match_endofsentence("Valid scientific notation 0.e4.") == 31
         assert match_endofsentence("It still early, it's 3:00 a.m.") == 30
+        assert match_endofsentence("That'll be $20.00.") == 18
         assert not match_endofsentence("This is not a sentence")
         assert not match_endofsentence("This is not a sentence,")
         assert not match_endofsentence("This is not a sentence, ")
