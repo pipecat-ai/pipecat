@@ -41,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `GladiaSTTService`'s `confidence` arg is deprecated. `confidence` is no
+  longer needed to determine which transcription or translation frames to
+  emit.
+
 - `PipelineTask` events `on_pipeline_stopped`, `on_pipeline_ended` and
   `on_pipeline_cancelled` are now deprecated. Use `on_pipeline_finished`
   instead.
