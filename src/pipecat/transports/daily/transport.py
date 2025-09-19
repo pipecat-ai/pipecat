@@ -106,15 +106,6 @@ class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
 
     participant_id: Optional[str] = None
 
-@dataclass
-class DailyUpdateRemoteParticipantsFrame(DataFrame):
-    """Frame to update remote participants in Daily calls.
-
-    Parameters:
-        remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
-    """
-
-    remote_participants: Optional[Any] = None
 
 @dataclass
 class DailyUpdateRemoteParticipantsFrame(ControlFrame):
@@ -1811,7 +1802,7 @@ class DailyOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         # Leave the room.
         await self._client.leave()
-    
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process outgoing frames, including transport messages.
 
