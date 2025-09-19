@@ -68,7 +68,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             model="inworld-tts-1",
             streaming=streaming,  # True: real-time chunks, False: complete audio then playback
             params=InworldTTSService.InputParams(
-                temperature=0.8,
+                temperature=1.1,
             ),
         )
 
