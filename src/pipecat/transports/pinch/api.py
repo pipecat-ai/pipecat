@@ -50,10 +50,8 @@ class PinchSessionRequest(BaseModel):
         """Validate language codes are not empty."""
         if not v or not v.strip():
             raise ValueError("Language code cannot be empty")
-        # Basic validation - should be 2-3 letter codes
-        if len(v.strip()) < 2 or len(v.strip()) > 3:
-            raise ValueError("Language code should be 2-3 characters")
-        return v.strip().lower()
+
+        return v.strip()
 
 
 class PinchSession(BaseModel):

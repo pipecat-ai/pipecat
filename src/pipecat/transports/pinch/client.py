@@ -291,7 +291,7 @@ class PinchClient:
                 self._call_event_callback(self._callbacks.on_original_transcript, text, is_final)
 
         elif msg_type == "translated_transcript":
-            text = message.get("translated_text", "")
+            text = message.get("text", "")
             is_final = message.get("is_final", True)
 
             if self._callbacks.on_translated_transcript:
