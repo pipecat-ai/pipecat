@@ -614,8 +614,8 @@ class RTVIAppendToContextData(BaseModel):
     Contains the role, content, and whether to run the message immediately.
 
         .. deprecated:: 0.0.85
-        The RTVI message, append-to-context, has been deprecated. Use send-text
-        or custom client and server messages instead.
+            The RTVI message, append-to-context, has been deprecated. Use send-text
+            or custom client and server messages instead.
     """
 
     role: Literal["user", "assistant"] | str
@@ -1601,17 +1601,18 @@ class RTVIProcessor(FrameProcessor):
 
     async def _handle_send_text(self, data: RTVISendTextData):
         """Handle a send-text message from the client."""
-        if data.options.run_immediately:
+        opts = data.options if data.options is not None else RTVISendTextOptions()
+        if opts.run_immediately:
             await self.interrupt_bot()
         cur_skip_tts = self._skip_tts
-        should_skip_tts = not data.options.audio_response
+        should_skip_tts = not opts.audio_response
         toggle_skip_tts = cur_skip_tts != should_skip_tts
         if toggle_skip_tts:
             output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
             await self.push_frame(output_frame)
         text_frame = LLMMessagesAppendFrame(
             messages=[{"role": "user", "content": data.content}],
-            run_llm=data.options.run_immediately,
+            run_llm=opts.run_immediately,
         )
         await self.push_frame(text_frame)
         if toggle_skip_tts:
