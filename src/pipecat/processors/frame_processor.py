@@ -141,6 +141,12 @@ class FrameProcessor(BaseObject):
     task. System frames are also processed in a separate task which guarantees
     frame priority.
 
+    Event handlers available:
+
+    - on_before_process_frame: Called before a frame is processed
+    - on_after_process_frame: Called after a frame is processed
+    - on_before_push_frame: Called before a frame is pushed
+    - on_after_push_frame: Called after a frame is pushed
     """
 
     def __init__(
@@ -227,6 +233,12 @@ class FrameProcessor(BaseObject):
         # event.
         self._wait_for_interruption = False
         self._wait_interruption_event = asyncio.Event()
+
+        # Frame processor events.
+        self._register_event_handler("on_before_process_frame", sync=True)
+        self._register_event_handler("on_after_process_frame", sync=True)
+        self._register_event_handler("on_before_push_frame", sync=True)
+        self._register_event_handler("on_after_push_frame", sync=True)
 
     @property
     def id(self) -> int:
@@ -639,7 +651,11 @@ class FrameProcessor(BaseObject):
         if not self._check_started(frame):
             return
 
+        await self._call_event_handler("on_before_push_frame", frame)
+
         await self.__internal_push_frame(frame, direction)
+
+        await self._call_event_handler("on_after_push_frame", frame)
 
         # If we are waiting for an interruption and we get an interruption, then
         # we can unblock `push_interruption_task_frame_and_wait()`.
@@ -836,11 +852,15 @@ class FrameProcessor(BaseObject):
         self, frame: Frame, direction: FrameDirection, callback: Optional[FrameCallback]
     ):
         try:
+            await self._call_event_handler("on_before_process_frame", frame)
+
             # Process the frame.
             await self.process_frame(frame, direction)
             # If this frame has an associated callback, call it now.
             if callback:
                 await callback(self, frame, direction)
+
+            await self._call_event_handler("on_after_process_frame", frame)
         except Exception as e:
             logger.exception(f"{self}: error processing frame: {e}")
             await self.push_error(ErrorFrame(str(e)))
