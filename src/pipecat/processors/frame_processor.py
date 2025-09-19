@@ -568,11 +568,17 @@ class FrameProcessor(BaseObject):
         """Pause processing of queued frames."""
         logger.trace(f"{self}: pausing frame processing")
         self.__should_block_frames = True
+        # We should also unset the process event here, in case it was set immediately after an interruption
+        if self.__process_event:
+            self.__process_event.clear()
 
     async def pause_processing_system_frames(self):
         """Pause processing of queued system frames."""
         logger.trace(f"{self}: pausing system frame processing")
         self.__should_block_system_frames = True
+        # We should also unset the input event here, in case it was set immediately after an interruption
+        if self.__input_event:
+            self.__input_event.clear()
 
     async def resume_processing_frames(self):
         """Resume processing of queued frames."""
