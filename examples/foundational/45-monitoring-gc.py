@@ -3,12 +3,16 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
+import asyncio
+import gc
 import os
+from collections import Counter
 
 import cv2
 import numpy as np
 from dotenv import load_dotenv
 from loguru import logger
+
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import Frame, InputImageRawFrame, LLMRunFrame, OutputImageRawFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -21,10 +25,7 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.gemini_multimodal_live import GeminiMultimodalLiveLLMService
 from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.daily.transport import DailyTransport, DailyParams
-import gc
-import asyncio
-from collections import Counter
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -48,6 +49,7 @@ transport_params = {
         vad_analyzer=SileroVADAnalyzer(),
     ),
 }
+
 
 class EdgeDetectionProcessor(FrameProcessor):
     def __init__(self, video_out_width, video_out_height: int):
@@ -93,6 +95,7 @@ Your output will be converted to audio so don't include special characters in yo
 Respond to what the user said in a creative and helpful way. Keep your responses brief. One or two sentences at most.
 """
 
+
 async def log_frame_counts(interval=10):
     """
     Log the number of Frames in the garbage collector.
@@ -117,6 +120,7 @@ async def log_frame_counts(interval=10):
         logger.info(f"Top 10 Frame classes by count: {top_counts}")
 
         await asyncio.sleep(interval)
+
 
 async def run_bot(pipecat_transport):
     asyncio.create_task(log_frame_counts())
@@ -148,7 +152,8 @@ async def run_bot(pipecat_transport):
             rtvi,
             llm,  # LLM
             EdgeDetectionProcessor(
-                pipecat_transport._params.video_out_width, pipecat_transport._params.video_out_height
+                pipecat_transport._params.video_out_width,
+                pipecat_transport._params.video_out_height,
             ),  # Sending the video back to the user
             pipecat_transport.output(),
             context_aggregator.assistant(),
@@ -187,6 +192,7 @@ async def run_bot(pipecat_transport):
     runner = PipelineRunner(handle_sigint=False, force_gc=True)
 
     await runner.run(task)
+
 
 async def bot(runner_args: RunnerArguments):
     """Main bot entry point compatible with Pipecat Cloud."""
