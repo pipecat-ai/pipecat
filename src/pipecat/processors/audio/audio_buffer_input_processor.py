@@ -11,7 +11,7 @@ from typing import Optional
 
 from loguru import logger
 
-from pipecat.audio.utils import create_default_resampler
+from pipecat.audio.utils import create_stream_resampler
 from pipecat.frames.frames import (
     AudioRawFrame,
     CancelFrame,
@@ -74,7 +74,7 @@ class AudioBufferInputProcessor(FrameProcessor):
         self._reported_first_frame_time = False
 
         self._recording = False
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
 
         self._register_event_handler("on_input_audio_data")
         self._register_event_handler("on_user_turn_audio_data")

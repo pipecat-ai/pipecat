@@ -11,7 +11,7 @@ from typing import Callable, Dict, List
 
 from loguru import logger
 
-from pipecat.audio.utils import create_default_resampler, interleave_stereo_audio, mix_audio
+from pipecat.audio.utils import create_stream_resampler, interleave_stereo_audio, mix_audio
 
 
 class AudioSynchronizer:
@@ -50,7 +50,7 @@ class AudioSynchronizer:
         self._output_buffer = bytearray()
 
         self._event_handlers: Dict[str, List[Callable]] = {"on_merged_audio": []}
-        self._resampler = create_default_resampler()
+        self._resampler = create_stream_resampler()
 
         self._input_processor = None
         self._output_processor = None

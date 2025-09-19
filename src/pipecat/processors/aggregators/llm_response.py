@@ -14,7 +14,7 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 import asyncio
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Set
+from typing import Callable, Dict, List, Literal, Optional, Set
 
 from loguru import logger
 
@@ -90,9 +90,12 @@ class LLMAssistantAggregatorParams:
     Parameters:
         expect_stripped_words: Whether to expect and handle stripped words
             in text frames by adding spaces between tokens.
+        correct_aggregation_callback: Optional callback to correct corrupted
+            TTS text before it's added to the conversation context.
     """
 
     expect_stripped_words: bool = True
+    correct_aggregation_callback: Optional[Callable[[str], str]] = None
 
 
 class LLMFullResponseAggregator(FrameProcessor):
@@ -779,6 +782,12 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
+        # Register event handler that will be triggered when an aggregation is pushed.
+        # External components (e.g., PipecatEngine) can subscribe to this event to be
+        # notified whenever the assistant context has been updated and pushed
+        # downstream.
+        self._register_event_handler("on_push_aggregation")
+
     @property
     def has_function_calls_in_progress(self) -> bool:
         """Check if there are any function calls currently in progress.
@@ -879,6 +888,13 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
         aggregation = self._aggregation.strip()
         await self.reset()
+
+        # Apply correction if callback is provided
+        if aggregation and self._params.correct_aggregation_callback:
+            try:
+                aggregation = self._params.correct_aggregation_callback(aggregation)
+            except Exception as e:
+                logger.error(f"Error in aggregation correction callback: {e}")
 
         if aggregation:
             await self.handle_aggregation(aggregation)

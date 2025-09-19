@@ -511,7 +511,7 @@ class FrameProcessor(BaseObject):
         """
         self._next = processor
         processor._prev = self
-        logger.debug(f"Linking {self} -> {self._next}")
+        logger.trace(f"Linking {self} -> {self._next}")
 
     def get_clock(self) -> BaseClock:
         """Get the clock used by this processor.

@@ -53,6 +53,12 @@ from pipecat.utils.time import nanoseconds_to_seconds
 BOT_VAD_STOP_SECS = 0
 
 
+class TransportClientNotConnectedException(Exception):
+    """Exception raised when a transport client is not connected."""
+
+    pass
+
+
 class BaseOutputTransport(FrameProcessor):
     """Base class for output transport implementations.
 
