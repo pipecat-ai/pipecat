@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from pipecat.audio.vad.vad_analyzer import VADAnalyzer, VADParams
 from pipecat.frames.frames import (
     CancelFrame,
+    ControlFrame,
     EndFrame,
     ErrorFrame,
     Frame,
@@ -41,7 +42,6 @@ from pipecat.frames.frames import (
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
-    ControlFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessorSetup
 from pipecat.transcriptions.language import Language
