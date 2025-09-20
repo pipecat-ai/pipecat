@@ -1973,7 +1973,7 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_recording_started")
         self._register_event_handler("on_recording_stopped")
         self._register_event_handler("on_recording_error")
-        self._register_event_handler("on_before_disconnect", sync=True)
+        self._register_event_handler("on_before_leave", sync=True)
         # Deprecated
         self._register_event_handler("on_joined")
         self._register_event_handler("on_left")
@@ -2230,7 +2230,7 @@ class DailyTransport(BaseTransport):
 
     async def _on_before_leave(self):
         """Handle before leave room events."""
-        await self._call_event_handler("on_before_disconnect")
+        await self._call_event_handler("on_before_leave")
 
     async def _on_error(self, error):
         """Handle error events and push error frames."""
