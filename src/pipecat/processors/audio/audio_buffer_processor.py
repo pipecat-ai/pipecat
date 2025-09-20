@@ -229,9 +229,12 @@ class AudioBufferProcessor(FrameProcessor):
             # Save time of frame so we can compute silence.
             self._last_bot_frame_at = time.time()
 
-        if self._buffer_size > 0 and len(self._user_audio_buffer) > self._buffer_size:
+        if self._buffer_size > 0 and (
+            len(self._user_audio_buffer) >= self._buffer_size
+            or len(self._bot_audio_buffer) >= self._buffer_size
+        ):
             await self._call_on_audio_data_handler()
-            self._reset_recording()
+            self._clear_primary_audio_buffers()
 
         # Process turn recording with preprocessed data.
         if self._enable_turn_audio:
@@ -272,8 +275,14 @@ class AudioBufferProcessor(FrameProcessor):
 
     async def _call_on_audio_data_handler(self):
         """Call the audio data event handlers with buffered audio."""
-        if not self.has_audio() or not self._recording:
+        if not self._recording:
             return
+
+        if len(self._user_audio_buffer) == 0 and len(self._bot_audio_buffer) == 0:
+            return
+
+        self._align_track_buffers()
+        flush_time = time.time()
 
         # Call original handler with merged audio
         merged_audio = self.merge_audio_buffers()
@@ -289,6 +298,9 @@ class AudioBufferProcessor(FrameProcessor):
             self._sample_rate,
             self._num_channels,
         )
+
+        self._last_user_frame_at = flush_time
+        self._last_bot_frame_at = flush_time
 
     def _buffer_has_audio(self, buffer: bytearray) -> bool:
         """Check if a buffer contains audio data."""
@@ -306,6 +318,26 @@ class AudioBufferProcessor(FrameProcessor):
         self._bot_audio_buffer = bytearray()
         self._user_turn_audio_buffer = bytearray()
         self._bot_turn_audio_buffer = bytearray()
+
+    def _clear_primary_audio_buffers(self):
+        """Clear user and bot buffers while preserving turn buffers and timestamps."""
+        self._user_audio_buffer = bytearray()
+        self._bot_audio_buffer = bytearray()
+
+    def _align_track_buffers(self):
+        """Pad the shorter track with silence so both tracks stay in sync."""
+        user_len = len(self._user_audio_buffer)
+        bot_len = len(self._bot_audio_buffer)
+        if user_len == bot_len:
+            return
+
+        target_len = max(user_len, bot_len)
+        if user_len < target_len:
+            self._user_audio_buffer.extend(b"\x00" * (target_len - user_len))
+            self._last_user_frame_at = max(self._last_user_frame_at, self._last_bot_frame_at)
+        if bot_len < target_len:
+            self._bot_audio_buffer.extend(b"\x00" * (target_len - bot_len))
+            self._last_bot_frame_at = max(self._last_bot_frame_at, self._last_user_frame_at)
 
     async def _resample_input_audio(self, frame: InputAudioRawFrame) -> bytes:
         """Resample audio frame to the target sample rate."""
