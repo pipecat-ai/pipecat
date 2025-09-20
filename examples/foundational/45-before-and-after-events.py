@@ -124,8 +124,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        # CustomSynchronizationFrame is pushed in order so it will reach the
-        # `on_after_push_frame` handler before the bot has finished talking.
+        # Custom frames are pushed in order so they can be used for synchronization purposes.
         await task.queue_frames([CustomBeforeProcessFrame(), LLMRunFrame(), CustomAfterPushFrame()])
 
     @transport.event_handler("on_client_disconnected")
