@@ -96,7 +96,7 @@ class DograhTTSService(AudioContextWordTTSService):
         model: str = "default",
         base_url: str = "wss://services.dograh.com",
         ws_path: str = "/api/v1/tts/stream",
-        sample_rate: Optional[int] = 24000,
+        sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         aggregate_sentences: Optional[bool] = True,
         **kwargs,
@@ -111,7 +111,7 @@ class DograhTTSService(AudioContextWordTTSService):
                    The actual model used is determined by Dograh backend configuration.
             base_url: WebSocket base URL for Dograh API. Defaults to "wss://services.dograh.com".
             ws_path: WebSocket path for TTS streaming. Defaults to "/api/v1/tts/stream".
-            sample_rate: Output audio sample rate in Hz. Defaults to 24000.
+            sample_rate: Output audio sample rate in Hz. Defaults to None.
             params: Additional input parameters for voice customization.
             aggregate_sentences: Whether to aggregate sentences before synthesis.
             **kwargs: Additional arguments passed to the parent service.
