@@ -57,7 +57,7 @@ class DograhSTTService(STTService):
         ws_path: str = "/api/v1/stt/stream",
         model: str = "default",
         language: Language = Language.EN,
-        sample_rate: Optional[int] = 16000,
+        sample_rate: Optional[int] = None,
         interim_results: bool = True,
         vad_events: bool = False,
         **kwargs,
@@ -71,7 +71,7 @@ class DograhSTTService(STTService):
             model: STT model to use. Options include "default", "fast", "accurate".
                    The actual model used is determined by Dograh backend configuration.
             language: Language for speech recognition. Defaults to English.
-            sample_rate: Audio sample rate in Hz. Defaults to 16000.
+            sample_rate: Audio sample rate in Hz. Defaults to None.
             interim_results: Whether to receive interim transcription results.
             vad_events: Whether to receive voice activity detection events.
             **kwargs: Additional arguments passed to the parent STTService.

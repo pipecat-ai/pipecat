@@ -762,7 +762,13 @@ class BaseOutputTransport(FrameProcessor):
 
                 # Send audio.
                 if isinstance(frame, OutputAudioRawFrame):
-                    await self._transport.write_audio_frame(frame)
+                    try:
+                        await self._transport.write_audio_frame(frame)
+                    except TransportClientNotConnectedException:
+                        logger.warning(
+                            "Got TransportClientNotConnectedException. Breaking out of _audio_task_handler"
+                        )
+                        return
 
         #
         # Video handling
