@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `on_before_process_frame`, `on_after_process_frame`,
+  `on_before_push_frame` and `on_after_push_frame`. These are synchronous events
+  that get called before and after a frame is processed or pushed. Note that
+  these events are synchrnous so they should ideally perform lightweight tasks
+  in order to not block the pipeline. See
+  `examples/foundational/45-before-and-after-events.py`.
+
 - Added `on_before_leave` synchronous event to `DailyTransport`.
 
 - Added `on_before_disconnect` synchronous event to `LiveKitTransport`.
