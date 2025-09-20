@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `on_before_disconnect` synchronous event to `DailyTransport` and
-  `LiveKitTransport`.
+- Added `on_before_leave` synchronous event to `DailyTransport`.
+
+- Added `on_before_disconnect` synchronous event to `LiveKitTransport`.
 
 - It is now possible to register synchronous event handlers. By default, all
   event handlers are executed in a separate task. However, in some cases we want
@@ -36,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       ...
   ```
 
-- Added support for new RTVI `send-text` event, along with the ability to toggle the audio response off (skip tts) while handling the new context.
+- Added support for new RTVI `send-text` event, along with the ability to toggle
+  the audio response off (skip tts) while handling the new context.
 
 ### Changed
 
@@ -65,7 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `on_pipeline_cancelled` are now deprecated. Use `on_pipeline_finished`
   instead.
 
-- Support for the RTVI `append-to-context` event, in lieu of the new `send-text` event and making way for future events like `send-image`.
+- Support for the RTVI `append-to-context` event, in lieu of the new `send-text`
+  event and making way for future events like `send-image`.
 
 ### Fixed
 
