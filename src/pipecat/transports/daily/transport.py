@@ -1948,8 +1948,6 @@ class DailyTransport(BaseTransport):
         # Register supported handlers. The user will only be able to register
         # these handlers.
         self._register_event_handler("on_active_speaker_changed")
-        self._register_event_handler("on_joined")
-        self._register_event_handler("on_left")
         self._register_event_handler("on_error")
         self._register_event_handler("on_app_message")
         self._register_event_handler("on_call_state_updated")
