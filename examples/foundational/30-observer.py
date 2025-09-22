@@ -10,13 +10,16 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     EndFrame,
+    InterruptionFrame,
     LLMRunFrame,
-    StartInterruptionFrame,
     TTSTextFrame,
     UserStartedSpeakingFrame,
 )
@@ -48,7 +51,7 @@ class CustomObserver(BaseObserver):
     """Observer to log interruptions and bot speaking events to the console.
 
     Logs all frame instances of:
-    - StartInterruptionFrame
+    - InterruptionFrame
     - BotStartedSpeakingFrame
     - BotStoppedSpeakingFrame
 
@@ -69,7 +72,7 @@ class CustomObserver(BaseObserver):
         # Create direction arrow
         arrow = "→" if direction == FrameDirection.DOWNSTREAM else "←"
 
-        if isinstance(frame, StartInterruptionFrame) and isinstance(src, BaseOutputTransport):
+        if isinstance(frame, InterruptionFrame) and isinstance(src, BaseOutputTransport):
             logger.info(f"⚡ INTERRUPTION START: {src} {arrow} {dst} at {time_sec:.2f}s")
         elif isinstance(frame, BotStartedSpeakingFrame):
             logger.info(f"🤖 BOT START SPEAKING: {src} {arrow} {dst} at {time_sec:.2f}s")
@@ -84,17 +87,20 @@ transport_params = {
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "twilio": lambda: FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
