@@ -35,7 +35,7 @@ from pipecat.frames.frames import (
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 from pipecat.transports.base_input import BaseInputTransport
-from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_output import BaseOutputTransport, TransportClientNotConnectedException
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 try:
@@ -417,7 +417,7 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
             frame: The output audio frame to write.
         """
         if self._client.is_closing or not self._client.is_connected:
-            return
+            raise TransportClientNotConnectedException()
 
         frame = OutputAudioRawFrame(
             audio=frame.audio,

@@ -38,7 +38,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.transports.base_input import BaseInputTransport
-from pipecat.transports.base_output import BaseOutputTransport
+from pipecat.transports.base_output import BaseOutputTransport, TransportClientNotConnectedException
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
 
@@ -389,6 +389,8 @@ class SmallWebRTCClient:
         """
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(frame.audio)
+        else:
+            raise TransportClientNotConnectedException()
 
     async def write_video_frame(self, frame: OutputImageRawFrame):
         """Write a video frame to the WebRTC connection.

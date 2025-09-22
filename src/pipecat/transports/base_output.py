@@ -724,6 +724,8 @@ class BaseOutputTransport(FrameProcessor):
             BOT_SPEAKING_CHUNK_PERIOD = max(int(200 / TOTAL_CHUNK_MS), 1)
             bot_speaking_counter = 0
             speech_last_speaking_time = 0
+            MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS = 6
+            client_not_connected_count = 0
 
             async for frame in self._next_frame():
                 # Notify the bot started speaking upstream if necessary and that
@@ -757,18 +759,31 @@ class BaseOutputTransport(FrameProcessor):
                 # Handle frame.
                 await self._handle_frame(frame)
 
-                # Also, push frame downstream in case anyone else needs it.
-                await self._transport.push_frame(frame)
-
                 # Send audio.
                 if isinstance(frame, OutputAudioRawFrame):
                     try:
                         await self._transport.write_audio_frame(frame)
+
+                        # Only push Audio Frame downstream if the write is successful
+                        await self._transport.push_frame(frame)
+
+                        # Reset counter on successful write
+                        client_not_connected_count = 0
                     except TransportClientNotConnectedException:
+                        client_not_connected_count += 1
                         logger.warning(
-                            "Got TransportClientNotConnectedException. Breaking out of _audio_task_handler"
+                            f"Got TransportClientNotConnectedException ({client_not_connected_count}/{MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS})"
                         )
-                        return
+                        if client_not_connected_count >= MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS:
+                            logger.error(
+                                f"Maximum TransportClientNotConnectedException attempts reached ({MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS}). Breaking out of _audio_task_handler"
+                            )
+                            return
+                        # Sleep for 1 second before continuing
+                        await asyncio.sleep(0.5)
+                else:
+                    # Push any other frame than AudioRawFrame downstream
+                    await self._transport.push_frame(frame)
 
         #
         # Video handling
