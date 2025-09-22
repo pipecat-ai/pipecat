@@ -1974,9 +1974,6 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_recording_stopped")
         self._register_event_handler("on_recording_error")
         self._register_event_handler("on_before_leave", sync=True)
-        # Deprecated
-        self._register_event_handler("on_joined")
-        self._register_event_handler("on_left")
 
     #
     # BaseTransport
