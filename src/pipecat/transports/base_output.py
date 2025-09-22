@@ -724,7 +724,10 @@ class BaseOutputTransport(FrameProcessor):
             BOT_SPEAKING_CHUNK_PERIOD = max(int(200 / TOTAL_CHUNK_MS), 1)
             bot_speaking_counter = 0
             speech_last_speaking_time = 0
-            MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS = 6
+
+            # Sometimes, ice gathering takes around 5 seconds, so
+            # lets poll for approximately 10 seconds before giving up
+            MAX_CLIENT_NOT_CONNECTED_EXCEPTIONS = 20
             client_not_connected_count = 0
 
             async for frame in self._next_frame():
