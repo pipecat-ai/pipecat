@@ -21,12 +21,49 @@
 
 🧭 Looking to build structured conversations? Check out [Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) for managing complex conversational states and transitions.
 
+🔍 Looking for help debugging your pipeline and processors? Check out [Whisker](https://github.com/pipecat-ai/whisker), a real-time Pipecat debugger.
+
 ## 🧠 Why Pipecat?
 
 - **Voice-first**: Integrates speech recognition, text-to-speech, and conversation handling
 - **Pluggable**: Supports many AI services and tools
 - **Composable Pipelines**: Build complex behavior from modular components
 - **Real-Time**: Ultra-low latency interaction with different transports (e.g. WebSockets or WebRTC)
+
+## 📱 Client SDKs
+
+You can connect to Pipecat from any platform using our official SDKs:
+
+<table>
+  <tr>
+    <td>
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/javascript/javascript-original.svg" width="40" height="40" alt="JavaScript"/>
+      <a href="https://docs.pipecat.ai/client/js/introduction">JavaScript</a>
+    </td>
+    <td>
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="40" height="40" alt="React"/>
+      <a href="https://docs.pipecat.ai/client/react/introduction">React</a>
+    </td>
+    <td>
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="40" height="40" alt="React Native"/>
+      <a href="https://docs.pipecat.ai/client/react-native/introduction">React Native</a>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/swift/swift-original.svg" width="40" height="40" alt="Swift"/>
+      <a href="https://docs.pipecat.ai/client/ios/introduction">Swift</a>
+    </td>
+    <td>
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/kotlin/kotlin-original.svg" width="40" height="40" alt="Kotlin"/>
+      <a href="https://docs.pipecat.ai/client/android/introduction">Kotlin</a>
+    </td>
+    <td>
+      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" width="40" height="40" alt="JavaScript"/>
+      <a href="https://docs.pipecat.ai/client/c++/introduction">C++</a>
+    </td>
+  </tr>
+</table>
 
 ## 🎬 See it in action
 
@@ -37,17 +74,6 @@
     <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/translation-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat-examples/main/translation-chatbot/image.png" width="400" /></a>&nbsp;
     <a href="https://github.com/pipecat-ai/pipecat-examples/tree/main/moondream-chatbot"><img src="https://raw.githubusercontent.com/pipecat-ai/pipecat-examples/main/moondream-chatbot/image.png" width="400" /></a>
 </p>
-
-## 📱 Client SDKs
-
-You can connect to Pipecat from any platform using our official SDKs:
-
-| Platform | SDK Repo                                                                       | Description                      |
-| -------- | ------------------------------------------------------------------------------ | -------------------------------- |
-| Web      | [pipecat-client-web](https://github.com/pipecat-ai/pipecat-client-web)         | JavaScript and React client SDKs |
-| iOS      | [pipecat-client-ios](https://github.com/pipecat-ai/pipecat-client-ios)         | Swift SDK for iOS                |
-| Android  | [pipecat-client-android](https://github.com/pipecat-ai/pipecat-client-android) | Kotlin SDK for Android           |
-| C++      | [pipecat-client-cxx](https://github.com/pipecat-ai/pipecat-client-cxx)         | C++ client SDK                   |
 
 ## 🧩 Available services
 
@@ -129,7 +155,11 @@ You can get started with Pipecat running on your local machine, then move your a
 2. Install development and testing dependencies:
 
    ```bash
-   uv sync --group dev --all-extras --no-extra gstreamer --no-extra krisp --no-extra local
+   uv sync --group dev --all-extras \
+     --no-extra gstreamer \
+     --no-extra krisp \
+     --no-extra local \
+     --no-extra ultravox # (ultravox not fully supported on macOS)
    ```
 
 3. Install the git pre-commit hooks:
@@ -137,23 +167,6 @@ You can get started with Pipecat running on your local machine, then move your a
    ```bash
    uv run pre-commit install
    ```
-
-### Python 3.13+ Compatibility
-
-Some features require PyTorch, which doesn't yet support Python 3.13+. Install using:
-
-```bash
-uv sync --group dev --all-extras \
-  --no-extra gstreamer \
-  --no-extra krisp \
-  --no-extra local \
-  --no-extra local-smart-turn \
-  --no-extra mlx-whisper \
-  --no-extra moondream \
-  --no-extra ultravox
-```
-
-> **Tip:** For full compatibility, use Python 3.12: `uv python pin 3.12`
 
 > **Note**: Some extras (local, gstreamer) require system dependencies. See documentation if you encounter build errors.
 

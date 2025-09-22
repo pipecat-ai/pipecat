@@ -13,6 +13,7 @@ supporting multiple languages, custom vocabulary, and various audio processing o
 import asyncio
 import base64
 import json
+import warnings
 from typing import Any, AsyncGenerator, Dict, Literal, Optional
 
 import aiohttp
@@ -173,8 +174,6 @@ class _InputParamsDescriptor:
     """Descriptor for backward compatibility with deprecation warning."""
 
     def __get__(self, obj, objtype=None):
-        import warnings
-
         with warnings.catch_warnings():
             warnings.simplefilter("always")
             warnings.warn(
@@ -208,7 +207,7 @@ class GladiaSTTService(STTService):
         api_key: str,
         region: Literal["us-west", "eu-west"] | None = None,
         url: str = "https://api.gladia.io/v2/live",
-        confidence: float = 0.5,
+        confidence: Optional[float] = None,
         sample_rate: Optional[int] = None,
         model: str = "solaria-1",
         params: Optional[GladiaInputParams] = None,
@@ -224,6 +223,11 @@ class GladiaSTTService(STTService):
             region: Region used to process audio. eu-west or us-west. Defaults to eu-west.
             url: Gladia API URL. Defaults to "https://api.gladia.io/v2/live".
             confidence: Minimum confidence threshold for transcriptions (0.0-1.0).
+
+                .. deprecated:: 0.0.86
+                    The 'confidence' parameter is deprecated and will be removed in a future version.
+                    No confidence threshold is applied.
+
             sample_rate: Audio sample rate in Hz. If None, uses service default.
             model: Model to use for transcription. Defaults to "solaria-1".
             params: Additional configuration parameters for Gladia service.
@@ -236,7 +240,6 @@ class GladiaSTTService(STTService):
 
         params = params or GladiaInputParams()
 
-        # Warn about deprecated language parameter if it's used
         if params.language is not None:
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
@@ -247,11 +250,20 @@ class GladiaSTTService(STTService):
                     stacklevel=2,
                 )
 
+        if confidence:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "The 'confidence' parameter is deprecated and will be removed in a future version. "
+                    "No confidence threshold is applied.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
         self._api_key = api_key
         self._region = region
         self._url = url
         self.set_model_name(model)
-        self._confidence = confidence
         self._params = params
         self._websocket = None
         self._receive_task = None
@@ -575,43 +587,40 @@ class GladiaSTTService(STTService):
 
                 elif content["type"] == "transcript":
                     utterance = content["data"]["utterance"]
-                    confidence = utterance.get("confidence", 0)
                     language = utterance["language"]
                     transcript = utterance["text"]
                     is_final = content["data"]["is_final"]
-                    if confidence >= self._confidence:
-                        if is_final:
-                            await self.push_frame(
-                                TranscriptionFrame(
-                                    transcript,
-                                    self._user_id,
-                                    time_now_iso8601(),
-                                    language,
-                                    result=content,
-                                )
+                    if is_final:
+                        await self.push_frame(
+                            TranscriptionFrame(
+                                transcript,
+                                self._user_id,
+                                time_now_iso8601(),
+                                language,
+                                result=content,
                             )
-                            await self._handle_transcription(
-                                transcript=transcript,
-                                is_final=is_final,
-                                language=language,
+                        )
+                        await self._handle_transcription(
+                            transcript=transcript,
+                            is_final=is_final,
+                            language=language,
+                        )
+                    else:
+                        await self.push_frame(
+                            InterimTranscriptionFrame(
+                                transcript,
+                                self._user_id,
+                                time_now_iso8601(),
+                                language,
+                                result=content,
                             )
-                        else:
-                            await self.push_frame(
-                                InterimTranscriptionFrame(
-                                    transcript,
-                                    self._user_id,
-                                    time_now_iso8601(),
-                                    language,
-                                    result=content,
-                                )
-                            )
+                        )
                 elif content["type"] == "translation":
                     translated_utterance = content["data"]["translated_utterance"]
                     original_language = content["data"]["original_language"]
                     translated_language = translated_utterance["language"]
-                    confidence = translated_utterance.get("confidence", 0)
                     translation = translated_utterance["text"]
-                    if translated_language != original_language and confidence >= self._confidence:
+                    if translated_language != original_language:
                         await self.push_frame(
                             TranslationFrame(
                                 translation, "", time_now_iso8601(), translated_language

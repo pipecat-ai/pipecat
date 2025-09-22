@@ -32,6 +32,8 @@ from pipecat.frames.frames import (
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
+    InterruptionFrame,
+    InterruptionTaskFrame,
     MetricsFrame,
     StartFrame,
     StopFrame,
@@ -113,9 +115,28 @@ class PipelineTask(BasePipelineTask):
     - on_frame_reached_downstream: Called when downstream frames reach the sink
     - on_idle_timeout: Called when pipeline is idle beyond timeout threshold
     - on_pipeline_started: Called when pipeline starts with StartFrame
-    - on_pipeline_stopped: Called when pipeline stops with StopFrame
-    - on_pipeline_ended: Called when pipeline ends with EndFrame
-    - on_pipeline_cancelled: Called when pipeline is cancelled
+    - on_pipeline_stopped: [deprecated] Called when pipeline stops with StopFrame
+
+            .. deprecated:: 0.0.86
+                Use `on_pipeline_finished` instead.
+
+    - on_pipeline_ended: [deprecated] Called when pipeline ends with EndFrame
+
+            .. deprecated:: 0.0.86
+                Use `on_pipeline_finished` instead.
+
+    - on_pipeline_cancelled: [deprecated] Called when pipeline is cancelled with CancelFrame
+
+            .. deprecated:: 0.0.86
+                Use `on_pipeline_finished` instead.
+
+    - on_pipeline_finished: Called after the pipeline has reached any terminal state.
+          This includes:
+              - StopFrame: pipeline was stopped (processors keep connections open)
+              - EndFrame: pipeline ended normally
+              - CancelFrame: pipeline was cancelled
+          Use this event for cleanup, logging, or post-processing tasks. Users can inspect
+          the frame if they need to handle specific cases.
 
     Example::
 
@@ -125,6 +146,10 @@ class PipelineTask(BasePipelineTask):
 
         @task.event_handler("on_idle_timeout")
         async def on_pipeline_idle_timeout(task):
+            ...
+
+        @task.event_handler("on_pipeline_finished")
+        async def on_pipeline_finished(task, frame):
             ...
     """
 
@@ -262,6 +287,7 @@ class PipelineTask(BasePipelineTask):
         self._register_event_handler("on_pipeline_stopped")
         self._register_event_handler("on_pipeline_ended")
         self._register_event_handler("on_pipeline_cancelled")
+        self._register_event_handler("on_pipeline_finished")
 
     @property
     def params(self) -> PipelineParams:
@@ -289,6 +315,27 @@ class PipelineTask(BasePipelineTask):
             The turn trace observer instance or None if not enabled.
         """
         return self._turn_trace_observer
+
+    def event_handler(self, event_name: str):
+        """Decorator for registering event handlers.
+
+        Args:
+            event_name: The name of the event to handle.
+
+        Returns:
+            The decorator function that registers the handler.
+        """
+        if event_name in ["on_pipeline_stopped", "on_pipeline_ended", "on_pipeline_cancelled"]:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    f"Event '{event_name}' is deprecated, use 'on_pipeline_finished' instead.",
+                    DeprecationWarning,
+                )
+
+        return super().event_handler(event_name)
 
     def add_observer(self, observer: BaseObserver):
         """Add an observer to monitor pipeline execution.
@@ -532,6 +579,7 @@ class PipelineTask(BasePipelineTask):
                 )
             finally:
                 await self._call_event_handler("on_pipeline_cancelled", frame)
+                await self._call_event_handler("on_pipeline_finished", frame)
 
         logger.debug(f"{self}: Closing. Waiting for {frame} to reach the end of the pipeline...")
 
@@ -627,13 +675,23 @@ class PipelineTask(BasePipelineTask):
 
         if isinstance(frame, EndTaskFrame):
             # Tell the task we should end nicely.
+            logger.debug(f"{self}: received end task frame {frame}")
             await self.queue_frame(EndFrame())
         elif isinstance(frame, CancelTaskFrame):
             # Tell the task we should end right away.
+            logger.debug(f"{self}: received cancel task frame {frame}")
             await self.queue_frame(CancelFrame())
         elif isinstance(frame, StopTaskFrame):
             # Tell the task we should stop nicely.
+            logger.debug(f"{self}: received stop task frame {frame}")
             await self.queue_frame(StopFrame())
+        elif isinstance(frame, InterruptionTaskFrame):
+            # Tell the task we should interrupt the pipeline. Note that we are
+            # bypassing the push queue and directly queue into the
+            # pipeline. This is in case the push task is blocked waiting for a
+            # pipeline-ending frame to finish traversing the pipeline.
+            logger.debug(f"{self}: received interruption task frame {frame}")
+            await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")
@@ -642,7 +700,7 @@ class PipelineTask(BasePipelineTask):
                 # Tell the task we should stop.
                 await self.queue_frame(StopTaskFrame())
             else:
-                logger.warning(f"Something went wrong: {frame}")
+                logger.warning(f"{self}: Something went wrong: {frame}")
 
     async def _sink_push_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames coming downstream from the pipeline.
@@ -669,9 +727,11 @@ class PipelineTask(BasePipelineTask):
             self._pipeline_start_event.set()
         elif isinstance(frame, EndFrame):
             await self._call_event_handler("on_pipeline_ended", frame)
+            await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()
         elif isinstance(frame, StopFrame):
             await self._call_event_handler("on_pipeline_stopped", frame)
+            await self._call_event_handler("on_pipeline_finished", frame)
             self._pipeline_end_event.set()
         elif isinstance(frame, CancelFrame):
             self._pipeline_end_event.set()

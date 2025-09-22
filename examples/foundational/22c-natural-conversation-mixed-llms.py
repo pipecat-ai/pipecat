@@ -18,9 +18,9 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InterruptionFrame,
     LLMRunFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -347,7 +347,7 @@ class OutputGate(FrameProcessor):
                 await self._start()
             if isinstance(frame, (EndFrame, CancelFrame)):
                 await self._stop()
-            if isinstance(frame, StartInterruptionFrame):
+            if isinstance(frame, InterruptionFrame):
                 self._frames_buffer = []
                 self.close_gate()
             await self.push_frame(frame, direction)
@@ -426,7 +426,7 @@ class TurnDetectionLLM(Pipeline):
         async def pass_only_llm_trigger_frames(frame):
             return (
                 isinstance(frame, OpenAILLMContextFrame)
-                or isinstance(frame, StartInterruptionFrame)
+                or isinstance(frame, InterruptionFrame)
                 or isinstance(frame, FunctionCallInProgressFrame)
                 or isinstance(frame, FunctionCallResultFrame)
             )

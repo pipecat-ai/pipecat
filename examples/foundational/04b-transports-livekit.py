@@ -12,9 +12,12 @@ import sys
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
+    InterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     UserStartedSpeakingFrame,
@@ -46,7 +49,8 @@ async def main():
         params=LiveKitParams(
             audio_in_enabled=True,
             audio_out_enabled=True,
-            vad_analyzer=SileroVADAnalyzer(),
+            vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+            turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
         ),
     )
 
@@ -115,7 +119,7 @@ async def main():
 
         await task.queue_frames(
             [
-                BotInterruptionFrame(),
+                InterruptionFrame(),
                 UserStartedSpeakingFrame(),
                 TranscriptionFrame(
                     user_id=participant_id,
