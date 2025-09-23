@@ -1,5 +1,4 @@
-"""
-Strands Agent integration for Pipecat.
+"""Strands Agent integration for Pipecat.
 
 This module provides integration with Strands Agents for handling conversational AI
 interactions. It supports both single agent and multi-agent graphs.
