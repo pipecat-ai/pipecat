@@ -9,14 +9,12 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
-)
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frameworks.strands_agents import StrandsAgentsProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -115,19 +113,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         )
 
     # Setup context aggregators for message handling
-    context = OpenAILLMContext()
-    tma_in = LLMUserContextAggregator(context=context)
-    tma_out = LLMAssistantContextAggregator(context=context)
+    context = LLMContext()
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,  # Speech-to-text
-            tma_in,  # User context aggregator
+            context_aggregator.user(),  # User responses
             llm,  # Strands Agents processor
             tts,  # Text-to-speech
             transport.output(),  # Transport bot output
-            tma_out,  # Assistant context aggregator
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
@@ -143,6 +140,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        # Kick off the conversation.
+        await task.queue_frames(
+            [
+                LLMMessagesAppendFrame(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": f"Greet the user and introduce yourself.",
+                        }
+                    ],
+                    run_llm=True,
+                )
+            ]
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
