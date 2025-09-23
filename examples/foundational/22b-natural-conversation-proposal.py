@@ -18,9 +18,9 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    InterruptionFrame,
     LLMRunFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -48,8 +48,8 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
@@ -144,7 +144,7 @@ class OutputGate(FrameProcessor):
                 await self._start()
             if isinstance(frame, (EndFrame, CancelFrame)):
                 await self._stop()
-            if isinstance(frame, StartInterruptionFrame):
+            if isinstance(frame, InterruptionFrame):
                 self._frames_buffer = []
                 self.close_gate()
             await self.push_frame(frame, direction)
@@ -232,7 +232,7 @@ class TurnDetectionLLM(Pipeline):
         async def pass_only_llm_trigger_frames(frame):
             return (
                 isinstance(frame, OpenAILLMContextFrame)
-                or isinstance(frame, StartInterruptionFrame)
+                or isinstance(frame, InterruptionFrame)
                 or isinstance(frame, FunctionCallInProgressFrame)
                 or isinstance(frame, FunctionCallResultFrame)
             )

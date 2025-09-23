@@ -20,10 +20,10 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     StartFrame,
-    StartInterruptionFrame,
     TextFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -310,7 +310,7 @@ class TTSService(AIService):
             and not isinstance(frame, TranscriptionFrame)
         ):
             await self._process_text_frame(frame)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption(frame, direction)
             await self.push_frame(frame, direction)
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
@@ -363,7 +363,7 @@ class TTSService(AIService):
         await super().push_frame(frame, direction)
 
         if self._push_stop_frames and (
-            isinstance(frame, StartInterruptionFrame)
+            isinstance(frame, InterruptionFrame)
             or isinstance(frame, TTSStartedFrame)
             or isinstance(frame, TTSAudioRawFrame)
             or isinstance(frame, TTSStoppedFrame)
@@ -384,7 +384,7 @@ class TTSService(AIService):
             num_channels=1,
         )
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False
         await self._text_aggregator.handle_interruption()
         for filter in self._text_filters:
@@ -448,7 +448,7 @@ class TTSService(AIService):
                 )
                 if isinstance(frame, TTSStartedFrame):
                     has_started = True
-                elif isinstance(frame, (TTSStoppedFrame, StartInterruptionFrame)):
+                elif isinstance(frame, (TTSStoppedFrame, InterruptionFrame)):
                     has_started = False
             except asyncio.TimeoutError:
                 if has_started:
@@ -533,7 +533,7 @@ class WordTTSService(TTSService):
         elif isinstance(frame, (LLMFullResponseEndFrame, EndFrame)):
             await self.flush_audio()
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         self._llm_response_started = False
         self.reset_word_timestamps()
@@ -623,7 +623,7 @@ class InterruptibleTTSService(WebsocketTTSService):
         # user interrupts we need to reconnect.
         self._bot_speaking = False
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         if self._bot_speaking:
             await self._disconnect()
@@ -695,7 +695,7 @@ class InterruptibleWordTTSService(WebsocketWordTTSService):
         # user interrupts we need to reconnect.
         self._bot_speaking = False
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         if self._bot_speaking:
             await self._disconnect()
@@ -905,7 +905,7 @@ class AudioContextTTSService(WebsocketTTSService, _AudioContextServiceMixin):
         await super().cancel(frame)
         await self._stop_audio_context_task()
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self._stop_audio_context_task()
         self._create_audio_context_task()

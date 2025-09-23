@@ -30,7 +30,6 @@ from loguru import logger
 from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -42,6 +41,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
+    LLMConfigureOutputFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -587,10 +587,35 @@ class RTVILLMFunctionCallMessage(BaseModel):
     data: RTVILLMFunctionCallMessageData
 
 
+class RTVISendTextOptions(BaseModel):
+    """Options for sending text input to the LLM.
+
+    Contains options for how the pipeline should process the text input.
+    """
+
+    run_immediately: bool = True
+    audio_response: bool = True
+
+
+class RTVISendTextData(BaseModel):
+    """Data format for sending text input to the LLM.
+
+    Contains the text content to send and any options for how the pipeline should process it.
+
+    """
+
+    content: str
+    options: Optional[RTVISendTextOptions] = None
+
+
 class RTVIAppendToContextData(BaseModel):
     """Data format for appending messages to the context.
 
     Contains the role, content, and whether to run the message immediately.
+
+        .. deprecated:: 0.0.85
+            The RTVI message, append-to-context, has been deprecated. Use send-text
+            or custom client and server messages instead.
     """
 
     role: Literal["user", "assistant"] | str
@@ -1128,6 +1153,7 @@ class RTVIProcessor(FrameProcessor):
         # "client-version".
         self._client_version = [0, 3, 0]
         self._errors_enabled = True
+        self._skip_tts: bool = False  # Keep in sync with llm_service.py
 
         self._registered_actions: Dict[str, RTVIAction] = {}
         self._registered_services: Dict[str, RTVIService] = {}
@@ -1206,7 +1232,7 @@ class RTVIProcessor(FrameProcessor):
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
-        await self.push_frame(BotInterruptionFrame(), FrameDirection.UPSTREAM)
+        await self.push_interruption_task_frame_and_wait()
 
     async def send_server_message(self, data: Any):
         """Send a server message to the client."""
@@ -1316,6 +1342,9 @@ class RTVIProcessor(FrameProcessor):
         # Data frames
         elif isinstance(frame, RTVIActionFrame):
             await self._action_queue.put(frame)
+        elif isinstance(frame, LLMConfigureOutputFrame):
+            self._skip_tts = frame.skip_tts
+            await self.push_frame(frame, direction)
         # Other frames
         else:
             await self.push_frame(frame, direction)
@@ -1415,7 +1444,13 @@ class RTVIProcessor(FrameProcessor):
                 case "llm-function-call-result":
                     data = RTVILLMFunctionCallResultData.model_validate(message.data)
                     await self._handle_function_call_result(data)
+                case "send-text":
+                    data = RTVISendTextData.model_validate(message.data)
+                    await self._handle_send_text(data)
                 case "append-to-context":
+                    logger.warning(
+                        f"The append-to-context message is deprecated, use send-text instead."
+                    )
                     data = RTVIAppendToContextData.model_validate(message.data)
                     await self._handle_update_context(data)
                 case "raw-audio" | "raw-audio-batch":
@@ -1563,6 +1598,26 @@ class RTVIProcessor(FrameProcessor):
         """Handle an update-config request."""
         await self._update_config(RTVIConfig(config=data.config), data.interrupt)
         await self._handle_get_config(request_id)
+
+    async def _handle_send_text(self, data: RTVISendTextData):
+        """Handle a send-text message from the client."""
+        opts = data.options if data.options is not None else RTVISendTextOptions()
+        if opts.run_immediately:
+            await self.interrupt_bot()
+        cur_skip_tts = self._skip_tts
+        should_skip_tts = not opts.audio_response
+        toggle_skip_tts = cur_skip_tts != should_skip_tts
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=should_skip_tts)
+            await self.push_frame(output_frame)
+        text_frame = LLMMessagesAppendFrame(
+            messages=[{"role": "user", "content": data.content}],
+            run_llm=opts.run_immediately,
+        )
+        await self.push_frame(text_frame)
+        if toggle_skip_tts:
+            output_frame = LLMConfigureOutputFrame(skip_tts=cur_skip_tts)
+            await self.push_frame(output_frame)
 
     async def _handle_update_context(self, data: RTVIAppendToContextData):
         if data.run_immediately:

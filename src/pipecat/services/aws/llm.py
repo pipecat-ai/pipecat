@@ -25,7 +25,10 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.bedrock_adapter import AWSBedrockLLMAdapter
+from pipecat.adapters.services.bedrock_adapter import (
+    AWSBedrockLLMAdapter,
+    AWSBedrockLLMInvocationParams,
+)
 from pipecat.frames.frames import (
     Frame,
     FunctionCallCancelFrame,
@@ -39,7 +42,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
-    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -179,22 +181,6 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         self = cls(messages=messages)
         self._restructure_from_openai_messages()
         return self
-
-    @classmethod
-    def from_image_frame(cls, frame: VisionImageRawFrame) -> "AWSBedrockLLMContext":
-        """Create AWS Bedrock context from vision image frame.
-
-        Args:
-            frame: The vision image frame to convert.
-
-        Returns:
-            New AWS Bedrock LLM context instance.
-        """
-        context = cls()
-        context.add_image_frame_message(
-            format=frame.format, size=frame.size, image=frame.image, text=frame.text
-        )
-        return context
 
     def set_messages(self, messages: List):
         """Set the messages list and restructure for Bedrock format.
@@ -399,9 +385,33 @@ class AWSBedrockLLMContext(OpenAILLMContext):
         elif isinstance(content, list):
             new_content = []
             for item in content:
+                # fix empty text
                 if item.get("type", "") == "text":
                     text_content = item["text"] if item["text"] != "" else "(empty)"
                     new_content.append({"text": text_content})
+                # handle image_url -> image conversion
+                if item["type"] == "image_url":
+                    new_item = {
+                        "image": {
+                            "format": "jpeg",
+                            "source": {
+                                "bytes": base64.b64decode(item["image_url"]["url"].split(",")[1])
+                            },
+                        }
+                    }
+                    new_content.append(new_item)
+            # In the case where there's a single image in the list (like what
+            # would result from a UserImageRawFrame), ensure that the image
+            # comes before text
+            image_indices = [i for i, item in enumerate(new_content) if "image" in item]
+            text_indices = [i for i, item in enumerate(new_content) if "text" in item]
+            if len(image_indices) == 1 and text_indices:
+                img_idx = image_indices[0]
+                first_txt_idx = text_indices[0]
+                if img_idx > first_txt_idx:
+                    # Move image before the first text
+                    image_item = new_content.pop(img_idx)
+                new_content.insert(first_txt_idx, image_item)
             return {"role": message["role"], "content": new_content}
 
         return message
@@ -569,7 +579,7 @@ class AWSBedrockLLMContext(OpenAILLMContext):
                 if isinstance(msg["content"], list):
                     for item in msg["content"]:
                         if item.get("image"):
-                            item["source"]["bytes"] = "..."
+                            item["image"]["source"]["bytes"] = "..."
             msgs.append(msg)
         return msgs
 
@@ -792,79 +802,64 @@ class AWSBedrockLLMService(LLMService):
         """
         return True
 
-    async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
-    ) -> Optional[str]:
+    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
-            system_instruction: Optional system instruction to guide the LLM's
-              behavior. You could also (again, optionally) provide a system
-              instruction directly in the context. If both are provided, the
-              one in the context takes precedence.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
-        try:
-            messages = []
-            system = []
-            if isinstance(context, LLMContext):
-                # Future code will be something like this:
-                # adapter = self.get_llm_adapter()
-                # params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
-                # messages = params["messages"]
-                # system = params["system_instruction"]
-                raise NotImplementedError(
-                    "Universal LLMContext is not yet supported for AWS Bedrock."
-                )
-            else:
-                context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
-                messages = context.messages
-                system = getattr(context, "system", None) or system_instruction
+        messages = []
+        system = []
+        if isinstance(context, LLMContext):
+            adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+            params: AWSBedrockLLMInvocationParams = adapter.get_llm_invocation_params(context)
+            messages = params["messages"]
+            system = params["system"]  # [{"text": "system message"}]
+        else:
+            context = AWSBedrockLLMContext.upgrade_to_bedrock(context)
+            messages = context.messages
+            system = getattr(context, "system", None)  # [{"text": "system message"}]
 
-            # Determine if we're using Claude or Nova based on model ID
-            model_id = self.model_name
+        # Determine if we're using Claude or Nova based on model ID
+        model_id = self.model_name
 
-            # Prepare request parameters
-            request_params = {
-                "modelId": model_id,
-                "messages": messages,
-                "inferenceConfig": {
-                    "maxTokens": 8192,
-                    "temperature": 0.7,
-                    "topP": 0.9,
-                },
-            }
+        # Prepare request parameters
+        request_params = {
+            "modelId": model_id,
+            "messages": messages,
+            "inferenceConfig": {
+                "maxTokens": 8192,
+                "temperature": 0.7,
+                "topP": 0.9,
+            },
+        }
 
-            if system:
-                request_params["system"] = [{"text": system}]
+        if system:
+            request_params["system"] = system
 
-            async with self._aws_session.client(
-                service_name="bedrock-runtime", **self._aws_params
-            ) as client:
-                # Call Bedrock without streaming
-                response = await client.converse(**request_params)
+        async with self._aws_session.client(
+            service_name="bedrock-runtime", **self._aws_params
+        ) as client:
+            # Call Bedrock without streaming
+            response = await client.converse(**request_params)
 
-                # Extract the response text
-                if (
-                    "output" in response
-                    and "message" in response["output"]
-                    and "content" in response["output"]["message"]
-                ):
-                    content = response["output"]["message"]["content"]
-                    if isinstance(content, list):
-                        for item in content:
-                            if item.get("text"):
-                                return item["text"]
-                    elif isinstance(content, str):
-                        return content
+            # Extract the response text
+            if (
+                "output" in response
+                and "message" in response["output"]
+                and "content" in response["output"]["message"]
+            ):
+                content = response["output"]["message"]["content"]
+                if isinstance(content, list):
+                    for item in content:
+                        if item.get("text"):
+                            return item["text"]
+                elif isinstance(content, str):
+                    return content
 
-                return None
-
-        except Exception as e:
-            logger.error(f"Bedrock summary generation failed: {e}", exc_info=True)
             return None
 
     async def _create_converse_stream(self, client, request_params):
@@ -880,7 +875,7 @@ class AWSBedrockLLMService(LLMService):
         if self._retry_on_timeout:
             try:
                 response = await asyncio.wait_for(
-                    await client.converse_stream(**request_params), timeout=self._retry_timeout_secs
+                    client.converse_stream(**request_params), timeout=self._retry_timeout_secs
                 )
                 return response
             except (ReadTimeoutError, asyncio.TimeoutError) as e:
@@ -939,8 +934,25 @@ class AWSBedrockLLMService(LLMService):
             }
         }
 
+    def _get_llm_invocation_params(
+        self, context: OpenAILLMContext | LLMContext
+    ) -> AWSBedrockLLMInvocationParams:
+        # Universal LLMContext
+        if isinstance(context, LLMContext):
+            adapter: AWSBedrockLLMAdapter = self.get_llm_adapter()
+            params = adapter.get_llm_invocation_params(context)
+            return params
+
+        # AWS Bedrock-specific context
+        return AWSBedrockLLMInvocationParams(
+            system=getattr(context, "system", None),
+            messages=context.messages,
+            tools=context.tools or [],
+            tool_choice=context.tool_choice,
+        )
+
     @traced_llm
-    async def _process_context(self, context: AWSBedrockLLMContext):
+    async def _process_context(self, context: AWSBedrockLLMContext | LLMContext):
         # Usage tracking
         prompt_tokens = 0
         completion_tokens = 0
@@ -957,6 +969,12 @@ class AWSBedrockLLMService(LLMService):
 
             await self.start_ttfb_metrics()
 
+            params_from_context = self._get_llm_invocation_params(context)
+            messages = params_from_context["messages"]
+            system = params_from_context["system"]
+            tools = params_from_context["tools"]
+            tool_choice = params_from_context["tool_choice"]
+
             # Set up inference config
             inference_config = {
                 "maxTokens": self._settings["max_tokens"],
@@ -967,17 +985,18 @@ class AWSBedrockLLMService(LLMService):
             # Prepare request parameters
             request_params = {
                 "modelId": self.model_name,
-                "messages": context.messages,
+                "messages": messages,
                 "inferenceConfig": inference_config,
                 "additionalModelRequestFields": self._settings["additional_model_request_fields"],
             }
 
             # Add system message
-            request_params["system"] = context.system
+            if system:
+                request_params["system"] = system
 
             # Check if messages contain tool use or tool result content blocks
             has_tool_content = False
-            for message in context.messages:
+            for message in messages:
                 if isinstance(message.get("content"), list):
                     for content_item in message["content"]:
                         if "toolUse" in content_item or "toolResult" in content_item:
@@ -987,7 +1006,6 @@ class AWSBedrockLLMService(LLMService):
                     break
 
             # Handle tools: use current tools, or no-op if tool content exists but no current tools
-            tools = context.tools or []
             if has_tool_content and not tools:
                 tools = [self._create_no_op_tool()]
                 using_noop_tool = True
@@ -996,17 +1014,15 @@ class AWSBedrockLLMService(LLMService):
                 tool_config = {"tools": tools}
 
                 # Only add tool_choice if we have real tools (not just no-op)
-                if not using_noop_tool and context.tool_choice:
-                    if context.tool_choice == "auto":
+                if not using_noop_tool and tool_choice:
+                    if tool_choice == "auto":
                         tool_config["toolChoice"] = {"auto": {}}
-                    elif context.tool_choice == "none":
+                    elif tool_choice == "none":
                         # Skip adding toolChoice for "none"
                         pass
-                    elif (
-                        isinstance(context.tool_choice, dict) and "function" in context.tool_choice
-                    ):
+                    elif isinstance(tool_choice, dict) and "function" in tool_choice:
                         tool_config["toolChoice"] = {
-                            "tool": {"name": context.tool_choice["function"]["name"]}
+                            "tool": {"name": tool_choice["function"]["name"]}
                         }
 
                 request_params["toolConfig"] = tool_config
@@ -1015,7 +1031,17 @@ class AWSBedrockLLMService(LLMService):
             if self._settings["latency"] in ["standard", "optimized"]:
                 request_params["performanceConfig"] = {"latency": self._settings["latency"]}
 
-            logger.debug(f"Calling AWS Bedrock model with: {request_params}")
+            # Log request params with messages redacted for logging
+            if isinstance(context, LLMContext):
+                adapter = self.get_llm_adapter()
+                context_type_for_logging = "universal"
+                messages_for_logging = adapter.get_messages_for_logging(context)
+            else:
+                context_type_for_logging = "LLM-specific"
+                messages_for_logging = context.get_messages_for_logging()
+            logger.debug(
+                f"{self}: Generating chat from {context_type_for_logging} context [{system}] | {messages_for_logging}"
+            )
 
             async with self._aws_session.client(
                 service_name="bedrock-runtime", **self._aws_params
@@ -1123,15 +1149,9 @@ class AWSBedrockLLMService(LLMService):
         if isinstance(frame, OpenAILLMContextFrame):
             context = AWSBedrockLLMContext.upgrade_to_bedrock(frame.context)
         if isinstance(frame, LLMContextFrame):
-            raise NotImplementedError("Universal LLMContext is not yet supported for AWS Bedrock.")
+            context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             context = AWSBedrockLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            # This is only useful in very simple pipelines because it creates
-            # a new context. Generally we want a context manager to catch
-            # UserImageRawFrames coming through the pipeline and add them
-            # to the context.
-            context = AWSBedrockLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:

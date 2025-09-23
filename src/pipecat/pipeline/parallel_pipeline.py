@@ -16,7 +16,7 @@ from typing import Dict, List
 
 from loguru import logger
 
-from pipecat.frames.frames import EndFrame, Frame, StartFrame
+from pipecat.frames.frames import CancelFrame, EndFrame, Frame, StartFrame
 from pipecat.pipeline.base_pipeline import BasePipeline
 from pipecat.pipeline.pipeline import Pipeline, PipelineSink, PipelineSource
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
@@ -141,7 +141,7 @@ class ParallelPipeline(BasePipeline):
         await super().process_frame(frame, direction)
 
         # Parallel pipeline synchronized frames.
-        if isinstance(frame, (StartFrame, EndFrame)):
+        if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             self._frame_counter[frame.id] = len(self._pipelines)
             await self.pause_processing_system_frames()
             await self.pause_processing_frames()
@@ -158,7 +158,7 @@ class ParallelPipeline(BasePipeline):
 
     async def _pipeline_sink_push_frame(self, frame: Frame, direction: FrameDirection):
         # Parallel pipeline synchronized frames.
-        if isinstance(frame, (StartFrame, EndFrame)):
+        if isinstance(frame, (StartFrame, EndFrame, CancelFrame)):
             # Decrement counter.
             frame_counter = self._frame_counter.get(frame.id, 0)
             if frame_counter > 0:

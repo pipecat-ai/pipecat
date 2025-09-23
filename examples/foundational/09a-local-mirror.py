@@ -24,8 +24,8 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport, maybe_capture_participant_camera
 from pipecat.transports.base_transport import BaseTransport, TransportParams
+from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.local.tk import TkLocalTransport, TkTransportParams
-from pipecat.transports.services.daily import DailyParams
 
 load_dotenv(override=True)
 

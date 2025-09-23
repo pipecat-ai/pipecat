@@ -36,7 +36,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
-    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -733,17 +732,11 @@ class GoogleLLMService(LLMService):
     def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
         self._client = genai.Client(api_key=api_key, http_options=http_options)
 
-    async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
-    ) -> Optional[str]:
+    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
-            system_instruction: Optional system instruction to guide the LLM's
-              behavior. You could also (again, optionally) provide a system
-              instruction directly in the context. If both are provided, the
-              one in the context takes precedence.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
@@ -758,7 +751,7 @@ class GoogleLLMService(LLMService):
         else:
             context = GoogleLLMContext.upgrade_to_google(context)
             messages = context.messages
-            system = getattr(context, "system_message", None) or system_instruction
+            system = getattr(context, "system_message", None)
 
         generation_config = GenerateContentConfig(system_instruction=system)
 
@@ -858,8 +851,7 @@ class GoogleLLMService(LLMService):
         self, context: OpenAILLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         logger.debug(
-            # f"{self}: Generating chat [{self._system_instruction}] | {context.get_messages_for_logging()}"
-            f"{self}: Generating chat from OpenAI context {context.get_messages_for_logging()}"
+            f"{self}: Generating chat from LLM-specific context [{context.system_message}] | {context.get_messages_for_logging()}"
         )
 
         params = GeminiLLMInvocationParams(
@@ -874,12 +866,11 @@ class GoogleLLMService(LLMService):
         self, context: LLMContext
     ) -> AsyncIterator[GenerateContentResponse]:
         adapter = self.get_llm_adapter()
-        logger.debug(
-            # f"{self}: Generating chat [{self._system_instruction}] | {context.get_messages_for_logging()}"
-            f"{self}: Generating chat from universal context {adapter.get_messages_for_logging(context)}"
-        )
-
         params: GeminiLLMInvocationParams = adapter.get_llm_invocation_params(context)
+
+        logger.debug(
+            f"{self}: Generating chat from universal context [{params['system_instruction']}] | {adapter.get_messages_for_logging(context)}"
+        )
 
         return await self._stream_content(params)
 
@@ -1021,15 +1012,6 @@ class GoogleLLMService(LLMService):
             # NOTE: LLMMessagesFrame is deprecated, so we don't support the newer universal
             # LLMContext with it
             context = GoogleLLMContext(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            # This is only useful in very simple pipelines because it creates
-            # a new context. Generally we want a context manager to catch
-            # UserImageRawFrames coming through the pipeline and add them
-            # to the context.
-            context = GoogleLLMContext()
-            context.add_image_frame_message(
-                format=frame.format, size=frame.size, image=frame.image, text=frame.text
-            )
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         else:

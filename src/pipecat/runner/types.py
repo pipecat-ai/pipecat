@@ -51,9 +51,11 @@ class WebSocketRunnerArguments(RunnerArguments):
 
     Parameters:
         websocket: WebSocket connection for audio streaming
+        body: Additional request data
     """
 
     websocket: WebSocket
+    body: Optional[Any] = field(default_factory=dict)
 
 
 @dataclass

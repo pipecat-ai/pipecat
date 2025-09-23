@@ -20,10 +20,10 @@ from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InterruptionFrame,
     LLMFullResponseStartFrame,
     LLMRunFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TextFrame,
     TranscriptionFrame,
@@ -52,8 +52,8 @@ from pipecat.services.llm_service import LLMService
 from pipecat.sync.base_notifier import BaseNotifier
 from pipecat.sync.event_notifier import EventNotifier
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketParams
-from pipecat.transports.services.daily import DailyParams
+from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.utils.time import time_now_iso8601
 
 load_dotenv(override=True)
@@ -570,7 +570,7 @@ class OutputGate(FrameProcessor):
                 await self._start()
             if isinstance(frame, (EndFrame, CancelFrame)):
                 await self._stop()
-            if isinstance(frame, StartInterruptionFrame):
+            if isinstance(frame, InterruptionFrame):
                 self._frames_buffer = []
                 self.close_gate()
             await self.push_frame(frame, direction)
