@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `BaseOutputTransport` methods `write_audio_frame` and `write_video_frame` now
+  return a boolean to indicate if the transport implementation was able to write
+  the given frame or not.
+
 - Updated Silero VAD model to v6.
 
 - Updated `livekit` to 1.0.13.
@@ -97,6 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event and making way for future events like `send-image`.
 
 ### Fixed
+
+- Fixed a `BaseOutputTransport` issue that could produce large saved
+  `AudioBufferProcessor` files when using an audio mixer.
 
 - Fixed a `PipelineRunner` issue on Windows where setting up SIGINT and SIGTERM
   was raising an exception.
