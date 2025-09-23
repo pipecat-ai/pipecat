@@ -234,7 +234,7 @@ class AudioBufferProcessor(FrameProcessor):
             or len(self._bot_audio_buffer) >= self._buffer_size
         ):
             await self._call_on_audio_data_handler()
-            self._clear_primary_audio_buffers()
+            self._reset_primary_audio_buffers()
 
         # Process turn recording with preprocessed data.
         if self._enable_turn_audio:
@@ -308,21 +308,24 @@ class AudioBufferProcessor(FrameProcessor):
 
     def _reset_recording(self):
         """Reset recording state and buffers."""
-        self._reset_audio_buffers()
+        self._reset_all_audio_buffers()
         self._last_user_frame_at = time.time()
         self._last_bot_frame_at = time.time()
 
-    def _reset_audio_buffers(self):
+    def _reset_all_audio_buffers(self):
         """Reset all audio buffers to empty state."""
-        self._user_audio_buffer = bytearray()
-        self._bot_audio_buffer = bytearray()
-        self._user_turn_audio_buffer = bytearray()
-        self._bot_turn_audio_buffer = bytearray()
+        self._reset_primary_audio_buffers()
+        self._reset_turn_audio_buffers()
 
-    def _clear_primary_audio_buffers(self):
+    def _reset_primary_audio_buffers(self):
         """Clear user and bot buffers while preserving turn buffers and timestamps."""
         self._user_audio_buffer = bytearray()
         self._bot_audio_buffer = bytearray()
+
+    def _reset_turn_audio_buffers(self):
+        """Clear user and bot turn buffers while preserving primary buffers and timestamps."""
+        self._user_turn_audio_buffer = bytearray()
+        self._bot_turn_audio_buffer = bytearray()
 
     def _align_track_buffers(self):
         """Pad the shorter track with silence so both tracks stay in sync."""

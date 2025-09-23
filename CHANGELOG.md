@@ -102,6 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an `AudioBufferProcessor` issues that was causing user audio to be
+  missing in stereo recordings causing bot and user overlaps.
+
 - Fixed a `BaseOutputTransport` issue that could produce large saved
   `AudioBufferProcessor` files when using an audio mixer.
 
