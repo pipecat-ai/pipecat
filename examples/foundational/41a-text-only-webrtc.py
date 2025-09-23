@@ -29,8 +29,7 @@ from pipecat.processors.frameworks.rtvi import (
 )
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.openai import OpenAIContextAggregatorPair
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.services.openai.llm import OpenAIContextAggregatorPair, OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 
 load_dotenv(override=True)
