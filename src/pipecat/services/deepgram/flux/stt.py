@@ -59,7 +59,7 @@ class FluxEventType(str, Enum):
     """
 
     START_OF_TURN = "StartOfTurn"
-    SPEECH_RESUMED = "SpeechResumed"
+    TURN_RESUMED = "TurnResumed"
     END_OF_TURN = "EndOfTurn"
     EAGER_END_OF_TURN = "EagerEndOfTurn"
     UPDATE = "Update"
@@ -82,7 +82,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Attributes:
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
-            eager_eot_threshold: EagerEndOfTurn/SpeechResumed are off by default. You can turn them on by setting eager_eot_threshold to a valid value.
+            eager_eot_threshold: EagerEndOfTurn/TurnResumed are off by default. You can turn them on by setting eager_eot_threshold to a valid value.
                 Lower values = more aggressive EagerEndOfTurning (faster response, more LLM calls).
                 Higher values = more conservative EagerEndOfTurning (slower response, fewer LLM calls).
             eot_threshold: End-of-turn confidence required to finish a turn (default 0.7).
@@ -488,8 +488,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         match flux_event_type:
             case FluxEventType.START_OF_TURN:
                 await self._handle_start_of_turn(transcript)
-            case FluxEventType.SPEECH_RESUMED:
-                await self._handle_speech_resumed(event)
+            case FluxEventType.TURN_RESUMED:
+                await self._handle_turn_resumed(event)
             case FluxEventType.END_OF_TURN:
                 await self._handle_end_of_turn(transcript)
             case FluxEventType.EAGER_END_OF_TURN:
@@ -519,17 +519,17 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         if transcript:
             logger.trace(f"Start of turn transcript: {transcript}")
 
-    async def _handle_speech_resumed(self, event: str):
-        """Handle SpeechResumed events from Deepgram Flux.
+    async def _handle_turn_resumed(self, event: str):
+        """Handle TurnResumed events from Deepgram Flux.
 
-        SpeechResumed events indicate that speech has resumed after a brief pause
+        TurnResumed events indicate that speech has resumed after a brief pause
         within the same turn. This is primarily used for logging and debugging
         purposes and doesn't trigger any significant processing changes.
 
         Args:
             event: The event type string for logging purposes.
         """
-        logger.trace(f"Received event SpeechResumed: {event}")
+        logger.trace(f"Received event TurnResumed: {event}")
 
     async def _handle_end_of_turn(self, transcript: str):
         """Handle EndOfTurn events from Deepgram Flux.
@@ -588,7 +588,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         #
         # Pipecat doesn't yet provide built-in Gate/control mechanisms to:
         # 1. Start LLM/TTS processing early on EagerEndOfTurn events
-        # 2. Cancel in-flight processing when SpeechResumed occurs
+        # 2. Cancel in-flight processing when TurnResumed occurs
         #
         # By pushing EagerEndOfTurn transcripts as InterimTranscriptionFrame, we enable
         # developers to implement custom EagerEndOfTurn handling in their applications while
