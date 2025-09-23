@@ -281,8 +281,10 @@ class BaseOpenAILLMService(LLMService):
         # base64 encode any images
         for message in messages:
             if message.get("mime_type") == "image/jpeg":
-                encoded_image = base64.b64encode(message["data"].getvalue()).decode("utf-8")
-                text = message["content"]
+                # Avoid .getvalue() which makes a full copy of BytesIO
+                raw_bytes = message["data"].read()
+                encoded_image = base64.b64encode(raw_bytes).decode("utf-8")
+                text = message.get("content", "")
                 message["content"] = [
                     {"type": "text", "text": text},
                     {
@@ -290,6 +292,7 @@ class BaseOpenAILLMService(LLMService):
                         "image_url": {"url": f"data:image/jpeg;base64,{encoded_image}"},
                     },
                 ]
+                # Explicit cleanup
                 del message["data"]
                 del message["mime_type"]
 
