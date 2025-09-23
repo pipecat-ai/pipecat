@@ -145,6 +145,7 @@ Pipecat supports telephony provider integration using websocket connections to e
 **Considerations:**
 
 - Include hang-up functionality using the provider's native API, ideally using `aiohttp`
+- Pipecat sends DTMF tones using the transport’s native DTMF support when available. If native support isn’t available, it can send the tones as raw audio. If neither option works for your service, you may need to implement custom DTMF handling.
 
 ### Image Generation Services
 
