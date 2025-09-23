@@ -369,7 +369,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_app_message")
-    async def on_app_message(transport, message):
+    async def on_app_message(transport, message, sender):
         logger.debug(f"Received app message: {message}")
         if "message" not in message:
             return
