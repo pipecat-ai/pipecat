@@ -79,6 +79,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `PipelineRunner` issue on Windows where setting up SIGINT and SIGTERM
+  was raising an exception.
+
 - Fixed an issue where multiple handlers for an event would not run in parallel.
 
 - Fixed `DailyTransport.sip_call_transfer()` to automatically use the session

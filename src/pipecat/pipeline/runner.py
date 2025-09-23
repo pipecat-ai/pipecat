@@ -106,13 +106,21 @@ class PipelineRunner(BaseObject):
 
     def _setup_sigint(self):
         """Set up signal handlers for graceful shutdown."""
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGINT, lambda *args: self._sig_handler())
+        try:
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGINT, lambda *args: self._sig_handler())
+        except NotImplementedError:
+            # Windows fallback
+            signal.signal(signal.SIGINT, lambda s, f: self._sig_handler())
 
     def _setup_sigterm(self):
         """Set up signal handlers for graceful shutdown."""
-        loop = asyncio.get_running_loop()
-        loop.add_signal_handler(signal.SIGTERM, lambda *args: self._sig_handler())
+        try:
+            loop = asyncio.get_running_loop()
+            loop.add_signal_handler(signal.SIGTERM, lambda *args: self._sig_handler())
+        except NotImplementedError:
+            # Windows fallback
+            signal.signal(signal.SIGTERM, lambda s, f: self._sig_handler())
 
     def _sig_handler(self):
         """Handle interrupt signals by cancelling all tasks."""
