@@ -139,7 +139,7 @@ class BaseObject(ABC):
                 name=event_name, handlers=[], is_sync=sync
             )
         else:
-            logger.warning(f"Event handler {event_name} not registered")
+            logger.warning(f"Event handler {event_name} already registered")
 
     async def _call_event_handler(self, event_name: str, *args, **kwargs):
         """Call all registered handlers for the specified event.
