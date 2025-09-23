@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added memory cleanup improvements to reduce memory peaks.
+
 - Added `on_before_process_frame`, `on_after_process_frame`,
   `on_before_push_frame` and `on_after_push_frame`. These are synchronous events
   that get called before and after a frame is processed or pushed. Note that
