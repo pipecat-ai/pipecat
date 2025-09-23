@@ -1,4 +1,4 @@
-<H1 align="center">(Vonage) Opentok integrations implemented on fork of pipecat</H1>
+<H1 align="center">(Vonage) Opentok integrations implemented on copy of pipecat</H1>
 
 Original sources can be found on: [PipecatSource](https://github.com/pipecat-ai/pipecat/)
 

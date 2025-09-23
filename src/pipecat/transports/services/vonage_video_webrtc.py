@@ -3,12 +3,13 @@
 
 import asyncio
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Awaitable, Callable, Optional
 
 import numpy as np
 from loguru import logger
 
+from pipecat.audio.resamplers.base_audio_resampler import BaseAudioResampler
 from pipecat.audio.utils import create_default_resampler
 from pipecat.frames.frames import (
     CancelFrame,
@@ -82,8 +83,10 @@ class VonageClientListener:
 class VonageClientParams:
     """Parameters for the Vonage client."""
 
-    audio_sample_rate: int = 48000
-    audio_channels: int = 2
+    audio_in_sample_rate: int = 48000
+    audio_in_channels: int = 2
+    audio_out_sample_rate: int = 48000
+    audio_out_channels: int = 2
     enable_migration: bool = False
 
 
@@ -107,7 +110,7 @@ class VonageClient:
         self._connected: bool = False
         self._connection_counter: int = 0
         self._listener_id_gen: itertools.count = itertools.count()
-        self._listeners: map[int, VonageClientListener] = {}
+        self._listeners: dict[int, VonageClientListener] = {}
         self._publish_ready: Optional[asyncio.Future] = None
         self._publisher_settings: Optional[PublisherSettings] = publisher_settings
         self._publisher: Optional[Publisher] = None
@@ -159,8 +162,8 @@ class VonageClient:
             token=self._token,
             session_settings=SessionSettings(
                 audio=SessionAudioSettings(
-                    sample_rate=self._params.audio_sample_rate,
-                    number_of_channels=self._params.audio_channels,
+                    sample_rate=self._params.audio_out_sample_rate,
+                    number_of_channels=self._params.audio_out_channels,
                 ),
                 enable_migration=self._params.enable_migration,
                 logging=LoggingSettings(level="INFO"),
@@ -209,13 +212,13 @@ class VonageClient:
 
     async def write_audio(self, raw_audio_frame: bytes):
         """Write audio data to the Vonage session."""
-        frame_count = len(raw_audio_frame) // (self._params.audio_channels * 2)
+        frame_count = len(raw_audio_frame) // (self._params.audio_out_channels * 2)
         self._client.inject_audio(
             AudioData(
                 sample_buffer=memoryview(raw_audio_frame).cast("h"),
                 number_of_frames=frame_count,
-                number_of_channels=self._params.audio_channels,
-                sample_rate=self._params.audio_sample_rate,
+                number_of_channels=self._params.audio_out_channels,
+                sample_rate=self._params.audio_out_sample_rate,
             )
         )
 
@@ -260,13 +263,13 @@ class VonageClient:
             f"code={code} description={description}"
         )
 
-    def _on_publisher_stream_created_cb(self, publisher: Publisher, stream: Stream):
+    def _on_publisher_stream_created_cb(self, publisher: Publisher):
         logger.info(
             f"Publisher stream created session={self._session_id} publisher={publisher.stream.id}"
         )
         self._publisher = publisher
 
-    def _on_publisher_stream_destroyed_cb(self, publisher: Publisher, stream: Stream):
+    def _on_publisher_stream_destroyed_cb(self, publisher: Publisher):
         logger.info(
             f"Publisher stream destroyed session={self._session_id} publisher={publisher.stream.id}"
         )
@@ -344,7 +347,6 @@ class VonageVideoWebrtcInputTransport(BaseInputTransport):
         super().__init__(params)
 
         self._initialized: bool = False
-        self._sample_rate = 0
         self._client: VonageClient = client
         self._listener_id: Optional[int] = None
         self._resampler = create_default_resampler()
@@ -367,39 +369,33 @@ class VonageVideoWebrtcInputTransport(BaseInputTransport):
 
     def _audio_in_cb(self, _session: Session, audio: AudioData):
         if self._listener_id is not None and self._params.audio_in_enabled:
-            bits_per_sample: int = (
-                8 * len(audio.sample_buffer) // (audio.number_of_frames * audio.number_of_channels)
-            )
-            dtype = np.int16 if bits_per_sample == 16 else np.uint8
-            # TODO: now the python wrapper also is losing reference to the passed audio properties such as sample rate
-            # when the use them out of scope such inside the push_frame function, this makes us have to copy these
-            # values here
+            check_audio_data(audio.sample_buffer, audio.number_of_frames, audio.number_of_channels)
+
             audio_sample_rate = audio.sample_rate
             number_of_channels = audio.number_of_channels
 
             # we need to copy the raw audio here as it is a memory view and it will be lost when processed async later
-            raw_audio = np.frombuffer(audio.sample_buffer, dtype=dtype)
+            audio_np = np.frombuffer(audio.sample_buffer, dtype=np.int16)
 
             async def push_frame():
-                # ensure audio is mono
-                if number_of_channels == 2:
-                    raw_audio_channel_matrix = raw_audio.reshape(-1, 2)
-                    raw_audio_mono = raw_audio_channel_matrix.mean(axis=1).astype(dtype)
-                else:
-                    raw_audio_mono = raw_audio
-
-                # resample audio if needed
-                if audio_sample_rate != self.sample_rate:
-                    resampled_audio = await self._resampler.resample(
-                        raw_audio_mono.tobytes(), audio_sample_rate, self.sample_rate
-                    )
-                else:
-                    resampled_audio = raw_audio_mono.tobytes()
+                # TODO(Toni S): this normalization won't be necessary once VIDMP-1393 is done
+                processed_audio_np = await process_audio(
+                    self._resampler,
+                    audio_np,
+                    AudioProps(
+                        sample_rate=audio_sample_rate,
+                        is_stereo=number_of_channels == 2,
+                    ),
+                    AudioProps(
+                        sample_rate=self.sample_rate,
+                        is_stereo=self._params.audio_in_channels == 2,
+                    ),
+                )
 
                 frame = InputAudioRawFrame(
-                    audio=resampled_audio,
+                    audio=processed_audio_np.tobytes(),
                     sample_rate=self.sample_rate,
-                    num_channels=1,
+                    num_channels=self._params.audio_in_channels,
                 )
 
                 await self.push_audio_frame(frame)
@@ -451,26 +447,27 @@ class VonageVideoWebrtcOutputTransport(BaseOutputTransport):
     async def write_audio_frame(self, frame: OutputAudioRawFrame):
         """Write an audio frame to the Vonage session."""
         if self._listener_id is not None and self._params.audio_out_enabled:
-            params: VonageClientParams = self._client.get_params()
+            check_audio_data(frame.audio, frame.num_frames, frame.num_channels)
 
             audio = frame.audio
+            params: VonageClientParams = self._client.get_params()
+            np_audio = np.frombuffer(audio, dtype=np.int16)
 
-            # resample audio if needed
-            if params.audio_sample_rate != frame.sample_rate:
-                audio = await self._resampler.resample(
-                    frame.audio, frame.sample_rate, params.audio_sample_rate
-                )
+            # TODO(Toni S): this normalization won't be necessary once VIDMP-1393 is done
+            processed_audio = await process_audio(
+                self._resampler,
+                np_audio,
+                AudioProps(
+                    sample_rate=frame.sample_rate,
+                    is_stereo=frame.num_channels == 2,
+                ),
+                AudioProps(
+                    sample_rate=params.audio_out_sample_rate,
+                    is_stereo=params.audio_out_channels == 2,
+                ),
+            )
 
-            # ensure audio has the correct number of channels
-            if params.audio_channels != frame.num_channels:
-                audio = np.frombuffer(audio, dtype=np.int16)
-                if params.audio_channels == 1:
-                    audio = audio.reshape(-1, 2).mean(axis=1).astype(np.int16)
-                    audio = audio.mean(axis=1).astype(dtype).tobytes()
-                else:
-                    audio = np.repeat(audio, params.audio_channels // frame.num_channels).tobytes()
-
-            await self._client.write_audio(audio)
+            await self._client.write_audio(processed_audio.tobytes())
 
     async def stop(self, frame: EndFrame):
         """Stop the Vonage output transport."""
@@ -501,11 +498,14 @@ class VonageVideoWebrtcTransport(BaseTransport):
     ):
         """Initialize the Vonage transport with session string and parameters."""
         super().__init__()
+        params.audio_out_sample_rate = params.audio_out_sample_rate or 48000
         self._params = params
 
         vonage_params = VonageClientParams(
-            audio_sample_rate=params.audio_out_sample_rate or 48000,
-            audio_channels=params.audio_out_channels,
+            audio_in_sample_rate=params.audio_in_sample_rate,
+            audio_in_channels=params.audio_in_channels,
+            audio_out_sample_rate=params.audio_out_sample_rate,
+            audio_out_channels=params.audio_out_channels,
             enable_migration=params.session_enable_migration,
         )
         publisher_settings = (
@@ -595,3 +595,58 @@ class VonageVideoWebrtcTransport(BaseTransport):
         await self._call_event_handler(
             "on_client_disconnected", {"subscriberId": subscriber.stream.id}
         )
+
+
+def check_audio_data(buffer: bytes | memoryview, number_of_frames: int, number_of_channels):
+    """Check the audio sample width based on buffer size, number of frames and channels."""
+    if number_of_channels not in (1, 2):
+        raise ValueError(f"We only accept mono or stereo audio, got {number_of_channels}")
+
+    if isinstance(buffer, memoryview):
+        bytes_per_sample = buffer.itemsize
+    else:
+        bytes_per_sample = len(buffer) // (number_of_frames * number_of_channels)
+
+    if bytes_per_sample != 2:
+        raise ValueError(f"We only accept 16 bit PCM audio, got {bytes_per_sample * 8} bit")
+
+
+@dataclass
+class AudioProps:
+    """Audio properties for normalization."""
+
+    sample_rate: int
+    is_stereo: bool
+
+
+def process_audio_channels(
+    audio: np.ndarray, current: AudioProps, target: AudioProps
+) -> np.ndarray:
+    """Normalize audio channels to the target properties."""
+    if current.is_stereo != target.is_stereo:
+        if target.is_stereo:
+            audio = np.repeat(audio, 2)
+        else:
+            audio = audio.reshape(-1, 2).mean(axis=1).astype(np.int16)
+
+    return audio
+
+
+async def process_audio(
+    resampler: BaseAudioResampler, audio: np.ndarray, current: AudioProps, target: AudioProps
+) -> np.ndarray:
+    """Normalize audio to the target properties."""
+    res_audio = audio
+    if current.sample_rate != target.sample_rate:
+        # first normalize channels to mono if needed, then resample, then normalize channels to target
+        res_audio = process_audio_channels(res_audio, current, replace(current, is_stereo=False))
+        current = replace(current, is_stereo=False)
+
+        res_audio = await resampler.resample(
+            res_audio.tobytes(), current.sample_rate, target.sample_rate
+        )
+        res_audio = np.frombuffer(res_audio, dtype=np.int16)
+
+    res_audio = process_audio_channels(res_audio, current, target)
+
+    return res_audio
