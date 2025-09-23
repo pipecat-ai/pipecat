@@ -237,6 +237,9 @@ class TurnDetectionLLM(Pipeline):
                 or isinstance(frame, FunctionCallResultFrame)
             )
 
+        async def filter_all(frame):
+            return False
+
         super().__init__(
             [
                 ParallelPipeline(
@@ -247,6 +250,7 @@ class TurnDetectionLLM(Pipeline):
                         statement_judge_context_filter,
                         statement_llm,
                         completeness_check,
+                        FunctionFilter(filter=filter_all, direction=FrameDirection.UPSTREAM),
                     ],
                     [
                         # Block everything except frames that trigger LLM inference.
