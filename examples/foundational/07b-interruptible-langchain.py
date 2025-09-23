@@ -23,13 +23,8 @@ from pipecat.frames.frames import LLMMessagesUpdateFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.llm_response import (
-    LLMAssistantContextAggregator,
-    LLMUserContextAggregator,
-)
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frameworks.langchain import LangchainProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -106,19 +101,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     lc = LangchainProcessor(history_chain)
 
-    context = OpenAILLMContext()
-    tma_in = LLMUserContextAggregator(context=context)
-    tma_out = LLMAssistantContextAggregator(context=context)
+    context = LLMContext()
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,
-            tma_in,  # User responses
+            context_aggregator.user(),  # User responses
             lc,  # Langchain
             tts,  # TTS
             transport.output(),  # Transport bot output
-            tma_out,  # Assistant spoken responses
+            context_aggregator.assistant(),  # Assistant spoken responses
         ]
     )
 
