@@ -70,7 +70,6 @@ import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
-from typing import Dict
 
 from loguru import logger
 
@@ -183,12 +182,13 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
         from pipecat_ai_small_webrtc_prebuilt.frontend import SmallWebRTCPrebuiltUI
 
         from pipecat.transports.smallwebrtc.connection import SmallWebRTCConnection
+        from pipecat.transports.smallwebrtc.request_handler import (
+            SmallWebRTCRequest,
+            SmallWebRTCRequestHandler,
+        )
     except ImportError as e:
         logger.error(f"WebRTC transport dependencies not installed: {e}")
         return
-
-    # Store connections by pc_id
-    pcs_map: Dict[str, SmallWebRTCConnection] = {}
 
     # Mount the frontend
     app.mount("/client", SmallWebRTCPrebuiltUI)
@@ -198,51 +198,33 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
         """Redirect root requests to client interface."""
         return RedirectResponse(url="/client/")
 
+    # Initialize the SmallWebRTC request handler
+    small_webrtc_handler: SmallWebRTCRequestHandler = SmallWebRTCRequestHandler(
+        esp32_mode=esp32_mode, host=host
+    )
+
     @app.post("/api/offer")
-    async def offer(request: dict, background_tasks: BackgroundTasks):
-        """Handle WebRTC offer requests and manage peer connections."""
-        pc_id = request.get("pc_id")
+    async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
+        """Handle WebRTC offer requests via SmallWebRTCRequestHandler."""
 
-        if pc_id and pc_id in pcs_map:
-            pipecat_connection = pcs_map[pc_id]
-            logger.info(f"Reusing existing connection for pc_id: {pc_id}")
-            await pipecat_connection.renegotiate(
-                sdp=request["sdp"],
-                type=request["type"],
-                restart_pc=request.get("restart_pc", False),
-            )
-        else:
-            pipecat_connection = SmallWebRTCConnection()
-            await pipecat_connection.initialize(sdp=request["sdp"], type=request["type"])
-
-            @pipecat_connection.event_handler("closed")
-            async def handle_disconnected(webrtc_connection: SmallWebRTCConnection):
-                """Handle WebRTC connection closure and cleanup."""
-                logger.info(f"Discarding peer connection for pc_id: {webrtc_connection.pc_id}")
-                pcs_map.pop(webrtc_connection.pc_id, None)
-
+        # Prepare runner arguments with the callback to run your bot
+        async def webrtc_connection_callback(connection):
             bot_module = _get_bot_module()
-            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=pipecat_connection)
+            runner_args = SmallWebRTCRunnerArguments(webrtc_connection=connection)
             background_tasks.add_task(bot_module.bot, runner_args)
 
-        answer = pipecat_connection.get_answer()
-
-        # Apply ESP32 SDP munging if enabled
-        if esp32_mode and host != "localhost":
-            from pipecat.runner.utils import smallwebrtc_sdp_munging
-
-            answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], host)
-
-        pcs_map[answer["pc_id"]] = pipecat_connection
+        # Delegate handling to SmallWebRTCRequestHandler
+        answer = await small_webrtc_handler.handle_web_request(
+            request=request,
+            webrtc_connection_callback=webrtc_connection_callback,
+        )
         return answer
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Manage FastAPI application lifecycle and cleanup connections."""
         yield
-        coros = [pc.disconnect() for pc in pcs_map.values()]
-        await asyncio.gather(*coros)
-        pcs_map.clear()
+        await small_webrtc_handler.close()
 
     app.router.lifespan_context = lifespan
 

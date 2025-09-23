@@ -98,15 +98,15 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
         inputs = self._feature_extractor(
             audio_array,
             sampling_rate=16000,
-            return_tensors="pt",
+            return_tensors="np",
             padding="max_length",
             max_length=8 * 16000,
             truncation=True,
             do_normalize=True,
         )
 
-        # Convert to numpy and ensure correct shape for ONNX
-        input_features = inputs.input_features.squeeze(0).numpy().astype(np.float32)
+        # Extract features and ensure correct shape for ONNX
+        input_features = inputs.input_features.squeeze(0).astype(np.float32)
         input_features = np.expand_dims(input_features, axis=0)  # Add batch dimension
 
         # Run ONNX inference

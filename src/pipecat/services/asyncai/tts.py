@@ -119,7 +119,6 @@ class AsyncAITTSService(InterruptibleTTSService):
         """
         super().__init__(
             aggregate_sentences=aggregate_sentences,
-            push_text_frames=False,
             pause_frame_processing=True,
             push_stop_frames=True,
             sample_rate=sample_rate,

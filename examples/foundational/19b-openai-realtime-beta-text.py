@@ -22,7 +22,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.transcript_processor import TranscriptProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.cartesia import CartesiaTTSService
+from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai_realtime_beta import (
     InputAudioNoiseReduction,
@@ -31,7 +31,6 @@ from pipecat.services.openai_realtime_beta import (
     SemanticTurnDetection,
     SessionProperties,
 )
-from pipecat.services.openai_realtime_beta.events import AudioConfiguration, AudioInput
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -114,18 +113,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
     session_properties = SessionProperties(
-        audio=AudioConfiguration(
-            input=AudioInput(
-                transcription=InputAudioTranscription(),
-                # Set openai TurnDetection parameters. Not setting this at all will turn it
-                # on by default
-                turn_detection=SemanticTurnDetection(),
-                # Or set to False to disable openai turn detection and use transport VAD
-                # turn_detection=False,
-                noise_reduction=InputAudioNoiseReduction(type="near_field"),
-            )
-        ),
-        output_modalities=["text"],
+        input_audio_transcription=InputAudioTranscription(),
+        modalities=["text"],
+        # Set openai TurnDetection parameters. Not setting this at all will turn it
+        # on by default
+        turn_detection=SemanticTurnDetection(),
+        # Or set to False to disable openai turn detection and use transport VAD
+        # turn_detection=False,
+        input_audio_noise_reduction=InputAudioNoiseReduction(type="near_field"),
         # tools=tools,
         instructions="""You are a helpful and friendly AI.
 

@@ -17,7 +17,6 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
-    StartFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -185,15 +184,13 @@ class UserIdleProcessor(FrameProcessor):
 
         Runs in a loop until cancelled or callback indicates completion.
         """
-        while True:
+        running = True
+        while running:
             try:
                 await asyncio.wait_for(self._idle_event.wait(), timeout=self._timeout)
             except asyncio.TimeoutError:
                 if not self._interrupted:
                     self._retry_count += 1
-                    should_continue = await self._callback(self, self._retry_count)
-                    if not should_continue:
-                        await self._stop()
-                        break
+                    running = await self._callback(self, self._retry_count)
             finally:
                 self._idle_event.clear()

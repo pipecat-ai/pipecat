@@ -1604,7 +1604,7 @@ class MixerEnableFrame(MixerControlFrame):
 
 @dataclass
 class ServiceSwitcherFrame(ControlFrame):
-    """A base class for frames that control ServiceSwitcher behavior."""
+    """A base class for frames that affect ServiceSwitcher behavior."""
 
     pass
 

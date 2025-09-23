@@ -137,12 +137,12 @@ class AudioBufferProcessor(FrameProcessor):
         return self._num_channels
 
     def has_audio(self) -> bool:
-        """Check if both user and bot audio buffers contain data.
+        """Check if either user or bot audio buffers contain data.
 
         Returns:
-            True if both buffers contain audio data.
+            True if either buffer contains audio data.
         """
-        return self._buffer_has_audio(self._user_audio_buffer) and self._buffer_has_audio(
+        return self._buffer_has_audio(self._user_audio_buffer) or self._buffer_has_audio(
             self._bot_audio_buffer
         )
 

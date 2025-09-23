@@ -659,6 +659,7 @@ class BaseOutputTransport(FrameProcessor):
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.TimeoutError:
                         # Notify the bot stopped speaking upstream if necessary.
                         await self._bot_stopped_speaking()
@@ -673,6 +674,7 @@ class BaseOutputTransport(FrameProcessor):
                             frame.audio = await self._mixer.mix(frame.audio)
                             last_frame_time = time.time()
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.QueueEmpty:
                         # Notify the bot stopped speaking upstream if necessary.
                         diff_time = time.time() - last_frame_time

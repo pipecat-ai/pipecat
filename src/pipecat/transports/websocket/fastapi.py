@@ -138,7 +138,6 @@ class FastAPIWebsocketClient:
             ):
                 logger.warning("Closing already disconnected websocket!")
                 self._closing = True
-                await self.trigger_client_disconnected()
 
     async def disconnect(self):
         """Disconnect the WebSocket client."""
@@ -152,8 +151,6 @@ class FastAPIWebsocketClient:
                 await self._websocket.close()
             except Exception as e:
                 logger.error(f"{self} exception while closing the websocket: {e}")
-            finally:
-                await self.trigger_client_disconnected()
 
     async def trigger_client_disconnected(self):
         """Trigger the client disconnected callback."""
@@ -298,7 +295,10 @@ class FastAPIWebsocketInputTransport(BaseInputTransport):
         except Exception as e:
             logger.error(f"{self} exception receiving data: {e.__class__.__name__} ({e})")
 
-        await self._client.trigger_client_disconnected()
+        # Trigger `on_client_disconnected` if the client actually disconnects,
+        # that is, we are not the ones disconnecting.
+        if not self._client.is_closing:
+            await self._client.trigger_client_disconnected()
 
     async def _monitor_websocket(self):
         """Wait for self._params.session_timeout seconds, if the websocket is still open, trigger timeout event."""
@@ -446,6 +446,9 @@ class FastAPIWebsocketOutputTransport(BaseOutputTransport):
 
     async def _write_frame(self, frame: Frame):
         """Serialize and send a frame through the WebSocket."""
+        if self._client.is_closing or not self._client.is_connected:
+            return
+
         if not self._params.serializer:
             return
 

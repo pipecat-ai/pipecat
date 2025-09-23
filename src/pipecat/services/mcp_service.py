@@ -7,7 +7,7 @@
 """MCP (Model Context Protocol) client for integrating external tools with LLMs."""
 
 import json
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, TypeAlias
 
 from loguru import logger
 
@@ -28,6 +28,8 @@ except ModuleNotFoundError as e:
     logger.error("In order to use an MCP client, you need to `pip install pipecat-ai[mcp]`.")
     raise Exception(f"Missing module: {e}")
 
+ServerParameters: TypeAlias = StdioServerParameters | SseServerParameters | StreamableHttpParameters
+
 
 class MCPClient(BaseObject):
     """Client for Model Context Protocol (MCP) servers.
@@ -42,7 +44,7 @@ class MCPClient(BaseObject):
 
     def __init__(
         self,
-        server_params: Tuple[StdioServerParameters, SseServerParameters, StreamableHttpParameters],
+        server_params: ServerParameters,
         **kwargs,
     ):
         """Initialize the MCP client with server parameters.

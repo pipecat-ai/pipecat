@@ -42,6 +42,11 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
     into AWS Bedrock's expected tool format for function calling capabilities.
     """
 
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for AWS Bedrock."""
+        return "aws"
+
     def get_llm_invocation_params(self, context: LLMContext) -> AWSBedrockLLMInvocationParams:
         """Get AWS Bedrock-specific LLM invocation parameters from a universal LLM context.
 
@@ -51,7 +56,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
         Returns:
             Dictionary of parameters for invoking AWS Bedrock's LLM API.
         """
-        messages = self._from_universal_context_messages(self._get_messages(context))
+        messages = self._from_universal_context_messages(self.get_messages(context))
         return {
             "system": messages.system,
             "messages": messages.messages,
@@ -75,7 +80,7 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
             List of messages in a format ready for logging about AWS Bedrock.
         """
         # Get messages in Anthropic's format
-        messages = self._from_universal_context_messages(self._get_messages(context)).messages
+        messages = self._from_universal_context_messages(self.get_messages(context)).messages
 
         # Sanitize messages for logging
         messages_for_logging = []
@@ -88,9 +93,6 @@ class AWSBedrockLLMAdapter(BaseLLMAdapter[AWSBedrockLLMInvocationParams]):
                             item["image"]["source"]["bytes"] = "..."
             messages_for_logging.append(msg)
         return messages_for_logging
-
-    def _get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
-        return context.get_messages("anthropic")
 
     @dataclass
     class ConvertedMessages:

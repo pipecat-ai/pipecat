@@ -240,6 +240,7 @@ class HeyGenVideoService(AIService):
             # As soon as we receive actual audio, the base output transport will create a
             # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
             await self.stop_ttfb_metrics()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
