@@ -13,7 +13,9 @@ from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 
 
 class _PassthroughResampler:
-    async def resample(self, audio: bytes, in_rate: int, out_rate: int) -> bytes:  # pragma: no cover - trivial
+    async def resample(
+        self, audio: bytes, in_rate: int, out_rate: int
+    ) -> bytes:  # pragma: no cover - trivial
         return audio
 
 
@@ -40,7 +42,9 @@ class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
             captured["merged"] = (audio, sample_rate, num_channels)
             audio_event.set()
 
-        async def on_track_audio_data(_, user: bytes, bot: bytes, sample_rate: int, num_channels: int):
+        async def on_track_audio_data(
+            _, user: bytes, bot: bytes, sample_rate: int, num_channels: int
+        ):
             captured["tracks"] = (user, bot, sample_rate, num_channels)
             track_event.set()
 
@@ -80,7 +84,9 @@ class TestAudioBufferProcessor(unittest.IsolatedAsyncioTestCase):
             captured["merged"] = (audio, sample_rate, num_channels)
             audio_event.set()
 
-        async def on_track_audio_data(_, user: bytes, bot: bytes, sample_rate: int, num_channels: int):
+        async def on_track_audio_data(
+            _, user: bytes, bot: bytes, sample_rate: int, num_channels: int
+        ):
             captured["tracks"] = (user, bot, sample_rate, num_channels)
             track_event.set()
 
