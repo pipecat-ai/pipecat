@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added a peer connection monitor to the `SmallWebRTCConnection` that 
-  automatically disconnects if the connection fails to establish within 
+- Added `ElevenLabsSTTService` for speech-to-text transcription.
+
+- Added a peer connection monitor to the `SmallWebRTCConnection` that
+  automatically disconnects if the connection fails to establish within
   the timeout (1 minute by default).
 
 - Added memory cleanup improvements to reduce memory peaks.
