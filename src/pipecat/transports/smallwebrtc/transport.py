@@ -399,23 +399,33 @@ class SmallWebRTCClient:
 
             del frame  # free original AudioFrame
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebRTC connection.
 
         Args:
             frame: The audio frame to transmit.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         if self._can_send() and self._audio_output_track:
             await self._audio_output_track.add_audio_bytes(frame.audio)
+            return True
+        return False
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.
 
         Args:
             frame: The video frame to transmit.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
         if self._can_send() and self._video_output_track:
             self._video_output_track.add_video_frame(frame)
+            return True
+        return False
 
     async def setup(self, _params: TransportParams, frame):
         """Set up the client with transport parameters.
@@ -818,21 +828,27 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         """
         await self._client.send_message(frame)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebRTC connection.
 
         Args:
             frame: The output audio frame to transmit.
-        """
-        await self._client.write_audio_frame(frame)
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
+        """
+        return await self._client.write_audio_frame(frame)
+
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the WebRTC connection.
 
         Args:
             frame: The output video frame to transmit.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
-        await self._client.write_video_frame(frame)
+        return await self._client.write_video_frame(frame)
 
 
 class SmallWebRTCTransport(BaseTransport):

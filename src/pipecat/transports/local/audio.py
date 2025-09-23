@@ -172,16 +172,21 @@ class LocalAudioOutputTransport(BaseOutputTransport):
             self._out_stream.close()
             self._out_stream = None
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the output stream.
 
         Args:
             frame: The audio frame to write to the output device.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         if self._out_stream:
             await self.get_event_loop().run_in_executor(
                 self._executor, self._out_stream.write, frame.audio
             )
+            return True
+        return False
 
 
 class LocalAudioTransport(BaseTransport):

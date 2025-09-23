@@ -395,15 +395,18 @@ class TavusTransportClient:
             participant_settings=participant_settings, profile_settings=profile_settings
         )
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the transport.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         if not self._client:
-            return
-        await self._client.write_audio_frame(frame)
+            return False
+        return await self._client.write_audio_frame(frame)
 
     async def register_audio_destination(self, destination: str):
         """Register an audio destination for output.
@@ -625,15 +628,18 @@ class TavusOutputTransport(BaseOutputTransport):
         """Handle interruption events by sending interrupt message."""
         await self._client.send_interrupt_message()
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the Tavus transport.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         # This is the custom track destination expected by Tavus
         frame.transport_destination = self._transport_destination
-        await self._client.write_audio_frame(frame)
+        return await self._client.write_audio_frame(frame)
 
     async def register_audio_destination(self, destination: str):
         """Register an audio destination.
