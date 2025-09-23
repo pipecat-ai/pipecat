@@ -61,6 +61,7 @@ class FastAPIWebsocketParams(TransportParams):
     add_wav_header: bool = False
     serializer: Optional[FrameSerializer] = None
     session_timeout: Optional[int] = None
+    is_binary: bool = False
 
 
 class FastAPIWebsocketCallbacks(BaseModel):
@@ -503,7 +504,7 @@ class FastAPIWebsocketTransport(BaseTransport):
             on_session_timeout=self._on_session_timeout,
         )
 
-        is_binary = False
+        is_binary = params.is_binary
         if self._params.serializer:
             is_binary = self._params.serializer.type == FrameSerializerType.BINARY
         self._client = FastAPIWebsocketClient(websocket, is_binary, self._callbacks)
