@@ -329,19 +329,21 @@ class LiveKitTransportClient:
         except Exception as e:
             logger.error(f"Error sending DTMF tone {digit}: {e}")
 
-    async def publish_audio(self, audio_frame: rtc.AudioFrame):
+    async def publish_audio(self, audio_frame: rtc.AudioFrame) -> bool:
         """Publish an audio frame to the room.
 
         Args:
             audio_frame: The LiveKit audio frame to publish.
         """
         if not self._connected or not self._audio_source:
-            return
+            return False
 
         try:
             await self._audio_source.capture_frame(audio_frame)
+            return True
         except Exception as e:
             logger.error(f"Error publishing audio: {e}")
+            return False
 
     def get_participants(self) -> List[str]:
         """Get list of participant IDs in the room.
@@ -849,14 +851,17 @@ class LiveKitOutputTransport(BaseOutputTransport):
         else:
             await self._client.send_data(message.encode())
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the LiveKit room.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
-        await self._client.publish_audio(livekit_audio)
+        return await self._client.publish_audio(livekit_audio)
 
     def _supports_native_dtmf(self) -> bool:
         """LiveKit supports native DTMF via telephone events.
