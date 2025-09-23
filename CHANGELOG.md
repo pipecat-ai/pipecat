@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `StrandsAgentProcessor` which allows you to use the Strands Agents
+  framework to build your voice agents.
+  See https://strandsagents.com
+
 - Added `ElevenLabsSTTService` for speech-to-text transcription.
 
 - Added a peer connection monitor to the `SmallWebRTCConnection` that
