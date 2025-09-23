@@ -968,7 +968,7 @@ class AudioContextWordTTSService(WebsocketWordTTSService, _AudioContextServiceMi
         await super().cancel(frame)
         await self._stop_audio_context_task()
 
-    async def _handle_interruption(self, frame: StartInterruptionFrame, direction: FrameDirection):
+    async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         await super()._handle_interruption(frame, direction)
         await self._stop_audio_context_task()
         self._create_audio_context_task()
