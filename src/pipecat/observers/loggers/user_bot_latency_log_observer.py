@@ -67,8 +67,8 @@ class UserBotLatencyLogObserver(BaseObserver):
             self._user_stopped_time = 0
             self._latencies.append(latency)
             self._log_latency(latency)
-    
-    async def _log_summary(self):
+
+    def _log_summary(self):
         if not self._latencies:
             return
         avg_latency = mean(self._latencies)
@@ -78,10 +78,12 @@ class UserBotLatencyLogObserver(BaseObserver):
             f"⏱️ LATENCY FROM USER STOPPED SPEAKING TO BOT STARTED SPEAKING - Avg: {avg_latency:.3f}s, Min: {min_latency:.3f}s, Max: {max_latency:.3f}s"
         )
 
-    async def _log_latency(self, latency: float):
+    def _log_latency(self, latency: float):
         """Log the latency.
 
         Args:
             latency: The latency to log.
         """
-        logger.debug(f"⏱️ LATENCY FROM USER STOPPED SPEAKING TO BOT STARTED SPEAKING: {latency:.3f}s")
+        logger.debug(
+            f"⏱️ LATENCY FROM USER STOPPED SPEAKING TO BOT STARTED SPEAKING: {latency:.3f}s"
+        )
