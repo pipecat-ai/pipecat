@@ -10,8 +10,9 @@ import os
 from deepgram import LiveOptions
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -112,25 +113,18 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm.register_function("switch_language", tts.switch_language)
 
-    tools = [
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "switch_language",
-                "description": "Switch to another language when the user asks you to",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "language": {
-                            "type": "string",
-                            "description": "The language the user wants you to speak",
-                        },
-                    },
-                    "required": ["language"],
-                },
+    switch_language_function = FunctionSchema(
+        name="switch_language",
+        description="Switch to another language when the user asks you to",
+        properties={
+            "language": {
+                "type": "string",
+                "description": "The language the user wants you to speak",
             },
-        )
-    ]
+        },
+        required=["language"],
+    )
+    tools = ToolsSchema(standard_tools=[switch_language_function])
     messages = [
         {
             "role": "system",

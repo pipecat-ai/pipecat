@@ -9,8 +9,9 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -19,14 +20,14 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.rime.tts import RimeHttpTTSService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
@@ -90,26 +91,20 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     # sent to the same callback with an additional function_name parameter.
     llm.register_function("store_user_emails", store_user_emails)
 
-    tools = [
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "store_user_emails",
-                "description": "Store user emails when confirmed",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "emails": {
-                            "type": "array",
-                            "description": "The list of user emails",
-                            "items": {"type": "string"},
-                        },
-                    },
-                    "required": ["emails"],
-                },
+    store_emails_function = FunctionSchema(
+        name="store_user_emails",
+        description="Store user emails when confirmed",
+        properties={
+            "emails": {
+                "type": "array",
+                "description": "The list of user emails",
+                "items": {"type": "string"},
             },
-        )
-    ]
+        },
+        required=["emails"],
+    )
+    tools = ToolsSchema(standard_tools=[store_emails_function])
+
     messages = [
         {
             "role": "system",
@@ -120,8 +115,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [
