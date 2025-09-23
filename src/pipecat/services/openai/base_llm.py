@@ -26,7 +26,6 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
-    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -423,6 +422,22 @@ class BaseOpenAILLMService(LLMService):
 
             await self.run_function_calls(function_calls)
 
+    async def _start_interruption(self):
+        """Start handling an interruption by cancelling current tasks."""
+        # OpenAI's client swallows asyncio.CancelledError internally, which prevents proper
+        # task cancellation propagation. To ensure proper cancellation behavior:
+        # 1. We check if there's an active chunk stream when receiving an interruption
+        # 2. We explicitly cancel the chunk stream first
+        # 3. This allows the task to be cancelled cleanly afterwards
+        # This approach ensures we don't get stuck in case there was a chunk processing loop
+        # when cancellation is requested.
+        if self.chunk_stream:
+            logger.debug(f"{self}: Cancelling chunk stream due to interruption")
+            await self.chunk_stream.cancel()
+            self.chunk_stream = None
+
+        await super()._start_interruption()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames for LLM completion requests.
 
@@ -434,18 +449,6 @@ class BaseOpenAILLMService(LLMService):
             frame: The frame to process.
             direction: The direction of frame processing.
         """
-        # OpenAI's client swallows asyncio.CancelledError internally, which prevents proper
-        # task cancellation propagation. To ensure proper cancellation behavior:
-        # 1. We check if there's an active chunk stream when receiving an interruption
-        # 2. We explicitly cancel the chunk stream first
-        # 3. This allows the task to be cancelled cleanly afterwards
-        # This approach ensures we don't get stuck in case there was a chunk processing loop
-        # when cancellation is requested.
-        if isinstance(frame, InterruptionFrame) and self.chunk_stream:
-            logger.debug(f"{self}: Cancelling chunk stream due to interruption")
-            await self.chunk_stream.cancel()
-            self.chunk_stream = None
-
         await super().process_frame(frame, direction)
 
         context = None
