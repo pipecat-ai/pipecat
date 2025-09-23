@@ -102,6 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue in BaseOpenAILLMService that could cause the pipeline to freeze
+  under certain race conditions.
+
 - Fixed a `BaseOutputTransport` issue that could produce large saved
   `AudioBufferProcessor` files when using an audio mixer.
 

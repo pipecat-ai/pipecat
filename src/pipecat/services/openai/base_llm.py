@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 from pipecat.adapters.services.open_ai_adapter import OpenAILLMInvocationParams
 from pipecat.frames.frames import (
     Frame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -41,6 +42,7 @@ from pipecat.processors.aggregators.openai_llm_context import (
 )
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.llm_service import FunctionCallFromLLM, LLMService
+from pipecat.utils.cancellable_stream import CancellableStream
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 
@@ -138,6 +140,7 @@ class BaseOpenAILLMService(LLMService):
             default_headers=default_headers,
             **kwargs,
         )
+        self.chunk_stream: Optional[CancellableStream[AsyncStream[AsyncStream]]] = None
 
     def create_client(
         self,
@@ -329,13 +332,15 @@ class BaseOpenAILLMService(LLMService):
         await self.start_ttfb_metrics()
 
         # Generate chat completions using either OpenAILLMContext or universal LLMContext
-        chunk_stream = await (
-            self._stream_chat_completions_specific_context(context)
-            if isinstance(context, OpenAILLMContext)
-            else self._stream_chat_completions_universal_context(context)
+        self.chunk_stream = CancellableStream(
+            await (
+                self._stream_chat_completions_specific_context(context)
+                if isinstance(context, OpenAILLMContext)
+                else self._stream_chat_completions_universal_context(context)
+            )
         )
 
-        async for chunk in chunk_stream:
+        async for chunk in self.chunk_stream:
             if chunk.usage:
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
@@ -389,6 +394,8 @@ class BaseOpenAILLMService(LLMService):
             ):
                 await self.push_frame(LLMTextFrame(chunk.choices[0].delta.audio["transcript"]))
 
+        self.chunk_stream = None
+
         # if we got a function name and arguments, check to see if it's a function with
         # a registered handler. If so, run the registered callback, save the result to
         # the context, and re-prompt to get a chat answer. If we don't have a registered
@@ -427,6 +434,18 @@ class BaseOpenAILLMService(LLMService):
             frame: The frame to process.
             direction: The direction of frame processing.
         """
+        # OpenAI's client swallows asyncio.CancelledError internally, which prevents proper
+        # task cancellation propagation. To ensure proper cancellation behavior:
+        # 1. We check if there's an active chunk stream when receiving an interruption
+        # 2. We explicitly cancel the chunk stream first
+        # 3. This allows the task to be cancelled cleanly afterwards
+        # This approach ensures we don't get stuck in case there was a chunk processing loop
+        # when cancellation is requested.
+        if isinstance(frame, InterruptionFrame) and self.chunk_stream:
+            logger.debug(f"{self}: Cancelling chunk stream due to interruption")
+            await self.chunk_stream.cancel()
+            self.chunk_stream = None
+
         await super().process_frame(frame, direction)
 
         context = None
