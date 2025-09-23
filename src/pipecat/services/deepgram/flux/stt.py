@@ -14,9 +14,9 @@ from loguru import logger
 from pydantic import BaseModel
 
 from pipecat.frames.frames import (
-    BotInterruptionFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InterimTranscriptionFrame,
     StartFrame,
@@ -61,7 +61,7 @@ class FluxEventType(str, Enum):
     START_OF_TURN = "StartOfTurn"
     SPEECH_RESUMED = "SpeechResumed"
     END_OF_TURN = "EndOfTurn"
-    PREFLIGHT = "Preflight"
+    EAGER_END_OF_TURN = "EagerEndOfTurn"
     UPDATE = "Update"
 
 
@@ -70,7 +70,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
     Provides real-time speech recognition using Deepgram's WebSocket API with Flux capabilities.
     Supports configurable models, VAD events, and various audio processing options
-    including advanced turn detection and preflight events for improved conversational AI performance.
+    including advanced turn detection and EagerEndOfTurn events for improved conversational AI performance.
     """
 
     class InputParams(BaseModel):
@@ -82,9 +82,9 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Attributes:
             flux_encoding: Audio encoding format required by Flux API. Must be "linear16".
                 Raw signed little-endian 16-bit PCM encoding.
-            preflight_threshold: Preflight/SpeechResumed are off by default. You can turn them on by setting preflight_threshold to a valid value.
-                Lower values = more aggressive preflighting (faster response, more LLM calls).
-                Higher values = more conservative preflighting (slower response, fewer LLM calls).
+            eager_eot_threshold: EagerEndOfTurn/SpeechResumed are off by default. You can turn them on by setting eager_eot_threshold to a valid value.
+                Lower values = more aggressive EagerEndOfTurning (faster response, more LLM calls).
+                Higher values = more conservative EagerEndOfTurning (slower response, fewer LLM calls).
             eot_threshold: End-of-turn confidence required to finish a turn (default 0.7).
                 Lower values = turns end sooner (more interruptions, faster responses).
                 Higher values = turns end later (fewer interruptions, more complete utterances).
@@ -98,7 +98,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         """
 
         flux_encoding: str = "linear16"
-        preflight_threshold: float = 0.3
+        eager_eot_threshold: float = 0.3
         eot_threshold: float = 0.7
         eot_timeout_ms: int = 5000
         keyterm: list = []
@@ -119,7 +119,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
         Creates a new instance of the Deepgram Flux speech-to-text service with the specified
         configuration parameters. The service provides real-time speech recognition with
-        advanced features like turn detection, preflight events, and voice activity detection.
+        advanced features like turn detection, EagerEndOfTurn events, and voice activity detection.
 
         Args:
             api_key: Deepgram API key for authentication. Required for API access.
@@ -137,7 +137,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
 
             # Advanced usage with custom parameters
             params = DeepgramFluxSTTService.InputParams(
-                preflight_threshold=0.5,
+                eager_eot_threshold=0.5,
                 eot_threshold=0.8,
                 keyterm=["AI", "machine learning", "neural network"],
                 tag=["production", "voice-agent"]
@@ -271,7 +271,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             f"model={self._model}",
             f"sample_rate={self.sample_rate}",
             f"encoding={self._params.flux_encoding}",
-            f"preflight_threshold={self._params.preflight_threshold}",
+            f"eager_eot_threshold={self._params.eager_eot_threshold}",
             f"eot_threshold={self._params.eot_threshold}",
             f"eot_timeout_ms={self._params.eot_timeout_ms}",
             f"mip_opt_out={str(self._params.mip_opt_out).lower()}",
@@ -324,6 +324,11 @@ class DeepgramFluxSTTService(WebsocketSTTService):
             Exception: If the WebSocket connection is not established or if there
                 are issues sending the audio data.
         """
+        if not self._websocket:
+            logger.error("Not connected to Deepgram Flux.")
+            yield ErrorFrame("Not connected to Deepgram Flux.", fatal=True)
+            return
+
         await self._websocket.send(audio)
         yield None
 
@@ -387,7 +392,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         Continuously receives messages from the Deepgram Flux WebSocket connection
         and processes various message types including connection status, transcription
         results, turn information, and error conditions. Handles different event types
-        such as StartOfTurn, EndOfTurn, Preflight, and Update events.
+        such as StartOfTurn, EndOfTurn, EagerEndOfTurn, and Update events.
         """
         async for message in self._get_websocket():
             if isinstance(message, str):
@@ -487,8 +492,8 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 await self._handle_speech_resumed(event)
             case FluxEventType.END_OF_TURN:
                 await self._handle_end_of_turn(transcript)
-            case FluxEventType.PREFLIGHT:
-                await self._handle_preflight(transcript)
+            case FluxEventType.EAGER_END_OF_TURN:
+                await self._handle_eager_end_of_turn(transcript)
             case FluxEventType.UPDATE:
                 await self._handle_update(transcript)
 
@@ -558,39 +563,39 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         await self.stop_processing_metrics()
         await self.push_frame(UserStoppedSpeakingFrame(), FrameDirection.DOWNSTREAM)
 
-    async def _handle_preflight(self, transcript: str):
-        """Handle Preflight events from Deepgram Flux.
+    async def _handle_eager_end_of_turn(self, transcript: str):
+        """Handle EagerEndOfTurn events from Deepgram Flux.
 
-        Preflight events are fired when the end-of-turn confidence reaches the
-        preflight threshold but hasn't yet reached the full end-of-turn threshold.
+        EagerEndOfTurn events are fired when the end-of-turn confidence reaches the
+        EagerEndOfTurn threshold but hasn't yet reached the full end-of-turn threshold.
         These provide interim transcripts that can be used for faster response
         generation while still allowing the user to continue speaking.
 
-        Preflight events enable more responsive conversational AI by allowing
+        EagerEndOfTurn events enable more responsive conversational AI by allowing
         the LLM to start processing likely final transcripts before the turn
         is definitively ended.
 
         Args:
-            transcript: The interim transcript text that triggered the preflight event.
+            transcript: The interim transcript text that triggered the EagerEndOfTurn event.
         """
-        logger.trace(f"Preflight - {transcript}")
-        # Deepgram's Preflight feature enables lower-latency voice agents by sending
+        logger.trace(f"EagerEndOfTurn - {transcript}")
+        # Deepgram's EagerEndOfTurn feature enables lower-latency voice agents by sending
         # medium-confidence transcripts before EndOfTurn certainty, allowing LLM processing to
         # begin early.
         #
         # However, if speech resumes or the transcripts differ from the final EndOfTurn, the
-        # preflight response should be cancelled to avoid incorrect or partial responses.
+        # EagerEndOfTurn response should be cancelled to avoid incorrect or partial responses.
         #
         # Pipecat doesn't yet provide built-in Gate/control mechanisms to:
-        # 1. Start LLM/TTS processing early on Preflight events
+        # 1. Start LLM/TTS processing early on EagerEndOfTurn events
         # 2. Cancel in-flight processing when SpeechResumed occurs
         #
-        # By pushing Preflight transcripts as InterimTranscriptionFrame, we enable
-        # developers to implement custom preflight handling in their applications while
+        # By pushing EagerEndOfTurn transcripts as InterimTranscriptionFrame, we enable
+        # developers to implement custom EagerEndOfTurn handling in their applications while
         # maintaining compatibility with existing interim transcription workflows.
         #
-        # TODO: Implement proper preflight support with cancellable processing pipeline
-        # that can start response generation on Preflight and cancel or confirm it.
+        # TODO: Implement proper EagerEndOfTurn support with cancellable processing pipeline
+        # that can start response generation on EagerEndOfTurn and cancel or confirm it.
         await self.push_frame(
             InterimTranscriptionFrame(
                 transcript,
