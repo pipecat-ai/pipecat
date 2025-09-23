@@ -346,14 +346,17 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
         """
         await self._write_frame(frame)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebSocket client with timing control.
 
         Args:
             frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         if not self._websocket:
-            return
+            return False
 
         frame = OutputAudioRawFrame(
             audio=frame.audio,
@@ -379,6 +382,8 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
 
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
+
+        return True
 
     async def _write_frame(self, frame: Frame):
         """Serialize and send a frame to the WebSocket client."""

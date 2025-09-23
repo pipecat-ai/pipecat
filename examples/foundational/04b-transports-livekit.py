@@ -18,8 +18,8 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     InterruptionFrame,
-    TextFrame,
     TranscriptionFrame,
+    TTSSpeakFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
 )
@@ -103,7 +103,7 @@ async def main():
     async def on_first_participant_joined(transport, participant_id):
         await asyncio.sleep(1)
         await task.queue_frame(
-            TextFrame(
+            TTSSpeakFrame(
                 "Hello there! How are you doing today? Would you like to talk about the weather?"
             )
         )
