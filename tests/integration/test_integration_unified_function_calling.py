@@ -12,14 +12,12 @@ from dotenv import load_dotenv
 
 from pipecat.adapters.schemas.function_schema import FunctionSchema
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.frames.frames import LLMContextFrame
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-    OpenAILLMContextFrame,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.services.anthropic.llm import AnthropicLLMService
 from pipecat.services.google.llm import GoogleLLMService
-from pipecat.services.llm_service import LLMService
+from pipecat.services.llm_service import FunctionCallParams, LLMService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.tests.utils import run_test
 
@@ -48,8 +46,13 @@ def standard_tools() -> ToolsSchema:
 
 
 async def _test_llm_function_calling(llm: LLMService):
-    # Create an AsyncMock for the function
-    mock_fetch_weather = AsyncMock()
+    # Create a mock weather function
+    call_count = 0
+
+    async def mock_fetch_weather(params: FunctionCallParams):
+        nonlocal call_count
+        call_count += 1
+        pass
 
     llm.register_function(None, mock_fetch_weather)
 
@@ -60,21 +63,19 @@ async def _test_llm_function_calling(llm: LLMService):
         },
         {"role": "user", "content": " How is the weather today in San Francisco, California?"},
     ]
-    context = OpenAILLMContext(messages, standard_tools())
-    # This is done by default inside the create_context_aggregator
-    context.set_llm_adapter(llm.get_llm_adapter())
+    context = LLMContext(messages, standard_tools())
 
     pipeline = Pipeline([llm])
 
-    frames_to_send = [OpenAILLMContextFrame(context)]
+    frames_to_send = [LLMContextFrame(context)]
     await run_test(
         pipeline,
         frames_to_send=frames_to_send,
         expected_down_frames=None,
     )
 
-    # Assert that the mock function was called
-    mock_fetch_weather.assert_called_once()
+    # Assert that the weather function was called once
+    assert call_count == 1
 
 
 @pytest.mark.skipif(os.getenv("OPENAI_API_KEY") is None, reason="OPENAI_API_KEY is not set")
