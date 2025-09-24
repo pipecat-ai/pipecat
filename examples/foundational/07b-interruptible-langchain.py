@@ -129,7 +129,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        # An `OpenAILLMContextFrame` will be picked up by the LangchainProcessor using
+        # An `LLMContextFrame` will be picked up by the LangchainProcessor using
         # only the content of the last message to inject it in the prompt defined
         # above. So no role is required here.
         messages = [({"content": "Please briefly introduce yourself to the user."})]
