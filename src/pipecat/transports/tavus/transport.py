@@ -221,6 +221,7 @@ class TavusTransportClient:
                 ),
                 on_joined=self._on_joined,
                 on_left=self._on_left,
+                on_before_leave=partial(self._on_handle_callback, "on_before_leave"),
                 on_error=partial(self._on_handle_callback, "on_error"),
                 on_app_message=partial(self._on_handle_callback, "on_app_message"),
                 on_call_state_updated=partial(self._on_handle_callback, "on_call_state_updated"),
