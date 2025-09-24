@@ -66,7 +66,7 @@ class SmallWebRTCCallbacks(BaseModel):
         on_client_disconnected: Called when a client disconnects.
     """
 
-    on_app_message: Callable[[Any], Awaitable[None]]
+    on_app_message: Callable[[Any, str], Awaitable[None]]
     on_client_connected: Callable[[SmallWebRTCConnection], Awaitable[None]]
     on_client_disconnected: Callable[[SmallWebRTCConnection], Awaitable[None]]
 
@@ -254,7 +254,7 @@ class SmallWebRTCClient:
 
         @self._webrtc_connection.event_handler("app-message")
         async def on_app_message(connection: SmallWebRTCConnection, message: Any):
-            await self._handle_app_message(message)
+            await self._handle_app_message(message, connection.pc_id)
 
     def _convert_frame(self, frame_array: np.ndarray, format_name: str) -> np.ndarray:
         """Convert a video frame to RGB format based on the input format.
@@ -512,9 +512,9 @@ class SmallWebRTCClient:
         if not self._closing:
             await self._callbacks.on_client_disconnected(self._webrtc_connection)
 
-    async def _handle_app_message(self, message: Any):
+    async def _handle_app_message(self, message: Any, sender: str):
         """Handle incoming application messages."""
-        await self._callbacks.on_app_message(message)
+        await self._callbacks.on_app_message(message, sender)
 
     def _can_send(self):
         """Check if the connection is ready for sending data."""
@@ -935,11 +935,11 @@ class SmallWebRTCTransport(BaseTransport):
         if self._output:
             await self._output.queue_frame(frame, FrameDirection.DOWNSTREAM)
 
-    async def _on_app_message(self, message: Any):
+    async def _on_app_message(self, message: Any, sender: str):
         """Handle incoming application messages."""
         if self._input:
             await self._input.push_app_message(message)
-        await self._call_event_handler("on_app_message", message)
+        await self._call_event_handler("on_app_message", message, sender)
 
     async def _on_client_connected(self, webrtc_connection):
         """Handle client connection events."""
