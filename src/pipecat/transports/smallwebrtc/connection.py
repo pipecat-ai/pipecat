@@ -483,17 +483,19 @@ class SmallWebRTCConnection(BaseObject):
                 sdp_mid = current_mid if current_mid else str(media_index)
 
                 try:
-                    await self._signaling_ws.send_json({
-                        "type": "ice-candidate",
-                        "payload": {
-                            "candidate": {
-                                "candidate": f"candidate:{candidate_str}",
-                                "sdpMid": sdp_mid,
-                                "sdpMLineIndex": media_index,
+                    await self._signaling_ws.send_json(
+                        {
+                            "type": "ice-candidate",
+                            "payload": {
+                                "candidate": {
+                                    "candidate": f"candidate:{candidate_str}",
+                                    "sdpMid": sdp_mid,
+                                    "sdpMLineIndex": media_index,
+                                },
+                                "pc_id": self._pc_id,
                             },
-                            "pc_id": self._pc_id,
-                        },
-                    })
+                        }
+                    )
                 except Exception as e:
                     logger.error(f"Failed to send ICE candidate: {e}")
 

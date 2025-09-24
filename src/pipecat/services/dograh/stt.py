@@ -95,6 +95,7 @@ class DograhSTTService(STTService):
 
         # Session tracking for metrics
         self._session_start_time: Optional[float] = None
+        self._start_metadata = None
 
         # Register event handlers if VAD is enabled
         if self._vad_events:
@@ -148,6 +149,11 @@ class DograhSTTService(STTService):
                 "interim_results": self._interim_results,
                 "vad_events": self._vad_events,
             }
+
+            # Add workflow_run_id if available from StartFrame metadata
+            if self._start_metadata and "workflow_run_id" in self._start_metadata:
+                config_msg["correlation_id"] = self._start_metadata["workflow_run_id"]
+
             await self._websocket.send(json.dumps(config_msg))
 
             # Start background tasks
@@ -366,6 +372,10 @@ class DograhSTTService(STTService):
             frame: The frame to process.
             direction: The direction of frame processing.
         """
+        # Capture StartFrame metadata for workflow_run_id
+        if isinstance(frame, StartFrame):
+            self._start_metadata = frame.metadata
+
         await super().process_frame(frame, direction)
 
         # Handle specific frame types if needed

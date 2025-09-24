@@ -152,6 +152,7 @@ class DograhTTSService(AudioContextWordTTSService):
         self._cumulative_time = 0
         self._accumulated_text = ""
         self._context_id = None
+        self._start_metadata = None
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.
@@ -207,6 +208,11 @@ class DograhTTSService(AudioContextWordTTSService):
                 "sample_rate": self.sample_rate,
                 "settings": self._settings,
             }
+
+            # Add workflow_run_id if available from StartFrame metadata
+            if self._start_metadata and "workflow_run_id" in self._start_metadata:
+                config_msg["correlation_id"] = self._start_metadata["workflow_run_id"]
+
             await self._websocket.send(json.dumps(config_msg))
 
             logger.info(f"Connected to Dograh TTS service")
@@ -391,6 +397,11 @@ class DograhTTSService(AudioContextWordTTSService):
                     "model": self._model,
                     "settings": self._settings,
                 }
+
+                # Add workflow_run_id if available
+                if self._start_metadata and "workflow_run_id" in self._start_metadata:
+                    context_msg["correlation_id"] = self._start_metadata["workflow_run_id"]
+
                 await self._websocket.send(json.dumps(context_msg))
                 logger.trace(f"Created new context {self._context_id} with voice settings")
 
@@ -437,6 +448,18 @@ class DograhTTSService(AudioContextWordTTSService):
         logger.trace(f"{self}: flushing audio")
         msg = {"context_id": self._context_id, "flush": True}
         await self._websocket.send(json.dumps(msg))
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection):
+        """Process frames and capture StartFrame metadata.
+
+        Args:
+            frame: The frame to process.
+            direction: The direction of frame processing.
+        """
+        if isinstance(frame, StartFrame):
+            self._start_metadata = frame.metadata
+
+        await super().process_frame(frame, direction)
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
         """Push a frame and handle state changes.
