@@ -455,8 +455,12 @@ class FrameProcessor(BaseObject):
             name = f"{self}::{coroutine.cr_code.co_name}"
         return self.task_manager.create_task(coroutine, name)
 
-    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = None):
+    async def cancel_task(self, task: asyncio.Task, timeout: Optional[float] = 1.0):
         """Cancel a task managed by this processor.
+
+        A default timeout if 1 second is used in order to avoid potential
+        freezes caused by certain libraries that swallow
+        `asyncio.CancelledError`.
 
         Args:
             task: The task to cancel.
