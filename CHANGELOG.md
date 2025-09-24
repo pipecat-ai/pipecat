@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `HeyGenTransport`. This is an integration for HeyGen Interactive
+  Avatar. A video service that handles audio streaming and requests HeyGen to
+  generate avatar video responses. (see https://www.heygen.com/). When used, the
+  Pipecat bot joins the same virtual room as the HeyGen Avatar and the user.
+
 - Added support to `TwilioFrameSerializer` for `region` and `edge` settings.
 
 - Added support for using universal `LLMContext` with:
