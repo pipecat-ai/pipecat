@@ -549,6 +549,7 @@ class OjinPersonaInteraction:
         bytes_per_sample = 2
         samples_count = audio_buffer_len // bytes_per_sample
         self.expected_frames += (samples_count / sample_rate) * fps
+        logger.debug(f"pushing audio samples count: {samples_count}, next expected frames: {self.expected_frames}")
 
 
 class OjinPersonaService(FrameProcessor):
@@ -1184,7 +1185,7 @@ class OjinPersonaService(FrameProcessor):
             f"Queued audio for later processing. Queue size: {interaction_to_use.audio_input_queue.qsize()}"
         )
         interaction_to_use.update_expected_frames(
-            len(resampled_audio), frame.sample_rate, self._fsm._playback_loop.fps
+            len(resampled_audio), OJIN_PERSONA_SAMPLE_RATE, self._fsm._playback_loop.fps
         )
 
     def _close_interaction(self):
