@@ -72,8 +72,30 @@ class TwilioFrameSerializer(FrameSerializer):
             call_sid: The associated Twilio Call SID (optional, but required for auto hang-up).
             account_sid: Twilio account SID (required for auto hang-up).
             auth_token: Twilio auth token (required for auto hang-up).
+            region: Twilio region (e.g., "au1", "ie1"). Must be specified with edge.
+            edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
             params: Configuration parameters.
         """
+        if not call_sid or not account_sid or not auth_token:
+            missing = []
+            if not call_sid:
+                missing.append("call_sid")
+            if not account_sid:
+                missing.append("account_sid")
+            if not auth_token:
+                missing.append("auth_token")
+
+            raise ValueError(
+                f"Cannot hang up Twilio call: missing required parameters: {', '.join(missing)}"
+            )
+
+        if (region and not edge) or (edge and not region):
+            raise ValueError(
+                "Both edge and region parameters are required if one is set. "
+                f"Twilio's FQDN format requires both: api.{{edge}}.{{region}}.twilio.com. "
+                f"Got: region='{region}', edge='{edge}'"
+            )
+
         self._stream_sid = stream_sid
         self._call_sid = call_sid
         self._account_sid = account_sid
@@ -165,33 +187,11 @@ class TwilioFrameSerializer(FrameSerializer):
             region = self._region
             edge = self._edge
 
-            if not call_sid or not account_sid or not auth_token:
-                missing = []
-                if not call_sid:
-                    missing.append("call_sid")
-                if not account_sid:
-                    missing.append("account_sid")
-                if not auth_token:
-                    missing.append("auth_token")
-
-                logger.warning(
-                    f"Cannot hang up Twilio call: missing required parameters: {', '.join(missing)}"
-                )
-                return
-
-            if (region and not edge) or (edge and not region):
-                logger.warning(
-                    "Cannot hang up Twilio call: both edge and region are required if one is set"
-                )
-                return
-
             region_prefix = f"{region}." if region else ""
             edge_prefix = f"{edge}." if edge else ""
 
             # Twilio API endpoint for updating calls
-            endpoint = (
-                f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
-            )
+            endpoint = f"https://api.{edge_prefix}{region_prefix}twilio.com/2010-04-01/Accounts/{account_sid}/Calls/{call_sid}.json"
 
             # Create basic auth from account_sid and auth_token
             auth = aiohttp.BasicAuth(account_sid, auth_token)
