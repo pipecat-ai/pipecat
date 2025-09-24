@@ -83,6 +83,7 @@ TESTS_07 = [
     ("07k-interruptible-lmnt.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     ("07l-interruptible-groq.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     ("07m-interruptible-aws.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
+    ("07m-interruptible-aws-strands.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("07n-interruptible-gemini.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     ("07n-interruptible-google.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
     ("07o-interruptible-assemblyai.py", PROMPT_SIMPLE_MATH, EVAL_SIMPLE_MATH, BOT_SPEAKS_FIRST),
@@ -135,25 +136,6 @@ TESTS_14 = [
     ("14r-function-calling-aws.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14v-function-calling-openai.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     ("14w-function-calling-mistral.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
-    ("14x-function-calling-universal-context.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
-    (
-        "14y-function-calling-google-universal-context.py",
-        PROMPT_WEATHER,
-        EVAL_WEATHER,
-        BOT_SPEAKS_FIRST,
-    ),
-    (
-        "14z-function-calling-anthropic-universal-context.py",
-        PROMPT_WEATHER,
-        EVAL_WEATHER,
-        BOT_SPEAKS_FIRST,
-    ),
-    (
-        "14aa-function-calling-aws-universal-context.py",
-        PROMPT_WEATHER,
-        EVAL_WEATHER,
-        BOT_SPEAKS_FIRST,
-    ),
     # Currently not working.
     # ("14c-function-calling-together.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),
     # ("14l-function-calling-deepseek.py", PROMPT_WEATHER, EVAL_WEATHER, BOT_SPEAKS_FIRST),

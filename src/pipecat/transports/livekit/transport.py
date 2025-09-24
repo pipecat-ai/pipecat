@@ -114,6 +114,7 @@ class LiveKitCallbacks(BaseModel):
 
     on_connected: Callable[[], Awaitable[None]]
     on_disconnected: Callable[[], Awaitable[None]]
+    on_before_disconnect: Callable[[], Awaitable[None]]
     on_participant_connected: Callable[[str], Awaitable[None]]
     on_participant_disconnected: Callable[[str], Awaitable[None]]
     on_audio_track_subscribed: Callable[[str], Awaitable[None]]
@@ -282,6 +283,7 @@ class LiveKitTransportClient:
                 return
 
             logger.info(f"Disconnecting from {self._room_name}")
+            await self._callbacks.on_before_disconnect()
             await self.room.disconnect()
             self._connected = False
             logger.info(f"Disconnected from {self._room_name}")
@@ -327,19 +329,21 @@ class LiveKitTransportClient:
         except Exception as e:
             logger.error(f"Error sending DTMF tone {digit}: {e}")
 
-    async def publish_audio(self, audio_frame: rtc.AudioFrame):
+    async def publish_audio(self, audio_frame: rtc.AudioFrame) -> bool:
         """Publish an audio frame to the room.
 
         Args:
             audio_frame: The LiveKit audio frame to publish.
         """
         if not self._connected or not self._audio_source:
-            return
+            return False
 
         try:
             await self._audio_source.capture_frame(audio_frame)
+            return True
         except Exception as e:
             logger.error(f"Error publishing audio: {e}")
+            return False
 
     def get_participants(self) -> List[str]:
         """Get list of participant IDs in the room.
@@ -847,14 +851,17 @@ class LiveKitOutputTransport(BaseOutputTransport):
         else:
             await self._client.send_data(message.encode())
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the LiveKit room.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         livekit_audio = self._convert_pipecat_audio_to_livekit(frame.audio)
-        await self._client.publish_audio(livekit_audio)
+        return await self._client.publish_audio(livekit_audio)
 
     def _supports_native_dtmf(self) -> bool:
         """LiveKit supports native DTMF via telephone events.
@@ -918,6 +925,7 @@ class LiveKitTransport(BaseTransport):
         callbacks = LiveKitCallbacks(
             on_connected=self._on_connected,
             on_disconnected=self._on_disconnected,
+            on_before_disconnect=self._on_before_disconnect,
             on_participant_connected=self._on_participant_connected,
             on_participant_disconnected=self._on_participant_disconnected,
             on_audio_track_subscribed=self._on_audio_track_subscribed,
@@ -947,6 +955,7 @@ class LiveKitTransport(BaseTransport):
         self._register_event_handler("on_first_participant_joined")
         self._register_event_handler("on_participant_left")
         self._register_event_handler("on_call_state_updated")
+        self._register_event_handler("on_before_disconnect", sync=True)
 
     def input(self) -> LiveKitInputTransport:
         """Get the input transport for receiving media and events.
@@ -1040,6 +1049,10 @@ class LiveKitTransport(BaseTransport):
     async def _on_disconnected(self):
         """Handle room disconnected events."""
         await self._call_event_handler("on_disconnected")
+
+    async def _on_before_disconnect(self):
+        """Handle before disconnection room events."""
+        await self._call_event_handler("on_before_disconnect")
 
     async def _on_participant_connected(self, participant_id: str):
         """Handle participant connected events."""

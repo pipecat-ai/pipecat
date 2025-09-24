@@ -11,6 +11,7 @@ from loguru import logger
 from pipecat.frames.frames import (
     FunctionCallInProgressFrame,
     FunctionCallResultFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesFrame,
@@ -79,10 +80,13 @@ class LLMLogObserver(BaseObserver):
                 f"🧠 {arrow} {dst} LLM MESSAGES FRAME: {frame.messages} at {time_sec:.2f}s"
             )
         # Log OpenAILLMContextFrame (input)
-        elif isinstance(frame, OpenAILLMContextFrame):
-            logger.debug(
-                f"🧠 {arrow} {dst} LLM CONTEXT FRAME: {frame.context.messages} at {time_sec:.2f}s"
+        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+            messages = (
+                frame.context.messages
+                if isinstance(frame, OpenAILLMContextFrame)
+                else frame.context.get_messages()
             )
+            logger.debug(f"🧠 {arrow} {dst} LLM CONTEXT FRAME: {messages} at {time_sec:.2f}s")
         # Log function call result (input)
         elif isinstance(frame, FunctionCallResultFrame):
             logger.debug(

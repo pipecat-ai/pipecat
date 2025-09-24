@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for using universal `LLMContext` with:
+
+  - `LLMLogObserver`
+  - `GatedLLMContextAggregator` (formerly `GatedOpenAILLMContextAggregator`)
+  - `LangchainProcessor`
+  - `Mem0MemoryService`
+
+- Added `StrandsAgentProcessor` which allows you to use the Strands Agents
+  framework to build your voice agents.
+  See https://strandsagents.com
+
+- Added `ElevenLabsSTTService` for speech-to-text transcription.
+
+- Added a peer connection monitor to the `SmallWebRTCConnection` that
+  automatically disconnects if the connection fails to establish within
+  the timeout (1 minute by default).
+
+- Added memory cleanup improvements to reduce memory peaks.
+
+- Added `on_before_process_frame`, `on_after_process_frame`,
+  `on_before_push_frame` and `on_after_push_frame`. These are synchronous events
+  that get called before and after a frame is processed or pushed. Note that
+  these events are synchrnous so they should ideally perform lightweight tasks
+  in order to not block the pipeline. See
+  `examples/foundational/45-before-and-after-events.py`.
+
+- Added `on_before_leave` synchronous event to `DailyTransport`.
+
+- Added `on_before_disconnect` synchronous event to `LiveKitTransport`.
+
+- It is now possible to register synchronous event handlers. By default, all
+  event handlers are executed in a separate task. However, in some cases we want
+  to guarantee order of execution, for example, executing something before
+  disconnecting a transport.
+
+  ```python
+  self._register_event_handler("on_event_name", sync=True)
+  ```
+
+- Added support for global location in `GoogleVertexLLMService`. The service now
+  supports both regional locations (e.g., "us-east4") and the "global" location
+  for Vertex AI endpoints. When using "global" location, the service will use
+  `aiplatform.googleapis.com` as the API host instead of the regional format.
+
 - Added `on_pipeline_finished` event to `PipelineTask`. This event will get
   fired when the pipeline is done running. This can be the result of a
   `StopFrame`, `CancelFrame` or `EndFrame`.
@@ -19,15 +63,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       ...
   ```
 
+- Added support for new RTVI `send-text` event, along with the ability to toggle
+  the audio response off (skip tts) while handling the new context.
+
 - Added `PinchAudioService` with procide access to Pinch Translation.
 
+### Changed
+
+- Updated `aiortc` to 1.13.0.
+
+- Updated `sentry` to 2.38.0.
+
+- `BaseOutputTransport` methods `write_audio_frame` and `write_video_frame` now
+  return a boolean to indicate if the transport implementation was able to write
+  the given frame or not.
+
+- Updated Silero VAD model to v6.
+
+- Updated `livekit` to 1.0.13.
+
+- `torch` and `torchaudio` are no longer required for running Smart Turn
+  locally. This avoids gigabytes of dependencies being installed.
+
+- Updated `websockets` dependency to support version 15.0. Removed deprecated
+  usage of `ConnectionClosed.code` and `ConnectionClosed.reason` attributes in
+  `AWSTranscribeSTTService` for compatibility.
+
+- Refactored `pyproject.toml` to reduce websockets dependency repetition using
+  self-referencing extras. All websockets-dependent services now reference a
+  shared `websockets-base` extra.
+
 ### Deprecated
+
+- `GladiaSTTService`'s `confidence` arg is deprecated. `confidence` is no
+  longer needed to determine which transcription or translation frames to
+  emit.
 
 - `PipelineTask` events `on_pipeline_stopped`, `on_pipeline_ended` and
   `on_pipeline_cancelled` are now deprecated. Use `on_pipeline_finished`
   instead.
 
+- Support for the RTVI `append-to-context` event, in lieu of the new `send-text`
+  event and making way for future events like `send-image`.
+
 ### Fixed
+
+- Fixed an `AudioBufferProcessor` issues that was causing user audio to be
+  missing in stereo recordings causing bot and user overlaps.
+
+- Fixed a `BaseOutputTransport` issue that could produce large saved
+  `AudioBufferProcessor` files when using an audio mixer.
+
+- Fixed a `PipelineRunner` issue on Windows where setting up SIGINT and SIGTERM
+  was raising an exception.
+
+- Fixed an issue where multiple handlers for an event would not run in parallel.
+
+- Fixed `DailyTransport.sip_call_transfer()` to automatically use the session
+  ID from the `on_dialin_connected` event, when not explicitly provided. Now
+  supports cold transfers (from incoming dial-in calls) by automatically
+  tracking session IDs from connection events.
+
+- Fixed a memory leak in `SmallWebRTCTransport`. In `aiortc`, when you receive
+  a `MediaStreamTrack` (audio or video), frames are produced asynchronously. If
+  the code never consumes these frames, they are queued in memory, causing a
+  memory leak.
+
+- Fixed an issue in `AsyncAITTSService`, where `TTSTextFrames` were not being
+  pushed.
+
+- Fixed an issue that would cause `push_interruption_task_frame_and_wait()` to
+  not wait if a previous interruption had already happened.
+
+- Fixed a couple of bugs in `ServiceSwitcher`:
+
+  - Using multiple `ServiceSwitcher`s in a pipeline would result in an error.
+  - `ServiceSwitcherFrame`s (such as `ManuallySwitchServiceFrame`s) were having
+    an effect too early, essentially "jumping the queue" in terms of pipeline
+    frame ordering.
+
+- Fixed a self-cancellation deadlock in `UserIdleProcessor` when returning
+  `False` from an idle callback. The task now terminates naturally instead of
+  attempting to cancel itself.
 
 - Fixed an issue in `AudioBufferProcessor` where a recording is not created
   when a bot speaks and user input is blocked.

@@ -38,7 +38,7 @@ Examples::
             model="inworld-tts-1",
             streaming=True,  # Default
             params=InworldTTSService.InputParams(
-                temperature=0.8,  # Optional: control synthesis variability (range: [0, 2])
+                temperature=1.1,  # Optional: control synthesis variability (range: [0, 2])
             ),
         )
 
@@ -50,7 +50,7 @@ Examples::
             model="inworld-tts-1",
             streaming=False,
             params=InworldTTSService.InputParams(
-                temperature=0.8,
+                temperature=1.1,
             ),
         )
 """
@@ -123,7 +123,7 @@ class InworldTTSService(TTSService):
                 model="inworld-tts-1",
                 streaming=True,  # Default behavior
                 params=InworldTTSService.InputParams(
-                    temperature=0.8,  # Add variability to speech synthesis (range: [0, 2])
+                    temperature=1.1,  # Add variability to speech synthesis (range: [0, 2])
                 ),
             )
 
@@ -135,7 +135,7 @@ class InworldTTSService(TTSService):
                 model="inworld-tts-1-max",
                 streaming=False,
                 params=InworldTTSService.InputParams(
-                    temperature=0.8,
+                    temperature=1.1,
                 ),
             )
     """
@@ -144,7 +144,7 @@ class InworldTTSService(TTSService):
         """Optional input parameters for Inworld TTS configuration.
 
         Parameters:
-            temperature: Voice temperature control for synthesis variability (e.g., 0.8).
+            temperature: Voice temperature control for synthesis variability (e.g., 1.1).
                         Valid range: [0, 2]. Higher values increase variability.
 
         Note:
@@ -197,7 +197,7 @@ class InworldTTSService(TTSService):
                      - "LINEAR16" (default) - Uncompressed PCM, best quality
                      - Other formats as supported by Inworld API
             params: Optional input parameters for additional configuration. Use this to specify:
-                   - temperature: Voice temperature control for variability (range: [0, 2], e.g., 0.8, optional)
+                   - temperature: Voice temperature control for variability (range: [0, 2], e.g., 1.1, optional)
                    Language is automatically inferred from input text.
             **kwargs: Additional arguments passed to the parent TTSService class.
 

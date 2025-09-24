@@ -150,17 +150,39 @@ class WebsocketClientSession:
         await self._websocket.close()
         self._websocket = None
 
-    async def send(self, message: websockets.Data):
+    async def send(self, message: websockets.Data) -> bool:
         """Send a message through the WebSocket connection.
 
         Args:
             message: The message data to send.
         """
+        result = False
         try:
             if self._websocket:
                 await self._websocket.send(message)
+                result = True
         except Exception as e:
             logger.error(f"{self} exception sending data: {e.__class__.__name__} ({e})")
+        finally:
+            return result
+
+    @property
+    def is_connected(self) -> bool:
+        """Check if the WebSocket is currently connected.
+
+        Returns:
+            True if the WebSocket is in connected state.
+        """
+        return self._websocket.state == websockets.State.OPEN if self._websocket else False
+
+    @property
+    def is_closing(self) -> bool:
+        """Check if the WebSocket is currently closing.
+
+        Returns:
+            True if the WebSocket is in the process of closing.
+        """
+        return self._websocket.state == websockets.State.CLOSING if self._websocket else False
 
     async def _client_task_handler(self):
         """Handle incoming messages from the WebSocket connection."""
@@ -371,12 +393,18 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         """
         await self._write_frame(frame)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the WebSocket with optional WAV header.
 
         Args:
             frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
+        if self._session.is_closing or not self._session.is_connected:
+            return False
+
         frame = OutputAudioRawFrame(
             audio=frame.audio,
             sample_rate=self.sample_rate,
@@ -402,10 +430,16 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         # Simulate audio playback with a sleep.
         await self._write_audio_sleep()
 
+        return True
+
     async def _write_frame(self, frame: Frame):
         """Write a frame to the WebSocket after serialization."""
+        if self._session.is_closing or not self._session.is_connected:
+            return
+
         if not self._params.serializer:
             return
+
         payload = await self._params.serializer.serialize(frame)
         if payload:
             await self._session.send(payload)
