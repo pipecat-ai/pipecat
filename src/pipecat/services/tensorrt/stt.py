@@ -13,7 +13,8 @@ from pipecat.services.whisper.base_stt import BaseWhisperSTTService, Transcripti
 from pipecat.transcriptions.language import Language
 import httpx
 import time
-class TensorRTSTTService(BaseWhisperSTTService):
+
+class SimplismartSTTService(BaseWhisperSTTService):
     """OpenAI Speech-to-Text service that generates text from audio.
 
     Uses TensorRT's transcription API to convert audio to text. Requires an TensorRT API key
