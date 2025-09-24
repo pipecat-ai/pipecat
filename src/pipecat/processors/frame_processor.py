@@ -886,9 +886,9 @@ class FrameProcessor(BaseObject):
 
             (frame, direction, callback) = await self.__input_queue.get()
 
-            if isinstance(frame, SystemFrame):
+            if isinstance(frame, SystemFrame) or self._enable_direct_mode:
                 await self.__process_frame(frame, direction, callback)
-            elif self.__process_queue:
+            elif hasattr(self, '_FrameProcessor__process_queue') and self.__process_queue:
                 await self.__process_queue.put((frame, direction, callback))
             else:
                 raise RuntimeError(
