@@ -140,7 +140,7 @@ class OpenAITTSService(TTSService):
             create_params = {
                 "input": text,
                 "model": self.model_name,
-                "voice": VALID_VOICES[self._voice_id],
+                "voice": self._voice_id,
                 "response_format": "pcm",
             }
 
