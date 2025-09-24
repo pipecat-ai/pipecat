@@ -939,7 +939,7 @@ class SmallWebRTCTransport(BaseTransport):
         """Handle incoming application messages."""
         if self._input:
             await self._input.push_app_message(message)
-        await self._call_event_handler("on_app_message", message)
+        await self._call_event_handler("on_app_message", message, "")
 
     async def _on_client_connected(self, webrtc_connection):
         """Handle client connection events."""
