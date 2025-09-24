@@ -506,11 +506,14 @@ class DailyTransportClient(EventHandler):
         self._custom_audio_tracks[destination] = await self.add_custom_audio_track(destination)
         self._client.update_publishing({"customAudio": {destination: True}})
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the appropriate audio track.
 
         Args:
             frame: The audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         future = self._get_event_loop().create_future()
 
@@ -526,18 +529,24 @@ class DailyTransportClient(EventHandler):
             audio_source.write_frames(frame.audio, completion=completion_callback(future))
         else:
             logger.warning(f"{self} unable to write audio frames to destination [{destination}]")
-            future.set_result(None)
+            future.set_result(0)
 
-        await future
+        num_frames = await future
+        return num_frames > 0
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the camera device.
 
         Args:
             frame: The image frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
         if not frame.transport_destination and self._camera:
             self._camera.write_frame(frame.image)
+            return True
+        return False
 
     async def setup(self, setup: FrameProcessorSetup):
         """Setup the client with task manager and event queues.
@@ -1835,24 +1844,33 @@ class DailyOutputTransport(BaseOutputTransport):
 
         Args:
             destination: The destination identifier to register.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
         await self._client.register_audio_destination(destination)
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the Daily call.
 
         Args:
             frame: The audio frame to write.
-        """
-        await self._client.write_audio_frame(frame)
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
+        """
+        return await self._client.write_audio_frame(frame)
+
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the Daily call.
 
         Args:
             frame: The video frame to write.
+
+        Returns:
+            True if the video frame was written successfully, False otherwise.
         """
-        await self._client.write_video_frame(frame)
+        return await self._client.write_video_frame(frame)
 
     def _supports_native_dtmf(self) -> bool:
         """Daily supports native DTMF via telephone events.
@@ -1974,9 +1992,6 @@ class DailyTransport(BaseTransport):
         self._register_event_handler("on_recording_stopped")
         self._register_event_handler("on_recording_error")
         self._register_event_handler("on_before_leave", sync=True)
-        # Deprecated
-        self._register_event_handler("on_joined")
-        self._register_event_handler("on_left")
 
     #
     # BaseTransport

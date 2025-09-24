@@ -12,6 +12,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -20,9 +22,8 @@ from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import (
-    OpenAILLMContext,
-)
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import (
     create_transport,
@@ -85,12 +86,12 @@ async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages_for_logging(), indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
             # todo: extract 'system' into the first message in the list
-            messages = params.context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages()
             # remove the last message (the instruction to save the context)
             messages.pop()
             json.dump(messages, file, indent=2)
@@ -151,78 +152,76 @@ indicate you should use the get_image tool are:
     # {"role": "user", "content": "Tell me"},
     # {"role": "user", "content": "a joke"},
 ]
-tools = [
-    {
-        "function_declarations": [
-            {
-                "name": "get_current_weather",
-                "description": "Get the current weather",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "The city and state, e.g. San Francisco, CA",
-                        },
-                        "format": {
-                            "type": "string",
-                            "enum": ["celsius", "fahrenheit"],
-                            "description": "The temperature unit to use. Infer this from the users location.",
-                        },
-                    },
-                    "required": ["location", "format"],
-                },
-            },
-            {
-                "name": "save_conversation",
-                "description": "Save the current conversation. Use this function to persist the current conversation to external storage.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "user_request_text": {
-                            "type": "string",
-                            "description": "The text of the user's request to save the conversation.",
-                        }
-                    },
-                    "required": ["user_request_text"],
-                },
-            },
-            {
-                "name": "get_saved_conversation_filenames",
-                "description": "Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
-                "parameters": None,
-            },
-            {
-                "name": "load_conversation",
-                "description": "Load a conversation history. Use this function to load a conversation history into the current session.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "filename": {
-                            "type": "string",
-                            "description": "The filename of the conversation history to load.",
-                        }
-                    },
-                    "required": ["filename"],
-                },
-            },
-            {
-                "name": "get_image",
-                "description": "Get and image from the camera or video stream.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "question": {
-                            "type": "string",
-                            "description": "The question to to use when running inference on the acquired image.",
-                        },
-                    },
-                    "required": ["question"],
-                },
-            },
-        ]
+
+weather_function = FunctionSchema(
+    name="get_current_weather",
+    description="Get the current weather",
+    properties={
+        "location": {
+            "type": "string",
+            "description": "The city and state, e.g. San Francisco, CA",
+        },
+        "format": {
+            "type": "string",
+            "enum": ["celsius", "fahrenheit"],
+            "description": "The temperature unit to use. Infer this from the users location.",
+        },
     },
-]
+    required=["location", "format"],
+)
+
+save_conversation_function = FunctionSchema(
+    name="save_conversation",
+    description="Save the current conversation. Use this function to persist the current conversation to external storage.",
+    properties={
+        "user_request_text": {
+            "type": "string",
+            "description": "The text of the user's request to save the conversation.",
+        }
+    },
+    required=["user_request_text"],
+)
+
+get_filenames_function = FunctionSchema(
+    name="get_saved_conversation_filenames",
+    description="Get a list of saved conversation histories. Returns a list of filenames. Each filename includes a date and timestamp. Each file is conversation history that can be loaded into this session.",
+    properties={},
+    required=[],
+)
+
+load_conversation_function = FunctionSchema(
+    name="load_conversation",
+    description="Load a conversation history. Use this function to load a conversation history into the current session.",
+    properties={
+        "filename": {
+            "type": "string",
+            "description": "The filename of the conversation history to load.",
+        }
+    },
+    required=["filename"],
+)
+
+get_image_function = FunctionSchema(
+    name="get_image",
+    description="Get and image from the camera or video stream.",
+    properties={
+        "question": {
+            "type": "string",
+            "description": "The question to to use when running inference on the acquired image.",
+        },
+    },
+    required=["question"],
+)
+
+tools = ToolsSchema(
+    standard_tools=[
+        weather_function,
+        save_conversation_function,
+        get_filenames_function,
+        load_conversation_function,
+        get_image_function,
+    ]
+)
 
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -266,8 +265,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm.register_function("load_conversation", load_conversation)
     llm.register_function("get_image", get_image)
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

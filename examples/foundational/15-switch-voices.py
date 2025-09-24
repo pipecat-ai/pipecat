@@ -9,8 +9,9 @@ import os
 
 from dotenv import load_dotenv
 from loguru import logger
-from openai.types.chat import ChatCompletionToolParam
 
+from pipecat.adapters.schemas.function_schema import FunctionSchema
+from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -20,7 +21,8 @@ from pipecat.pipeline.parallel_pipeline import ParallelPipeline
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.filters.function_filter import FunctionFilter
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -120,25 +122,19 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = OpenAILLMService(api_key=os.getenv("OPENAI_API_KEY"))
     llm.register_function("switch_voice", tts.switch_voice)
 
-    tools = [
-        ChatCompletionToolParam(
-            type="function",
-            function={
-                "name": "switch_voice",
-                "description": "Switch your voice only when the user asks you to",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "voice": {
-                            "type": "string",
-                            "description": "The voice the user wants you to use",
-                        },
-                    },
-                    "required": ["voice"],
-                },
+    switch_voice_function = FunctionSchema(
+        name="switch_voice",
+        description="Switch your voice only when the user asks you to",
+        properties={
+            "voice": {
+                "type": "string",
+                "description": "The voice the user wants you to use",
             },
-        )
-    ]
+        },
+        required=["voice"],
+    )
+    tools = ToolsSchema(standard_tools=[switch_voice_function])
+
     messages = [
         {
             "role": "system",
@@ -146,8 +142,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         },
     ]
 
-    context = OpenAILLMContext(messages, tools)
-    context_aggregator = llm.create_context_aggregator(context)
+    context = LLMContext(messages, tools)
+    context_aggregator = LLMContextAggregatorPair(context)
 
     pipeline = Pipeline(
         [

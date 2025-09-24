@@ -68,6 +68,9 @@ class Language(StrEnum):
     AS = "as"
     AS_IN = "as-IN"
 
+    # Asturian
+    AST = "ast"
+
     # Azerbaijani
     AZ = "az"
     AZ_AZ = "az-AZ"
@@ -100,6 +103,9 @@ class Language(StrEnum):
     # Catalan
     CA = "ca"
     CA_ES = "ca-ES"
+
+    # Cebuano
+    CEB = "ceb"
 
     # Mandarin Chinese
     CMN = "cmn"
@@ -185,6 +191,9 @@ class Language(StrEnum):
     FA = "fa"
     FA_IR = "fa-IR"
 
+    # Fulah
+    FF = "ff"
+
     # Finnish
     FI = "fi"
     FI_FI = "fi-FI"
@@ -251,6 +260,9 @@ class Language(StrEnum):
     ID = "id"
     ID_ID = "id-ID"
 
+    # Igbo
+    IG = "ig"
+
     # Icelandic
     IS = "is"
     IS_IS = "is-IS"
@@ -279,6 +291,9 @@ class Language(StrEnum):
     KA = "ka"
     KA_GE = "ka-GE"
 
+    # Kabuverdianu
+    KEA = "kea"
+
     # Kazakh
     KK = "kk"
     KK_KZ = "kk-KZ"
@@ -294,6 +309,13 @@ class Language(StrEnum):
     # Korean
     KO = "ko"
     KO_KR = "ko-KR"
+
+    # Kurdish
+    KU = "ku"
+
+    # Kyrgyz
+    KY = "ky"
+    KY_KG = "ky-KG"
 
     # Latin
     LA = "la"
@@ -311,6 +333,12 @@ class Language(StrEnum):
     # Lithuanian
     LT = "lt"
     LT_LT = "lt-LT"
+
+    # Ganda
+    LG = "lg"
+
+    # Luo
+    LUO = "luo"
 
     # Latvian
     LV = "lv"
@@ -365,6 +393,12 @@ class Language(StrEnum):
     NL = "nl"
     NL_BE = "nl-BE"
     NL_NL = "nl-NL"
+
+    # Northern Sotho
+    NSO = "nso"
+
+    # Chichewa
+    NY = "ny"
 
     # Occitan
     OC = "oc"
@@ -484,6 +518,9 @@ class Language(StrEnum):
     UK = "uk"
     UK_UA = "uk-UA"
 
+    # Umbundu
+    UMB = "umb"
+
     # Urdu
     UR = "ur"
     UR_IN = "ur-IN"
@@ -497,6 +534,9 @@ class Language(StrEnum):
     VI = "vi"
     VI_VN = "vi-VN"
 
+    # Wolof
+    WO = "wo"
+
     # Wu Chinese
     WUU = "wuu"
     WUU_CN = "wuu-CN"
@@ -507,7 +547,7 @@ class Language(StrEnum):
     # Yoruba
     YO = "yo"
 
-    # Yue Chinese
+    # Yue Chinese (Cantonese)
     YUE = "yue"
     YUE_CN = "yue-CN"
 
