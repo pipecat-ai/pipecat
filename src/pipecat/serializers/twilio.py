@@ -76,25 +76,31 @@ class TwilioFrameSerializer(FrameSerializer):
             edge: Twilio edge location (e.g., "sydney", "dublin"). Must be specified with region.
             params: Configuration parameters.
         """
-        if not call_sid or not account_sid or not auth_token:
-            missing = []
+        self._params = params or TwilioFrameSerializer.InputParams()
+
+        # Validate hangup-related parameters if auto_hang_up is enabled
+        if self._params.auto_hang_up:
+            # Validate required credentials
+            missing_credentials = []
             if not call_sid:
-                missing.append("call_sid")
+                missing_credentials.append("call_sid")
             if not account_sid:
-                missing.append("account_sid")
+                missing_credentials.append("account_sid")
             if not auth_token:
-                missing.append("auth_token")
+                missing_credentials.append("auth_token")
 
-            raise ValueError(
-                f"Cannot hang up Twilio call: missing required parameters: {', '.join(missing)}"
-            )
+            if missing_credentials:
+                raise ValueError(
+                    f"auto_hang_up is enabled but missing required parameters: {', '.join(missing_credentials)}"
+                )
 
-        if (region and not edge) or (edge and not region):
-            raise ValueError(
-                "Both edge and region parameters are required if one is set. "
-                f"Twilio's FQDN format requires both: api.{{edge}}.{{region}}.twilio.com. "
-                f"Got: region='{region}', edge='{edge}'"
-            )
+            # Validate region and edge are both provided if either is specified
+            if (region and not edge) or (edge and not region):
+                raise ValueError(
+                    "Both edge and region parameters are required if one is set. "
+                    f"Twilio's FQDN format requires both: api.{{edge}}.{{region}}.twilio.com. "
+                    f"Got: region='{region}', edge='{edge}'"
+                )
 
         self._stream_sid = stream_sid
         self._call_sid = call_sid
@@ -102,7 +108,6 @@ class TwilioFrameSerializer(FrameSerializer):
         self._auth_token = auth_token
         self._region = region
         self._edge = edge
-        self._params = params or TwilioFrameSerializer.InputParams()
 
         self._twilio_sample_rate = self._params.twilio_sample_rate
         self._sample_rate = 0  # Pipeline input rate
