@@ -775,7 +775,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
             self._params.expect_stripped_words = kwargs["expect_stripped_words"]
 
-        self._started = 0
+        self._started = False
         self._function_calls_in_progress: Dict[str, Optional[FunctionCallInProgressFrame]] = {}
         self._context_updated_tasks: Set[asyncio.Task] = set()
 
@@ -905,7 +905,7 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
         await self.push_aggregation()
-        self._started = 0
+        self._started = False
         await self.reset()
 
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
@@ -992,10 +992,10 @@ class LLMAssistantContextAggregator(LLMContextResponseAggregator):
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
-        self._started += 1
+        self._started = True
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
-        self._started -= 1
+        self._started = False
         await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
