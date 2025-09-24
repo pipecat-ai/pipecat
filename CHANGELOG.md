@@ -68,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated `aiortc` to 1.13.0.
+
+- Updated `sentry` to 2.38.0.
+
 - `BaseOutputTransport` methods `write_audio_frame` and `write_video_frame` now
   return a boolean to indicate if the transport implementation was able to write
   the given frame or not.
