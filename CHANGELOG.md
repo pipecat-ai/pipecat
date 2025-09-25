@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `DailyTransportMessageFrame` and `DailyTransportMessageUrgentFrame` are
+  deprecated, use `DailyOutputTransportMessageFrame` and
+  `DailyOutputTransportMessageUrgentFrame` respectively instead.
+
 - `LiveKitTransportMessageFrame` and `LiveKitTransportMessageUrgentFrame` are
   deprecated, use `LiveKitOutputTransportMessageFrame` and
   `LiveKitOutputTransportMessageUrgentFrame` respectively instead.

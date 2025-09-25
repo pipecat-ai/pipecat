@@ -26,7 +26,11 @@ from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.deepgram.tts import DeepgramTTSService
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-from pipecat.transports.daily.transport import DailyParams, DailyTransportMessageFrame
+from pipecat.transports.daily.transport import (
+    DailyOutputTransportMessageFrame,
+    DailyOutputTransportMessageUrgentFrame,
+    DailyParams,
+)
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 
 load_dotenv(override=True)
@@ -128,14 +132,14 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
                 logger.debug(f"Received latency ping app message: {message}")
                 ts = message["latency-ping"]["ts"]
                 # Send immediately
-                transport.output().send_message(
-                    DailyTransportMessageFrame(
+                await task.queue_frame(
+                    DailyOutputTransportMessageUrgentFrame(
                         message={"latency-pong-msg-handler": {"ts": ts}}, participant_id=sender
                     )
                 )
                 # And push to the pipeline for the Daily transport.output to send
                 await task.queue_frame(
-                    DailyTransportMessageFrame(
+                    DailyOutputTransportMessageFrame(
                         message={"latency-pong-pipeline-delivery": {"ts": ts}},
                         participant_id=sender,
                     )
