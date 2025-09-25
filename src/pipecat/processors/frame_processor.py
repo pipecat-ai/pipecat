@@ -507,6 +507,7 @@ class FrameProcessor(BaseObject):
 
         # Create processing tasks.
         self.__create_input_task()
+        self.__create_process_task()  # Create process task early to avoid race condition
 
         if self._metrics is not None:
             await self._metrics.setup(self._task_manager)
@@ -702,7 +703,7 @@ class FrameProcessor(BaseObject):
         self._interruption_strategies = frame.interruption_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
 
-        self.__create_process_task()
+        # Process task is now created in setup() to avoid race condition
 
     async def __cancel(self, frame: CancelFrame):
         """Handle the cancel frame to stop processor operation.
