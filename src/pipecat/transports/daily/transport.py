@@ -30,7 +30,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
-    InputTransportMessageUrgentFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
@@ -96,7 +96,7 @@ class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
 
 
 @dataclass
-class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
+class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """Frame for input urgent transport messages in Daily calls.
 
     Parameters:
@@ -104,6 +104,31 @@ class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
     """
 
     participant_id: Optional[str] = None
+
+
+class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
+    """Frame for input urgent transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyInputTransportMessageFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyInputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyInputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass
@@ -1621,7 +1646,7 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = DailyInputTransportMessageUrgentFrame(message=message, participant_id=sender)
+        frame = DailyInputTransportMessageFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     #

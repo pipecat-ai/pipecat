@@ -1106,20 +1106,43 @@ class TransportMessageUrgentFrame(SystemFrame):
 
 
 @dataclass
-class InputTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+class InputTransportMessageFrame(SystemFrame):
     """Frame for transport messages received from external sources.
 
-    This frame wraps incoming transport messages to distinguish them from outgoing
-    urgent transport messages (TransportMessageUrgentFrame), preventing infinite
-    message loops in the transport layer. It inherits the message payload from
-    TransportMessageFrame while marking the message as having been received
-    rather than generated locally.
-
-    Used by transport implementations to properly handle bidirectional message
-    flow without creating feedback loops.
+    Parameters:
+        message: The urgent transport message payload.
     """
 
-    pass
+    message: Any
+
+    def __str__(self):
+        return f"{self.name}(message: {self.message})"
+
+
+@dataclass
+class InputTransportMessageUrgentFrame(InputTransportMessageFrame):
+    """Frame for transport messages received from external sources.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `InputTransportMessageFrame`.
+
+    Parameters:
+        message: The urgent transport message payload.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "InputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use InputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 @dataclass

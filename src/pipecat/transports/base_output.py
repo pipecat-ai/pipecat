@@ -29,7 +29,6 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    InputTransportMessageUrgentFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
@@ -307,9 +306,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
-        elif isinstance(frame, TransportMessageUrgentFrame) and not isinstance(
-            frame, InputTransportMessageUrgentFrame
-        ):
+        elif isinstance(frame, TransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
             await self.write_dtmf(frame)
