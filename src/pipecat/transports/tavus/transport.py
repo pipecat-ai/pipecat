@@ -27,9 +27,9 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor, FrameProcessorSetup
 from pipecat.transports.base_input import BaseInputTransport
@@ -345,7 +345,9 @@ class TavusTransportClient:
             participant_id, callback, audio_source, sample_rate, callback_interval_ms
         )
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a message to participants.
 
         Args:
@@ -373,7 +375,7 @@ class TavusTransportClient:
 
     async def send_interrupt_message(self) -> None:
         """Send an interrupt message to the conversation."""
-        transport_frame = TransportMessageUrgentFrame(
+        transport_frame = OutputTransportMessageUrgentFrame(
             message={
                 "message_type": "conversation",
                 "event_type": "conversation.interrupt",
@@ -605,7 +607,9 @@ class TavusOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         await self._client.stop()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a message to participants.
 
         Args:
