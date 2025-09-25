@@ -77,7 +77,7 @@ class LocalSmartTurnAnalyzerV3(BaseSmartTurn):
 
         logger.debug("Loaded Local Smart Turn v3")
 
-    async def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
+    def _predict_endpoint(self, audio_array: np.ndarray) -> Dict[str, Any]:
         """Predict end-of-turn using local ONNX model."""
 
         def truncate_audio_to_last_n_seconds(audio_array, n_seconds=8, sample_rate=16000):
