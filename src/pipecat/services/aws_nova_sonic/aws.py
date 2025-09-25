@@ -469,8 +469,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Send conversation history
         for message in llm_connection_params["messages"]:
-            # TODO: should be commented out by default
-            logger.debug(f"Seeding conversation history with message: {message}")
+            # logger.debug(f"Seeding conversation history with message: {message}")
             await self._send_text_event(text=message.text, role=message.role)
 
         # Start audio input
