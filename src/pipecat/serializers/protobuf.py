@@ -17,10 +17,10 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputTransportMessageFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     TextFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.serializers.base_serializer import FrameSerializer, FrameSerializerType
 
@@ -83,7 +83,7 @@ class ProtobufFrameSerializer(FrameSerializer):
             Serialized frame as bytes, or None if frame type is not serializable.
         """
         # Wrapping this messages as a JSONFrame to send
-        if isinstance(frame, (TransportMessageFrame, TransportMessageUrgentFrame)):
+        if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             frame = MessageFrame(
                 data=json.dumps(frame.message),
             )
@@ -135,7 +135,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         if "pts" in args_dict:
             del args_dict["pts"]
 
-        # Special handling for MessageFrame -> TransportMessageUrgentFrame
+        # Special handling for MessageFrame -> OutputTransportMessageUrgentFrame
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])

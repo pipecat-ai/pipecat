@@ -51,10 +51,10 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMTextFrame,
     MetricsFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
-    TransportMessageUrgentFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -1346,7 +1346,9 @@ class RTVIProcessor(FrameProcessor):
 
     async def push_transport_message(self, model: BaseModel, exclude_none: bool = True):
         """Push a transport message frame."""
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
         await self.push_frame(frame)
 
     async def handle_message(self, message: RTVIMessage):
