@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Include OpenAI-based LLM services cached tokens to `MetricsFrame`.
 
+## Fixed
+
+- Fixed an issue where local SmartTurn was not being ran in a separate thread.
+
 ## [0.0.86] - 2025-09-24
 
 ### Added
