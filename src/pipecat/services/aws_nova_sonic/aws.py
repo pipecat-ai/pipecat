@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallFromLLM,
     InputAudioRawFrame,
-    InterimTranscriptionFrame,
+    InterruptionFrame,
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
@@ -243,12 +243,16 @@ class AWSNovaSonicLLMService(LLMService):
         self._input_audio_content_name: Optional[str] = None
         self._content_being_received: Optional[CurrentContent] = None
         self._assistant_is_responding = False
+        self._needs_re_push_assistant_text = False
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
         self._disconnecting = False
         self._connected_time: Optional[float] = None
         self._wants_connection = False
+
+        self._user_text_buffer = ""
+        self._assistant_text_buffer = ""
 
         file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -329,6 +333,8 @@ class AWSNovaSonicLLMService(LLMService):
             await self._handle_bot_stopped_speaking(delay_to_catch_trailing_assistant_text=True)
         elif isinstance(frame, AWSNovaSonicFunctionCallResultFrame):
             await self._handle_function_call_result(frame)
+        elif isinstance(frame, InterruptionFrame):
+            await self._handle_interruption_frame()
 
         await self.push_frame(frame, direction)
 
@@ -389,6 +395,10 @@ class AWSNovaSonicLLMService(LLMService):
     async def _handle_function_call_result(self, frame: AWSNovaSonicFunctionCallResultFrame):
         result = frame.result_frame
         await self._send_tool_result(tool_call_id=result.tool_call_id, result=result.result)
+
+    async def _handle_interruption_frame(self):
+        if self._assistant_is_responding:
+            self._needs_re_push_assistant_text = True
 
     #
     # LLM communication: lifecycle
@@ -958,7 +968,7 @@ class AWSNovaSonicLLMService(LLMService):
     async def _report_assistant_response_started(self):
         logger.debug("Assistant response started")
 
-        # Report that the assistant has started their response.
+        # Report the start of the assistant response.
         await self.push_frame(LLMFullResponseStartFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) started
@@ -970,23 +980,16 @@ class AWSNovaSonicLLMService(LLMService):
 
         logger.debug(f"Assistant response text added: {text}")
 
-        # Report some text added to the ongoing assistant response
-        await self.push_frame(LLMTextFrame(text))
-
-        # Report some text added to the *equivalent* of TTS (this is a speech-to-speech model)
+        # Report the text of the assistant response.
         await self.push_frame(TTSTextFrame(text))
 
-        # TODO: this is a (hopefully temporary) HACK. Here we directly manipulate the context rather
-        # than relying on the frames pushed to the assistant context aggregator. The pattern of
-        # receiving full-sentence text after the assistant has spoken does not easily fit with the
-        # Pipecat expectation of chunks of text streaming in while the assistant is speaking.
-        # Interruption handling was especially challenging. Rather than spend days trying to fit a
-        # square peg in a round hole, I decided on this hack for the time being. We can most cleanly
-        # abandon this hack if/when AWS Nova Sonic implements streaming smaller text chunks
-        # interspersed with audio. Note that when we move away from this hack, we need to make sure
-        # that on an interruption we avoid sending LLMFullResponseEndFrame, which gets the
-        # LLMAssistantContextAggregator into a bad state.
-        self._context.buffer_assistant_text(text)
+        # HACK: here we're also buffering the assistant text ourselves as a
+        # backup rather than relying solely on the assistant context aggregator
+        # to do it, because the text arrives from Nova Sonic only after all the
+        # assistant audio frames have been pushed, meaning that if an
+        # interruption frame were to arrive we would lose all of it (the text
+        # frames sitting in the queue would be wiped).
+        self._assistant_text_buffer += text
 
     async def _report_assistant_response_ended(self):
         if not self._context:  # should never happen
@@ -994,14 +997,25 @@ class AWSNovaSonicLLMService(LLMService):
 
         logger.debug("Assistant response ended")
 
-        # Report that the assistant has finished their response.
+        # If an interruption frame arrived while the assistant was responding
+        # we probably lost all of the assistant text (see HACK, above), so
+        # re-push it downstream to the aggregator now.
+        if self._needs_re_push_assistant_text:
+            # We also need to re-push the LLMFullResponseStartFrame since the
+            # TTSTextFrame would be ignored otherwise (the interruption frame
+            # would have cleared the assistant aggregator state).
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.push_frame(TTSTextFrame(self._assistant_text_buffer))
+            self._needs_re_push_assistant_text = False
+
+        # Report the end of the assistant response.
         await self.push_frame(LLMFullResponseEndFrame())
 
         # Report that equivalent of TTS (this is a speech-to-speech model) stopped.
         await self.push_frame(TTSStoppedFrame())
 
-        # For an explanation of this hack, see _report_assistant_response_text_added.
-        self._context.flush_aggregated_assistant_text()
+        # Clear out the buffered assistant text
+        self._assistant_text_buffer = ""
 
     #
     # user transcription reporting
@@ -1018,33 +1032,32 @@ class AWSNovaSonicLLMService(LLMService):
 
         logger.debug(f"User transcription text added: {text}")
 
-        # Manually add new user transcription text to context.
-        # We can't rely on the user context aggregator to do this since it's upstream from the LLM.
-        self._context.buffer_user_text(text)
-
-        # Report that some new user transcription text is available.
-        if self._send_transcription_frames:
-            await self.push_frame(
-                InterimTranscriptionFrame(text=text, user_id="", timestamp=time_now_iso8601())
-            )
+        # HACK: here we're buffering the user text ourselves rather than
+        # relying on the upstream user context aggregator to do it, because the
+        # text arrives in fairly large chunks spaced fairly far apart in time.
+        # That means the user text would be split between different messages in
+        # context. Even if we sent placeholder InterimTranscriptionFrames in
+        # between each TranscriptionFrame to tell the aggregator to hold off on
+        # finalizing the user message, the aggregator would likely get the last
+        # chunk too late.
+        self._user_text_buffer += f" {text}" if self._user_text_buffer else text
 
     async def _report_user_transcription_ended(self):
         if not self._context:  # should never happen
             return
 
-        # Manually add user transcription to context (if any has been buffered).
-        # We can't rely on the user context aggregator to do this since it's upstream from the LLM.
-        transcription = self._context.flush_aggregated_user_text()
-
-        if not transcription:
-            return
-
         logger.debug(f"User transcription ended")
 
+        # Report to the upstream user context aggregator that some new user
+        # transcription text is available.
         if self._send_transcription_frames:
-            await self.push_frame(
-                TranscriptionFrame(text=transcription, user_id="", timestamp=time_now_iso8601())
+            frame = TranscriptionFrame(
+                text=self._user_text_buffer, user_id="", timestamp=time_now_iso8601()
             )
+            await self.push_frame(frame, direction=FrameDirection.UPSTREAM)
+
+        # Clear out the buffered user text
+        self._user_text_buffer = ""
 
     #
     # context
