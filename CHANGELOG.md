@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expanded support for universal `LLMContext` to `AWSNovaSonicLLMService`.
+  As a reminder, the context-setup pattern when using `LLMContext` is:
+
+  ```python
+  context = LLMContext(messages, tools)
+  context_aggregator = LLMContextAggregatorPair(context)
+  ```
+
+  (Note that even though `AWSNovaSonicLLMService` now supports the universal
+  `LLMContext`, it is not meant to be swapped out for another LLM service at
+  runtime.)
+
 - Added support for `bulbul:v3` model in `SarvamTTSService` and `SarvamHttpTTSService`.
 
 - Added `keyterms_prompt` parameter to `AssemblyAIConnectionParams`.
