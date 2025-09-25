@@ -19,7 +19,7 @@ import numpy as np
 from loguru import logger
 from pydantic import BaseModel
 
-from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, BaseTurnParams, EndOfTurnState
 from pipecat.metrics.metrics import MetricsData, SmartTurnMetricsData
 
 # Default timing parameters
@@ -29,7 +29,7 @@ MAX_DURATION_SECONDS = 8  # Max allowed segment duration
 USE_ONLY_LAST_VAD_SEGMENT = True
 
 
-class SmartTurnParams(BaseModel):
+class SmartTurnParams(BaseTurnParams):
     """Configuration parameters for smart turn analysis.
 
     Parameters:
