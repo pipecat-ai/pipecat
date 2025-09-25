@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Include OpenAI-based LLM services cached tokens to `MetricsFrame`.
 
+### Deprecated
+
+- `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a
+  future version. Create your own custom frame and use a custom processor to
+  handle it or use, for example, `on_after_push_frame` event instead in the
+  output transport.
+
 ## Fixed
 
 - Fixed an issue where local SmartTurn was not being ran in a separate thread.
