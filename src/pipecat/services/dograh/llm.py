@@ -6,12 +6,11 @@
 
 """Dograh LLM Service implementation using OpenAI-compatible interface."""
 
-from tkinter import Frame
 from typing import Dict, Optional
 
 from loguru import logger
 
-from pipecat.frames.frames import StartFrame
+from pipecat.frames.frames import Frame, StartFrame
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.base_llm import OpenAILLMInvocationParams
 from pipecat.services.openai.llm import OpenAILLMService
