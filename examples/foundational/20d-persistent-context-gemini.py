@@ -85,13 +85,13 @@ async def get_saved_conversation_filenames(params: FunctionCallParams):
 async def save_conversation(params: FunctionCallParams):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
     filename = f"{BASE_FILENAME}{timestamp}.json"
+    llm: GoogleLLMService = params.llm
     logger.debug(
-        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages(), indent=4)}"
+        f"writing conversation to {filename}\n{json.dumps(params.context.get_messages_for_persistent_storage(), indent=4)}"
     )
     try:
         with open(filename, "w") as file:
-            # todo: extract 'system' into the first message in the list
-            messages = params.context.get_messages()
+            messages = params.context.get_messages_for_persistent_storage()
             # remove the last message (the instruction to save the context)
             messages.pop()
             json.dump(messages, file, indent=2)
