@@ -25,7 +25,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter
+from pipecat.adapters.services.aws_nova_sonic_adapter import AWSNovaSonicLLMAdapter, Role
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
