@@ -892,11 +892,13 @@ class FrameProcessor(BaseObject):
             else:
                 # Create process task lazily if it doesn't exist yet
                 if not hasattr(self, '_FrameProcessor__process_queue') or not self.__process_queue:
+                    logger.debug(f"{self}: Creating process task lazily, direct_mode={self._enable_direct_mode}")
                     self.__create_process_task()
 
-                if self.__process_queue:
+                if hasattr(self, '_FrameProcessor__process_queue') and self.__process_queue:
                     await self.__process_queue.put((frame, direction, callback))
                 else:
+                    logger.error(f"{self}: __process_queue still None after creation attempt, direct_mode={self._enable_direct_mode}, frame={frame.name}")
                     raise RuntimeError(
                         f"{self}: __process_queue is None when processing frame {frame.name}"
                     )
