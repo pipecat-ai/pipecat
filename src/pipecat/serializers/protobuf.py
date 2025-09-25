@@ -15,6 +15,7 @@ import pipecat.frames.protobufs.frames_pb2 as frame_protos
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     OutputAudioRawFrame,
     TextFrame,
     TranscriptionFrame,
@@ -138,7 +139,7 @@ class ProtobufFrameSerializer(FrameSerializer):
         if class_name == MessageFrame:
             try:
                 msg = json.loads(args_dict["data"])
-                instance = TransportMessageUrgentFrame(message=msg)
+                instance = InputTransportMessageFrame(message=msg)
                 logger.debug(f"ProtobufFrameSerializer: Transport message {instance}")
             except Exception as e:
                 logger.error(f"Error parsing MessageFrame data: {e}")

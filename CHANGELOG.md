@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed an issue where local SmartTurn was not being ran in a separate thread.
 
+### Deprecated
+
+- `InputTransportMessageUrgentFrame` is deprecated, use
+  `InputTransportMessageFrame` instead.
+
 ## [0.0.86] - 2025-09-24
 
 ### Added
