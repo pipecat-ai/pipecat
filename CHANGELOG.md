@@ -34,9 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `LiveKitTransportMessageFrame` and `LiveKitTransportMessageUrgentFrame` are
+  deprecated, use `LiveKitOutputTransportMessageFrame` and
+  `LiveKitOutputTransportMessageUrgentFrame` respectively instead.
+
 - `TransportMessageFrame` and `TransportMessageUrgentFrame` are deprecated, use
   `OutputTransportMessageFrame` and `OutputTransportMessageUrgentFrame`
-  respectively.
+  respectively instead.
 
 - `InputTransportMessageUrgentFrame` is deprecated, use
   `InputTransportMessageFrame` instead.
