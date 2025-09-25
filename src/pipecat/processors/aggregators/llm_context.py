@@ -15,6 +15,7 @@ service-specific adapter.
 """
 
 import base64
+import copy
 import io
 from dataclasses import dataclass
 from typing import Any, List, Optional, TypeAlias, Union
@@ -117,7 +118,7 @@ class LLMContext:
                 included as the first message in the returned list, if not
                 already present.
         """
-        messages = self.get_messages()
+        messages = copy.deepcopy(self.get_messages())
         if system_instruction and (not messages or messages[0].get("role") != "system"):
             messages.insert(0, {"role": "system", "content": system_instruction})
         return messages
