@@ -250,9 +250,9 @@ class AWSNovaSonicLLMService(LLMService):
         self._disconnecting = False
         self._connected_time: Optional[float] = None
         self._wants_connection = False
-
         self._user_text_buffer = ""
         self._assistant_text_buffer = ""
+        self._completed_tool_calls = set()
 
         file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
@@ -331,8 +331,6 @@ class AWSNovaSonicLLMService(LLMService):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
             await self._handle_bot_stopped_speaking(delay_to_catch_trailing_assistant_text=True)
-        elif isinstance(frame, AWSNovaSonicFunctionCallResultFrame):
-            await self._handle_function_call_result(frame)
         elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption_frame()
 
@@ -340,9 +338,16 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _handle_context(self, context: LLMContext | OpenAILLMContext):
         if not self._context:
-            # We got our initial context - try to finish connecting
+            # We got our initial context
             self._context = context
+            # Update our bookkeeping of already-completed tool calls
+            await self._process_completed_function_calls(send_new_results=False)
+            # Try to finish connecting
             await self._finish_connecting_if_context_available()
+        else:
+            # We got an updated context
+            # Send results for any newly-completed function calls
+            await self._process_completed_function_calls(send_new_results=True)
 
     async def _handle_input_audio_frame(self, frame: InputAudioRawFrame):
         # Wait until we're done sending the assistant response trigger audio before sending audio
@@ -392,10 +397,6 @@ class AWSNovaSonicLLMService(LLMService):
         else:
             await finalize_assistant_response()
 
-    async def _handle_function_call_result(self, frame: AWSNovaSonicFunctionCallResultFrame):
-        result = frame.result_frame
-        await self._send_tool_result(tool_call_id=result.tool_call_id, result=result.result)
-
     async def _handle_interruption_frame(self):
         if self._assistant_is_responding:
             self._needs_re_push_assistant_text = True
@@ -433,6 +434,19 @@ class AWSNovaSonicLLMService(LLMService):
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
             self._disconnect()
+
+    async def _process_completed_function_calls(self, send_new_results: bool):
+        # Check for set of completed function calls in the context
+        for message in self._context.get_messages():
+            if message.get("role") and message.get("content") != "IN_PROGRESS":
+                tool_call_id = message.get("tool_call_id")
+                if tool_call_id and tool_call_id not in self._completed_tool_calls:
+                    # Found a newly-completed function call - send the result to the service
+                    print(f"[pk] Sending tool result for tool_call_id {tool_call_id}")
+                    if send_new_results:
+                        await self._send_tool_result(tool_call_id, message.get("content"))
+                    self._completed_tool_calls.add(tool_call_id)
+                    print(f"[pk] Completed tool calls: {self._completed_tool_calls}")
 
     async def _finish_connecting_if_context_available(self):
         # We can only finish connecting once we've gotten our initial context and we're ready to
