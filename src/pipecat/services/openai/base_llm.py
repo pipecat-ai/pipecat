@@ -337,10 +337,16 @@ class BaseOpenAILLMService(LLMService):
 
         async for chunk in chunk_stream:
             if chunk.usage:
+                cached_tokens = (
+                    chunk.usage.prompt_tokens_details.cached_tokens
+                    if chunk.usage.prompt_tokens_details
+                    else None
+                )
                 tokens = LLMTokenUsage(
                     prompt_tokens=chunk.usage.prompt_tokens,
                     completion_tokens=chunk.usage.completion_tokens,
                     total_tokens=chunk.usage.total_tokens,
+                    cache_read_input_tokens=cached_tokens,
                 )
                 await self.start_llm_usage_metrics(tokens)
 
