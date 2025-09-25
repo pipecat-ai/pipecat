@@ -110,11 +110,31 @@ class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
 class DailyUpdateRemoteParticipantsFrame(ControlFrame):
     """Frame to update remote participants in Daily calls.
 
+    .. deprecated:: 0.0.87
+        `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a future version.
+        Create your own custom frame and use a custom processor to handle it or use, for example,
+        `on_after_push_frame` event instead in the output transport.
+
     Parameters:
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
     remote_participants: Mapping[str, Any] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyUpdateRemoteParticipantsFrame is deprecated and will be removed in a future version."
+                "Instead, create your own custom frame and handle it in the "
+                '`@transport.output().event_handler("on_after_push_frame")` event handler or a '
+                "custom processor.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
