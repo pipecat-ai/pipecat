@@ -45,6 +45,7 @@ from pipecat.frames.frames import (
     TTSStoppedFrame,
     TTSTextFrame,
 )
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -57,9 +58,7 @@ from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.aws_nova_sonic.context import (
     AWSNovaSonicAssistantContextAggregator,
     AWSNovaSonicContextAggregatorPair,
-    AWSNovaSonicLLMContext,
     AWSNovaSonicUserContextAggregator,
-    Role,
 )
 from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
@@ -231,7 +230,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._system_instruction = system_instruction
         self._tools = tools
         self._send_transcription_frames = send_transcription_frames
-        self._context: Optional[AWSNovaSonicLLMContext] = None
+        self._context: Optional[LLMContext] = None
         self._stream: Optional[
             DuplexEventStream[
                 InvokeModelWithBidirectionalStreamInput,
@@ -322,12 +321,8 @@ class AWSNovaSonicLLMService(LLMService):
         """
         await super().process_frame(frame, direction)
 
-        if isinstance(frame, OpenAILLMContextFrame):
+        if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
             await self._handle_context(frame.context)
-        elif isinstance(frame, LLMContextFrame):
-            raise NotImplementedError(
-                "Universal LLMContext is not yet supported for AWS Nova Sonic."
-            )
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
@@ -337,12 +332,10 @@ class AWSNovaSonicLLMService(LLMService):
 
         await self.push_frame(frame, direction)
 
-    async def _handle_context(self, context: OpenAILLMContext):
+    async def _handle_context(self, context: LLMContext | OpenAILLMContext):
         if not self._context:
             # We got our initial context - try to finish connecting
-            self._context = AWSNovaSonicLLMContext.upgrade_to_nova_sonic(
-                context, self._system_instruction
-            )
+            self._context = context
             await self._finish_connecting_if_context_available()
 
     async def _handle_input_audio_frame(self, frame: InputAudioRawFrame):
@@ -440,29 +433,34 @@ class AWSNovaSonicLLMService(LLMService):
         logger.info("Finishing connecting (setting up session)...")
 
         # Read context
-        history = self._context.get_messages_for_initializing_history()
+        adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
+        llm_connection_params = adapter.get_llm_invocation_params(self._context)
 
         # Send prompt start event, specifying tools.
         # Tools from context take priority over self._tools.
         tools = (
-            self._context.tools
-            if self._context.tools
-            else self.get_llm_adapter().from_standard_tools(self._tools)
+            llm_connection_params["tools"]
+            if llm_connection_params["tools"]
+            else adapter.from_standard_tools(self._tools)
         )
         logger.debug(f"Using tools: {tools}")
         await self._send_prompt_start_event(tools)
 
         # Send system instruction.
         # Instruction from context takes priority over self._system_instruction.
-        # (NOTE: this prioritizing occurred automatically behind the scenes: the context was
-        # initialized with self._system_instruction and then updated itself from its messages when
-        # get_messages_for_initializing_history() was called).
-        logger.debug(f"Using system instruction: {history.system_instruction}")
-        if history.system_instruction:
-            await self._send_text_event(text=history.system_instruction, role=Role.SYSTEM)
+        system_instruction = (
+            llm_connection_params["system_instruction"]
+            if llm_connection_params["system_instruction"]
+            else self._system_instruction
+        )
+        logger.debug(f"Using system instruction: {system_instruction}")
+        if system_instruction:
+            await self._send_text_event(text=system_instruction, role=Role.SYSTEM)
 
         # Send conversation history
-        for message in history.messages:
+        for message in llm_connection_params["messages"]:
+            # TODO: should be commented out by default
+            logger.debug(f"Seeding conversation history with message: {message}")
             await self._send_text_event(text=message.text, role=message.role)
 
         # Start audio input
