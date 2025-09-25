@@ -15,9 +15,10 @@ service-specific adapter.
 """
 
 import base64
+import copy
 import io
 from dataclasses import dataclass
-from typing import Any, List, Optional, TypeAlias, Union
+from typing import TYPE_CHECKING, Any, List, Optional, TypeAlias, Union
 
 from loguru import logger
 from openai._types import NOT_GIVEN as OPEN_AI_NOT_GIVEN
@@ -30,6 +31,9 @@ from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import AudioRawFrame
+
+if TYPE_CHECKING:
+    from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 
 # "Re-export" types from OpenAI that we're using as universal context types.
 # NOTE: if universal message types need to someday diverge from OpenAI's, we
@@ -64,6 +68,26 @@ class LLMContext:
     content for LLM conversations. Provides methods for message manipulation,
     and content formatting.
     """
+
+    @staticmethod
+    def from_openai_context(openai_context: "OpenAILLMContext") -> "LLMContext":
+        """Create a universal LLM context from an OpenAI-specific context.
+
+        NOTE: this should only be used internally, for facilitating migration
+        from OpenAILLMContext to LLMContext. New user code should use
+        LLMContext directly.
+
+        Args:
+            openai_context: The OpenAI LLM context to convert.
+
+        Returns:
+            New LLMContext instance with converted messages and settings.
+        """
+        return LLMContext(
+            messages=openai_context.get_messages(),
+            tools=openai_context.tools,
+            tool_choice=openai_context.tool_choice,
+        )
 
     def __init__(
         self,
@@ -106,6 +130,21 @@ class LLMContext:
                 f"Attempted to use incompatible LLMSpecificMessages with LLM '{llm_specific_filter}'."
             )
         return filtered_messages
+
+    def get_messages_for_persistent_storage(
+        self, system_instruction: Optional[str] = None
+    ) -> List[LLMContextMessage]:
+        """Get messages formatted for persistent storage.
+
+        Args:
+            system_instruction: Optional system instruction to ensure is
+                included as the first message in the returned list, if not
+                already present.
+        """
+        messages = copy.deepcopy(self.get_messages())
+        if system_instruction and (not messages or messages[0].get("role") != "system"):
+            messages.insert(0, {"role": "system", "content": system_instruction})
+        return messages
 
     @property
     def tools(self) -> ToolsSchema | NotGiven:
