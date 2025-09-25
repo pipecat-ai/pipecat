@@ -49,6 +49,7 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMTextFrame,
     MetricsFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
@@ -984,7 +985,9 @@ class RTVIObserver(BaseObserver):
             model: The message model to send.
             exclude_none: Whether to exclude None values from the model dump.
         """
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
         await self._rtvi.push_frame(frame)
 
     async def _push_bot_transcription(self):
@@ -1379,7 +1382,9 @@ class RTVIProcessor(FrameProcessor):
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
         """Push a transport message frame."""
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
         await self.push_frame(frame)
 
     async def _action_task_handler(self):

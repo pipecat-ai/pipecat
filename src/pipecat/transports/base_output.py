@@ -35,13 +35,13 @@ from pipecat.frames.frames import (
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     OutputTransportReadyFrame,
     SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
     SystemFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -177,7 +177,9 @@ class BaseOutputTransport(FrameProcessor):
         # Sending a frame indicating that the output transport is ready and able to receive frames.
         await self.push_frame(OutputTransportReadyFrame(), FrameDirection.UPSTREAM)
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message.
 
         Args:
@@ -306,7 +308,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
-        elif isinstance(frame, TransportMessageUrgentFrame):
+        elif isinstance(frame, OutputTransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
             await self.write_dtmf(frame)

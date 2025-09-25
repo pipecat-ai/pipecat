@@ -29,10 +29,10 @@ from pipecat.frames.frames import (
     InputTransportMessageFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     SpriteFrame,
     StartFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
 )
@@ -461,7 +461,9 @@ class SmallWebRTCClient:
             await self._webrtc_connection.disconnect()
             await self._handle_peer_disconnected()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send an application message through the WebRTC connection.
 
         Args:
@@ -820,7 +822,9 @@ class SmallWebRTCOutputTransport(BaseOutputTransport):
         await super().cancel(frame)
         await self._client.disconnect()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message through the WebRTC connection.
 
         Args:

@@ -29,9 +29,9 @@ from pipecat.frames.frames import (
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
 )
@@ -68,7 +68,7 @@ DTMF_CODE_MAP = {
 
 
 @dataclass
-class LiveKitTransportMessageFrame(TransportMessageFrame):
+class LiveKitTransportMessageFrame(OutputTransportMessageFrame):
     """Frame for transport messages in LiveKit rooms.
 
     Parameters:
@@ -79,7 +79,7 @@ class LiveKitTransportMessageFrame(TransportMessageFrame):
 
 
 @dataclass
-class LiveKitTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+class LiveKitTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
     """Frame for urgent transport messages in LiveKit rooms.
 
     Parameters:
@@ -836,7 +836,9 @@ class LiveKitOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._transport.cleanup()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message to participants.
 
         Args:
