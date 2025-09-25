@@ -1158,6 +1158,7 @@ class OjinPersonaService(FrameProcessor):
         if (
             self._interaction is not None
             and self._interaction.state == InteractionState.ALL_AUDIO_PROCESSED
+            or self.is_pending_initialization()
         ):
             self._pending_interaction = OjinPersonaInteraction(
                 persona_id=self._settings.persona_config_id,
