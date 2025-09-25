@@ -507,7 +507,6 @@ class FrameProcessor(BaseObject):
 
         # Create processing tasks.
         self.__create_input_task()
-        self.__create_process_task()  # Create process task early to avoid race condition
 
         if self._metrics is not None:
             await self._metrics.setup(self._task_manager)
@@ -703,7 +702,8 @@ class FrameProcessor(BaseObject):
         self._interruption_strategies = frame.interruption_strategies
         self._report_only_initial_ttfb = frame.report_only_initial_ttfb
 
-        # Process task is now created in setup() to avoid race condition
+        # Create process task now that we know the direct mode setting
+        self.__create_process_task()
 
     async def __cancel(self, frame: CancelFrame):
         """Handle the cancel frame to stop processor operation.
@@ -889,12 +889,17 @@ class FrameProcessor(BaseObject):
 
             if isinstance(frame, SystemFrame) or self._enable_direct_mode:
                 await self.__process_frame(frame, direction, callback)
-            elif hasattr(self, '_FrameProcessor__process_queue') and self.__process_queue:
-                await self.__process_queue.put((frame, direction, callback))
             else:
-                raise RuntimeError(
-                    f"{self}: __process_queue is None when processing frame {frame.name}"
-                )
+                # Create process task lazily if it doesn't exist yet
+                if not hasattr(self, '_FrameProcessor__process_queue') or not self.__process_queue:
+                    self.__create_process_task()
+
+                if self.__process_queue:
+                    await self.__process_queue.put((frame, direction, callback))
+                else:
+                    raise RuntimeError(
+                        f"{self}: __process_queue is None when processing frame {frame.name}"
+                    )
 
             self.__input_queue.task_done()
 
