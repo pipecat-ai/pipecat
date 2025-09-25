@@ -11,7 +11,6 @@ input processing, including VAD, turn analysis, and interruption management.
 """
 
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from loguru import logger
@@ -78,10 +77,6 @@ class BaseInputTransport(FrameProcessor):
 
         # Track user speaking state for interruption logic
         self._user_speaking = False
-
-        # We read audio from a single queue one at a time and we then run VAD in
-        # a thread. Therefore, only one thread should be necessary.
-        self._executor = ThreadPoolExecutor(max_workers=1)
 
         # Task to process incoming audio (VAD) and push audio frames downstream
         # if passthrough is enabled.
@@ -398,9 +393,7 @@ class BaseInputTransport(FrameProcessor):
         """Analyze audio frame for voice activity."""
         state = VADState.QUIET
         if self.vad_analyzer:
-            state = await self.get_event_loop().run_in_executor(
-                self._executor, self.vad_analyzer.analyze_audio, audio_frame.audio
-            )
+            state = await self.vad_analyzer.analyze_audio(audio_frame.audio)
         return state
 
     async def _handle_vad(self, audio_frame: InputAudioRawFrame, vad_state: VADState) -> VADState:
