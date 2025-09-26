@@ -37,7 +37,6 @@ from pipecat.frames.frames import (
     LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
-    LLMTextFrame,
     StartFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
@@ -55,13 +54,12 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.aws_nova_sonic.context import (
-    AWSNovaSonicAssistantContextAggregator,
-    AWSNovaSonicContextAggregatorPair,
-    AWSNovaSonicUserContextAggregator,
-)
-from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
+from pipecat.services.openai.llm import (
+    OpenAIAssistantContextAggregator,
+    OpenAIContextAggregatorPair,
+    OpenAIUserContextAggregator,
+)
 from pipecat.utils.time import time_now_iso8601
 
 try:
@@ -1082,7 +1080,7 @@ class AWSNovaSonicLLMService(LLMService):
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> AWSNovaSonicContextAggregatorPair:
+    ) -> OpenAIContextAggregatorPair:
         """Create context aggregator pair for managing conversation context.
 
         Args:
@@ -1095,10 +1093,10 @@ class AWSNovaSonicLLMService(LLMService):
         """
         context.set_llm_adapter(self.get_llm_adapter())
 
-        user = AWSNovaSonicUserContextAggregator(context=context, params=user_params)
-        assistant = AWSNovaSonicAssistantContextAggregator(context=context, params=assistant_params)
+        user = OpenAIUserContextAggregator(context=context, params=user_params)
+        assistant = OpenAIAssistantContextAggregator(context=context, params=assistant_params)
 
-        return AWSNovaSonicContextAggregatorPair(user, assistant)
+        return OpenAIContextAggregatorPair(user, assistant)
 
     #
     # assistant response trigger (HACK)
