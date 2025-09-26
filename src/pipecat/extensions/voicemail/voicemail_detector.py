@@ -232,6 +232,7 @@ class ClassificationProcessor(FrameProcessor):
         conversation_notifier: BaseNotifier,
         voicemail_notifier: BaseNotifier,
         voicemail_response_delay: float,
+        conversation_response_delay: float,
     ):
         """Initialize the voicemail processor.
 
@@ -245,24 +246,29 @@ class ClassificationProcessor(FrameProcessor):
             voicemail_response_delay: Delay in seconds after user stops speaking
                 before triggering the voicemail event handler. This ensures the voicemail
                 greeting or user message is complete before responding.
+            conversation_response_delay: Delay in seconds after conversation is detected
+                before triggering the conversation event handler.
         """
         super().__init__()
         self._gate_notifier = gate_notifier
         self._conversation_notifier = conversation_notifier
         self._voicemail_notifier = voicemail_notifier
         self._voicemail_response_delay = voicemail_response_delay
+        self._conversation_response_delay = conversation_response_delay
 
-        # Register the voicemail detected event
+        # Register the voicemail and conversation detected events
         self._register_event_handler("on_voicemail_detected")
+        self._register_event_handler("on_conversation_detected")
 
         # Aggregation state for collecting complete LLM responses
         self._processing_response = False
         self._response_buffer = ""
         self._decision_made = False
 
-        # Voicemail timing state
+        # Detection state and timing
         self._voicemail_detected = False
-        self._voicemail_task: Optional[asyncio.Task] = None
+        self._conversation_detected = False
+        self._detection_task: Optional[asyncio.Task] = None
         self._voicemail_event = asyncio.Event()
         self._voicemail_event.set()
 
@@ -273,14 +279,14 @@ class ClassificationProcessor(FrameProcessor):
             setup: Configuration object containing setup parameters.
         """
         await super().setup(setup)
-        self._voicemail_task = self.create_task(self._delayed_voicemail_handler())
+        self._detection_task = self.create_task(self._delayed_detection_handler())
 
     async def cleanup(self):
         """Clean up the processor resources."""
         await super().cleanup()
-        if self._voicemail_task:
-            await self.cancel_task(self._voicemail_task)
-            self._voicemail_task = None
+        if self._detection_task:
+            await self.cancel_task(self._detection_task)
+            self._detection_task = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process frames and handle LLM classification responses.
@@ -347,6 +353,7 @@ class ClassificationProcessor(FrameProcessor):
         if "CONVERSATION" in response:
             # Human answered - continue normal conversation flow
             self._decision_made = True
+            self._conversation_detected = True
             logger.info(f"{self}: CONVERSATION detected")
             await self._gate_notifier.notify()  # Close the classifier gate
             await self._conversation_notifier.notify()  # Release buffered TTS frames
@@ -369,22 +376,33 @@ class ClassificationProcessor(FrameProcessor):
             # This can happen if the LLM is interrupted before completing the response
             logger.debug(f"{self}: No classification found: '{full_response}'")
 
-    async def _delayed_voicemail_handler(self):
-        """Execute the voicemail event handler after the configured delay.
+    async def _delayed_detection_handler(self):
+        """Execute the appropriate event handler based on detection type.
 
-        This method waits for the specified delay period, then triggers the
-        developer's voicemail event handler. The timer can be cancelled and restarted
-        based on user speech patterns to ensure proper timing.
+        For both conversations and voicemail, waits for the specified delay period,
+        then triggers the appropriate event handler. For voicemail, the timer can be
+        cancelled and restarted based on user speech patterns to ensure proper timing.
         """
         while True:
-            try:
-                await asyncio.wait_for(
-                    self._voicemail_event.wait(), timeout=self._voicemail_response_delay
-                )
-                await asyncio.sleep(0.1)
-            except asyncio.TimeoutError:
-                await self._call_event_handler("on_voicemail_detected")
+            # Check for conversation detection (delayed trigger)
+            if self._conversation_detected:
+                await asyncio.sleep(self._conversation_response_delay)
+                await self._call_event_handler("on_conversation_detected")
                 break
+
+            # Check for voicemail detection (delayed trigger with speech interruption)
+            if self._voicemail_detected:
+                try:
+                    await asyncio.wait_for(
+                        self._voicemail_event.wait(), timeout=self._voicemail_response_delay
+                    )
+                    await asyncio.sleep(0.1)
+                except asyncio.TimeoutError:
+                    await self._call_event_handler("on_voicemail_detected")
+                    break
+
+            # Small sleep to prevent busy waiting
+            await asyncio.sleep(0.01)
 
 
 class TTSGate(FrameProcessor):
@@ -542,6 +560,9 @@ class VoicemailDetector(ParallelPipeline):
         on_voicemail_detected: Triggered when voicemail is detected after the configured
             delay. The event handler receives one argument: the ClassificationProcessor
             instance which can be used to push frames.
+        on_conversation_detected: Triggered when a conversation (live person) is detected
+            after the configured delay. The event handler receives one argument: the
+            ClassificationProcessor instance which can be used to push frames.
 
     Constants:
         CLASSIFIER_RESPONSE_INSTRUCTION: The exact text that must be included in custom
@@ -580,6 +601,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         *,
         llm: LLMService,
         voicemail_response_delay: float = 2.0,
+        conversation_response_delay: float = 0.0,
         custom_system_prompt: Optional[str] = None,
     ):
         """Initialize the voicemail detector with classification and buffering components.
@@ -591,6 +613,9 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
                 before triggering the voicemail event handler. This allows voicemail
                 responses to be played back after a short delay to ensure the response
                 occurs during the voicemail recording. Default is 2.0 seconds.
+            conversation_response_delay: Delay in seconds after conversation is detected
+                before triggering the conversation event handler. Default is 0.0 seconds
+                (immediate trigger).
             custom_system_prompt: Optional custom system prompt for classification. If None,
                 uses the default prompt optimized for outbound calling scenarios.
                 Custom prompts should instruct the LLM to respond with exactly
@@ -601,6 +626,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             custom_system_prompt if custom_system_prompt is not None else self.DEFAULT_SYSTEM_PROMPT
         )
         self._voicemail_response_delay = voicemail_response_delay
+        self._conversation_response_delay = conversation_response_delay
 
         # Validate custom prompts to ensure they work with the detection logic
         if custom_system_prompt is not None:
@@ -631,6 +657,7 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             conversation_notifier=self._conversation_notifier,
             voicemail_notifier=self._voicemail_notifier,
             voicemail_response_delay=voicemail_response_delay,
+            conversation_response_delay=conversation_response_delay,
         )
         self._voicemail_gate = TTSGate(self._conversation_notifier, self._voicemail_notifier)
 
@@ -648,8 +675,9 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
             ],
         )
 
-        # Register the voicemail detected event after super().__init__()
+        # Register the detection events after super().__init__()
         self._register_event_handler("on_voicemail_detected")
+        self._register_event_handler("on_conversation_detected")
 
     def _validate_prompt(self, prompt: str) -> None:
         """Validate custom prompt contains required response format instructions.
@@ -695,13 +723,13 @@ VOICEMAIL SYSTEM (respond "VOICEMAIL"):
         return self._voicemail_gate
 
     def add_event_handler(self, event_name: str, handler):
-        """Add an event handler for voicemail detection events.
+        """Add an event handler for detection events.
 
         Args:
             event_name: The name of the event to handle.
             handler: The function to call when the event occurs.
         """
-        if event_name == "on_voicemail_detected":
+        if event_name in ["on_voicemail_detected", "on_conversation_detected"]:
             self._classification_processor.add_event_handler(event_name, handler)
         else:
             super().add_event_handler(event_name, handler)
