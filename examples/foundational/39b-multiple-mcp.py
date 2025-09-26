@@ -219,6 +219,14 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    if not os.getenv("NASA_API_KEY") or not os.getenv("MCP_RUN_SSE_URL"):
+        logger.error(
+            f"Please set NASA_API_KEY and MCP_RUN_SSE_URL environment variables. See https://api.nasa.gov and https://mcp.run"
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.runner.run import main
 
     main()

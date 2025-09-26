@@ -145,6 +145,14 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    if not os.getenv("GITHUB_PERSONAL_ACCESS_TOKEN"):
+        logger.error(
+            f"Please set GITHUB_PERSONAL_ACCESS_TOKEN environment variable for this example."
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.runner.run import main
 
     main()
