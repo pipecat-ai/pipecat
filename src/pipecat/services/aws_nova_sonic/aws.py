@@ -51,6 +51,7 @@ from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContext,
     OpenAILLMContextFrame,
@@ -327,7 +328,12 @@ class AWSNovaSonicLLMService(LLMService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
-            await self._handle_context(frame.context)
+            context = (
+                frame.context
+                if isinstance(frame, LLMContextFrame)
+                else LLMContext.from_openai_context(frame.context)
+            )
+            await self._handle_context(context)
         elif isinstance(frame, InputAudioRawFrame):
             await self._handle_input_audio_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
@@ -337,7 +343,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         await self.push_frame(frame, direction)
 
-    async def _handle_context(self, context: LLMContext | OpenAILLMContext):
+    async def _handle_context(self, context: LLMContext):
         if not self._context:
             # We got our initial context
             # Try to finish connecting
@@ -1120,23 +1126,26 @@ class AWSNovaSonicLLMService(LLMService):
         *,
         user_params: LLMUserAggregatorParams = LLMUserAggregatorParams(),
         assistant_params: LLMAssistantAggregatorParams = LLMAssistantAggregatorParams(),
-    ) -> OpenAIContextAggregatorPair:
+    ) -> LLMContextAggregatorPair:
         """Create context aggregator pair for managing conversation context.
 
+        NOTE: this method exists only for backward compatibility. New code
+        should instead do:
+            context = LLMContext(...)
+            context_aggregator = LLMContextAggregatorPair(context)
+
         Args:
-            context: The OpenAI LLM context to upgrade.
+            context: The OpenAI LLM context.
             user_params: Parameters for the user context aggregator.
             assistant_params: Parameters for the assistant context aggregator.
 
         Returns:
             A pair of user and assistant context aggregators.
         """
-        context.set_llm_adapter(self.get_llm_adapter())
-
-        user = OpenAIUserContextAggregator(context=context, params=user_params)
-        assistant = OpenAIAssistantContextAggregator(context=context, params=assistant_params)
-
-        return OpenAIContextAggregatorPair(user, assistant)
+        context = LLMContext.from_openai_context(context)
+        return LLMContextAggregatorPair(
+            context, user_params=user_params, assistant_params=assistant_params
+        )
 
     #
     # assistant response trigger (HACK)
