@@ -40,6 +40,7 @@ class ContentPart(BaseModel):
     Parameters:
         text: Text content. Defaults to None.
         inlineData: Inline media data. Defaults to None.
+        fileData: File data. Defaults to None.
     """
 
     text: Optional[str] = Field(default=None, validate_default=False)
@@ -61,11 +62,11 @@ class Turn(BaseModel):
     """Represents a conversational turn in the dialogue.
 
     Parameters:
-        role: The role of the speaker, either "user" or "model". Defaults to "user".
+        role: The role of the speaker, either "user", "model", or "tool". Defaults to "user".
         parts: List of content parts that make up the turn.
     """
 
-    role: Literal["user", "model"] = "user"
+    role: Literal["user", "model", "tool"] = "user"
     parts: List[ContentPart]
 
 
@@ -386,10 +387,10 @@ class BidiGenerateContentTranscription(BaseModel):
     """Transcription data from bidirectional content generation.
 
     Parameters:
-        text: The transcribed text content.
+        text: The transcribed text content. Defaults to None.
     """
 
-    text: str
+    text: Optional[str] = None
 
 
 class ServerContent(BaseModel):

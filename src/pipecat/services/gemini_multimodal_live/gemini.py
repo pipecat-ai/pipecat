@@ -662,7 +662,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             frame: The start frame.
         """
         await super().start(frame)
-        await self._connect()
+        await self._connect(self._model_name)
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close connections.
@@ -788,7 +788,17 @@ class GeminiMultimodalLiveLLMService(LLMService):
         """
         await self._ws_send(event.model_dump(exclude_none=True))
 
-    async def _connect(self):
+    async def websocket_connect_with_auth(self):
+        """Connect to websocket using api key."""
+        logger.info(f"Connecting to wss://{self._base_url}")
+        uri = f"wss://{self._base_url}?key={self._api_key}"
+        self._websocket = await websocket_connect(uri=uri)
+
+    def get_model_name_or_path(self):
+        """Return model name."""
+        return self._model_name
+
+    async def _connect(self, model_name_or_path: str):
         """Establish WebSocket connection to Gemini Live API."""
         if self._websocket:
             # Here we assume that if we have a websocket, we are connected. We
@@ -797,15 +807,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         logger.info("Connecting to Gemini service")
         try:
-            logger.info(f"Connecting to wss://{self._base_url}")
-            uri = f"wss://{self._base_url}?key={self._api_key}"
-            self._websocket = await websocket_connect(uri=uri)
+            await self.websocket_connect_with_auth()
             self._receive_task = self.create_task(self._receive_task_handler())
 
             # Create the basic configuration
             config_data = {
                 "setup": {
-                    "model": self._model_name,
+                    "model": self.get_model_name_or_path(),
                     "generation_config": {
                         "frequency_penalty": self._settings["frequency_penalty"],
                         "max_output_tokens": self._settings["max_tokens"],
@@ -1151,8 +1159,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not inline_data:
             return
         if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
-            logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
-            return
+            # Vertex AI does not always return the sample rate in mimeType
+            if inline_data.mimeType != f"audio/pcm":
+                logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
+                return
 
         audio = base64.b64decode(inline_data.data)
         if not audio:
