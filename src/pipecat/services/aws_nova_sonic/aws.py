@@ -43,6 +43,8 @@ from pipecat.frames.frames import (
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
+    UserStartedSpeakingFrame,
+    UserStoppedSpeakingFrame,
 )
 from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
@@ -245,6 +247,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
+        self._waiting_for_trigger_transcription = False
         self._disconnecting = False
         self._connected_time: Optional[float] = None
         self._wants_connection = False
@@ -337,10 +340,8 @@ class AWSNovaSonicLLMService(LLMService):
     async def _handle_context(self, context: LLMContext | OpenAILLMContext):
         if not self._context:
             # We got our initial context
-            self._context = context
-            # Update our bookkeeping of already-completed tool calls
-            await self._process_completed_function_calls(send_new_results=False)
             # Try to finish connecting
+            self._context = context
             await self._finish_connecting_if_context_available()
         else:
             # We got an updated context
@@ -454,6 +455,10 @@ class AWSNovaSonicLLMService(LLMService):
 
         logger.info("Finishing connecting (setting up session)...")
 
+        # Initialize our bookkeeping of already-completed tool calls in the
+        # context
+        await self._process_completed_function_calls(send_new_results=False)
+
         # Read context
         adapter: AWSNovaSonicLLMAdapter = self.get_llm_adapter()
         llm_connection_params = adapter.get_llm_invocation_params(self._context)
@@ -536,8 +541,12 @@ class AWSNovaSonicLLMService(LLMService):
             self._ready_to_send_context = False
             self._handling_bot_stopped_speaking = False
             self._triggering_assistant_response = False
+            self._waiting_for_trigger_transcription = False
             self._disconnecting = False
             self._connected_time = None
+            self._user_text_buffer = ""
+            self._assistant_text_buffer = ""
+            self._completed_tool_calls = set()
 
             logger.info("Finished disconnecting")
         except Exception as e:
@@ -1062,13 +1071,44 @@ class AWSNovaSonicLLMService(LLMService):
         # Report to the upstream user context aggregator that some new user
         # transcription text is available.
         if self._send_transcription_frames:
+            # HACK: Check if this transcription was triggered by our own
+            # assistant response trigger. If so, we need to wrap it with
+            # UserStarted/StoppedSpeakingFrames; otherwise the user aggregator
+            # would fire an EmulatedUserStartedSpeakingFrame, which would
+            # trigger an interruption, which would prevent us from writing the
+            # assistant response to context.
+            #
+            # Sending an EmulateUserStartedSpeakingFrame ourselves doesn't
+            # work: it just causes the interruption we're trying to avoid.
+            #
+            # Setting enable_emulated_vad_interruptions also doesn't work: at
+            # the time the user aggregator receives the TranscriptionFrame, it
+            # doesn't yet know the assistant has started responding, so it
+            # doesn't know that emulating the user starting to speak would
+            # cause an interruption.
+            should_wrap_in_user_started_stopped_speaking_frames = (
+                self._waiting_for_trigger_transcription
+                and self._user_text_buffer.strip().lower() == "ready"
+            )
+            if should_wrap_in_user_started_stopped_speaking_frames:
+                logger.debug(
+                    "Wrapping assistant response trigger transcription with upstream UserStarted/StoppedSpeakingFrames"
+                )
+                await self.push_frame(UserStartedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+
             frame = TranscriptionFrame(
                 text=self._user_text_buffer, user_id="", timestamp=time_now_iso8601()
             )
             await self.push_frame(frame, direction=FrameDirection.UPSTREAM)
 
+            if should_wrap_in_user_started_stopped_speaking_frames:
+                await self.push_frame(UserStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+
         # Clear out the buffered user text
         self._user_text_buffer = ""
+
+        # We're no longer waiting for a trigger transcription
+        self._waiting_for_trigger_transcription = False
 
     #
     # context
@@ -1133,6 +1173,8 @@ class AWSNovaSonicLLMService(LLMService):
 
         try:
             logger.debug("Sending assistant response trigger...")
+
+            self._waiting_for_trigger_transcription = True
 
             chunk_duration = 0.02  # what we might get from InputAudioRawFrame
             chunk_size = int(
