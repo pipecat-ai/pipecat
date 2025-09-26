@@ -1076,39 +1076,47 @@ class AWSNovaSonicLLMService(LLMService):
 
         # Report to the upstream user context aggregator that some new user
         # transcription text is available.
+
+        # HACK: Check if this transcription was triggered by our own
+        # assistant response trigger. If so, we need to wrap it with
+        # UserStarted/StoppedSpeakingFrames; otherwise the user aggregator
+        # would fire an EmulatedUserStartedSpeakingFrame, which would
+        # trigger an interruption, which would prevent us from writing the
+        # assistant response to context.
+        #
+        # Sending an EmulateUserStartedSpeakingFrame ourselves doesn't
+        # work: it just causes the interruption we're trying to avoid.
+        #
+        # Setting enable_emulated_vad_interruptions also doesn't work: at
+        # the time the user aggregator receives the TranscriptionFrame, it
+        # doesn't yet know the assistant has started responding, so it
+        # doesn't know that emulating the user starting to speak would
+        # cause an interruption.
+        should_wrap_in_user_started_stopped_speaking_frames = (
+            self._waiting_for_trigger_transcription
+            and self._user_text_buffer.strip().lower() == "ready"
+        )
+
+        # Start wrapping the upstream transcription in UserStarted/StoppedSpeakingFrames if needed
+        if should_wrap_in_user_started_stopped_speaking_frames:
+            logger.debug(
+                "Wrapping assistant response trigger transcription with upstream UserStarted/StoppedSpeakingFrames"
+            )
+            await self.push_frame(UserStartedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+
+        # Send the transcription upstream for the user context aggregator
+        frame = TranscriptionFrame(
+            text=self._user_text_buffer, user_id="", timestamp=time_now_iso8601()
+        )
+        await self.push_frame(frame, direction=FrameDirection.UPSTREAM)
+
+        # Finish wrapping the upstream transcription in UserStarted/StoppedSpeakingFrames if needed
+        if should_wrap_in_user_started_stopped_speaking_frames:
+            await self.push_frame(UserStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+
+        # Also send the transcription downstream if requested
         if self._send_transcription_frames:
-            # HACK: Check if this transcription was triggered by our own
-            # assistant response trigger. If so, we need to wrap it with
-            # UserStarted/StoppedSpeakingFrames; otherwise the user aggregator
-            # would fire an EmulatedUserStartedSpeakingFrame, which would
-            # trigger an interruption, which would prevent us from writing the
-            # assistant response to context.
-            #
-            # Sending an EmulateUserStartedSpeakingFrame ourselves doesn't
-            # work: it just causes the interruption we're trying to avoid.
-            #
-            # Setting enable_emulated_vad_interruptions also doesn't work: at
-            # the time the user aggregator receives the TranscriptionFrame, it
-            # doesn't yet know the assistant has started responding, so it
-            # doesn't know that emulating the user starting to speak would
-            # cause an interruption.
-            should_wrap_in_user_started_stopped_speaking_frames = (
-                self._waiting_for_trigger_transcription
-                and self._user_text_buffer.strip().lower() == "ready"
-            )
-            if should_wrap_in_user_started_stopped_speaking_frames:
-                logger.debug(
-                    "Wrapping assistant response trigger transcription with upstream UserStarted/StoppedSpeakingFrames"
-                )
-                await self.push_frame(UserStartedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
-
-            frame = TranscriptionFrame(
-                text=self._user_text_buffer, user_id="", timestamp=time_now_iso8601()
-            )
-            await self.push_frame(frame, direction=FrameDirection.UPSTREAM)
-
-            if should_wrap_in_user_started_stopped_speaking_frames:
-                await self.push_frame(UserStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
+            await self.push_frame(frame, direction=FrameDirection.DOWNSTREAM)
 
         # Clear out the buffered user text
         self._user_text_buffer = ""
