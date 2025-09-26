@@ -224,12 +224,36 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
         return answer
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def smallwebrtc_lifespan(app: FastAPI):
         """Manage FastAPI application lifecycle and cleanup connections."""
         yield
         await small_webrtc_handler.close()
 
-    app.router.lifespan_context = lifespan
+    # Add the SmallWebRTC lifespan to the app
+    _add_lifespan_to_app(app, smallwebrtc_lifespan)
+
+
+def _add_lifespan_to_app(app: FastAPI, new_lifespan):
+    """Add a new lifespan context manager to the app, combining with existing if present.
+    
+    Args:
+        app: The FastAPI application instance
+        new_lifespan: The new lifespan context manager to add
+    """
+    if hasattr(app.router, 'lifespan_context') and app.router.lifespan_context is not None:
+        # If there's already a lifespan context, combine them
+        existing_lifespan = app.router.lifespan_context
+        
+        @asynccontextmanager
+        async def combined_lifespan(app: FastAPI):
+            async with existing_lifespan(app):
+                async with new_lifespan(app):
+                    yield
+        
+        app.router.lifespan_context = combined_lifespan
+    else:
+        # No existing lifespan, use the new one
+        app.router.lifespan_context = new_lifespan
 
 
 def _setup_whatsapp_routes(app: FastAPI):
@@ -279,6 +303,10 @@ def _setup_whatsapp_routes(app: FastAPI):
         the webhook URL during setup. It validates the verification token
         and returns the challenge parameter if successful.
         """
+        if whatsapp_client is None:
+            logger.error("WhatsApp client is not initialized")
+            raise HTTPException(status_code=503, detail="Service unavailable")
+            
         params = dict(request.query_params)
         logger.debug(f"Webhook verification request received with params: {list(params.keys())}")
 
@@ -303,6 +331,10 @@ def _setup_whatsapp_routes(app: FastAPI):
         For call events, establishes WebRTC connections and spawns bot instances
         in the background to handle real-time communication.
         """
+        if whatsapp_client is None:
+            logger.error("WhatsApp client is not initialized")
+            raise HTTPException(status_code=503, detail="Service unavailable")
+            
         # Validate webhook object type
         if body.object != "whatsapp_business_account":
             logger.warning(f"Invalid webhook object type: {body.object}")
@@ -336,9 +368,9 @@ def _setup_whatsapp_routes(app: FastAPI):
             raise HTTPException(status_code=500, detail="Internal server error processing webhook")
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        """Manage FastAPI application lifecycle and cleanup connections."""
-        global whatsapp_client
+    async def whatsapp_lifespan(app: FastAPI):
+        """Manage WhatsApp client lifecycle and cleanup connections."""
+        nonlocal whatsapp_client
 
         # Initialize WhatsApp client with persistent HTTP session
         async with aiohttp.ClientSession() as session:
@@ -356,9 +388,10 @@ def _setup_whatsapp_routes(app: FastAPI):
                 logger.info("Cleaning up WhatsApp client resources...")
                 if whatsapp_client:
                     await whatsapp_client.terminate_all_calls()
-                logger.info("Cleanup completed")
+                logger.info("WhatsApp cleanup completed")
 
-    app.router.lifespan_context = lifespan
+    # Add the WhatsApp lifespan to the app
+    _add_lifespan_to_app(app, whatsapp_lifespan)
 
 
 def _setup_daily_routes(app: FastAPI):
