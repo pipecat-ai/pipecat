@@ -13,6 +13,7 @@ LLM processing, and text-to-speech components in conversational AI pipelines.
 
 import asyncio
 import json
+from abc import abstractmethod
 from typing import Any, Dict, List, Literal, Optional, Set
 
 from loguru import logger
@@ -169,6 +170,11 @@ class LLMContextAggregator(FrameProcessor):
         """Reset the aggregation state."""
         self._aggregation = ""
 
+    @abstractmethod
+    async def push_aggregation(self):
+        """Push the current aggregation downstream."""
+        pass
+
 
 class LLMUserAggregator(LLMContextAggregator):
     """User LLM aggregator that processes speech-to-text transcriptions.
@@ -301,7 +307,7 @@ class LLMUserAggregator(LLMContextAggregator):
         frame = LLMContextFrame(self._context)
         await self.push_frame(frame)
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         """Push the current aggregation based on interruption strategies and conditions."""
         if len(self._aggregation) > 0:
             if self.interruption_strategies and self._bot_speaking:
@@ -392,7 +398,7 @@ class LLMUserAggregator(LLMContextAggregator):
         # pushing the aggregation as we will probably get a final transcription.
         if len(self._aggregation) > 0:
             if not self._seen_interim_results:
-                await self._push_aggregation()
+                await self.push_aggregation()
         # Handles the case where both the user and the bot are not speaking,
         # and the bot was previously speaking before the user interruption.
         # So in this case we are resetting the aggregation timer
@@ -471,7 +477,7 @@ class LLMUserAggregator(LLMContextAggregator):
                 await self._maybe_emulate_user_speaking()
             except asyncio.TimeoutError:
                 if not self._user_speaking:
-                    await self._push_aggregation()
+                    await self.push_aggregation()
 
                 # If we are emulating VAD we still need to send the user stopped
                 # speaking frame.
@@ -607,12 +613,12 @@ class LLMAssistantAggregator(LLMContextAggregator):
         elif isinstance(frame, UserImageRawFrame) and frame.request and frame.request.tool_call_id:
             await self._handle_user_image_frame(frame)
         elif isinstance(frame, BotStoppedSpeakingFrame):
-            await self._push_aggregation()
+            await self.push_aggregation()
             await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
-    async def _push_aggregation(self):
+    async def push_aggregation(self):
         """Push the current assistant aggregation with timestamp."""
         if not self._aggregation:
             return
@@ -644,7 +650,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_interruptions(self, frame: InterruptionFrame):
-        await self._push_aggregation()
+        await self.push_aggregation()
         self._started = 0
         await self.reset()
 
@@ -778,7 +784,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
             text=frame.request.context,
         )
 
-        await self._push_aggregation()
+        await self.push_aggregation()
         await self.push_context_frame(FrameDirection.UPSTREAM)
 
     async def _handle_llm_start(self, _: LLMFullResponseStartFrame):
@@ -786,7 +792,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_llm_end(self, _: LLMFullResponseEndFrame):
         self._started -= 1
-        await self._push_aggregation()
+        await self.push_aggregation()
 
     async def _handle_text(self, frame: TextFrame):
         if not self._started:
