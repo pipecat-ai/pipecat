@@ -236,6 +236,20 @@ class AudioTranscriptionConfig(BaseModel):
     pass
 
 
+class ContextWindowCompressionConfig(BaseModel):
+    """Configuration for context window compression."""
+
+    sliding_window: Optional[dict] = Field(default=True)
+    trigger_tokens: Optional[int] = Field(default=None)
+
+
+class SessionResumptionConfig(BaseModel):
+    """Configuration for session resumption."""
+
+    transparent: Optional[bool] = Field(default=None)
+    handle: Optional[str] = Field(default=None)
+
+
 class Setup(BaseModel):
     """Setup configuration for the Gemini Live session.
 
@@ -247,6 +261,8 @@ class Setup(BaseModel):
         input_audio_transcription: Input audio transcription config. Defaults to None.
         output_audio_transcription: Output audio transcription config. Defaults to None.
         realtime_input_config: Realtime input configuration. Defaults to None.
+        context_window_compression: context_window_compression. Defaults to None.
+        session_resumption: session_resumption. Defaults to None.
     """
 
     model: str
@@ -256,6 +272,8 @@ class Setup(BaseModel):
     input_audio_transcription: Optional[AudioTranscriptionConfig] = None
     output_audio_transcription: Optional[AudioTranscriptionConfig] = None
     realtime_input_config: Optional[RealtimeInputConfig] = None
+    context_window_compression: Optional[ContextWindowCompressionConfig] = None
+    session_resumption: Optional[SessionResumptionConfig] = None
 
 
 class Config(BaseModel):
@@ -392,6 +410,11 @@ class BidiGenerateContentTranscription(BaseModel):
     text: str
 
 
+class Duration(BaseModel):
+    seconds: int
+    nanos: int
+
+
 class ServerContent(BaseModel):
     """Content sent from server to client.
 
@@ -485,6 +508,20 @@ class UsageMetadata(BaseModel):
     toolUsePromptTokensDetails: Optional[List[ModalityTokenCount]] = None
 
 
+class GoAway(BaseModel):
+    """Server will not be able to service client soon."""
+
+    timeLeft: str
+
+
+class SessionResumptionUpdate(BaseModel):
+    """Update of the session resumption state. Only sent if BidiGenerateContentSetup.session_resumption was set."""
+
+    newHandle: Optional[str] = None
+    resumable: Optional[bool] = None
+    lastConsumedClientMessageIndex: Optional[int] = None
+
+
 class ServerEvent(BaseModel):
     """Server event received from the Gemini Live API.
 
@@ -499,6 +536,8 @@ class ServerEvent(BaseModel):
     serverContent: Optional[ServerContent] = None
     toolCall: Optional[ToolCall] = None
     usageMetadata: Optional[UsageMetadata] = None
+    goAway: Optional[GoAway] = None
+    sessionResumptionUpdate: Optional[SessionResumptionUpdate] = None
 
 
 def parse_server_event(str):
