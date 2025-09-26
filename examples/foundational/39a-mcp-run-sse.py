@@ -141,6 +141,14 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    if not os.getenv("MCP_RUN_SSE_URL"):
+        logger.error(
+            f"Please set MCP_RUN_SSE_URL environment variable for this example. See https://mcp.run"
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.runner.run import main
 
     main()
