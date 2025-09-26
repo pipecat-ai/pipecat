@@ -235,21 +235,21 @@ def _setup_webrtc_routes(app: FastAPI, esp32_mode: bool = False, host: str = "lo
 
 def _add_lifespan_to_app(app: FastAPI, new_lifespan):
     """Add a new lifespan context manager to the app, combining with existing if present.
-    
+
     Args:
         app: The FastAPI application instance
         new_lifespan: The new lifespan context manager to add
     """
-    if hasattr(app.router, 'lifespan_context') and app.router.lifespan_context is not None:
+    if hasattr(app.router, "lifespan_context") and app.router.lifespan_context is not None:
         # If there's already a lifespan context, combine them
         existing_lifespan = app.router.lifespan_context
-        
+
         @asynccontextmanager
         async def combined_lifespan(app: FastAPI):
             async with existing_lifespan(app):
                 async with new_lifespan(app):
                     yield
-        
+
         app.router.lifespan_context = combined_lifespan
     else:
         # No existing lifespan, use the new one
@@ -306,7 +306,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         if whatsapp_client is None:
             logger.error("WhatsApp client is not initialized")
             raise HTTPException(status_code=503, detail="Service unavailable")
-            
+
         params = dict(request.query_params)
         logger.debug(f"Webhook verification request received with params: {list(params.keys())}")
 
@@ -334,7 +334,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         if whatsapp_client is None:
             logger.error("WhatsApp client is not initialized")
             raise HTTPException(status_code=503, detail="Service unavailable")
-            
+
         # Validate webhook object type
         if body.object != "whatsapp_business_account":
             logger.warning(f"Invalid webhook object type: {body.object}")
