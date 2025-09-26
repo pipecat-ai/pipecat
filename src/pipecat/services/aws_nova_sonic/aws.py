@@ -429,7 +429,7 @@ class AWSNovaSonicLLMService(LLMService):
             await self._finish_connecting_if_context_available()
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
-            self._disconnect()
+            await self._disconnect()
 
     async def _finish_connecting_if_context_available(self):
         # We can only finish connecting once we've gotten our initial context and we're ready to
