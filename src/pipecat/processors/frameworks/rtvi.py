@@ -40,6 +40,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InputTransportMessageUrgentFrame,
     InterimTranscriptionFrame,
     LLMConfigureOutputFrame,
     LLMContextFrame,
@@ -48,10 +49,10 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMTextFrame,
     MetricsFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
-    TransportMessageUrgentFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
@@ -984,7 +985,9 @@ class RTVIObserver(BaseObserver):
             model: The message model to send.
             exclude_none: Whether to exclude None values from the model dump.
         """
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
         await self._rtvi.push_frame(frame)
 
     async def _push_bot_transcription(self):
@@ -1328,7 +1331,7 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, ErrorFrame):
             await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, TransportMessageUrgentFrame):
+        elif isinstance(frame, InputTransportMessageUrgentFrame):
             await self._handle_transport_message(frame)
         # All other system frames
         elif isinstance(frame, SystemFrame):
@@ -1379,7 +1382,9 @@ class RTVIProcessor(FrameProcessor):
 
     async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
         """Push a transport message frame."""
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
         await self.push_frame(frame)
 
     async def _action_task_handler(self):
@@ -1396,7 +1401,7 @@ class RTVIProcessor(FrameProcessor):
             await self._handle_message(message)
             self._message_queue.task_done()
 
-    async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
+    async def _handle_transport_message(self, frame: InputTransportMessageUrgentFrame):
         """Handle an incoming transport message frame."""
         try:
             transport_message = frame.message

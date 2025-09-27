@@ -28,9 +28,9 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
 )
 from pipecat.processors.frame_processor import FrameProcessorSetup
 from pipecat.serializers.base_serializer import FrameSerializer
@@ -385,7 +385,9 @@ class WebsocketClientOutputTransport(BaseOutputTransport):
         await super().cleanup()
         await self._transport.cleanup()
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message through the WebSocket.
 
         Args:
