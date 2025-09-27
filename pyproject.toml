@@ -54,6 +54,7 @@ aws-nova-sonic = [ "aws_sdk_bedrock_runtime~=0.0.2; python_version>='3.12'" ]
 azure = [ "azure-cognitiveservices-speech~=1.42.0"]
 cartesia = [ "cartesia~=2.0.3", "pipecat-ai[websockets-base]" ]
 cerebras = []
+cometapi = []
 deepseek = []
 daily = [ "daily-python~=0.19.9" ]
 deepgram = [ "deepgram-sdk~=4.7.0" ]
@@ -166,6 +167,9 @@ pythonpath = ["src"]
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [
     "ignore:'audioop' is deprecated:DeprecationWarning",
+]
+markers = [
+    "integration: marks tests that hit real external services (deselect with -m 'not integration')",
 ]
 
 [tool.setuptools_scm]
