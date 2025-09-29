@@ -24,7 +24,10 @@ from loguru import logger
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from pipecat.adapters.services.anthropic_adapter import AnthropicLLMAdapter
+from pipecat.adapters.services.anthropic_adapter import (
+    AnthropicLLMAdapter,
+    AnthropicLLMInvocationParams,
+)
 from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
@@ -39,7 +42,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     UserImageRawFrame,
-    VisionImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -112,7 +114,12 @@ class AnthropicLLMService(LLMService):
         """Input parameters for Anthropic model inference.
 
         Parameters:
-            enable_prompt_caching_beta: Whether to enable beta prompt caching feature.
+            enable_prompt_caching: Whether to enable the prompt caching feature.
+            enable_prompt_caching_beta (deprecated): Whether to enable the beta prompt caching feature.
+
+                .. deprecated:: 0.0.84
+                    Use the `enable_prompt_caching` parameter instead.
+
             max_tokens: Maximum tokens to generate. Must be at least 1.
             temperature: Sampling temperature between 0.0 and 1.0.
             top_k: Top-k sampling parameter.
@@ -120,12 +127,25 @@ class AnthropicLLMService(LLMService):
             extra: Additional parameters to pass to the API.
         """
 
-        enable_prompt_caching_beta: Optional[bool] = False
+        enable_prompt_caching: Optional[bool] = None
+        enable_prompt_caching_beta: Optional[bool] = None
         max_tokens: Optional[int] = Field(default_factory=lambda: 4096, ge=1)
         temperature: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         top_k: Optional[int] = Field(default_factory=lambda: NOT_GIVEN, ge=0)
         top_p: Optional[float] = Field(default_factory=lambda: NOT_GIVEN, ge=0.0, le=1.0)
         extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+        def model_post_init(self, __context):
+            """Post-initialization to handle deprecated parameters."""
+            if self.enable_prompt_caching_beta is not None:
+                import warnings
+
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "enable_prompt_caching_beta is deprecated. Use enable_prompt_caching instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
 
     def __init__(
         self,
@@ -159,7 +179,15 @@ class AnthropicLLMService(LLMService):
         self._retry_on_timeout = retry_on_timeout
         self._settings = {
             "max_tokens": params.max_tokens,
-            "enable_prompt_caching_beta": params.enable_prompt_caching_beta or False,
+            "enable_prompt_caching": (
+                params.enable_prompt_caching
+                if params.enable_prompt_caching is not None
+                else (
+                    params.enable_prompt_caching_beta
+                    if params.enable_prompt_caching_beta is not None
+                    else False
+                )
+            ),
             "temperature": params.temperature,
             "top_k": params.top_k,
             "top_p": params.top_p,
@@ -199,34 +227,28 @@ class AnthropicLLMService(LLMService):
             response = await api_call(**params)
             return response
 
-    async def run_inference(
-        self, context: LLMContext | OpenAILLMContext, system_instruction: Optional[str] = None
-    ) -> Optional[str]:
+    async def run_inference(self, context: LLMContext | OpenAILLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context.
 
         Args:
             context: The LLM context containing conversation history.
-            system_instruction: Optional system instruction to guide the LLM's
-              behavior. You could also (again, optionally) provide a system
-              instruction directly in the context. If both are provided, the
-              one in the context takes precedence.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
         messages = []
-        system = []
+        system = NOT_GIVEN
         if isinstance(context, LLMContext):
-            # Future code will be something like this:
-            # adapter = self.get_llm_adapter()
-            # params: AnthropicLLMInvocationParams = adapter.get_llm_invocation_params(context)
-            # messages = params["messages"]
-            # system = params["system_instruction"]
-            raise NotImplementedError("Universal LLMContext is not yet supported for Anthropic.")
+            adapter: AnthropicLLMAdapter = self.get_llm_adapter()
+            params = adapter.get_llm_invocation_params(
+                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
+            )
+            messages = params["messages"]
+            system = params["system"]
         else:
             context = AnthropicLLMContext.upgrade_to_anthropic(context)
             messages = context.messages
-            system = getattr(context, "system", None) or system_instruction
+            system = getattr(context, "system", NOT_GIVEN)
 
         # LLM completion
         response = await self._client.messages.create(
@@ -238,15 +260,6 @@ class AnthropicLLMService(LLMService):
         )
 
         return response.content[0].text
-
-    @property
-    def enable_prompt_caching_beta(self) -> bool:
-        """Check if prompt caching beta feature is enabled.
-
-        Returns:
-            True if prompt caching is enabled.
-        """
-        return self._enable_prompt_caching_beta
 
     def create_context_aggregator(
         self,
@@ -277,8 +290,31 @@ class AnthropicLLMService(LLMService):
         assistant = AnthropicAssistantContextAggregator(context, params=assistant_params)
         return AnthropicContextAggregatorPair(_user=user, _assistant=assistant)
 
+    def _get_llm_invocation_params(
+        self, context: OpenAILLMContext | LLMContext
+    ) -> AnthropicLLMInvocationParams:
+        # Universal LLMContext
+        if isinstance(context, LLMContext):
+            adapter: AnthropicLLMAdapter = self.get_llm_adapter()
+            params = adapter.get_llm_invocation_params(
+                context, enable_prompt_caching=self._settings["enable_prompt_caching"]
+            )
+            return params
+
+        # Anthropic-specific context
+        messages = (
+            context.get_messages_with_cache_control_markers()
+            if self._settings["enable_prompt_caching"]
+            else context.messages
+        )
+        return AnthropicLLMInvocationParams(
+            system=context.system,
+            messages=messages,
+            tools=context.tools or [],
+        )
+
     @traced_llm
-    async def _process_context(self, context: OpenAILLMContext):
+    async def _process_context(self, context: OpenAILLMContext | LLMContext):
         # Usage tracking. We track the usage reported by Anthropic in prompt_tokens and
         # completion_tokens. We also estimate the completion tokens from output text
         # and use that estimate if we are interrupted, because we almost certainly won't
@@ -294,24 +330,22 @@ class AnthropicLLMService(LLMService):
             await self.push_frame(LLMFullResponseStartFrame())
             await self.start_processing_metrics()
 
+            params_from_context = self._get_llm_invocation_params(context)
+
+            if isinstance(context, LLMContext):
+                adapter = self.get_llm_adapter()
+                context_type_for_logging = "universal"
+                messages_for_logging = adapter.get_messages_for_logging(context)
+            else:
+                context_type_for_logging = "LLM-specific"
+                messages_for_logging = context.get_messages_for_logging()
             logger.debug(
-                f"{self}: Generating chat [{context.system}] | {context.get_messages_for_logging()}"
+                f"{self}: Generating chat from {context_type_for_logging} context [{params_from_context['system']}] | {messages_for_logging}"
             )
-
-            messages = context.messages
-            if self._settings["enable_prompt_caching_beta"]:
-                messages = context.get_messages_with_cache_control_markers()
-
-            api_call = self._client.messages.create
-            if self._settings["enable_prompt_caching_beta"]:
-                api_call = self._client.beta.prompt_caching.messages.create
 
             await self.start_ttfb_metrics()
 
             params = {
-                "tools": context.tools or [],
-                "system": context.system,
-                "messages": messages,
                 "model": self.model_name,
                 "max_tokens": self._settings["max_tokens"],
                 "stream": True,
@@ -320,9 +354,12 @@ class AnthropicLLMService(LLMService):
                 "top_p": self._settings["top_p"],
             }
 
+            # Messages, system, tools
+            params.update(params_from_context)
+
             params.update(self._settings["extra"])
 
-            response = await self._create_message_stream(api_call, params)
+            response = await self._create_message_stream(self._client.messages.create, params)
 
             await self.stop_ttfb_metrics()
 
@@ -405,7 +442,10 @@ class AnthropicLLMService(LLMService):
                         prompt_tokens + cache_creation_input_tokens + cache_read_input_tokens
                     )
                     if total_input_tokens >= 1024:
-                        context.turns_above_cache_threshold += 1
+                        if hasattr(
+                            context, "turns_above_cache_threshold"
+                        ):  # LLMContext doesn't have this attribute
+                            context.turns_above_cache_threshold += 1
 
             await self.run_function_calls(function_calls)
 
@@ -451,20 +491,14 @@ class AnthropicLLMService(LLMService):
         if isinstance(frame, OpenAILLMContextFrame):
             context: "AnthropicLLMContext" = AnthropicLLMContext.upgrade_to_anthropic(frame.context)
         elif isinstance(frame, LLMContextFrame):
-            raise NotImplementedError("Universal LLMContext is not yet supported for Anthropic.")
+            context = frame.context
         elif isinstance(frame, LLMMessagesFrame):
             context = AnthropicLLMContext.from_messages(frame.messages)
-        elif isinstance(frame, VisionImageRawFrame):
-            # This is only useful in very simple pipelines because it creates
-            # a new context. Generally we want a context manager to catch
-            # UserImageRawFrames coming through the pipeline and add them
-            # to the context.
-            context = AnthropicLLMContext.from_image_frame(frame)
         elif isinstance(frame, LLMUpdateSettingsFrame):
             await self._update_settings(frame.settings)
         elif isinstance(frame, LLMEnablePromptCachingFrame):
             logger.debug(f"Setting enable prompt caching to: [{frame.enable}]")
-            self._settings["enable_prompt_caching_beta"] = frame.enable
+            self._settings["enable_prompt_caching"] = frame.enable
         else:
             await self.push_frame(frame, direction)
 
@@ -584,22 +618,6 @@ class AnthropicLLMContext(OpenAILLMContext):
         self = cls(messages=messages)
         self._restructure_from_openai_messages()
         return self
-
-    @classmethod
-    def from_image_frame(cls, frame: VisionImageRawFrame) -> "AnthropicLLMContext":
-        """Create context from a vision image frame.
-
-        Args:
-            frame: The vision image frame to process.
-
-        Returns:
-            New Anthropic context with the image message.
-        """
-        context = cls()
-        context.add_image_frame_message(
-            format=frame.format, size=frame.size, image=frame.image, text=frame.text
-        )
-        return context
 
     def set_messages(self, messages: List):
         """Set the messages list and reset cache tracking.

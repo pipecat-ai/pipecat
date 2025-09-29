@@ -30,25 +30,17 @@ class LLMSwitcher(ServiceSwitcher[StrategyType]):
         """Get the currently active LLM, if any."""
         return self.strategy.active_service
 
-    async def run_inference(
-        self, context: LLMContext, system_instruction: Optional[str] = None
-    ) -> Optional[str]:
+    async def run_inference(self, context: LLMContext) -> Optional[str]:
         """Run a one-shot, out-of-band (i.e. out-of-pipeline) inference with the given LLM context, using the currently active LLM.
 
         Args:
             context: The LLM context containing conversation history.
-            system_instruction: Optional system instruction to guide the LLM's
-              behavior. You could also (again, optionally) provide a system
-              instruction directly in the context. If both are provided, the
-              one in the context takes precedence.
 
         Returns:
             The LLM's response as a string, or None if no response is generated.
         """
         if self.active_llm:
-            return await self.active_llm.run_inference(
-                context=context, system_instruction=system_instruction
-            )
+            return await self.active_llm.run_inference(context=context)
         return None
 
     def register_function(

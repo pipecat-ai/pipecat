@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     EndFrame,
     Frame,
     InputTransportMessageUrgentFrame,
+    InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
@@ -39,7 +40,6 @@ from pipecat.frames.frames import (
     SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
-    StartInterruptionFrame,
     SystemFrame,
     TransportMessageFrame,
     TransportMessageUrgentFrame,
@@ -202,24 +202,57 @@ class BaseOutputTransport(FrameProcessor):
         """
         pass
 
-    async def write_video_frame(self, frame: OutputImageRawFrame):
+    async def write_video_frame(self, frame: OutputImageRawFrame) -> bool:
         """Write a video frame to the transport.
 
         Args:
             frame: The output video frame to write.
-        """
-        pass
 
-    async def write_audio_frame(self, frame: OutputAudioRawFrame):
+        Returns:
+            True if the video frame was written successfully, False otherwise.
+        """
+        return False
+
+    async def write_audio_frame(self, frame: OutputAudioRawFrame) -> bool:
         """Write an audio frame to the transport.
 
         Args:
             frame: The output audio frame to write.
+
+        Returns:
+            True if the audio frame was written successfully, False otherwise.
         """
-        pass
+        return False
 
     async def write_dtmf(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
-        """Write a DTMF tone to the transport.
+        """Write a DTMF tone using the transport's preferred method.
+
+        Args:
+            frame: The DTMF frame to write.
+        """
+        if self._supports_native_dtmf():
+            await self._write_dtmf_native(frame)
+        else:
+            await self._write_dtmf_audio(frame)
+
+    def _supports_native_dtmf(self) -> bool:
+        """Override in transport implementations that support native DTMF.
+
+        Returns:
+            True if the transport supports native DTMF, False otherwise.
+        """
+        return False
+
+    async def _write_dtmf_native(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        """Override in transport implementations for native DTMF.
+
+        Args:
+            frame: The DTMF frame to write.
+        """
+        raise NotImplementedError("Transport claims native DTMF support but doesn't implement it")
+
+    async def _write_dtmf_audio(self, frame: OutputDTMFFrame | OutputDTMFUrgentFrame):
+        """Generate and send audio tones for DTMF.
 
         Args:
             frame: The DTMF frame to write.
@@ -228,7 +261,6 @@ class BaseOutputTransport(FrameProcessor):
         dtmf_audio_frame = OutputAudioRawFrame(
             audio=dtmf_audio, sample_rate=self._sample_rate, num_channels=1
         )
-        dtmf_audio_frame.transport_destination = frame.transport_destination
         await self.write_audio_frame(dtmf_audio_frame)
 
     async def send_audio(self, frame: OutputAudioRawFrame):
@@ -261,9 +293,8 @@ class BaseOutputTransport(FrameProcessor):
         await super().process_frame(frame, direction)
 
         #
-        # System frames (like StartInterruptionFrame) are pushed
-        # immediately. Other frames require order so they are put in the sink
-        # queue.
+        # System frames (like InterruptionFrame) are pushed immediately. Other
+        # frames require order so they are put in the sink queue.
         #
         if isinstance(frame, StartFrame):
             # Push StartFrame before start(), because we want StartFrame to be
@@ -273,7 +304,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, CancelFrame):
             await self.cancel(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
         elif isinstance(frame, TransportMessageUrgentFrame) and not isinstance(
@@ -314,7 +345,7 @@ class BaseOutputTransport(FrameProcessor):
 
         sender = self._media_senders[frame.transport_destination]
 
-        if isinstance(frame, StartInterruptionFrame):
+        if isinstance(frame, InterruptionFrame):
             await sender.handle_interruptions(frame)
         elif isinstance(frame, OutputAudioRawFrame):
             await sender.handle_audio_frame(frame)
@@ -465,7 +496,7 @@ class BaseOutputTransport(FrameProcessor):
             await self._cancel_clock_task()
             await self._cancel_video_task()
 
-        async def handle_interruptions(self, _: StartInterruptionFrame):
+        async def handle_interruptions(self, _: InterruptionFrame):
             """Handle interruption events by restarting tasks and clearing buffers.
 
             Args:
@@ -634,6 +665,7 @@ class BaseOutputTransport(FrameProcessor):
                             self._audio_queue.get(), timeout=vad_stop_secs
                         )
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.TimeoutError:
                         # Notify the bot stopped speaking upstream if necessary.
                         await self._bot_stopped_speaking()
@@ -646,8 +678,9 @@ class BaseOutputTransport(FrameProcessor):
                         frame = self._audio_queue.get_nowait()
                         if isinstance(frame, OutputAudioRawFrame):
                             frame.audio = await self._mixer.mix(frame.audio)
-                        last_frame_time = time.time()
+                            last_frame_time = time.time()
                         yield frame
+                        self._audio_queue.task_done()
                     except asyncio.QueueEmpty:
                         # Notify the bot stopped speaking upstream if necessary.
                         diff_time = time.time() - last_frame_time
@@ -713,12 +746,22 @@ class BaseOutputTransport(FrameProcessor):
                 # Handle frame.
                 await self._handle_frame(frame)
 
-                # Also, push frame downstream in case anyone else needs it.
-                await self._transport.push_frame(frame)
+                # If we are not able to write to the transport we shouldn't
+                # pushb downstream.
+                push_downstream = True
 
-                # Send audio.
-                if isinstance(frame, OutputAudioRawFrame):
-                    await self._transport.write_audio_frame(frame)
+                # Try to send audio to the transport.
+                try:
+                    if isinstance(frame, OutputAudioRawFrame):
+                        push_downstream = await self._transport.write_audio_frame(frame)
+                except Exception as e:
+                    logger.error(f"{self} Error writing {frame} to transport: {e}")
+                    push_downstream = False
+
+                # If we were able to send to the transport, push the frame
+                # downstream in case anyone else needs it.
+                if push_downstream:
+                    await self._transport.push_frame(frame)
 
         #
         # Video handling

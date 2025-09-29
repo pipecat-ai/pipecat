@@ -500,9 +500,11 @@ class GoogleTTSService(TTSService):
 
         Parameters:
             language: Language for synthesis. Defaults to English.
+            speaking_rate: The speaking rate, in the range [0.25, 4.0].
         """
 
         language: Optional[Language] = Language.EN
+        speaking_rate: Optional[float] = None
 
     def __init__(
         self,
@@ -510,6 +512,7 @@ class GoogleTTSService(TTSService):
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         voice_id: str = "en-US-Chirp3-HD-Charon",
+        voice_cloning_key: Optional[str] = None,
         sample_rate: Optional[int] = None,
         params: InputParams = InputParams(),
         **kwargs,
@@ -520,6 +523,7 @@ class GoogleTTSService(TTSService):
             credentials: JSON string containing Google Cloud service account credentials.
             credentials_path: Path to Google Cloud service account JSON file.
             voice_id: Google TTS voice identifier (e.g., "en-US-Chirp3-HD-Charon").
+            voice_cloning_key: The voice cloning key for Chirp 3 custom voices.
             sample_rate: Audio sample rate in Hz. If None, uses default.
             params: Language configuration parameters.
             **kwargs: Additional arguments passed to parent TTSService.
@@ -532,8 +536,10 @@ class GoogleTTSService(TTSService):
             "language": self.language_to_service_language(params.language)
             if params.language
             else "en-US",
+            "speaking_rate": params.speaking_rate,
         }
         self.set_voice(voice_id)
+        self._voice_cloning_key = voice_cloning_key
         self._client: texttospeech_v1.TextToSpeechAsyncClient = self._create_client(
             credentials, credentials_path
         )
@@ -600,15 +606,24 @@ class GoogleTTSService(TTSService):
         try:
             await self.start_ttfb_metrics()
 
-            voice = texttospeech_v1.VoiceSelectionParams(
-                language_code=self._settings["language"], name=self._voice_id
-            )
+            if self._voice_cloning_key:
+                voice_clone_params = texttospeech_v1.VoiceCloneParams(
+                    voice_cloning_key=self._voice_cloning_key
+                )
+                voice = texttospeech_v1.VoiceSelectionParams(
+                    language_code=self._settings["language"], voice_clone=voice_clone_params
+                )
+            else:
+                voice = texttospeech_v1.VoiceSelectionParams(
+                    language_code=self._settings["language"], name=self._voice_id
+                )
 
             streaming_config = texttospeech_v1.StreamingSynthesizeConfig(
                 voice=voice,
                 streaming_audio_config=texttospeech_v1.StreamingAudioConfig(
                     audio_encoding=texttospeech_v1.AudioEncoding.PCM,
                     sample_rate_hertz=self.sample_rate,
+                    speaking_rate=self._settings["speaking_rate"],
                 ),
             )
             config_request = texttospeech_v1.StreamingSynthesizeRequest(

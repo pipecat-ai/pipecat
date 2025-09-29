@@ -33,6 +33,8 @@ from pipecat.frames.frames import (
     InputAudioRawFrame,
     InputImageRawFrame,
     InputTextRawFrame,
+    InterruptionFrame,
+    LLMContextFrame,
     LLMFullResponseEndFrame,
     LLMFullResponseStartFrame,
     LLMMessagesAppendFrame,
@@ -40,7 +42,6 @@ from pipecat.frames.frames import (
     LLMTextFrame,
     LLMUpdateSettingsFrame,
     StartFrame,
-    StartInterruptionFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
@@ -738,6 +739,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 # Support just one tool call per context frame for now
                 tool_result_message = context.messages[-1]
                 await self._tool_result(tool_result_message)
+        elif isinstance(frame, LLMContextFrame):
+            raise NotImplementedError(
+                "Universal LLMContext is not yet supported for Gemini Multimodal Live."
+            )
         elif isinstance(frame, InputTextRawFrame):
             await self._send_user_text(frame.text)
             await self.push_frame(frame, direction)
@@ -747,7 +752,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         elif isinstance(frame, InputImageRawFrame):
             await self._send_user_video(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, StartInterruptionFrame):
+        elif isinstance(frame, InterruptionFrame):
             await self._handle_interruption()
             await self.push_frame(frame, direction)
         elif isinstance(frame, UserStartedSpeakingFrame):

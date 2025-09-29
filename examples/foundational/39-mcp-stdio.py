@@ -16,7 +16,10 @@ from loguru import logger
 from mcp import StdioServerParameters
 from PIL import Image
 
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
@@ -26,7 +29,8 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -91,7 +95,8 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -99,7 +104,8 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -152,8 +158,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
         messages = [{"role": "system", "content": system}]
 
-        context = OpenAILLMContext(messages, tools)
-        context_aggregator = llm.create_context_aggregator(context)
+        context = LLMContext(messages, tools)
+        context_aggregator = LLMContextAggregatorPair(context)
 
         pipeline = Pipeline(
             [
@@ -200,6 +206,14 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    if not os.getenv("NASA_API_KEY"):
+        logger.error(
+            f"Please set NASA_API_KEY environment variable for this example. See https://api.nasa.gov"
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.runner.run import main
 
     main()

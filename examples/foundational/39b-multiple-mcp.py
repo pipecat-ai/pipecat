@@ -19,7 +19,10 @@ from mcp.client.session_group import SseServerParameters
 from PIL import Image
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
+from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
@@ -29,7 +32,8 @@ from pipecat.frames.frames import (
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
-from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
+from pipecat.processors.aggregators.llm_context import LLMContext
+from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -94,7 +98,8 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
     "webrtc": lambda: TransportParams(
         audio_in_enabled=True,
@@ -102,7 +107,8 @@ transport_params = {
         video_out_enabled=True,
         video_out_width=1024,
         video_out_height=1024,
-        vad_analyzer=SileroVADAnalyzer(),
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.2)),
+        turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
     ),
 }
 
@@ -164,8 +170,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         all_standard_tools = run_tools.standard_tools + tools.standard_tools
         all_tools = ToolsSchema(standard_tools=all_standard_tools)
 
-        context = OpenAILLMContext(messages, all_tools)
-        context_aggregator = llm.create_context_aggregator(context)
+        context = LLMContext(messages, all_tools)
+        context_aggregator = LLMContextAggregatorPair(context)
         mcp_image_processor = UrlToImageProcessor(aiohttp_session=session)
 
         pipeline = Pipeline(
@@ -213,6 +219,14 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    if not os.getenv("NASA_API_KEY") or not os.getenv("MCP_RUN_SSE_URL"):
+        logger.error(
+            f"Please set NASA_API_KEY and MCP_RUN_SSE_URL environment variables. See https://api.nasa.gov and https://mcp.run"
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.runner.run import main
 
     main()

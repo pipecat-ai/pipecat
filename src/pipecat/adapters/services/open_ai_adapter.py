@@ -24,6 +24,7 @@ from pipecat.processors.aggregators.llm_context import (
     LLMContext,
     LLMContextMessage,
     LLMContextToolChoice,
+    LLMSpecificMessage,
     NotGiven,
 )
 
@@ -47,6 +48,11 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
     - Extracting and sanitizing messages from the LLM context for logging about OpenAI.
     """
 
+    @property
+    def id_for_llm_specific_messages(self) -> str:
+        """Get the identifier used in LLMSpecificMessage instances for OpenAI."""
+        return "openai"
+
     def get_llm_invocation_params(self, context: LLMContext) -> OpenAILLMInvocationParams:
         """Get OpenAI-specific LLM invocation parameters from a universal LLM context.
 
@@ -57,7 +63,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             Dictionary of parameters for OpenAI's ChatCompletion API.
         """
         return {
-            "messages": self._from_universal_context_messages(self._get_messages(context)),
+            "messages": self._from_universal_context_messages(self.get_messages(context)),
             # NOTE; LLMContext's tools are guaranteed to be a ToolsSchema (or NOT_GIVEN)
             "tools": self.from_standard_tools(context.tools),
             "tool_choice": context.tool_choice,
@@ -91,7 +97,7 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
             List of messages in a format ready for logging about OpenAI.
         """
         msgs = []
-        for message in self._get_messages(context):
+        for message in self.get_messages(context):
             msg = copy.deepcopy(message)
             if "content" in msg:
                 if isinstance(msg["content"], list):
@@ -99,19 +105,25 @@ class OpenAILLMAdapter(BaseLLMAdapter[OpenAILLMInvocationParams]):
                         if item["type"] == "image_url":
                             if item["image_url"]["url"].startswith("data:image/"):
                                 item["image_url"]["url"] = "data:image/..."
+                        if item["type"] == "input_audio":
+                            item["input_audio"]["data"] = "..."
             if "mime_type" in msg and msg["mime_type"].startswith("image/"):
                 msg["data"] = "..."
             msgs.append(msg)
         return msgs
 
-    def _get_messages(self, context: LLMContext) -> List[LLMContextMessage]:
-        return context.get_messages("openai")
-
     def _from_universal_context_messages(
         self, messages: List[LLMContextMessage]
     ) -> List[ChatCompletionMessageParam]:
-        # Just a pass-through: messages are already the right type
-        return messages
+        result = []
+        for message in messages:
+            if isinstance(message, LLMSpecificMessage):
+                # Extract the actual message content from LLMSpecificMessage
+                result.append(message.message)
+            else:
+                # Standard message, pass through unchanged
+                result.append(message)
+        return result
 
     def _from_standard_tool_choice(
         self, tool_choice: LLMContextToolChoice | NotGiven

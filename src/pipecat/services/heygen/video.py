@@ -110,6 +110,7 @@ class HeyGenVideoService(AIService):
             api_key=self._api_key,
             session=self._session,
             params=TransportParams(
+                audio_in_sample_rate=48000,
                 audio_in_enabled=True,
                 video_in_enabled=True,
                 audio_out_enabled=True,
@@ -240,6 +241,7 @@ class HeyGenVideoService(AIService):
             # As soon as we receive actual audio, the base output transport will create a
             # BotStartedSpeakingFrame, which we can use as a signal for the TTFB metrics.
             await self.stop_ttfb_metrics()
+            await self.push_frame(frame, direction)
         else:
             await self.push_frame(frame, direction)
 
