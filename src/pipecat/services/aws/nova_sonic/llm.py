@@ -212,6 +212,11 @@ class AWSNovaSonicLLMService(LLMService):
             system_instruction: System-level instruction for the model.
             tools: Available tools/functions for the model to use.
             send_transcription_frames: Whether to emit transcription frames.
+
+                .. deprecated:: 0.0.87
+                    This parameter is deprecated and will be removed in a future version.
+                    Transcription frames are always sent.
+
             **kwargs: Additional arguments passed to the parent LLMService.
         """
         super().__init__(**kwargs)
@@ -225,7 +230,19 @@ class AWSNovaSonicLLMService(LLMService):
         self._params = params or Params()
         self._system_instruction = system_instruction
         self._tools = tools
-        self._send_transcription_frames = send_transcription_frames
+
+        if not send_transcription_frames:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "`send_transcription_frames` is deprecated and will be removed in a future version. "
+                    "Transcription frames are always sent.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
         self._context: Optional[LLMContext] = None
         self._stream: Optional[
             DuplexEventStream[
@@ -239,7 +256,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._input_audio_content_name: Optional[str] = None
         self._content_being_received: Optional[CurrentContent] = None
         self._assistant_is_responding = False
-        self._needs_re_push_assistant_text = False
+        self._may_need_repush_assistant_text = False
         self._ready_to_send_context = False
         self._handling_bot_stopped_speaking = False
         self._triggering_assistant_response = False
@@ -402,7 +419,7 @@ class AWSNovaSonicLLMService(LLMService):
 
     async def _handle_interruption_frame(self):
         if self._assistant_is_responding:
-            self._needs_re_push_assistant_text = True
+            self._may_need_repush_assistant_text = True
 
     #
     # LLM communication: lifecycle
@@ -546,7 +563,7 @@ class AWSNovaSonicLLMService(LLMService):
             self._input_audio_content_name = None
             self._content_being_received = None
             self._assistant_is_responding = False
-            self._needs_re_push_assistant_text = False
+            self._may_need_repush_assistant_text = False
             self._ready_to_send_context = False
             self._handling_bot_stopped_speaking = False
             self._triggering_assistant_response = False
@@ -1031,15 +1048,24 @@ class AWSNovaSonicLLMService(LLMService):
         logger.debug("Assistant response ended")
 
         # If an interruption frame arrived while the assistant was responding
-        # we probably lost all of the assistant text (see HACK, above), so
+        # we may have lost all of the assistant text (see HACK, above), so
         # re-push it downstream to the aggregator now.
-        if self._needs_re_push_assistant_text:
-            # We also need to re-push the LLMFullResponseStartFrame since the
-            # TTSTextFrame would be ignored otherwise (the interruption frame
-            # would have cleared the assistant aggregator state).
-            await self.push_frame(LLMFullResponseStartFrame())
-            await self.push_frame(TTSTextFrame(self._assistant_text_buffer))
-            self._needs_re_push_assistant_text = False
+        if self._may_need_repush_assistant_text:
+            # Just in case, check that assistant text hasn't already made it
+            # into the context (sometimes it does, despite the interruption).
+            messages = self._context.get_messages()
+            last_message = messages[-1] if messages else None
+            if (
+                not last_message
+                or last_message.get("role") != "assistant"
+                or last_message.get("content") != self._assistant_text_buffer
+            ):
+                # We also need to re-push the LLMFullResponseStartFrame since the
+                # TTSTextFrame would be ignored otherwise (the interruption frame
+                # would have cleared the assistant aggregator state).
+                await self.push_frame(LLMFullResponseStartFrame())
+                await self.push_frame(TTSTextFrame(self._assistant_text_buffer))
+            self._may_need_repush_assistant_text = False
 
         # Report the end of the assistant response.
         await self.push_frame(LLMFullResponseEndFrame())
@@ -1120,10 +1146,6 @@ class AWSNovaSonicLLMService(LLMService):
         # Finish wrapping the upstream transcription in UserStarted/StoppedSpeakingFrames if needed
         if should_wrap_in_user_started_stopped_speaking_frames:
             await self.push_frame(UserStoppedSpeakingFrame(), direction=FrameDirection.UPSTREAM)
-
-        # Also send the transcription downstream if requested
-        if self._send_transcription_frames:
-            await self.push_frame(frame, direction=FrameDirection.DOWNSTREAM)
 
         # Clear out the buffered user text
         self._user_text_buffer = ""
