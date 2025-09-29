@@ -301,6 +301,7 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
     Returns:
         Cleaned SDP text with filtered ICE candidates.
     """
+    logger.debug("Removing unsupported ICE candidates from SDP")
     result = []
     lines = text.splitlines()
     for line in lines:
@@ -321,6 +322,7 @@ def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
     Returns:
         SDP text with sha-384 and sha-512 fingerprints removed.
     """
+    logger.debug("Removing unsupported fingerprints from SDP")
     result = []
     lines = text.splitlines()
     for line in lines:
@@ -329,7 +331,7 @@ def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
     return "\r\n".join(result)
 
 
-def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
+def smallwebrtc_sdp_munging(sdp: str, host: Optional[str]) -> str:
     """Apply SDP modifications for SmallWebRTC compatibility.
 
     Args:
@@ -340,7 +342,8 @@ def smallwebrtc_sdp_munging(sdp: str, host: str) -> str:
         Modified SDP string with fingerprint and ICE candidate cleanup.
     """
     sdp = _smallwebrtc_sdp_cleanup_fingerprints(sdp)
-    sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
+    if host:
+        sdp = _smallwebrtc_sdp_cleanup_ice_candidates(sdp, host)
     return sdp
 
 
