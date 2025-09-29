@@ -77,7 +77,7 @@ async def save_conversation(params: FunctionCallParams):
     filename = f"{BASE_FILENAME}{timestamp}.json"
     try:
         with open(filename, "w") as file:
-            messages = params.context.get_messages_for_persistent_storage()
+            messages = params.context.get_messages()
             # remove the last few messages. in reverse order, they are:
             # - the in progress save tool call
             # - the invocation of the save tool call

@@ -131,21 +131,6 @@ class LLMContext:
             )
         return filtered_messages
 
-    def get_messages_for_persistent_storage(
-        self, system_instruction: Optional[str] = None
-    ) -> List[LLMContextMessage]:
-        """Get messages formatted for persistent storage.
-
-        Args:
-            system_instruction: Optional system instruction to ensure is
-                included as the first message in the returned list, if not
-                already present.
-        """
-        messages = copy.deepcopy(self.get_messages())
-        if system_instruction and (not messages or messages[0].get("role") != "system"):
-            messages.insert(0, {"role": "system", "content": system_instruction})
-        return messages
-
     @property
     def tools(self) -> ToolsSchema | NotGiven:
         """Get the tools list.
