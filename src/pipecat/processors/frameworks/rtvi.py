@@ -864,6 +864,14 @@ class RTVIBotAudioLevelMessage(BaseModel):
     data: RTVIAudioLevelMessageData
 
 
+class RTVISystemLogMessage(BaseModel):
+    """Message including a system log."""
+
+    label: RTVIMessageLiteral = RTVI_MESSAGE_LABEL
+    type: Literal["system-log"] = "system-log"
+    data: RTVITextMessageData
+
+
 @dataclass
 class RTVIServerMessageFrame(SystemFrame):
     """A frame for sending server messages to the client.
@@ -893,6 +901,7 @@ class RTVIObserverParams:
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
         user_audio_level_enabled: Indicates if user's audio level messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
+        system_logs_enabled: Indicates if system logs should be sent.
         errors_enabled: [Deprecated] Indicates if errors messages should be sent.
         audio_level_period_secs: How often audio levels should be sent if enabled.
     """
@@ -906,6 +915,7 @@ class RTVIObserverParams:
     user_transcription_enabled: bool = True
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
+    system_logs_enabled: bool = False
     errors_enabled: bool = True
     audio_level_period_secs: float = 0.15
 
@@ -945,6 +955,20 @@ class RTVIObserver(BaseObserver):
         self._bot_transcription = ""
         self._last_user_audio_level = 0
         self._last_bot_audio_level = 0
+
+        if self._params.system_logs_enabled:
+            self._system_logger_id = logger.add(self._logger_sink)
+
+    async def _logger_sink(self, message):
+        """Logger sink so we cna send system logs to RTVI clients."""
+        message = RTVISystemLogMessage(data=RTVITextMessageData(text=message))
+        await self.send_rtvi_message(message)
+
+    async def cleanup(self):
+        """Cleanup RTVI observer resources."""
+        await super().cleanup()
+        if self._params.system_logs_enabled:
+            logger.remove(self._system_logger_id)
 
     async def send_rtvi_message(self, model: BaseModel, exclude_none: bool = True):
         """Send an RTVI message.
