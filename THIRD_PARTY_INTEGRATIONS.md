@@ -19,10 +19,14 @@ To be listed as an official third-party integration, your repository must contai
 - **Source code** - Complete implementation following Pipecat patterns
 - **Foundational example** - Single file example showing basic usage (see [Pipecat examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational))
 - **README.md** - Must include:
+
   - Introduction and explanation of your integration
   - Installation instructions
   - Usage instructions with Pipecat Pipeline
   - How to run your example
+  - Last Pipecat version tested (e.g., "Tested with Pipecat v0.0.50")
+  - Company attribution: If you work for the company providing the service, please mention this in your README. This helps build confidence that the integration will be actively maintained.
+
 - **LICENSE** - Permissive license (BSD-2 like Pipecat, or equivalent open source terms)
 - **Code documentation** - Source code with docstrings (we recommend following [Pipecat's docstring conventions](https://github.com/pipecat-ai/pipecat/blob/main/CONTRIBUTING.md#docstring-conventions))
 - **Changelog** - Maintain a changelog for version updates
@@ -35,6 +39,9 @@ When submitting your integration for listing, provide:
 - Service type (STT, LLM, TTS, Image, etc.)
 - Link to your repository
 - GitHub username(s) of maintainers
+- Demo video (approx 30-60 seconds) showing:
+  - Core functionality of your integration
+  - Handling of an interruption (if applicable to service type)
 
 ## Submission Process
 
@@ -133,7 +140,7 @@ When submitting your integration for listing, provide:
 - Handle idle service timeouts with keepalives
 - TTSServices push both audio (`TTSRawAudioFrame`) and text (`TTSTextFrame`) frames
 
-### Telephony Services
+### Telephony Serializers
 
 Pipecat supports telephony provider integration using websocket connections to exchange MediaStreams. These services use a FrameSerializer to serialize and deserialize inputs from the FastAPIWebsocketTransport.
 
@@ -145,6 +152,10 @@ Pipecat supports telephony provider integration using websocket connections to e
 **Considerations:**
 
 - Include hang-up functionality using the provider's native API, ideally using `aiohttp`
+- Support DTMF (dual-tone multi-frequency) events if the provider supports them:
+  - Deserialize DTMF events from the provider's protocol to `InputDTMFFrame`
+  - Use `KeypadEntry` enum for valid keypad entries (0-9, \*, #, A-D)
+  - Handle invalid DTMF digits gracefully by returning `None`
 
 ### Image Generation Services
 
@@ -158,6 +169,22 @@ Pipecat supports telephony provider integration using websocket connections to e
 **Requirements:**
 
 - Must implement `run_image_gen` method returning an `AsyncGenerator`
+
+### Vision Services
+
+Vision services process images and provide analysis such as descriptions, object detection, or visual question answering.
+
+**Base class:** `VisionService`
+
+**Example:**
+
+- [MoondreamVisionService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/moondream/vision.py)
+
+**Requirements:**
+
+- Must implement `run_vision` method that takes an `LLMContext` and returns an `AsyncGenerator[Frame, None]`
+- The method processes the latest image in the context and yields frames with analysis results
+- Typically yields `TextFrame` objects containing descriptions or answers
 
 ## Implementation Guidelines
 
@@ -245,6 +272,20 @@ For REST-based communication, use aiohttp. Pipecat includes this as a required d
 - Wrap API calls in appropriate try/catch blocks
 - Handle rate limits and network failures gracefully
 - Provide meaningful error messages
+- When errors occur, raise exceptions AND push `ErrorFrame`s to notify the pipeline:
+
+```python
+from pipecat.frames.frames import ErrorFrame
+
+try:
+    # Your API call
+    result = await self._make_api_call()
+except Exception as e:
+    # Push error frame to pipeline
+    await self.push_error(ErrorFrame(error=f"{self} error: {e}"))
+    # Raise or handle as appropriate
+    raise
+```
 
 ### Testing
 
@@ -254,6 +295,19 @@ For REST-based communication, use aiohttp. Pipecat includes this as a required d
 ## Disclaimer
 
 Third-party integrations are community-maintained and not officially supported by the Pipecat team. Users should evaluate these integrations independently. The Pipecat team reserves the right to remove listings that become unmaintained or problematic.
+
+## Staying Up to Date
+
+Pipecat evolves rapidly to support the latest AI technologies and patterns. While we strive to minimize breaking changes, they do occur as the framework matures.
+
+**We strongly recommend:**
+
+- Join our Discord at https://discord.gg/pipecat and monitor the `#announcements` channel for release notifications
+- Follow our changelog: https://github.com/pipecat-ai/pipecat/blob/main/CHANGELOG.md
+- Test your integration against new Pipecat releases promptly
+- Update your README with the last tested Pipecat version
+
+This helps ensure your integration remains compatible and your users have clear expectations about version support.
 
 ## Questions?
 
