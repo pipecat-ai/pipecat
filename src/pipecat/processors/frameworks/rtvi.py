@@ -616,9 +616,9 @@ class RTVIAppendToContextData(BaseModel):
 
     Contains the role, content, and whether to run the message immediately.
 
-        .. deprecated:: 0.0.85
-            The RTVI message, append-to-context, has been deprecated. Use send-text
-            or custom client and server messages instead.
+    .. deprecated:: 0.0.85
+        The RTVI message, append-to-context, has been deprecated. Use send-text
+        or custom client and server messages instead.
     """
 
     role: Literal["user", "assistant"] | str
@@ -891,6 +891,9 @@ class RTVIServerMessageFrame(SystemFrame):
 class RTVIObserverParams:
     """Parameters for configuring RTVI Observer behavior.
 
+    .. deprecated:: 0.0.87
+        Parameter `errors_enabled` is deprecated. Error messages are always enabled.
+
     Parameters:
         bot_llm_enabled: Indicates if the bot's LLM messages should be sent.
         bot_tts_enabled: Indicates if the bot's TTS messages should be sent.
@@ -958,6 +961,16 @@ class RTVIObserver(BaseObserver):
 
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
+
+        if self._params.errors_enabled:
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter `errors_enabled` is deprecated. Error messages are always enabled.",
+                    DeprecationWarning,
+                )
 
     async def _logger_sink(self, message):
         """Logger sink so we cna send system logs to RTVI clients."""
