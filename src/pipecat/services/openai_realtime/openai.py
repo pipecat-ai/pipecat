@@ -41,6 +41,7 @@ from pipecat.frames.frames import (
     UserStoppedSpeakingFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
+from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response import (
     LLMAssistantAggregatorParams,
     LLMUserAggregatorParams,
@@ -138,7 +139,15 @@ class OpenAIRealtimeLLMService(LLMService):
         self._send_transcription_frames = send_transcription_frames
         self._websocket = None
         self._receive_task = None
-        self._context = None
+        # "Last received context" is only needed while we still support
+        # OpenAILLMContextFrame. The "last received context" is the context received
+        # in the most recent OpenAILLMContextFrame or LLMContextFrame, before
+        # we convert it to an LLMContext if needed. Storing the "last received
+        # context" lets us determine whether the context has changed. (We can't
+        # compare contexts after conversion because conversion creates a new
+        # object.)
+        self._context: LLMContext = None
+        self._last_received_context: OpenAILLMContext | LLMContext = None
 
         self._disconnecting = False
         self._api_session_ready = False
@@ -347,22 +356,22 @@ class OpenAIRealtimeLLMService(LLMService):
 
         if isinstance(frame, TranscriptionFrame):
             pass
-        elif isinstance(frame, OpenAILLMContextFrame):
-            context: OpenAIRealtimeLLMContext = OpenAIRealtimeLLMContext.upgrade_to_realtime(
+        elif isinstance(frame, (LLMContextFrame, OpenAILLMContextFrame)):
+            context = (
                 frame.context
+                if isinstance(frame, LLMContextFrame)
+                else LLMContext.from_openai_context(frame.context)
             )
             if not self._context:
+                self._last_received_context = frame.context
                 self._context = context
-            elif frame.context is not self._context:
+            elif frame.context is not self._last_received_context:
                 # If the context has changed, reset the conversation
+                self._last_received_context = frame.context
                 self._context = context
                 await self.reset_conversation()
             # Run the LLM at next opportunity
             await self._create_response()
-        elif isinstance(frame, LLMContextFrame):
-            raise NotImplementedError(
-                "Universal LLMContext is not yet supported for OpenAI Realtime."
-            )
         elif isinstance(frame, InputAudioRawFrame):
             if not self._audio_input_paused:
                 await self._send_user_audio(frame)
