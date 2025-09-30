@@ -892,7 +892,11 @@ class RTVIObserver(BaseObserver):
     """
 
     def __init__(
-        self, rtvi: "RTVIProcessor", *, params: Optional[RTVIObserverParams] = None, **kwargs
+        self,
+        rtvi: Optional["RTVIProcessor"] = None,
+        *,
+        params: Optional[RTVIObserverParams] = None,
+        **kwargs,
     ):
         """Initialize the RTVI observer.
 
@@ -906,6 +910,20 @@ class RTVIObserver(BaseObserver):
         self._params = params or RTVIObserverParams()
         self._bot_transcription = ""
         self._frames_seen = set()
+
+    async def send_rtvi_message(self, model: BaseModel, exclude_none: bool = True):
+        """Send an RTVI message.
+
+        By default, we push a transport frame. But this function can be
+        overriden by subclass to send RTVI messages in different ways.
+
+        Args:
+            model: The message to send.
+            exclude_none: Whether to exclude None values from the model dump.
+
+        """
+        if self._rtvi:
+            await self._rtvi.push_transport_message(model, exclude_none)
 
     async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
@@ -947,26 +965,26 @@ class RTVIObserver(BaseObserver):
         ):
             await self._handle_context(frame)
         elif isinstance(frame, LLMFullResponseStartFrame) and self._params.bot_llm_enabled:
-            await self.push_transport_message_urgent(RTVIBotLLMStartedMessage())
+            await self.send_rtvi_message(RTVIBotLLMStartedMessage())
         elif isinstance(frame, LLMFullResponseEndFrame) and self._params.bot_llm_enabled:
-            await self.push_transport_message_urgent(RTVIBotLLMStoppedMessage())
+            await self.send_rtvi_message(RTVIBotLLMStoppedMessage())
         elif isinstance(frame, LLMTextFrame) and self._params.bot_llm_enabled:
             await self._handle_llm_text_frame(frame)
         elif isinstance(frame, TTSStartedFrame) and self._params.bot_tts_enabled:
-            await self.push_transport_message_urgent(RTVIBotTTSStartedMessage())
+            await self.send_rtvi_message(RTVIBotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
-            await self.push_transport_message_urgent(RTVIBotTTSStoppedMessage())
+            await self.send_rtvi_message(RTVIBotTTSStoppedMessage())
         elif isinstance(frame, TTSTextFrame) and self._params.bot_tts_enabled:
             if isinstance(src, BaseOutputTransport):
                 message = RTVIBotTTSTextMessage(data=RTVITextMessageData(text=frame.text))
-                await self.push_transport_message_urgent(message)
+                await self.send_rtvi_message(message)
             else:
                 mark_as_seen = False
         elif isinstance(frame, MetricsFrame) and self._params.metrics_enabled:
             await self._handle_metrics(frame)
         elif isinstance(frame, RTVIServerMessageFrame):
             message = RTVIServerMessage(data=frame.data)
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerResponseFrame):
             if frame.error is not None:
                 await self._send_error_response(frame)
@@ -976,23 +994,13 @@ class RTVIObserver(BaseObserver):
         if mark_as_seen:
             self._frames_seen.add(frame.id)
 
-    async def push_transport_message_urgent(self, model: BaseModel, exclude_none: bool = True):
-        """Push an urgent transport message to the RTVI processor.
-
-        Args:
-            model: The message model to send.
-            exclude_none: Whether to exclude None values from the model dump.
-        """
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
-        await self._rtvi.push_frame(frame)
-
     async def _push_bot_transcription(self):
         """Push accumulated bot transcription as a message."""
         if len(self._bot_transcription) > 0:
             message = RTVIBotTranscriptionMessage(
                 data=RTVITextMessageData(text=self._bot_transcription)
             )
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
             self._bot_transcription = ""
 
     async def _handle_interruptions(self, frame: Frame):
@@ -1004,7 +1012,7 @@ class RTVIObserver(BaseObserver):
             message = RTVIUserStoppedSpeakingMessage()
 
         if message:
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
 
     async def _handle_bot_speaking(self, frame: Frame):
         """Handle bot speaking event frames."""
@@ -1015,12 +1023,12 @@ class RTVIObserver(BaseObserver):
             message = RTVIBotStoppedSpeakingMessage()
 
         if message:
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
 
     async def _handle_llm_text_frame(self, frame: LLMTextFrame):
         """Handle LLM text output frames."""
         message = RTVIBotLLMTextMessage(data=RTVITextMessageData(text=frame.text))
-        await self.push_transport_message_urgent(message)
+        await self.send_rtvi_message(message)
 
         self._bot_transcription += frame.text
         if match_endofsentence(self._bot_transcription):
@@ -1043,7 +1051,7 @@ class RTVIObserver(BaseObserver):
             )
 
         if message:
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
 
     async def _handle_context(self, frame: OpenAILLMContextFrame | LLMContextFrame):
         """Process LLM context frames to extract user messages for the RTVI client."""
@@ -1063,7 +1071,7 @@ class RTVIObserver(BaseObserver):
                 text = "".join(part.text for part in message.parts if hasattr(part, "text"))
                 if text:
                     rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
-                    await self.push_transport_message_urgent(rtvi_message)
+                    await self.send_rtvi_message(rtvi_message)
 
             # Handle OpenAI format (original implementation)
             elif isinstance(message, dict):
@@ -1074,7 +1082,7 @@ class RTVIObserver(BaseObserver):
                     else:
                         text = content
                     rtvi_message = RTVIUserLLMTextMessage(data=RTVITextMessageData(text=text))
-                    await self.push_transport_message_urgent(rtvi_message)
+                    await self.send_rtvi_message(rtvi_message)
 
         except Exception as e:
             logger.warning(f"Caught an error while trying to handle context: {e}")
@@ -1101,7 +1109,7 @@ class RTVIObserver(BaseObserver):
                 metrics["characters"].append(d.model_dump(exclude_none=True))
 
         message = RTVIMetricsMessage(data=metrics)
-        await self.push_transport_message_urgent(message)
+        await self.send_rtvi_message(message)
 
     async def _send_server_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
@@ -1109,7 +1117,7 @@ class RTVIObserver(BaseObserver):
             id=str(frame.client_msg.msg_id),
             data=RTVIRawServerResponseData(t=frame.client_msg.type, d=frame.data),
         )
-        await self.push_transport_message_urgent(message)
+        await self.send_rtvi_message(message)
 
     async def _send_error_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
@@ -1117,7 +1125,7 @@ class RTVIObserver(BaseObserver):
             message = RTVIErrorResponse(
                 id=str(frame.client_msg.msg_id), data=RTVIErrorResponseData(error=frame.error)
             )
-            await self.push_transport_message_urgent(message)
+            await self.send_rtvi_message(message)
 
 
 class RTVIProcessor(FrameProcessor):
@@ -1248,6 +1256,11 @@ class RTVIProcessor(FrameProcessor):
         """
         await self._send_error_frame(ErrorFrame(error=error))
 
+    async def push_transport_message(self, model: BaseModel, exclude_none: bool = True):
+        """Push a transport message frame."""
+        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
+        await self.push_frame(frame)
+
     async def handle_message(self, message: RTVIMessage):
         """Handle an incoming RTVI message.
 
@@ -1268,7 +1281,7 @@ class RTVIProcessor(FrameProcessor):
             args=params.arguments,
         )
         message = RTVILLMFunctionCallMessage(data=fn)
-        await self._push_transport_message(message, exclude_none=False)
+        await self.push_transport_message(message, exclude_none=False)
 
     async def handle_function_call_start(
         self, function_name: str, llm: FrameProcessor, context: OpenAILLMContext
@@ -1295,7 +1308,7 @@ class RTVIProcessor(FrameProcessor):
 
         fn = RTVILLMFunctionCallStartMessageData(function_name=function_name)
         message = RTVILLMFunctionCallStartMessage(data=fn)
-        await self._push_transport_message(message, exclude_none=False)
+        await self.push_transport_message(message, exclude_none=False)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames through the RTVI processor.
@@ -1366,11 +1379,6 @@ class RTVIProcessor(FrameProcessor):
         if self._message_task:
             await self.cancel_task(self._message_task)
             self._message_task = None
-
-    async def _push_transport_message(self, model: BaseModel, exclude_none: bool = True):
-        """Push a transport message frame."""
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
-        await self.push_frame(frame)
 
     async def _action_task_handler(self):
         """Handle incoming action frames."""
@@ -1508,7 +1516,7 @@ class RTVIProcessor(FrameProcessor):
 
         services = list(self._registered_services.values())
         message = RTVIDescribeConfig(id=request_id, data=RTVIDescribeConfigData(config=services))
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _handle_describe_actions(self, request_id: str):
         """Handle a describe-actions request."""
@@ -1523,7 +1531,7 @@ class RTVIProcessor(FrameProcessor):
 
         actions = list(self._registered_actions.values())
         message = RTVIDescribeActions(id=request_id, data=RTVIDescribeActionsData(actions=actions))
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _handle_get_config(self, request_id: str):
         """Handle a get-config request."""
@@ -1537,7 +1545,7 @@ class RTVIProcessor(FrameProcessor):
             )
 
         message = RTVIConfigResponse(id=request_id, data=self._config)
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     def _update_config_option(self, service: str, config: RTVIServiceOptionConfig):
         """Update a specific configuration option."""
@@ -1662,7 +1670,7 @@ class RTVIProcessor(FrameProcessor):
         # action responses (such as webhooks) don't set a request_id
         if request_id:
             message = RTVIActionResponse(id=request_id, data=RTVIActionResponseData(result=result))
-            await self._push_transport_message(message)
+            await self.push_transport_message(message)
 
     async def _send_bot_ready(self):
         """Send the bot-ready message to the client."""
@@ -1673,21 +1681,21 @@ class RTVIProcessor(FrameProcessor):
             id=self._client_ready_id,
             data=RTVIBotReadyData(version=RTVI_PROTOCOL_VERSION, config=config),
         )
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _send_server_message(self, message: RTVIServerMessage | RTVIServerResponse):
         """Send a message or response to the client."""
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _send_error_frame(self, frame: ErrorFrame):
         """Send an error frame as an RTVI error message."""
         message = RTVIError(data=RTVIErrorData(error=frame.error, fatal=frame.fatal))
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     async def _send_error_response(self, id: str, error: str):
         """Send an error response message."""
         message = RTVIErrorResponse(id=id, data=RTVIErrorResponseData(error=error))
-        await self._push_transport_message(message)
+        await self.push_transport_message(message)
 
     def _action_id(self, service: str, action: str) -> str:
         """Generate an action ID from service and action names."""
