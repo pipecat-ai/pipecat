@@ -150,6 +150,32 @@ class OpenAILLMContext:
             message: The message to add to the conversation history.
         """
         self._messages.append(message)
+        self.combine_messages()
+
+    def combine_messages(self):
+        """
+        Combine consecutive messages with the same role in self._messages.
+        Modifies self._messages in place.
+        """
+        print(f"Combining messages")
+        i = 0
+        while i < len(self._messages) - 1:
+            msg1 = self._messages[i]
+            msg2 = self._messages[i + 1]
+            role1 = msg1.get("role") if isinstance(msg1, dict) else getattr(msg1, "role", None)
+            role2 = msg2.get("role") if isinstance(msg2, dict) else getattr(msg2, "role", None)
+            if role1 == role2:
+                # Combine content
+                content1 = msg1.get("content") if isinstance(msg1, dict) else getattr(msg1, "content", "")
+                content2 = msg2.get("content") if isinstance(msg2, dict) else getattr(msg2, "content", "")
+                if isinstance(msg1, dict):
+                    msg1["content"] = content1 + content2
+                else:
+                    msg1.content = content1 + content2
+                self._messages.pop(i + 1)
+                # Do not increment i, as we want to check the new next message
+            else:
+                i += 1
 
     def add_messages(self, messages: List[ChatCompletionMessageParam]):
         """Add multiple messages to the context.
@@ -158,6 +184,7 @@ class OpenAILLMContext:
             messages: List of messages to add to the conversation history.
         """
         self._messages.extend(messages)
+        self.combine_messages()
 
     def set_messages(self, messages: List[ChatCompletionMessageParam]):
         """Replace all messages in the context.
