@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added RTVI messages for user/bot audio levels and system logs.
+
 - Include OpenAI-based LLM services cached tokens to `MetricsFrame`.
 
 ## Fixed
