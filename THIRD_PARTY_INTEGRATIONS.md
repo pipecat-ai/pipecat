@@ -16,7 +16,7 @@ To be listed as an official third-party integration, your repository must contai
 
 ### Required Components
 
-- **Source code** - Complete implementation following Pipecat patterns
+- **Source code** - Complete implementation following Pipecat patterns (See the section below on "Integration Patterns and Examples")
 - **Foundational example** - Single file example showing basic usage (see [Pipecat examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational))
 - **README.md** - Must include:
 
@@ -24,7 +24,7 @@ To be listed as an official third-party integration, your repository must contai
   - Installation instructions
   - Usage instructions with Pipecat Pipeline
   - How to run your example
-  - Last Pipecat version tested (e.g., "Tested with Pipecat v0.0.50")
+  - Pipecat version compatibility (e.g., "Tested with Pipecat v0.0.86")
   - Company attribution: If you work for the company providing the service, please mention this in your README. This helps build confidence that the integration will be actively maintained.
 
 - **LICENSE** - Permissive license (BSD-2 like Pipecat, or equivalent open source terms)
@@ -38,7 +38,6 @@ When submitting your integration for listing, provide:
 - Service name
 - Service type (STT, LLM, TTS, Image, etc.)
 - Link to your repository
-- GitHub username(s) of maintainers
 - Demo video (approx 30-60 seconds) showing:
   - Core functionality of your integration
   - Handling of an interruption (if applicable to service type)
@@ -100,6 +99,19 @@ When submitting your integration for listing, provide:
 - [AnthropicLLMService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/anthropic/llm.py)
 - [GoogleLLMService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/llm.py)
 
+#### Key requirements:
+
+- **Frame sequence:** Output must follow this frame sequence pattern:
+
+  - `LLMFullResponseStartFrame` - Signals the start of an LLM response
+  - `LLMTextFrame` - Contains LLM content, typically streamed as tokens
+  - `LLMFullResponseEndFrame` - Signals the end of an LLM response
+
+- **Context aggregation:** Implement context aggregation to collect user and assistant content:
+  - Aggregators come in pairs with a `user()` instance and `assistant()` instance
+  - Context must adhere to the `LLMContext` universal format
+  - Aggregators should handle adding messages, function calls, and images to the context
+
 ### TTS (Text-to-Speech) Services
 
 #### AudioContextWordTTSService
@@ -134,7 +146,7 @@ When submitting your integration for listing, provide:
 
 - [GoogleHttpTTSService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/tts.py)
 
-#### TTS Considerations:
+#### Key requirements:
 
 - For websocket services, use asyncio WebSocket implementation (required for v13+ support)
 - Handle idle service timeouts with keepalives
@@ -149,7 +161,7 @@ Pipecat supports telephony provider integration using websocket connections to e
 - [Twilio](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/serializers/twilio.py)
 - [Telnyx](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/serializers/telnyx.py)
 
-**Considerations:**
+#### Key requirements:
 
 - Include hang-up functionality using the provider's native API, ideally using `aiohttp`
 - Support DTMF (dual-tone multi-frequency) events if the provider supports them:
@@ -166,7 +178,7 @@ Pipecat supports telephony provider integration using websocket connections to e
 - [FalImageGenService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/fal/image.py)
 - [GoogleImageGenService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/google/image.py)
 
-**Requirements:**
+#### Key requirements:
 
 - Must implement `run_image_gen` method returning an `AsyncGenerator`
 
@@ -180,7 +192,7 @@ Vision services process images and provide analysis such as descriptions, object
 
 - [MoondreamVisionService](https://github.com/pipecat-ai/pipecat/blob/main/src/pipecat/services/moondream/vision.py)
 
-**Requirements:**
+#### Key requirements:
 
 - Must implement `run_vision` method that takes an `LLMContext` and returns an `AsyncGenerator[Frame, None]`
 - The method processes the latest image in the context and yields frames with analysis results
