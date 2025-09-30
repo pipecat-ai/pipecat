@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Fixed
 
+- Fixed a `PipelineTask` issue that could prevent the application to exit if
+  `task.cancel()` was called when the task was already finished.
+
 - Fixed an issue where local SmartTurn was not being ran in a separate thread.
 
 ## [0.0.86] - 2025-09-24

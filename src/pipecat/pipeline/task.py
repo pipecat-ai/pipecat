@@ -13,8 +13,7 @@ including heartbeats, idle detection, and observer integration.
 
 import asyncio
 import time
-from collections import deque
-from typing import Any, AsyncIterable, Deque, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,7 +30,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
-    InputAudioRawFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
     MetricsFrame,
@@ -395,7 +393,8 @@ class PipelineTask(BasePipelineTask):
         Cancels all running tasks and stops frame processing without
         waiting for completion.
         """
-        await self._cancel()
+        if not self._finished:
+            await self._cancel()
 
     async def run(self, params: PipelineTaskParams):
         """Start and manage the pipeline execution until completion or cancellation.
