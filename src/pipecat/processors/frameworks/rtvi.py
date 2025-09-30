@@ -866,7 +866,7 @@ class RTVIObserverParams:
         user_speaking_enabled: Indicates if the user's started/stopped speaking messages should be sent.
         user_transcription_enabled: Indicates if user's transcription messages should be sent.
         metrics_enabled: Indicates if metrics messages should be sent.
-        errors_enabled: Indicates if errors messages should be sent.
+        errors_enabled: [Deprecated] Indicates if errors messages should be sent.
     """
 
     bot_llm_enabled: bool = True
@@ -906,7 +906,6 @@ class RTVIObserver(BaseObserver):
         self._params = params or RTVIObserverParams()
         self._bot_transcription = ""
         self._frames_seen = set()
-        rtvi.set_errors_enabled(self._params.errors_enabled)
 
     async def on_push_frame(self, data: FramePushed):
         """Process a frame being pushed through the pipeline.
@@ -1152,7 +1151,6 @@ class RTVIProcessor(FrameProcessor):
         # Default to 0.3.0 which is the last version before actually having a
         # "client-version".
         self._client_version = [0, 3, 0]
-        self._errors_enabled = True
         self._skip_tts: bool = False  # Keep in sync with llm_service.py
 
         self._registered_actions: Dict[str, RTVIAction] = {}
@@ -1221,14 +1219,6 @@ class RTVIProcessor(FrameProcessor):
         self._bot_ready = True
         await self._update_config(self._config, False)
         await self._send_bot_ready()
-
-    def set_errors_enabled(self, enabled: bool):
-        """Enable or disable error message sending.
-
-        Args:
-            enabled: Whether to send error messages.
-        """
-        self._errors_enabled = enabled
 
     async def interrupt_bot(self):
         """Send a bot interruption frame upstream."""
@@ -1691,15 +1681,13 @@ class RTVIProcessor(FrameProcessor):
 
     async def _send_error_frame(self, frame: ErrorFrame):
         """Send an error frame as an RTVI error message."""
-        if self._errors_enabled:
-            message = RTVIError(data=RTVIErrorData(error=frame.error, fatal=frame.fatal))
-            await self._push_transport_message(message)
+        message = RTVIError(data=RTVIErrorData(error=frame.error, fatal=frame.fatal))
+        await self._push_transport_message(message)
 
     async def _send_error_response(self, id: str, error: str):
         """Send an error response message."""
-        if self._errors_enabled:
-            message = RTVIErrorResponse(id=id, data=RTVIErrorResponseData(error=error))
-            await self._push_transport_message(message)
+        message = RTVIErrorResponse(id=id, data=RTVIErrorResponseData(error=error))
+        await self._push_transport_message(message)
 
     def _action_id(self, service: str, action: str) -> str:
         """Generate an action ID from service and action names."""
