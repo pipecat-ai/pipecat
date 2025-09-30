@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Include OpenAI-based LLM services cached tokens to `MetricsFrame`.
 
+### Changed
+
+- Updated the default model for `AnthropicLLMService` to
+  `claude-sonnet-4-5-20250929`.
+
 ## Fixed
 
 - Fixed an issue where local SmartTurn was not being ran in a separate thread.
