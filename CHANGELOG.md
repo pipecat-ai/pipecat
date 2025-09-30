@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the default model for `AnthropicLLMService` to
   `claude-sonnet-4-5-20250929`.
 
+### Deprecated
+
+- `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a
+  future version. Instead, create your own custom frame and handle it in the
+  `@transport.output().event_handler("on_after_push_frame")` event handler or a
+  custom processor.
+
 ## Fixed
 
 - Fixed a `PipelineTask` issue that could prevent the application to exit if
