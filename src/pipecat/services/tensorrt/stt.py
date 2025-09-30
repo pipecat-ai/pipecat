@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""TensorRT Speech-to-Text service implementation using TensorRT's transcription API."""
+"""Simplismart Speech-to-Text service implementation using Simplismart's transcription API."""
 
 from typing import Optional
 import base64
@@ -17,7 +17,7 @@ import time
 class SimplismartSTTService(BaseWhisperSTTService):
     """OpenAI Speech-to-Text service that generates text from audio.
 
-    Uses TensorRT's transcription API to convert audio to text. Requires an TensorRT API key
+    Uses Simplismart's transcription API to convert audio to text. Requires an Simplismart API key
     set via the api_key parameter or OPENAI_API_KEY environment variable.
     """
 
