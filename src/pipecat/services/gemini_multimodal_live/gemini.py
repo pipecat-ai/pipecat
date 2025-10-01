@@ -662,7 +662,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             frame: The start frame.
         """
         await super().start(frame)
-        await self._connect(self._model_name)
+        await self._connect()
 
     async def stop(self, frame: EndFrame):
         """Stop the service and close connections.
@@ -798,7 +798,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         """Return model name."""
         return self._model_name
 
-    async def _connect(self, model_name_or_path: str):
+    async def _connect(self):
         """Establish WebSocket connection to Gemini Live API."""
         if self._websocket:
             # Here we assume that if we have a websocket, we are connected. We
@@ -1158,11 +1158,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         inline_data = part.inlineData
         if not inline_data:
             return
-        if inline_data.mimeType != f"audio/pcm;rate={self._sample_rate}":
-            # Vertex AI does not always return the sample rate in mimeType
-            if inline_data.mimeType != f"audio/pcm":
-                logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
-                return
+        if inline_data.mimeType not in ["audio/pcm", f"audio/pcm;rate={self._sample_rate}"]:
+            logger.warning(f"Unrecognized server_content format {inline_data.mimeType}")
+            return
 
         audio = base64.b64decode(inline_data.data)
         if not audio:
