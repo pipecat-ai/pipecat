@@ -310,7 +310,7 @@ def _smallwebrtc_sdp_cleanup_ice_candidates(text: str, pattern: str) -> str:
                 result.append(line)
         else:
             result.append(line)
-    return "\r\n".join(result)
+    return "\r\n".join(result) + "\r\n"
 
 
 def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
@@ -328,7 +328,7 @@ def _smallwebrtc_sdp_cleanup_fingerprints(text: str) -> str:
     for line in lines:
         if not re.search("sha-384", line) and not re.search("sha-512", line):
             result.append(line)
-    return "\r\n".join(result)
+    return "\r\n".join(result) + "\r\n"
 
 
 def smallwebrtc_sdp_munging(sdp: str, host: Optional[str]) -> str:
