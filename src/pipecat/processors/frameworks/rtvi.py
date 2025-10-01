@@ -919,7 +919,7 @@ class RTVIObserverParams:
     user_audio_level_enabled: bool = False
     metrics_enabled: bool = True
     system_logs_enabled: bool = False
-    errors_enabled: bool = True
+    errors_enabled: Optional[bool] = None
     audio_level_period_secs: float = 0.15
 
 
@@ -962,7 +962,7 @@ class RTVIObserver(BaseObserver):
         if self._params.system_logs_enabled:
             self._system_logger_id = logger.add(self._logger_sink)
 
-        if self._params.errors_enabled:
+        if self._params.errors_enabled is not None:
             import warnings
 
             with warnings.catch_warnings():
@@ -1209,11 +1209,10 @@ class RTVIObserver(BaseObserver):
 
     async def _send_error_response(self, frame: RTVIServerResponseFrame):
         """Send a response to the client for a specific request."""
-        if self._params.errors_enabled:
-            message = RTVIErrorResponse(
-                id=str(frame.client_msg.msg_id), data=RTVIErrorResponseData(error=frame.error)
-            )
-            await self.send_rtvi_message(message)
+        message = RTVIErrorResponse(
+            id=str(frame.client_msg.msg_id), data=RTVIErrorResponseData(error=frame.error)
+        )
+        await self.send_rtvi_message(message)
 
 
 class RTVIProcessor(FrameProcessor):
