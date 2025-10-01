@@ -29,20 +29,19 @@ from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
     Frame,
-    InputTransportMessageUrgentFrame,
     InterruptionFrame,
     MixerControlFrame,
     OutputAudioRawFrame,
     OutputDTMFFrame,
     OutputDTMFUrgentFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     OutputTransportReadyFrame,
     SpeechOutputAudioRawFrame,
     SpriteFrame,
     StartFrame,
     SystemFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     TTSAudioRawFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -178,7 +177,9 @@ class BaseOutputTransport(FrameProcessor):
         # Sending a frame indicating that the output transport is ready and able to receive frames.
         await self.push_frame(OutputTransportReadyFrame(), FrameDirection.UPSTREAM)
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message.
 
         Args:
@@ -307,9 +308,7 @@ class BaseOutputTransport(FrameProcessor):
         elif isinstance(frame, InterruptionFrame):
             await self.push_frame(frame, direction)
             await self._handle_frame(frame)
-        elif isinstance(frame, TransportMessageUrgentFrame) and not isinstance(
-            frame, InputTransportMessageUrgentFrame
-        ):
+        elif isinstance(frame, OutputTransportMessageUrgentFrame):
             await self.send_message(frame)
         elif isinstance(frame, OutputDTMFUrgentFrame):
             await self.write_dtmf(frame)
@@ -646,7 +645,7 @@ class BaseOutputTransport(FrameProcessor):
                 await self._set_video_image(frame)
             elif isinstance(frame, SpriteFrame):
                 await self._set_video_images(frame.images)
-            elif isinstance(frame, TransportMessageFrame):
+            elif isinstance(frame, OutputTransportMessageFrame):
                 await self._transport.send_message(frame)
             elif isinstance(frame, OutputDTMFFrame):
                 await self._transport.write_dtmf(frame)

@@ -42,6 +42,7 @@ from pipecat.frames.frames import (
     Frame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
+    InputTransportMessageUrgentFrame,
     InterimTranscriptionFrame,
     LLMConfigureOutputFrame,
     LLMContextFrame,
@@ -50,10 +51,10 @@ from pipecat.frames.frames import (
     LLMMessagesAppendFrame,
     LLMTextFrame,
     MetricsFrame,
+    OutputTransportMessageUrgentFrame,
     StartFrame,
     SystemFrame,
     TranscriptionFrame,
-    TransportMessageUrgentFrame,
     TTSAudioRawFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -1345,7 +1346,9 @@ class RTVIProcessor(FrameProcessor):
 
     async def push_transport_message(self, model: BaseModel, exclude_none: bool = True):
         """Push a transport message frame."""
-        frame = TransportMessageUrgentFrame(message=model.model_dump(exclude_none=exclude_none))
+        frame = OutputTransportMessageUrgentFrame(
+            message=model.model_dump(exclude_none=exclude_none)
+        )
         await self.push_frame(frame)
 
     async def handle_message(self, message: RTVIMessage):
@@ -1418,7 +1421,7 @@ class RTVIProcessor(FrameProcessor):
         elif isinstance(frame, ErrorFrame):
             await self._send_error_frame(frame)
             await self.push_frame(frame, direction)
-        elif isinstance(frame, TransportMessageUrgentFrame):
+        elif isinstance(frame, InputTransportMessageUrgentFrame):
             await self._handle_transport_message(frame)
         # All other system frames
         elif isinstance(frame, SystemFrame):
@@ -1481,7 +1484,7 @@ class RTVIProcessor(FrameProcessor):
             await self._handle_message(message)
             self._message_queue.task_done()
 
-    async def _handle_transport_message(self, frame: TransportMessageUrgentFrame):
+    async def _handle_transport_message(self, frame: InputTransportMessageUrgentFrame):
         """Handle an incoming transport message frame."""
         try:
             transport_message = frame.message
