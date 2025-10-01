@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Fixed
 
+- Fixed an issue in `AWSBedrockLLMService` where timeout exceptions weren't
+  being detected.
+
 - Fixed a `PipelineTask` issue that could prevent the application to exit if
   `task.cancel()` was called when the task was already finished.
 
