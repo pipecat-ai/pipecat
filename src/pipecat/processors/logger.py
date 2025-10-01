@@ -15,7 +15,7 @@ from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
     OutputAudioRawFrame,
-    TransportMessageFrame,
+    UserSpeakingFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
@@ -36,9 +36,9 @@ class FrameLogger(FrameProcessor):
         color: Optional[str] = None,
         ignored_frame_types: Tuple[Type[Frame], ...] = (
             BotSpeakingFrame,
+            UserSpeakingFrame,
             InputAudioRawFrame,
             OutputAudioRawFrame,
-            TransportMessageFrame,
         ),
     ):
         """Initialize the frame logger.
