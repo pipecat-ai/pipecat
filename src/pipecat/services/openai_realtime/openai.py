@@ -10,11 +10,14 @@ import base64
 import json
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from pipecat.adapters.services.open_ai_realtime_adapter import OpenAIRealtimeLLMAdapter
+from pipecat.adapters.services.open_ai_realtime_adapter import (
+    OpenAIRealtimeLLMAdapter,
+    OpenAIRealtimeLLMInvocationParams,
+)
 from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
@@ -148,6 +151,8 @@ class OpenAIRealtimeLLMService(LLMService):
         # object.)
         self._context: LLMContext = None
         self._last_received_context: OpenAILLMContext | LLMContext = None
+
+        self._llm_needs_conversation_setup = True
 
         self._disconnecting = False
         self._api_session_ready = False
@@ -386,6 +391,7 @@ class OpenAIRealtimeLLMService(LLMService):
         elif isinstance(frame, LLMMessagesAppendFrame):
             await self._handle_messages_append(frame)
         elif isinstance(frame, RealtimeMessagesUpdateFrame):
+            # TODO: we don't need RealtimeMessagesUpdateFrame, I think...?
             self._context = frame.context
         elif isinstance(frame, LLMUpdateSettingsFrame):
             self._session_properties = events.SessionProperties(**frame.settings)
@@ -468,13 +474,19 @@ class OpenAIRealtimeLLMService(LLMService):
 
     async def _update_settings(self):
         settings = self._session_properties
+
+        adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+        llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+
         # tools given in the context override the tools in the session properties
-        if self._context and self._context.tools:
-            settings.tools = self._context.tools
+        if llm_invocation_params["tools"]:
+            settings.tools = llm_invocation_params["tools"]
+
         # instructions in the context come from an initial "system" message in the
         # messages list, and override instructions in the session properties
-        if self._context and self._context._session_instructions:
-            settings.instructions = self._context._session_instructions
+        if llm_invocation_params["system_instruction"]:
+            settings.instructions = llm_invocation_params["system_instruction"]
+
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 
     #
@@ -769,9 +781,7 @@ class OpenAIRealtimeLLMService(LLMService):
         """
         logger.debug("Resetting conversation")
         await self._disconnect()
-        if self._context:
-            self._context.llm_needs_settings_update = True
-            self._context.llm_needs_initial_messages = True
+        self._llm_needs_conversation_setup = True
         await self._connect()
 
     @traced_openai_realtime(operation="llm_request")
@@ -780,17 +790,22 @@ class OpenAIRealtimeLLMService(LLMService):
             self._run_llm_when_api_session_ready = True
             return
 
-        if self._context.llm_needs_initial_messages:
-            messages = self._context.get_messages_for_initializing_history()
+        # Configure the LLM for this session if needed
+        if self._llm_needs_conversation_setup:
+            # Send initial messages
+            adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+            messages = llm_invocation_params["messages"]
             for item in messages:
                 evt = events.ConversationItemCreateEvent(item=item)
                 self._messages_added_manually[evt.item.id] = True
                 await self.send_client_event(evt)
-            self._context.llm_needs_initial_messages = False
 
-        if self._context.llm_needs_settings_update:
+            # Send new settings if needed
             await self._update_settings()
-            self._context.llm_needs_settings_update = False
+
+            # We're done configuring the LLM for this session
+            self._llm_needs_conversation_setup = False
 
         logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")
 
