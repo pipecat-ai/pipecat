@@ -9,6 +9,7 @@
 import base64
 import json
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -475,17 +476,18 @@ class OpenAIRealtimeLLMService(LLMService):
     async def _update_settings(self):
         settings = self._session_properties
 
-        adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
-        llm_invocation_params = adapter.get_llm_invocation_params(self._context)
+        if self._context:
+            adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+            llm_invocation_params = adapter.get_llm_invocation_params(self._context)
 
-        # tools given in the context override the tools in the session properties
-        if llm_invocation_params["tools"]:
-            settings.tools = llm_invocation_params["tools"]
+            # tools given in the context override the tools in the session properties
+            if llm_invocation_params["tools"]:
+                settings.tools = llm_invocation_params["tools"]
 
-        # instructions in the context come from an initial "system" message in the
-        # messages list, and override instructions in the session properties
-        if llm_invocation_params["system_instruction"]:
-            settings.instructions = llm_invocation_params["system_instruction"]
+            # instructions in the context come from an initial "system" message in the
+            # messages list, and override instructions in the session properties
+            if llm_invocation_params["system_instruction"]:
+                settings.instructions = llm_invocation_params["system_instruction"]
 
         await self.send_client_event(events.SessionUpdateEvent(session=settings))
 
@@ -790,10 +792,11 @@ class OpenAIRealtimeLLMService(LLMService):
             self._run_llm_when_api_session_ready = True
             return
 
+        adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
+
         # Configure the LLM for this session if needed
         if self._llm_needs_conversation_setup:
             # Send initial messages
-            adapter: OpenAIRealtimeLLMAdapter = self.get_llm_adapter()
             llm_invocation_params = adapter.get_llm_invocation_params(self._context)
             messages = llm_invocation_params["messages"]
             for item in messages:
@@ -807,7 +810,7 @@ class OpenAIRealtimeLLMService(LLMService):
             # We're done configuring the LLM for this session
             self._llm_needs_conversation_setup = False
 
-        logger.debug(f"Creating response: {self._context.get_messages_for_logging()}")
+        logger.debug(f"Creating response: {adapter.get_messages_for_logging(self._context)}")
 
         await self.push_frame(LLMFullResponseStartFrame())
         await self.start_processing_metrics()

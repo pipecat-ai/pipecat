@@ -6,8 +6,8 @@
 
 """OpenAI Realtime LLM adapter for Pipecat."""
 
+import copy
 import json
-from copy import copy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TypedDict
 
@@ -75,7 +75,7 @@ class OpenAIRealtimeLLMAdapter(BaseLLMAdapter):
         Returns:
             List of messages in a format ready for logging about OpenAI Realtime.
         """
-        raise NotImplementedError("Universal LLMContext is not yet supported for OpenAI Realtime.")
+        return self._from_universal_context_messages(self.get_messages(context)).messages
 
     @dataclass
     class ConvertedMessages:
