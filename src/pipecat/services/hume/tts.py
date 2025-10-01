@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 
 """Hume Text-to-Speech service implementation."""
+
 from __future__ import annotations
 
 import base64
@@ -26,8 +27,8 @@ from pipecat.utils.tracing.service_decorators import traced_tts
 try:
     from hume import AsyncHumeClient
     from hume.tts import (
-        PostedUtterance,
         FormatPcm,
+        PostedUtterance,
         PostedUtteranceVoiceWithId,
     )
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
@@ -45,24 +46,21 @@ class HumeTTSService(TTSService):
     Streams PCM audio via Hume's HTTP output streaming (JSON chunks) endpoint
     using the Python SDK and emits `TTSAudioRawFrame`s suitable for Pipecat transports.
 
-    Parameters
-    ----------
-    api_key:
-        Hume API key. If omitted, reads the ``HUME_API_KEY`` environment variable.
-    voice_id:
-        **Required**: ID of the voice to use (ID-only; names are not supported here).
-    params:
-        Optional synthesis controls (acting instructions, speed, trailing silence).
-    sample_rate:
-        Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).
+    Supported features:
+
+    - Generates speech from text using Hume TTS.
+    - Streams PCM audio.
+    - Supports dynamic updates of voice and synthesis parameters at runtime.
+    - Provides metrics for Time To First Byte (TTFB) and TTS usage.
     """
 
     class InputParams(BaseModel):
         """Optional synthesis parameters for Hume TTS.
 
-        description: Natural-language acting directions (≤100 chars)
-        speed: Speaking-rate multiplier (0.5-2.0)
-        trailing_silence: Seconds of silence to append at the end (0-5)
+        Parameters:
+            description: Natural-language acting directions (up to 100 characters).
+            speed: Speaking-rate multiplier (0.5-2.0).
+            trailing_silence: Seconds of silence to append at the end (0-5).
         """
 
         description: Optional[str] = None
@@ -78,6 +76,15 @@ class HumeTTSService(TTSService):
         sample_rate: Optional[int] = HUME_SAMPLE_RATE,
         **kwargs,
     ) -> None:
+        """Initialize the HumeTTSService.
+
+        Args:
+            api_key: Hume API key. If omitted, reads the ``HUME_API_KEY`` environment variable.
+            voice_id: ID of the voice to use (ID-only; names are not supported here).
+            params: Optional synthesis controls (acting instructions, speed, trailing silence).
+            sample_rate: Output sample rate for emitted PCM frames. Defaults to 48_000 (Hume).
+            **kwargs: Additional arguments passed to the parent class.
+        """
         api_key = api_key or os.getenv("HUME_API_KEY")
         if not api_key:
             raise ValueError("HumeTTSService requires an API key (env HUME_API_KEY or api_key=)")
@@ -88,9 +95,6 @@ class HumeTTSService(TTSService):
             )
 
         super().__init__(
-            aggregate_sentences=True,
-            push_text_frames=False,
-            push_stop_frames=True,
             pause_frame_processing=True,
             sample_rate=sample_rate,
             **kwargs,
@@ -102,20 +106,34 @@ class HumeTTSService(TTSService):
         # Store voice in the base class (mirrors other services)
         self.set_voice(voice_id)
 
+        self._audio_bytes = b""
+
     def can_generate_metrics(self) -> bool:
+        """Can generate metrics.
+
+        Returns:
+            True if metrics can be generated, False otherwise.
+        """
         return True
 
     async def start(self, frame: StartFrame) -> None:
+        """Start the service.
+
+        Args:
+            frame: The start frame.
+        """
         await super().start(frame)
 
     async def update_setting(self, key: str, value: Any) -> None:
         """Runtime updates via `TTSUpdateSettingsFrame`.
 
-        Recognized keys:
-          - "voice_id"
-          - "description"
-          - "speed"
-          - "trailing_silence"
+        Args:
+            key: The name of the setting to update. Recognized keys are:
+                - "voice_id"
+                - "description"
+                - "speed"
+                - "trailing_silence"
+            value: The new value for the setting.
         """
         key_l = (key or "").lower()
 
@@ -134,13 +152,22 @@ class HumeTTSService(TTSService):
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
-        """Generate speech from text using Hume TTS."""
+        """Generate speech from text using Hume TTS.
+
+        Args:
+            text: The text to be synthesized.
+
+        Returns:
+            An async generator that yields `Frame` objects, including
+            `TTSStartedFrame`, `TTSAudioRawFrame`, `ErrorFrame`, and
+            `TTSStoppedFrame`.
+        """
         logger.debug(f"{self}: Generating Hume TTS: [{text}]")
 
         # Build the request payload
         utterance_kwargs: dict[str, Any] = {
             "text": text,
-            "voice": PostedUtteranceVoiceWithId(id=self.voice),
+            "voice": PostedUtteranceVoiceWithId(id=self._voice_id),
         }
         if self._params.description is not None:
             utterance_kwargs["description"] = self._params.description
@@ -161,6 +188,10 @@ class HumeTTSService(TTSService):
 
         try:
             # Instant mode is always enabled here (not user-configurable)
+            # Hume emits mono PCM at 48 kHz; downstream can resample if needed.
+            # We buffer audio bytes before sending to prevent glitches.
+            self._audio_bytes = b""
+            first_audio_sent = False
             async for chunk in self._client.tts.synthesize_json_streaming(
                 utterances=[utterance],
                 format=pcm_fmt,
@@ -171,18 +202,34 @@ class HumeTTSService(TTSService):
                     continue
 
                 pcm_bytes = base64.b64decode(audio_b64)
+                self._audio_bytes += pcm_bytes
 
-                if measuring_ttfb:
-                    await self.stop_ttfb_metrics()
-                    measuring_ttfb = False
+                # Send the first audio chunk immediately to avoid client-side delays.
+                if not first_audio_sent:
+                    if self._audio_bytes:
+                        yield TTSAudioRawFrame(self._audio_bytes, self.sample_rate, 1)
+                        if measuring_ttfb:
+                            await self.stop_ttfb_metrics()
+                            measuring_ttfb = False
+                        first_audio_sent = True
+                        # Do NOT clear _audio_bytes here. Subsequent chunks will build on this.
+                    continue
 
-                # Hume emits mono PCM at 48 kHz; downstream can resample if needed.
-                yield TTSAudioRawFrame(pcm_bytes, self.sample_rate, 1)
+                # Buffer audio until we have enough to avoid glitches
+                if len(self._audio_bytes) < self.chunk_size:
+                    continue
+
+                yield TTSAudioRawFrame(self._audio_bytes, self.sample_rate, 1)
+                self._audio_bytes = b""
 
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")
             yield ErrorFrame(error=str(e))
         finally:
+            # Yield any remaining audio
+            if self._audio_bytes:
+                yield TTSAudioRawFrame(self._audio_bytes, self.sample_rate, 1)
+
             # Ensure TTFB timer is stopped even on early failures
             if measuring_ttfb:
                 await self.stop_ttfb_metrics()

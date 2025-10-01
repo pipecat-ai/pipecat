@@ -3,11 +3,3 @@
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
-
-import sys
-
-from pipecat.services import DeprecatedModuleProxy
-
-from .tts import *
-
-sys.modules[__name__] = DeprecatedModuleProxy(globals(), "hume", "hume.tts")
