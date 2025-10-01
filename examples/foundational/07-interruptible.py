@@ -5,6 +5,7 @@
 #
 
 import os
+import wave
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -14,7 +15,14 @@ from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import (
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMRunFrame,
+    LLMTextFrame,
+    OutputAudioRawFrame,
+    TextFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
@@ -110,7 +118,27 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         logger.info(f"Client connected")
         # Kick off the conversation.
         messages.append({"role": "system", "content": "Please introduce yourself to the user."})
-        await task.queue_frames([LLMRunFrame()])
+
+        audio_file_path = os.path.join(os.path.dirname(__file__), "assets", "pre-recorded.wav")
+
+        with wave.open(audio_file_path, "rb") as wav_file:
+            llm_text_frame = TextFrame(text="This is a pre-recorded message.")
+            llm_text_frame.skip_tts = True
+
+            audio_data = wav_file.readframes(wav_file.getnframes())
+            output_audio_raw_frame = OutputAudioRawFrame(
+                audio=audio_data, sample_rate=44100, num_channels=1
+            )
+
+            await task.queue_frames(
+                [
+                    LLMRunFrame(),
+                    LLMFullResponseStartFrame(),
+                    llm_text_frame,
+                    output_audio_raw_frame,
+                    LLMFullResponseEndFrame(),
+                ]
+            )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
