@@ -9,7 +9,6 @@ import wave
 
 from dotenv import load_dotenv
 from loguru import logger
-from prerecorded_message_processor import PrerecordedMessageProcessor
 
 from pipecat.audio.turn.smart_turn.base_smart_turn import SmartTurnParams
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
@@ -86,18 +85,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     context = LLMContext(messages)
     context_aggregator = LLMContextAggregatorPair(context)
 
-    # Create the prerecorded message processor
-    prerecorded_processor = PrerecordedMessageProcessor(
-        audio_file_path=os.path.join(os.path.dirname(__file__), "assets", "ding1.wav")
-    )
-
     pipeline = Pipeline(
         [
             transport.input(),  # Transport user input
             stt,
             context_aggregator.user(),  # User responses
             llm,  # LLM
-            prerecorded_processor,  # Check for prerecorded message trigger
             tts,  # TTS
             transport.output(),  # Transport bot output
             context_aggregator.assistant(),  # Assistant spoken responses
