@@ -180,7 +180,7 @@ class SmallWebRTCRequestHandler:
 
             answer = pipecat_connection.get_answer()
 
-            if self._esp32_mode and self._host and self._host != "localhost":
+            if self._esp32_mode:
                 from pipecat.runner.utils import smallwebrtc_sdp_munging
 
                 answer["sdp"] = smallwebrtc_sdp_munging(answer["sdp"], self._host)
