@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     BotStoppedSpeakingFrame,
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     InputAudioRawFrame,
     InputImageRawFrame,
@@ -910,8 +911,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             self._connection_task = self.create_task(self._connection_task_handler(config=config))
 
         except Exception as e:
-            logger.error(f"{self} initialization error: {e}")
-            self._session = None
+            await self.push_error(ErrorFrame(error=f"{self} Initialization error: {e}", fatal=True))
 
     async def _connection_task_handler(self, config: LiveConnectConfig):
         async with self._client.aio.live.connect(model=self._model_name, config=config) as session:
@@ -941,7 +941,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
                         elif message.tool_call:
                             await self._handle_msg_tool_call(message)
                 except Exception as e:
-                    logger.error(f"Error in receive loop: {type(e)}: {e}")
+                    if not self._disconnecting:
+                        await self.push_error(
+                            ErrorFrame(error=f"{self} Error in receive loop: {e}", fatal=True)
+                        )
                     break
 
     async def _disconnect(self):
@@ -969,9 +972,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
             return
 
         # Send all audio to Gemini
-        await self._session.send_realtime_input(
-            audio=Blob(data=frame.audio, mime_type=f"audio/pcm;rate={frame.sample_rate}")
-        )
+        try:
+            await self._session.send_realtime_input(
+                audio=Blob(data=frame.audio, mime_type=f"audio/pcm;rate={frame.sample_rate}")
+            )
+        except Exception as e:
+            self._handle_send_error(e)
 
         # Manage a buffer of audio to use for transcription
         audio = frame.audio
@@ -1000,7 +1006,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if not self._session:
             return
 
-        await self._session.send_realtime_input(text=text)
+        try:
+            await self._session.send_realtime_input(text=text)
+        except Exception as e:
+            self._handle_send_error(e)
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""
@@ -1016,10 +1025,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         self._last_sent_time = now  # Update last sent time
         logger.debug(f"Sending video frame to Gemini: {frame}")
+
         buffer = io.BytesIO()
         Image.frombytes(frame.format, frame.size, frame.image).save(buffer, format="JPEG")
         data = base64.b64encode(buffer.getvalue()).decode("utf-8")
-        await self._session.send_realtime_input(video=Blob(data=data, mime_type="image/jpeg"))
+
+        try:
+            await self._session.send_realtime_input(video=Blob(data=data, mime_type="image/jpeg"))
+        except Exception as e:
+            self._handle_send_error(e)
 
     async def _create_initial_response(self):
         """Create initial response based on context history."""
@@ -1035,9 +1049,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        await self._session.send_client_content(
-            turns=messages, turn_complete=self._inference_on_context_initialization
-        )
+        try:
+            await self._session.send_client_content(
+                turns=messages, turn_complete=self._inference_on_context_initialization
+            )
+        except Exception as e:
+            self._handle_send_error(e)
 
         # If we're generating a response right away upon initializing
         # conversation history, set a flag saying that we need a turn complete
@@ -1059,7 +1076,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         await self.start_ttfb_metrics()
 
-        await self._session.send_client_content(turns=messages, turn_complete=True)
+        try:
+            await self._session.send_client_content(turns=messages, turn_complete=True)
+        except Exception as e:
+            self._handle_send_error(e)
 
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(self, tool_result_message):
@@ -1070,7 +1090,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
         name = tool_result_message.get("tool_call_name")
         result = json.loads(tool_result_message.get("content") or "")
         response = FunctionResponse(name=name, id=id, response=result)
-        await self._session.send_tool_response(function_responses=response)
+
+        try:
+            await self._session.send_tool_response(function_responses=response)
+        except Exception as e:
+            self._handle_send_error(e)
 
     @traced_gemini_live(operation="llm_setup")
     async def _handle_session_ready(self, session: AsyncSession):
@@ -1345,6 +1369,15 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
 
         await self.start_llm_usage_metrics(tokens)
+
+    async def _handle_send_error(self, error: Exception):
+        # In server-to-server contexts, a WebSocket error should be quite rare.
+        # Given how hard it is to recover from a send-side error with proper
+        # state management, and that exponential backoff for retries can have
+        # cost/stability implications for a service cluster, let's just treat a
+        # send-side error as fatal.
+        if not self._disconnecting:
+            await self.push_error(ErrorFrame(error=f"{self} Send error: {error}", fatal=True))
 
     def create_context_aggregator(
         self,
