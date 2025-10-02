@@ -29,7 +29,7 @@ class EventHandler:
     This data class stores the event name, a list of handlers to run for this
     event, and whether these handlers will be executed in a task.
 
-    Attributes:
+    Parameters:
         name (str): The name of the event handler.
         handlers (List[Any]): A list of functions to be called when this event is triggered.
         is_sync (bool): Indicates whether the functions are executed in a task.
