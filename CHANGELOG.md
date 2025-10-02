@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added audio filter `KrispVivaFilter` using the Krisp VIVA SDK.
+
 - Added `WebsocketSTTService` base class for websocket-based STT services.
   Combines STT functionality with websocket connectivity, providing automatic
   error handling and reconnection capabilities with exponential backoff.
