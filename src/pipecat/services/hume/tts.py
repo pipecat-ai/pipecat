@@ -188,6 +188,7 @@ class HumeTTSService(TTSService):
                 utterances=[utterance],
                 format=pcm_fmt,
                 instant_mode=True,
+                version="2",
             ):
                 audio_b64 = getattr(chunk, "audio", None)
                 if not audio_b64:
