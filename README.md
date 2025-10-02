@@ -170,54 +170,6 @@ Run a specific test suite:
 uv run pytest tests/test_name.py
 ```
 
-### Setting up your editor
-
-This project uses strict [PEP 8](https://peps.python.org/pep-0008/) formatting via [Ruff](https://github.com/astral-sh/ruff).
-
-#### Emacs
-
-You can use [use-package](https://github.com/jwiegley/use-package) to install [emacs-lazy-ruff](https://github.com/christophermadsen/emacs-lazy-ruff) package and configure `ruff` arguments:
-
-```elisp
-(use-package lazy-ruff
-  :ensure t
-  :hook ((python-mode . lazy-ruff-mode))
-  :config
-  (setq lazy-ruff-format-command "ruff format")
-  (setq lazy-ruff-check-command "ruff check --select I"))
-```
-
-`ruff` was installed in the `venv` environment described before, so you should be able to use [pyvenv-auto](https://github.com/ryotaro612/pyvenv-auto) to automatically load that environment inside Emacs.
-
-```elisp
-(use-package pyvenv-auto
-  :ensure t
-  :defer t
-  :hook ((python-mode . pyvenv-auto-run)))
-```
-
-#### Visual Studio Code
-
-Install the
-[Ruff](https://marketplace.visualstudio.com/items?itemName=charliermarsh.ruff) extension. Then edit the user settings (_Ctrl-Shift-P_ `Open User Settings (JSON)`) and set it as the default Python formatter, and enable formatting on save:
-
-```json
-"[python]": {
-    "editor.defaultFormatter": "charliermarsh.ruff",
-    "editor.formatOnSave": true
-}
-```
-
-#### PyCharm
-
-`ruff` was installed in the `venv` environment described before, now to enable autoformatting on save, go to `File` -> `Settings` -> `Tools` -> `File Watchers` and add a new watcher with the following settings:
-
-1. **Name**: `Ruff formatter`
-2. **File type**: `Python`
-3. **Working directory**: `$ContentRoot$`
-4. **Arguments**: `format $FilePath$`
-5. **Program**: `$PyInterpreterDirectory$/ruff`
-
 ## 🤝 Contributing
 
 We welcome contributions from the community! Whether you're fixing bugs, improving documentation, or adding new features, here's how you can help:
