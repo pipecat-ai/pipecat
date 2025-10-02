@@ -83,6 +83,9 @@ class WebsocketService(ABC):
             try:
                 await self._receive_messages()
                 retry_count = 0  # Reset counter on successful message receive
+            except asyncio.CancelledError:
+                logger.debug(f"{self} receive task cancelled")
+                break
             except ConnectionClosedOK as e:
                 # Normal closure, don't retry
                 logger.debug(f"{self} connection closed normally: {e}")
