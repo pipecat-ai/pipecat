@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from pipecat.frames.frames import DataFrame, FunctionCallResultFrame
 
 if TYPE_CHECKING:
-    from pipecat.services.openai_realtime_beta.context import OpenAIRealtimeLLMContext
+    from pipecat.services.openai_realtime.context import OpenAIRealtimeLLMContext
 
 
 @dataclass
