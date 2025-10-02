@@ -9,9 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `HumeTTSService` for text-to-speech synthesis using Hume AI's expressive voice models.
-  Provides high-quality, emotionally expressive speech synthesis with support for various voice models.
-  Includes example in `examples/foundational/07ad-interruptible-hume.py`.
+- Added `HumeTTSService` for text-to-speech synthesis using Hume AI's
+  expressive voice models. Provides high-quality, emotionally expressive speech
+  synthesis with support for various voice models. Includes example in
+  `examples/foundational/07ad-interruptible-hume.py`.
 
 - Added `hume` optional dependency group for Hume AI TTS integration.
 
