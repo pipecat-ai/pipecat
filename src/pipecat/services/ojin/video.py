@@ -155,6 +155,7 @@ class OjinPersonaFSM:
         self._transition_time: float = -1
         self._current_frame_idx: int = -1
         self._playback_task: Optional[asyncio.Task] = None
+        self._receive_task: Optional[asyncio.Task] = None
         self._waiting_for_image_frames = False
         self._previous_speech_frame: Optional[OutputImageRawFrame] = None
         self.on_state_changed_callback = on_state_changed_callback
