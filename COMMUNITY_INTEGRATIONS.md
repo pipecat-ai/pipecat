@@ -1,22 +1,28 @@
-# Third-Party Integrations Guide
+# Community Integrations Guide
 
-Pipecat welcomes community-maintained integrations! As our ecosystem grows, we've established a process for third-party developers to create and maintain their own service integrations while ensuring discoverability for the community.
+Pipecat welcomes community-maintained integrations! As our ecosystem grows, we've established a process for any developer to create and maintain their own service integrations while ensuring discoverability for the Pipecat community.
 
 ## Overview
 
-**What we support:** Third-party maintained integrations that live in separate repositories and are maintained by their authors.
+**What we support:** Community-maintained integrations that live in separate repositories and are maintained by their authors.
 
-**What we don't do:** The Pipecat team does not review, test, or maintain third-party integrations. We provide guidance and list approved integrations for discoverability.
+**What we don't do:** The Pipecat team does not code review, test, or maintain community integrations. We provide guidance and list approved integrations for discoverability.
 
 **Why this approach:** This allows the community to move quickly while keeping the Pipecat core team focused on maintaining the framework itself.
 
-## Requirements for Third-Party Integration Listing
+## Submitting your Integration
 
-To be listed as an official third-party integration, your repository must contain:
+To be listed as an official community integration, follow these steps:
 
-### Required Components
+### Step 1: Build Your Integration
 
-- **Source code** - Complete implementation following Pipecat patterns (See the section below on "Integration Patterns and Examples")
+Create your integration following the patterns and examples shown in the "Integration Patterns and Examples" section below.
+
+### Step 2: Set Up Your Repository
+
+Your repository must contain these components:
+
+- **Source code** - Complete implementation following Pipecat patterns
 - **Foundational example** - Single file example showing basic usage (see [Pipecat examples](https://github.com/pipecat-ai/pipecat/tree/main/examples/foundational))
 - **README.md** - Must include:
 
@@ -31,9 +37,13 @@ To be listed as an official third-party integration, your repository must contai
 - **Code documentation** - Source code with docstrings (we recommend following [Pipecat's docstring conventions](https://github.com/pipecat-ai/pipecat/blob/main/CONTRIBUTING.md#docstring-conventions))
 - **Changelog** - Maintain a changelog for version updates
 
-### Submission Information Required
+### Step 3: Join Discord
 
-When submitting your integration for listing, provide:
+Join our Discord: https://discord.gg/pipecat
+
+### Step 4: Submit for Listing
+
+Post in the `#community-integrations` channel with:
 
 - Service name
 - Service type (STT, LLM, TTS, Image, etc.)
@@ -41,16 +51,6 @@ When submitting your integration for listing, provide:
 - Demo video (approx 30-60 seconds) showing:
   - Core functionality of your integration
   - Handling of an interruption (if applicable to service type)
-
-## Submission Process
-
-1. **Create your integration** following the patterns above
-2. **Set up your repository** with all required components
-3. **Join our Discord:** https://discord.gg/pipecat
-4. **Submit for listing** in the `#third-party-integrations` channel with:
-   - Service name and type
-   - Repository link
-   - Maintainer GitHub usernames
 
 ## Integration Patterns and Examples
 
@@ -306,7 +306,7 @@ except Exception as e:
 
 ## Disclaimer
 
-Third-party integrations are community-maintained and not officially supported by the Pipecat team. Users should evaluate these integrations independently. The Pipecat team reserves the right to remove listings that become unmaintained or problematic.
+Community integrations are community-maintained and not officially supported by the Pipecat team. Users should evaluate these integrations independently. The Pipecat team reserves the right to remove listings that become unmaintained or problematic.
 
 ## Staying Up to Date
 
@@ -323,6 +323,6 @@ This helps ensure your integration remains compatible and your users have clear 
 
 ## Questions?
 
-Join our Discord community at https://discord.gg/pipecat and post in the `#third-party-integrations` channel for guidance and support.
+Join our Discord community at https://discord.gg/pipecat and post in the `#community-integrations` channel for guidance and support.
 
 For additional questions, you can also reach out to us at pipecat-ai@daily.co.
