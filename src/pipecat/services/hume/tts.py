@@ -4,8 +4,6 @@
 
 """Hume Text-to-Speech service implementation."""
 
-from __future__ import annotations
-
 import base64
 import os
 from typing import Any, AsyncGenerator, Optional
@@ -34,7 +32,7 @@ try:
 except ModuleNotFoundError as e:  # pragma: no cover - import-time guidance
     logger.error(f"Exception: {e}")
     logger.error("In order to use Hume, you need to `pip install pipecat-ai[hume]`.")
-    raise
+    raise Exception(f"Missing module: {e}")
 
 
 HUME_SAMPLE_RATE = 48_000  # Hume TTS streams at 48 kHz
@@ -94,11 +92,7 @@ class HumeTTSService(TTSService):
                 f"Hume TTS streams at {HUME_SAMPLE_RATE} Hz; configured sample_rate={sample_rate}"
             )
 
-        super().__init__(
-            pause_frame_processing=True,
-            sample_rate=sample_rate,
-            **kwargs,
-        )
+        super().__init__(sample_rate=sample_rate, **kwargs)
 
         self._client = AsyncHumeClient(api_key=api_key)
         self._params = params or HumeTTSService.InputParams()
@@ -181,7 +175,6 @@ class HumeTTSService(TTSService):
         # Request raw PCM chunks in the streaming JSON
         pcm_fmt = FormatPcm(type="pcm")
 
-        measuring_ttfb = True
         await self.start_ttfb_metrics()
         await self.start_tts_usage_metrics(text)
         yield TTSStartedFrame()
@@ -191,7 +184,6 @@ class HumeTTSService(TTSService):
             # Hume emits mono PCM at 48 kHz; downstream can resample if needed.
             # We buffer audio bytes before sending to prevent glitches.
             self._audio_bytes = b""
-            first_audio_sent = False
             async for chunk in self._client.tts.synthesize_json_streaming(
                 utterances=[utterance],
                 format=pcm_fmt,
@@ -204,17 +196,6 @@ class HumeTTSService(TTSService):
                 pcm_bytes = base64.b64decode(audio_b64)
                 self._audio_bytes += pcm_bytes
 
-                # Send the first audio chunk immediately to avoid client-side delays.
-                if not first_audio_sent:
-                    if self._audio_bytes:
-                        yield TTSAudioRawFrame(self._audio_bytes, self.sample_rate, 1)
-                        if measuring_ttfb:
-                            await self.stop_ttfb_metrics()
-                            measuring_ttfb = False
-                        first_audio_sent = True
-                        # Do NOT clear _audio_bytes here. Subsequent chunks will build on this.
-                    continue
-
                 # Buffer audio until we have enough to avoid glitches
                 if len(self._audio_bytes) < self.chunk_size:
                     continue
@@ -226,14 +207,5 @@ class HumeTTSService(TTSService):
             logger.exception(f"{self} error generating TTS: {e}")
             yield ErrorFrame(error=str(e))
         finally:
-            # Yield any remaining audio
-            if self._audio_bytes:
-                yield TTSAudioRawFrame(self._audio_bytes, self.sample_rate, 1)
-
             # Ensure TTFB timer is stopped even on early failures
-            if measuring_ttfb:
-                await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
-
-
-__all__ = ["HumeTTSService"]
