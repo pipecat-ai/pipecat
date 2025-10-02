@@ -142,6 +142,7 @@ class TTSService(AIService):
         """
         return self._sample_rate
 
+    @property
     def chunk_size(self) -> int:
         """Get the recommended chunk size for audio streaming.
 
