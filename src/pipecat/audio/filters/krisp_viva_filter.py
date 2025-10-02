@@ -54,6 +54,8 @@ class KrispVivaFilter(BaseAudioFilter):
         48000: krisp_audio.SamplingRate.Sr48000Hz,
     }
 
+    FRAME_SIZE_MS = 10  # Krisp requires audio frames of 10ms duration for processing.
+
     def __init__(self, model_path: str = None, noise_suppression_level: int = 100) -> None:
         """Initialize the Krisp noise reduction filter.
 
@@ -86,6 +88,9 @@ class KrispVivaFilter(BaseAudioFilter):
         self._samples_per_frame = None
         self._noise_suppression_level = noise_suppression_level
 
+        # Audio buffer to accumulate samples for complete frames
+        self._audio_buffer = bytearray()
+
     def _int_to_sample_rate(self, sample_rate):
         """Convert integer sample rate to krisp_audio SamplingRate enum.
 
@@ -117,7 +122,7 @@ class KrispVivaFilter(BaseAudioFilter):
         nc_cfg.outputSampleRate = nc_cfg.inputSampleRate
         nc_cfg.modelInfo = model_info
 
-        self._samples_per_frame = int((sample_rate * 10) / 1000)
+        self._samples_per_frame = int((sample_rate * self.FRAME_SIZE_MS) / 1000)
         self._session = krisp_audio.NcInt16.create(nc_cfg)
 
     async def stop(self):
@@ -145,14 +150,29 @@ class KrispVivaFilter(BaseAudioFilter):
         if not self._filtering:
             return audio
 
-        samples = np.frombuffer(audio, dtype=np.int16)
+        # Add incoming audio to our buffer
+        self._audio_buffer.extend(audio)
 
-        if samples.size % self._samples_per_frame:
-            logger.warning(
-                f"Audio length {samples.size} samples is not a multiple of {self._samples_per_frame}, ignoring it"
-            )
-            return audio
+        # Calculate how many complete frames we can process
+        total_samples = len(self._audio_buffer) // 2  # 2 bytes per int16 sample
+        num_complete_frames = total_samples // self._samples_per_frame
 
+        if num_complete_frames == 0:
+            # Not enough samples for a complete frame yet, return empty
+            return b""
+
+        # Calculate how many bytes we need for complete frames
+        complete_samples_count = num_complete_frames * self._samples_per_frame
+        bytes_to_process = complete_samples_count * 2  # 2 bytes per sample
+
+        # Extract the bytes we can process
+        audio_to_process = bytes(self._audio_buffer[:bytes_to_process])
+
+        # Remove processed bytes from buffer, keep the remainder
+        self._audio_buffer = self._audio_buffer[bytes_to_process:]
+
+        # Process the complete frames
+        samples = np.frombuffer(audio_to_process, dtype=np.int16)
         frames = samples.reshape(-1, self._samples_per_frame)
         processed_samples = np.empty_like(samples)
 
