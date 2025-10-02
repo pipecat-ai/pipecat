@@ -130,9 +130,11 @@ class PipelineTask(BasePipelineTask):
 
     - on_pipeline_finished: Called after the pipeline has reached any terminal state.
           This includes:
+
               - StopFrame: pipeline was stopped (processors keep connections open)
               - EndFrame: pipeline ended normally
               - CancelFrame: pipeline was cancelled
+
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
 

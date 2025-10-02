@@ -79,7 +79,7 @@ class DeepgramFluxSTTService(WebsocketSTTService):
         This class defines all available connection parameters for the Deepgram Flux API
         based on the official documentation.
 
-        Attributes:
+        Parameters:
             eager_eot_threshold: Optional. EagerEndOfTurn/TurnResumed are off by default.
                 You can turn them on by setting eager_eot_threshold to a valid value.
                 Lower values = more aggressive EagerEndOfTurning (faster response, more LLM calls).
@@ -126,24 +126,24 @@ class DeepgramFluxSTTService(WebsocketSTTService):
                 If None, default parameters will be used.
             **kwargs: Additional arguments passed to the parent WebsocketSTTService class.
 
-        Example:
-            ```python
-            # Basic usage with default parameters
-            stt = DeepgramFluxSTTService(api_key="your-api-key")
+        Examples:
+            Basic usage with default parameters::
 
-            # Advanced usage with custom parameters
-            params = DeepgramFluxSTTService.InputParams(
-                eager_eot_threshold=0.5,
-                eot_threshold=0.8,
-                keyterm=["AI", "machine learning", "neural network"],
-                tag=["production", "voice-agent"]
-            )
-            stt = DeepgramFluxSTTService(
-                api_key="your-api-key",
-                model="flux-general-en",
-                params=params
-            )
-            ```
+                stt = DeepgramFluxSTTService(api_key="your-api-key")
+
+            Advanced usage with custom parameters::
+
+                params = DeepgramFluxSTTService.InputParams(
+                    eager_eot_threshold=0.5,
+                    eot_threshold=0.8,
+                    keyterm=["AI", "machine learning", "neural network"],
+                    tag=["production", "voice-agent"]
+                )
+                stt = DeepgramFluxSTTService(
+                    api_key="your-api-key",
+                    model="flux-general-en",
+                    params=params
+                )
         """
         super().__init__(sample_rate=sample_rate, **kwargs)
 
