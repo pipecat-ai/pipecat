@@ -19,10 +19,6 @@
 - **Business Agents** – customer intake, support bots, guided flows
 - **Complex Dialog Systems** – design logic with structured conversations
 
-🧭 Looking to build structured conversations? Check out [Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) for managing complex conversational states and transitions.
-
-🔍 Looking for help debugging your pipeline and processors? Check out [Whisker](https://github.com/pipecat-ai/whisker), a real-time Pipecat debugger.
-
 ## 🧠 Why Pipecat?
 
 - **Voice-first**: Integrates speech recognition, text-to-speech, and conversation handling
@@ -30,40 +26,30 @@
 - **Composable Pipelines**: Build complex behavior from modular components
 - **Real-Time**: Ultra-low latency interaction with different transports (e.g. WebSockets or WebRTC)
 
-## 📱 Client SDKs
+## 🌐 Pipecat Ecosystem
 
-You can connect to Pipecat from any platform using our official SDKs:
+### 📱 Client SDKs
 
-<table>
-  <tr>
-    <td>
-      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/javascript/javascript-original.svg" width="40" height="40" alt="JavaScript"/>
-      <a href="https://docs.pipecat.ai/client/js/introduction">JavaScript</a>
-    </td>
-    <td>
-      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="40" height="40" alt="React"/>
-      <a href="https://docs.pipecat.ai/client/react/introduction">React</a>
-    </td>
-    <td>
-      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/react/react-original.svg" width="40" height="40" alt="React Native"/>
-      <a href="https://docs.pipecat.ai/client/react-native/introduction">React Native</a>
-    </td>
-  </tr>
-  <tr>
-    <td>
-      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/swift/swift-original.svg" width="40" height="40" alt="Swift"/>
-      <a href="https://docs.pipecat.ai/client/ios/introduction">Swift</a>
-    </td>
-    <td>
-      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/kotlin/kotlin-original.svg" width="40" height="40" alt="Kotlin"/>
-      <a href="https://docs.pipecat.ai/client/android/introduction">Kotlin</a>
-    </td>
-    <td>
-      <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/cplusplus/cplusplus-original.svg" width="40" height="40" alt="JavaScript"/>
-      <a href="https://docs.pipecat.ai/client/c++/introduction">C++</a>
-    </td>
-  </tr>
-</table>
+Building client applications? You can connect to Pipecat from any platform using our official SDKs:
+
+<a href="https://docs.pipecat.ai/client/js/introduction">JavaScript</a> | <a href="https://docs.pipecat.ai/client/react/introduction">React</a> | <a href="https://docs.pipecat.ai/client/react-native/introduction">React Native</a> |
+<a href="https://docs.pipecat.ai/client/ios/introduction">Swift</a> | <a href="https://docs.pipecat.ai/client/android/introduction">Kotlin</a> | <a href="https://docs.pipecat.ai/client/c++/introduction">C++</a> | <a href="https://github.com/pipecat-ai/pipecat-esp32">ESP32</a>
+
+### 🧭 Structured conversations
+
+Looking to build structured conversations? Check out [Pipecat Flows](https://github.com/pipecat-ai/pipecat-flows) for managing complex conversational states and transitions.
+
+### 🪄 Beautiful UIs
+
+Want to build beautiful and engaging experiences? Checkout the [Voice UI Kit](https://github.com/pipecat-ai/voice-ui-kit), a collection of components, hooks and templates for building voice AI applications quickly.
+
+### 🔍 Debugging
+
+Looking for help debugging your pipeline and processors? Check out [Whisker](https://github.com/pipecat-ai/whisker), a real-time Pipecat debugger.
+
+### 🖥️ Terminal
+
+Love terminal applications? Check out [Tail](https://github.com/pipecat-ai/tail), a terminal dashboard for Pipecat.
 
 ## 🎬 See it in action
 
