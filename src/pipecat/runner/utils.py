@@ -99,29 +99,41 @@ async def parse_telephony_websocket(websocket: WebSocket):
         tuple: (transport_type: str, call_data: dict)
 
         call_data contains provider-specific fields:
-        - Twilio: {
-            "stream_id": str,
-            "call_id": str,
-            "body": dict
-        }
-        - Telnyx: {
-            "stream_id": str,
-            "call_control_id": str,
-            "outbound_encoding": str,
-            "from": str,
-            "to": str,
-        }
-        - Plivo: {
-            "stream_id": str,
-            "call_id": str,
-        }
-        - Exotel: {
-            "stream_id": str,
-            "call_id": str,
-            "account_sid": str,
-            "from": str,
-            "to": str,
-        }
+
+        - Twilio::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+                "body": dict
+            }
+
+        - Telnyx::
+
+            {
+                "stream_id": str,
+                "call_control_id": str,
+                "outbound_encoding": str,
+                "from": str,
+                "to": str,
+            }
+
+        - Plivo::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+            }
+
+        - Exotel::
+
+            {
+                "stream_id": str,
+                "call_id": str,
+                "account_sid": str,
+                "from": str,
+                "to": str,
+            }
 
     Example usage::
 

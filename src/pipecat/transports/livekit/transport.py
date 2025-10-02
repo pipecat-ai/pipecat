@@ -354,10 +354,10 @@ class LiveKitTransportClient:
             logger.error(f"Error sending data: {e}")
 
     async def send_dtmf(self, digit: str):
-        """Send DTMF tone to the room.
+        r"""Send DTMF tone to the room.
 
         Args:
-            digit: The DTMF digit to send (0-9, *, #).
+            digit: The DTMF digit to send (0-9, \*, #).
         """
         if not self._connected:
             return
