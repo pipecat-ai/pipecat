@@ -698,9 +698,7 @@ class OjinPersonaService(FrameProcessor):
         logger.error(
             f"Failed to connect after {self._settings.client_connect_max_retries} attempts. Last error: {last_error}"
         )
-        await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
-        await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
-        return False
+        raise Exception("Failed to connect to Ojin")
 
     # Disabled for now since it was causing issues with the server not processing all audio
     async def _incomming_frame_task(self):
@@ -755,22 +753,22 @@ class OjinPersonaService(FrameProcessor):
         Cancels all running tasks, closes connections, and resets the state.
         """
         # Cancel queued audio processing task
-        if self._audio_input_task:
+        if self._audio_input_task is not None:
             await self.cancel_task(self._audio_input_task)
             self._audio_input_task = None
 
-        if self._receive_task:
+        if self._receive_task is not None:
             await self.cancel_task(self._receive_task)
             self._receive_task = None
 
-        if self._client:
+        if self._client is not None:
             await self._client.close()
             self._client = None
 
         # Clear all buffers
         await self._interrupt()
 
-        if self._fsm:
+        if self._fsm is not None:
             await self._fsm.close()
             self._fsm = None
 
