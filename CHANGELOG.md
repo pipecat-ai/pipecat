@@ -126,6 +126,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added support for new RTVI `send-text` event, along with the ability to toggle
   the audio response off (skip tts) while handling the new context.
 
+- Added `PinchAudioService` with procide access to Pinch Translation.
+
 ### Changed
 
 - Updated `aiortc` to 1.13.0.
