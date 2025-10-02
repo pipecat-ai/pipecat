@@ -1,7 +1,7 @@
 ## Contributing to Pipecat
 
 **Want to add a new service integration?**
-We encourage community-maintained integrations! Please see our [Third-Party Integration Guide](THIRD_PARTY_INTEGRATIONS.md) for the process and requirements.
+We encourage community-maintained integrations! Please see our [Community Integration Guide](COMMUNITY_INTEGRATIONS.md) for the process and requirements.
 
 **Want to contribute to Pipecat core?**
 We welcome contributions of all kinds! Your help is appreciated. Follow these steps to get involved:
