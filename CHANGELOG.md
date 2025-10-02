@@ -5,7 +5,7 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.87] - 2025-10-02
 
 ### Added
 
@@ -28,23 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a
-  future version. Instead, create your own custom frame and handle it in the
-  `@transport.output().event_handler("on_after_push_frame")` event handler or a
-  custom processor.
-
-## Fixed
-
-- Fixed an issue in `AWSBedrockLLMService` where timeout exceptions weren't
-  being detected.
-
-- Fixed a `PipelineTask` issue that could prevent the application to exit if
-  `task.cancel()` was called when the task was already finished.
-
-- Fixed an issue where local SmartTurn was not being ran in a separate thread.
-
-### Deprecated
-
 - `DailyTransportMessageFrame` and `DailyTransportMessageUrgentFrame` are
   deprecated, use `DailyOutputTransportMessageFrame` and
   `DailyOutputTransportMessageUrgentFrame` respectively instead.
@@ -59,6 +42,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `InputTransportMessageUrgentFrame` is deprecated, use
   `InputTransportMessageFrame` instead.
+
+- `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a
+  future version. Instead, create your own custom frame and handle it in the
+  `@transport.output().event_handler("on_after_push_frame")` event handler or a
+  custom processor.
+
+## Fixed
+
+- Fixed an issue in `AWSBedrockLLMService` where timeout exceptions weren't
+  being detected.
+
+- Fixed a `PipelineTask` issue that could prevent the application to exit if
+  `task.cancel()` was called when the task was already finished.
+
+- Fixed an issue where local SmartTurn was not being ran in a separate thread.
 
 ## [0.0.86] - 2025-09-24
 
