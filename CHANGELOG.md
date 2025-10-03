@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `hume` optional dependency group for Hume AI TTS integration.
 
+### Fixed
+
+- Fixed RTVI incoming message handling, broken in 0.0.87.
+
 ## [0.0.87] - 2025-10-02
 
 ### Added
