@@ -201,12 +201,20 @@ class HumeTTSService(TTSService):
                 if len(self._audio_bytes) < self.chunk_size:
                     continue
 
-                yield TTSAudioRawFrame(self._audio_bytes, self.sample_rate, 1)
+                frame = TTSAudioRawFrame(
+                    audio=self._audio_bytes,
+                    sample_rate=self.sample_rate,
+                    num_channels=1,
+                )
+
+                yield frame
+
                 self._audio_bytes = b""
 
         except Exception as e:
             logger.exception(f"{self} error generating TTS: {e}")
-            yield ErrorFrame(error=str(e))
+            await self.push_error(ErrorFrame(f"Error generating TTS: {e}"))
         finally:
             # Ensure TTFB timer is stopped even on early failures
+            await self.stop_ttfb_metrics()
             yield TTSStoppedFrame()
