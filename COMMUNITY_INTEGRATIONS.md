@@ -43,14 +43,22 @@ Join our Discord: https://discord.gg/pipecat
 
 ### Step 4: Submit for Listing
 
-Post in the `#community-integrations` channel with:
+Submit a pull request to add your integration to our [Community Integrations documentation page](https://docs.pipecat.ai/server/services/community-integrations).
 
-- Service name
-- Service type (STT, LLM, TTS, Image, etc.)
-- Link to your repository
-- Demo video (approx 30-60 seconds) showing:
-  - Core functionality of your integration
-  - Handling of an interruption (if applicable to service type)
+**To submit:**
+
+1. Fork the [Pipecat docs repository](https://github.com/pipecat-ai/docs)
+2. Edit the file `server/services/community-integrations.mdx`
+3. Add your integration to the appropriate service category table with:
+   - Service name
+   - Link to your repository
+   - Maintainer GitHub username(s)
+4. Include a link to your demo video (approx 30-60 seconds) in your PR description showing:
+   - Core functionality of your integration
+   - Handling of an interruption (if applicable to service type)
+5. Submit your pull request
+
+Once your PR is submitted, post in the `#community-integrations` Discord channel to let us know.
 
 ## Integration Patterns and Examples
 
