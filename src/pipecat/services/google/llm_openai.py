@@ -94,9 +94,9 @@ class GoogleLLMOpenAIBetaService(OpenAILLMService):
         async for chunk in chunk_stream:
             if chunk.usage:
                 tokens = LLMTokenUsage(
-                    prompt_tokens=chunk.usage.prompt_tokens,
-                    completion_tokens=chunk.usage.completion_tokens,
-                    total_tokens=chunk.usage.total_tokens,
+                    prompt_tokens=chunk.usage.prompt_tokens or 0,
+                    completion_tokens=chunk.usage.completion_tokens or 0,
+                    total_tokens=chunk.usage.total_tokens or 0,
                 )
                 await self.start_llm_usage_metrics(tokens)
 
