@@ -50,7 +50,26 @@ except ModuleNotFoundError as e:
     logger.error("In order to use ElevenLabs, you need to `pip install pipecat-ai[elevenlabs]`.")
     raise Exception(f"Missing module: {e}")
 
-ElevenLabsOutputFormat = Literal["pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100"]
+ElevenLabsOutputFormat = Literal[
+    "mp3_22050_32",
+    "mp3_44100_32",
+    "mp3_44100_64",
+    "mp3_44100_96",
+    "mp3_44100_128",
+    "mp3_44100_192",
+    "pcm_8000",
+    "pcm_16000",
+    "pcm_22050",
+    "pcm_24000",
+    "pcm_44100",
+    "ulaw_8000",
+    "alaw_8000",
+    "opus_48000_32",
+    "opus_48000_64",
+    "opus_48000_96",
+    "opus_48000_128",
+    "opus_48000_192",
+]
 
 # Models that support language codes
 # The following models are excluded as they don't support language codes:
@@ -123,12 +142,18 @@ def language_to_elevenlabs_language(language: Language) -> Optional[str]:
 def output_format_from_sample_rate(sample_rate: int) -> str:
     """Get the appropriate output format string for a given sample rate.
 
+    .. deprecated::
+        This function is deprecated. Please specify output_format directly in the service constructor.
+
     Args:
         sample_rate: The audio sample rate in Hz.
 
     Returns:
         The ElevenLabs output format string.
     """
+    logger.warning(
+        "output_format_from_sample_rate is deprecated. Please specify output_format directly in the service constructor."
+    )
     match sample_rate:
         case 8000:
             return "pcm_8000"
@@ -263,6 +288,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         *,
         api_key: str,
         voice_id: str,
+        output_format: Optional[ElevenLabsOutputFormat] = None,
         model: str = "eleven_turbo_v2_5",
         url: str = "wss://api.elevenlabs.io",
         sample_rate: Optional[int] = None,
@@ -275,6 +301,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         Args:
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
+            output_format: Output format for audio (e.g., "pcm_24000", "mp3_44100_128").
+                If not provided, will be derived from sample_rate (deprecated).
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
             url: WebSocket URL for ElevenLabs TTS API.
             sample_rate: Audio sample rate. If None, uses default.
@@ -325,7 +353,17 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
-        self._output_format = ""  # initialized in start()
+        
+        # Handle output_format with fallback to deprecated method
+        if output_format:
+            self._output_format = output_format
+        else:
+            logger.warning(
+                "Please specify 'output_format' parameter directly. "
+                "Deriving output format from sample_rate is deprecated and will be removed in a future version."
+            )
+            self._output_format = output_format_from_sample_rate(self.sample_rate)
+        
         self._voice_settings = self._set_voice_settings()
 
         # Indicates if we have sent TTSStartedFrame. It will reset to False when
@@ -423,7 +461,6 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._output_format = output_format_from_sample_rate(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame):
@@ -751,6 +788,7 @@ class ElevenLabsHttpTTSService(WordTTSService):
         *,
         api_key: str,
         voice_id: str,
+        output_format: Optional[ElevenLabsOutputFormat] = None,
         aiohttp_session: aiohttp.ClientSession,
         model: str = "eleven_turbo_v2_5",
         base_url: str = "https://api.elevenlabs.io",
@@ -763,6 +801,8 @@ class ElevenLabsHttpTTSService(WordTTSService):
         Args:
             api_key: ElevenLabs API key for authentication.
             voice_id: ID of the voice to use for synthesis.
+            output_format: Output format for audio (e.g., "pcm_24000", "mp3_44100_128").
+                If not provided, will be derived from sample_rate (deprecated).
             aiohttp_session: aiohttp ClientSession for HTTP requests.
             model: TTS model to use (e.g., "eleven_turbo_v2_5").
             base_url: Base URL for ElevenLabs HTTP API.
@@ -799,7 +839,17 @@ class ElevenLabsHttpTTSService(WordTTSService):
         }
         self.set_model_name(model)
         self.set_voice(voice_id)
-        self._output_format = ""  # initialized in start()
+        
+        # Handle output_format with fallback to deprecated method
+        if output_format:
+            self._output_format = output_format
+        else:
+            logger.warning(
+                "Please specify 'output_format' parameter directly. "
+                "Deriving output format from sample_rate is deprecated and will be removed in a future version."
+            )
+            self._output_format = output_format_from_sample_rate(self.sample_rate)
+        
         self._voice_settings = self._set_voice_settings()
 
         # Track cumulative time to properly sequence word timestamps across utterances
@@ -845,7 +895,6 @@ class ElevenLabsHttpTTSService(WordTTSService):
             frame: The start frame containing initialization parameters.
         """
         await super().start(frame)
-        self._output_format = output_format_from_sample_rate(self.sample_rate)
         self._reset_state()
 
     async def push_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM):
