@@ -578,7 +578,7 @@ class OjinPersonaService(FrameProcessor):
 
         self._interaction: Optional[OjinPersonaInteraction] = None
         self._pending_interaction: Optional[OjinPersonaInteraction] = None
-
+        self._receive_task: Optional[asyncio.Task] = None
         self._resampler = create_default_resampler()
         self._server_fps_tracker = FPSTracker("OjinPersonaService")
         self.should_generate_silence: bool = False
