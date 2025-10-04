@@ -523,6 +523,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
         Args:
             api_key: Google AI API key for authentication.
             base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
+
+                .. deprecated:: 0.0.88
+                    This parameter is deprecated and no longer has any effect.
+                    Please use `http_options` to customize requests made by the
+                    API client.
+
             model: Model identifier to use. Defaults to "models/gemini-2.0-flash-live-001".
             voice_id: TTS voice identifier. Defaults to "Charon".
             start_audio_paused: Whether to start with audio input paused. Defaults to False.
@@ -536,6 +542,21 @@ class GeminiMultimodalLiveLLMService(LLMService):
             http_options: HTTP options for the client.
             **kwargs: Additional arguments passed to parent LLMService.
         """
+        # Check for deprecated parameter usage
+        if (
+            base_url
+            != "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+        ):
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn(
+                    "Parameter 'base_url' is deprecated and no longer has any effect. Please use 'http_options' to customize requests made by the API client.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+
         super().__init__(base_url=base_url, **kwargs)
 
         params = params or InputParams()
