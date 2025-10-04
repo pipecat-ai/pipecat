@@ -1172,19 +1172,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._bot_is_speaking = False
         text = self._bot_text_buffer
 
-        # Determine output and modality for tracing
-        # TODO: looks like there's a bug here - output_text and output_modality are unused
-        if text:
-            # TEXT modality
-            output_text = text
-            output_modality = "TEXT"
-        else:
-            # AUDIO modality
-            output_text = self._llm_output_buffer
-            output_modality = "AUDIO"
-
         # Trace the complete LLM response (this will be handled by the decorator)
-        # The decorator will extract the output text and usage metadata from the event
+        # The decorator will extract the output text and usage metadata from the message
 
         self._bot_text_buffer = ""
         self._llm_output_buffer = ""
