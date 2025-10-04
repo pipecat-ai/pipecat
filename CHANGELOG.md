@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `PermissionError` is now caught if NLTK's `punkt_tab` can't be downloaded.
+
 - Added `HumeTTSService` for text-to-speech synthesis using Hume AI's
   expressive voice models. Provides high-quality, emotionally expressive speech
   synthesis with support for various voice models. Includes example in

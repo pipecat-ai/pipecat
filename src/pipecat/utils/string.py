@@ -21,13 +21,24 @@ import re
 from typing import FrozenSet, Optional, Sequence, Tuple
 
 import nltk
+from loguru import logger
 from nltk.tokenize import sent_tokenize
 
 # Ensure punkt_tab tokenizer data is available
 try:
     nltk.data.find("tokenizers/punkt_tab")
 except LookupError:
-    nltk.download("punkt_tab", quiet=True)
+    try:
+        nltk.download("punkt_tab", quiet=True)
+    except (OSError, PermissionError) as e:
+        logger.error(
+            f"Failed to download NLTK 'punkt_tab' tokenizer data: {e}. "
+            "This data is required for sentence tokenization features. "
+            "The download failed due to filesystem permissions. "
+            "To resolve: pre-install the data in a location with appropriate read permissions, "
+            "or set the NLTK_DATA environment variable to point to a writable directory. "
+            "See https://www.nltk.org/data.html for more information."
+        )
 
 SENTENCE_ENDING_PUNCTUATION: FrozenSet[str] = frozenset(
     {
