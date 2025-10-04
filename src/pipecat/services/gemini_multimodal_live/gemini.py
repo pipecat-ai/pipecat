@@ -478,8 +478,8 @@ class InputParams(BaseModel):
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_k: Optional[int] = Field(default=None, ge=0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    modalities: Optional[Union[List[GeminiMultimodalModalities], GeminiMultimodalModalities]] = (
-        Field(default=GeminiMultimodalModalities.AUDIO)
+    modalities: Optional[GeminiMultimodalModalities] = Field(
+        default=GeminiMultimodalModalities.AUDIO
     )
     language: Optional[Language] = Field(default=Language.EN_US)
     media_resolution: Optional[GeminiMediaResolution] = Field(
@@ -640,9 +640,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         """
         self._video_input_paused = paused
 
-    def set_model_modalities(
-        self, modalities: Union[List[GeminiMultimodalModalities], GeminiMultimodalModalities]
-    ):
+    def set_model_modalities(self, modalities: GeminiMultimodalModalities):
         """Set the model response modalities.
 
         Args:
@@ -818,11 +816,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         logger.info("Connecting to Gemini service")
         try:
-            # Handle modalities being specified as either a list or a single value
-            modalities = self._settings["modalities"]
-            if isinstance(modalities, GeminiMultimodalModalities):
-                modalities = [modalities]
-
             # Assemble basic configuration
             config = LiveConnectConfig(
                 generation_config=GenerationConfig(
@@ -832,7 +825,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     temperature=self._settings["temperature"],
                     top_k=self._settings["top_k"],
                     top_p=self._settings["top_p"],
-                    response_modalities=[Modality(modality.value) for modality in modalities],
+                    response_modalities=[Modality(self._settings["modalities"].value)],
                     speech_config=SpeechConfig(
                         voice_config=VoiceConfig(
                             prebuilt_voice_config={"voice_name": self._voice_id}
@@ -977,7 +970,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 audio=Blob(data=frame.audio, mime_type=f"audio/pcm;rate={frame.sample_rate}")
             )
         except Exception as e:
-            self._handle_send_error(e)
+            await self._handle_send_error(e)
 
         # Manage a buffer of audio to use for transcription
         audio = frame.audio
@@ -1009,7 +1002,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         try:
             await self._session.send_realtime_input(text=text)
         except Exception as e:
-            self._handle_send_error(e)
+            await self._handle_send_error(e)
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""
@@ -1033,7 +1026,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         try:
             await self._session.send_realtime_input(video=Blob(data=data, mime_type="image/jpeg"))
         except Exception as e:
-            self._handle_send_error(e)
+            await self._handle_send_error(e)
 
     async def _create_initial_response(self):
         """Create initial response based on context history."""
@@ -1054,7 +1047,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 turns=messages, turn_complete=self._inference_on_context_initialization
             )
         except Exception as e:
-            self._handle_send_error(e)
+            await self._handle_send_error(e)
 
         # If we're generating a response right away upon initializing
         # conversation history, set a flag saying that we need a turn complete
@@ -1079,7 +1072,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         try:
             await self._session.send_client_content(turns=messages, turn_complete=True)
         except Exception as e:
-            self._handle_send_error(e)
+            await self._handle_send_error(e)
 
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(self, tool_result_message):
@@ -1094,7 +1087,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         try:
             await self._session.send_tool_response(function_responses=response)
         except Exception as e:
-            self._handle_send_error(e)
+            await self._handle_send_error(e)
 
     @traced_gemini_live(operation="llm_setup")
     async def _handle_session_ready(self, session: AsyncSession):
