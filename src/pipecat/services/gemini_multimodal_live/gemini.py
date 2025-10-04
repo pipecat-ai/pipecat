@@ -464,7 +464,7 @@ class InputParams(BaseModel):
         temperature: Sampling temperature (0.0-2.0). Defaults to None.
         top_k: Top-k sampling parameter. Must be >= 0. Defaults to None.
         top_p: Top-p sampling parameter (0.0-1.0). Defaults to None.
-        modalities: Response modalities. Defaults to "AUDIO".
+        modalities: Response modalities. Defaults to AUDIO.
         language: Language for generation. Defaults to EN_US.
         media_resolution: Media resolution setting. Defaults to UNSPECIFIED.
         vad: Voice activity detection parameters. Defaults to None.
