@@ -1,0 +1,22 @@
+dotenv==0.9.9
+onnxruntime==1.23.0
+transformers==4.57.0
+fastapi==0.118.0
+websockets==15.0.1
+kokoro==0.9.4
+
+# Google sdk
+google==3.0.0
+google-api-core==2.25.2
+google-auth==2.41.1
+google-cloud==0.34.0
+google-cloud-speech==2.33.0
+google-cloud-texttospeech==2.31.0
+google-crc32c==1.7.1
+google-genai==1.41.0
+googleapis-common-protos==1.70.0
+
+daily-python==0.19.9
+aiortc
+opencv-python
+faster-whisper
