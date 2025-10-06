@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that would cause wrong user/assistant context ordering when
+  using interruption strategies.
+
 - Fixed RTVI incoming message handling, broken in 0.0.87.
 
 ## [0.0.87] - 2025-10-02
