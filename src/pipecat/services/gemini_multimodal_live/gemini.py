@@ -601,7 +601,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self._audio_input_paused = start_audio_paused
         self._video_input_paused = start_video_paused
         self._context = None
-        self._create_client(api_key, http_options)
+        self._api_key = api_key
+        self._http_options = http_options
         self._session: AsyncSession = None
         self._connection_task = None
 
@@ -649,8 +650,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
-        # Initialize the File API client
-        self.file_api = GeminiFileAPI(api_key=api_key, base_url=file_api_base_url)
+        self._file_api_base_url = file_api_base_url
+        self._file_api: Optional[GeminiFileAPI] = None
 
         # Grounding metadata tracking
         self._search_result_buffer = ""
@@ -662,8 +663,23 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Bookkeeping for ending gracefully (i.e. after the bot is finished)
         self._end_frame_pending_bot_turn_finished: Optional[EndFrame] = None
 
-    def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
-        self._client = Client(api_key=api_key, http_options=http_options)
+        # Initialize the API client. Subclasses can override this if needed.
+        self.create_client()
+
+    def create_client(self):
+        """Create the Gemini API client instance. Subclasses can override this."""
+        self._client = Client(api_key=self._api_key, http_options=self._http_options)
+
+    @property
+    def file_api(self) -> GeminiFileAPI:
+        """Get the Gemini File API client instance. Subclasses can override this.
+
+        Returns:
+            The Gemini File API client.
+        """
+        if not self._file_api:
+            self._file_api = GeminiFileAPI(api_key=self._api_key, base_url=self._file_api_base_url)
+        return self._file_api
 
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate usage metrics.
@@ -1282,7 +1298,21 @@ class GeminiMultimodalLiveLLMService(LLMService):
         inline_data = part.inline_data
         if not inline_data:
             return
-        if inline_data.mime_type != f"audio/pcm;rate={self._sample_rate}":
+
+        # Check if mime type matches expected format
+        expected_mime_type = f"audio/pcm;rate={self._sample_rate}"
+        if inline_data.mime_type == expected_mime_type:
+            # Perfect match, continue processing
+            pass
+        elif inline_data.mime_type == "audio/pcm":
+            # Sample rate not provided in mime type, assume default
+            if not hasattr(self, "_sample_rate_warning_logged"):
+                logger.warning(
+                    f"Sample rate not provided in mime type '{inline_data.mime_type}', assuming rate of {self._sample_rate}"
+                )
+                self._sample_rate_warning_logged = True
+        else:
+            # Unrecognized format
             logger.warning(f"Unrecognized server_content format {inline_data.mime_type}")
             return
 

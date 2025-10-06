@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `GeminiVertexMultimodalLiveLLMService`, for accessing Gemini Live via
+  Google Vertex AI.
+
 - Added some new configuration options to `GeminiMultimodalLiveLLMService`:
 
   - `thinking`
