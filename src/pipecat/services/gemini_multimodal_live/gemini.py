@@ -16,6 +16,7 @@ import io
 import json
 import random
 import time
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
@@ -1345,7 +1346,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
         function_calls_llm = [
             FunctionCallFromLLM(
                 context=self._context,
-                tool_call_id=f.id,
+                tool_call_id=(
+                    # NOTE: when using Vertex AI we don't get server-provided
+                    # tool call IDs here
+                    f.id or str(uuid.uuid4())
+                ),
                 function_name=f.name,
                 arguments=f.args,
             )
