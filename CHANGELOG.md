@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added support for Nano Banana models to `GoogleLLMService`. For example, you
+  can now use the `gemini-2.5-flash-image` model to generate images.
+
 - `PermissionError` is now caught if NLTK's `punkt_tab` can't be downloaded.
 
 - Added `HumeTTSService` for text-to-speech synthesis using Hume AI's
