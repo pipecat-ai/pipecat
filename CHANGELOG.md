@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `hume` optional dependency group for Hume AI TTS integration.
 
+### Changed
+
+- Updated default `GoogleLLMService` model to `gemini-2.5-flash`.
+
 ### Fixed
 
 - Fixed RTVI incoming message handling, broken in 0.0.87.
