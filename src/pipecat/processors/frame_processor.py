@@ -28,6 +28,7 @@ from pipecat.frames.frames import (
     FrameProcessorPauseUrgentFrame,
     FrameProcessorResumeFrame,
     FrameProcessorResumeUrgentFrame,
+    InterruptionCompletedFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
     StartFrame,
@@ -571,7 +572,9 @@ class FrameProcessor(BaseObject):
         # frames and we will process the frame right away. This is because a
         # previous system frame might be waiting for the interruption frame and
         # it's blocking the input task.
-        if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
+        if self._wait_for_interruption and isinstance(
+            frame, (InterruptionFrame, InterruptionCompletedFrame)
+        ):
             await self.__process_frame(frame, direction, callback)
             return
 
@@ -661,18 +664,17 @@ class FrameProcessor(BaseObject):
 
         await self._call_event_handler("on_after_push_frame", frame)
 
-        # If we are waiting for an interruption and we get an interruption, then
-        # we can unblock `push_interruption_task_frame_and_wait()`.
-        if self._wait_for_interruption and isinstance(frame, InterruptionFrame):
+        # If we are waiting for an interruption and one completed, then we can
+        # unblock `push_interruption_task_frame_and_wait()`.
+        if self._wait_for_interruption and isinstance(frame, InterruptionCompletedFrame):
             self._wait_interruption_event.set()
 
     async def push_interruption_task_frame_and_wait(self):
         """Push an interruption task frame upstream and wait for the interruption.
 
         This function sends an `InterruptionTaskFrame` upstream to the pipeline
-        task and waits to receive the corresponding `InterruptionFrame`. When
-        the function finishes it is guaranteed that the `InterruptionFrame` has
-        been pushed downstream.
+        task and waits to receive an `InterruptionCompletedFrame`. This
+        guarantees the whole pipeline has been interrupted.
         """
         self._wait_for_interruption = True
 
