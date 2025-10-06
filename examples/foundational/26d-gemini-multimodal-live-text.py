@@ -80,6 +80,8 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
+    # KNOWN ISSUE: If using GeminiVertexMultimodalLiveLLMService, it appears
+    # you cannot specify a modality other than AUDIO.
     llm = GeminiMultimodalLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=SYSTEM_INSTRUCTION,
