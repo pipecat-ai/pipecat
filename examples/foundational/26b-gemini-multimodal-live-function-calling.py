@@ -122,6 +122,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         required=["location"],
     )
     search_tool = {"google_search": {}}
+    # KNOWN ISSUE: If using GeminiVertexMultimodalLiveLLMService, it appears
+    # you cannot use the "google_search" tool alongside other tools.
+    # See https://github.com/googleapis/python-genai/issues/941.
     tools = ToolsSchema(
         standard_tools=[weather_function, restaurant_function],
         custom_tools={AdapterType.GEMINI: [search_tool]},
