@@ -30,6 +30,7 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
+    InterruptionCompletedFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
     MetricsFrame,
@@ -691,8 +692,11 @@ class PipelineTask(BasePipelineTask):
             # bypassing the push queue and directly queue into the
             # pipeline. This is in case the push task is blocked waiting for a
             # pipeline-ending frame to finish traversing the pipeline.
-            logger.debug(f"{self}: received interruption task frame {frame}")
-            await self._pipeline.queue_frame(InterruptionFrame())
+            interruption_frame = InterruptionFrame(pushed_by_task=True)
+            logger.debug(
+                f"{self}: received interruption task frame {frame}, pushing {interruption_frame}"
+            )
+            await self._pipeline.queue_frame(interruption_frame)
         elif isinstance(frame, ErrorFrame):
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")
@@ -736,6 +740,14 @@ class PipelineTask(BasePipelineTask):
             self._pipeline_end_event.set()
         elif isinstance(frame, CancelFrame):
             self._pipeline_end_event.set()
+        elif isinstance(frame, InterruptionFrame) and frame.pushed_by_task:
+            # If an interruption frame made it all the way to the end of the
+            # pipeline, send an InterruptionCompleteFrame. Note that we are
+            # bypassing the push queue and directly queue into the
+            # pipeline. This is in case the push task is blocked waiting for a
+            # pipeline-ending frame to finish traversing the pipeline.
+            logger.debug(f"{self}: interruption completed with {frame}")
+            await self._pipeline.queue_frame(InterruptionCompletedFrame())
         elif isinstance(frame, HeartbeatFrame):
             await self._heartbeat_queue.put(frame)
 
