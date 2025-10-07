@@ -12,6 +12,8 @@ WhatsApp call events.
 """
 
 import asyncio
+import hashlib
+import hmac
 from typing import Awaitable, Callable, Dict, List, Optional
 
 import aiohttp
@@ -47,6 +49,7 @@ class WhatsAppClient:
         phone_number_id: str,
         session: aiohttp.ClientSession,
         ice_servers: Optional[List[IceServer]] = None,
+        whatsapp_secret: Optional[str] = None,
     ) -> None:
         """Initialize the WhatsApp client.
 
@@ -56,10 +59,12 @@ class WhatsAppClient:
             session: aiohttp session for making HTTP requests
             ice_servers: List of ICE servers for WebRTC connections. If None,
                         defaults to Google's public STUN server
+            whatsapp_secret: WhatsApp APP secret for validating that the webhook request came from WhatsApp.
         """
         self._whatsapp_api = WhatsAppApi(
             whatsapp_token=whatsapp_token, phone_number_id=phone_number_id, session=session
         )
+        self._whatsapp_secret = whatsapp_secret
         self._ongoing_calls_map: Dict[str, SmallWebRTCConnection] = {}
 
         # Set default ICE servers if none provided
@@ -133,10 +138,32 @@ class WhatsAppClient:
 
         return int(challenge)
 
+    async def _validate_whatsapp_webhook_request(self, raw_body: bytes, sha256_signature: str):
+        """Common handler for both /start and /connect endpoints."""
+        # Compute HMAC SHA256 using your App Secret
+        expected_signature = hmac.new(
+            key=self._whatsapp_secret.encode("utf-8"),
+            msg=raw_body,
+            digestmod=hashlib.sha256,
+        ).hexdigest()
+
+        # Extract signature from header (strip 'sha256=' prefix)
+        if not sha256_signature:
+            raise Exception("Missing X-Hub-Signature-256 header")
+        received_signature = sha256_signature.split("sha256=")[-1]
+
+        # Compare signatures securely
+        if not hmac.compare_digest(expected_signature, received_signature):
+            raise Exception("Invalid webhook signature")
+
+        logger.debug(f"Webhook signature verified!")
+
     async def handle_webhook_request(
         self,
         request: WhatsAppWebhookRequest,
         connection_callback: Optional[Callable[[SmallWebRTCConnection], Awaitable[None]]] = None,
+        raw_body: Optional[bytes] = None,
+        sha256_signature: Optional[str] = None,
     ) -> bool:
         """Handle a webhook request from WhatsApp.
 
@@ -150,6 +177,8 @@ class WhatsAppClient:
             connection_callback: Optional callback function to invoke when a new
                                WebRTC connection is established. The callback
                                receives the SmallWebRTCConnection instance.
+            raw_body: Optional bytes containing the raw request body.
+            sha256_signature: Optional X-Hub-Signature-256 header value from the request.
 
         Returns:
             bool: True if the webhook request was handled successfully, False otherwise
@@ -159,6 +188,8 @@ class WhatsAppClient:
             Exception: If connection establishment or API calls fail
         """
         try:
+            if self._whatsapp_secret:
+                await self._validate_whatsapp_webhook_request(raw_body, sha256_signature)
             for entry in request.entry:
                 for change in entry.changes:
                     # Handle connect events
