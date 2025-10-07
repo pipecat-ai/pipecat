@@ -73,6 +73,22 @@ class WhatsAppClient:
         else:
             self._ice_servers = ice_servers
 
+    def update_ice_servers(self, ice_servers: Optional[List[IceServer]] = None):
+        """Update the list of ICE servers used for WebRTC connections."""
+        self._ice_servers = ice_servers
+
+    def update_whatsapp_secret(self, whatsapp_secret: Optional[str] = None):
+        """Update the WhatsApp APP secret for validating that the webhook request came from WhatsApp."""
+        self._whatsapp_secret = whatsapp_secret
+
+    def update_whatsapp_token(self, whatsapp_token: str):
+        """Update the WhatsApp API access token."""
+        self._whatsapp_api.update_whatsapp_token(whatsapp_token)
+
+    def update_whatsapp_phone_number_id(self, phone_number_id: str):
+        """Update the WhatsApp phone number ID for authentication."""
+        self._whatsapp_api.update_whatsapp_phone_number_id(phone_number_id)
+
     async def terminate_all_calls(self) -> None:
         """Terminate all ongoing WhatsApp calls.
 

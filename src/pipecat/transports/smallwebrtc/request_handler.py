@@ -116,6 +116,10 @@ class SmallWebRTCRequestHandler:
                 detail="Cannot create new connection with existing connection active",
             )
 
+    def update_ice_servers(self, ice_servers: Optional[List[IceServer]] = None):
+        """Update the list of ICE servers used for WebRTC connections."""
+        self._ice_servers = ice_servers
+
     async def handle_web_request(
         self,
         request: SmallWebRTCRequest,
