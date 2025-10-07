@@ -16,6 +16,7 @@ google-crc32c==1.7.1
 google-genai==1.41.0
 googleapis-common-protos==1.70.0
 
+uvicorn
 daily-python==0.19.9
 aiortc
 opencv-python

@@ -54,7 +54,7 @@ from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from system_prompt import base_prompt
+from system_prompt import base_prompt, hindi_prompt
 
 logger.info("✅ All components loaded successfully!")
 
@@ -69,11 +69,12 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
     tts = KokoroTTSService()
+    # tts = KokoroTTSService(lang_code = "h", voice = "hf_alpha")
 
     messages = [
         {
             "role": "system",
-            "content": base_prompt,
+            "content": base_prompt,#hindi_prompt,
         },
     ]
 
