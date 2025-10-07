@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated default `GoogleLLMService` model to `gemini-2.5-flash`.
 
+### Deprecated
+
+- PlayHT is shutting down their API on December 31st, 2025. As a result,
+  `PlayHTTTSService` and `PlayHTHttpTTSService` are deprecated and will be
+  removed in a future version.
+
 ### Fixed
 
 - Fixed an issue with `AWSNovaSonicLLMService` where the client wouldn't
