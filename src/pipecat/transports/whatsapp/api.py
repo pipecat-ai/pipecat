@@ -241,6 +241,14 @@ class WhatsAppApi:
         self._whatsapp_url = f"{self.BASE_URL}{phone_number_id}/calls"
         self._whatsapp_token = whatsapp_token
 
+    def update_whatsapp_token(self, whatsapp_token: str):
+        """Update the WhatsApp access token for authentication."""
+        self._whatsapp_token = whatsapp_token
+
+    def update_whatsapp_phone_number_id(self, phone_number_id: str):
+        """Update the WhatsApp phone number ID for authentication."""
+        self._phone_number_id = phone_number_id
+
     async def answer_call_to_whatsapp(self, call_id: str, action: str, sdp: str, from_: str):
         """Answer an incoming WhatsApp call.
 
