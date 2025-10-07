@@ -103,6 +103,7 @@ try:
     from google.genai.types import (
         HttpOptions as _HttpOptions,
     )
+    from google.genai.types import ProactivityConfig as _ProactivityConfig
     from google.genai.types import (
         ThinkingConfig as _ThinkingConfig,
     )
@@ -461,6 +462,7 @@ class ContextWindowCompressionParams(BaseModel):
 
 ThinkingConfig = _ThinkingConfig
 HttpOptions = _HttpOptions
+ProactivityConfig = _ProactivityConfig
 
 
 class InputParams(BaseModel):
@@ -479,8 +481,21 @@ class InputParams(BaseModel):
         vad: Voice activity detection parameters. Defaults to None.
         context_window_compression: Context compression settings. Defaults to None.
         thinking: Thinking settings. Defaults to None.
-            Note that these settings aren't accepted by all models, including
-            the current default one.
+            Note that these settings may require specifying a model that
+            supports them, e.g. "gemini-2.5-flash-native-audio-preview-09-2025".
+        enable_affective_dialog: Enable affective dialog, which allows Gemini
+            to adapt to expression and tone. Defaults to None.
+            Note that these settings may require specifying a model that
+            supports them, e.g. "gemini-2.5-flash-native-audio-preview-09-2025".
+            Also note that this setting may require specifying an API version that
+            supports it, e.g. HttpOptions(api_version="v1alpha").
+        proactivity: Proactivity settings, which allows Gemini to proactively
+            decide how to behave, such as whether to avoid responding to
+            content that is not relevant. Defaults to None.
+            Note that these settings may require specifying a model that
+            supports them, e.g. "gemini-2.5-flash-native-audio-preview-09-2025".
+            Also note that this setting may require specifying an API version that
+            supports it, e.g. HttpOptions(api_version="v1alpha").
         extra: Additional parameters. Defaults to empty dict.
     """
 
@@ -500,6 +515,8 @@ class InputParams(BaseModel):
     vad: Optional[GeminiVADParams] = Field(default=None)
     context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
     thinking: Optional[ThinkingConfig] = Field(default=None)
+    enable_affective_dialog: Optional[bool] = Field(default=None)
+    proactivity: Optional[ProactivityConfig] = Field(default=None)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -627,6 +644,8 @@ class GeminiMultimodalLiveLLMService(LLMService):
             if params.context_window_compression
             else {},
             "thinking": params.thinking or {},
+            "enable_affective_dialog": params.enable_affective_dialog or False,
+            "proactivity": params.proactivity or {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -892,6 +911,14 @@ class GeminiMultimodalLiveLLMService(LLMService):
             # Add thinking configuration to configuration, if provided
             if self._settings.get("thinking"):
                 config.thinking_config = self._settings["thinking"]
+
+            # Add affective dialog setting, if provided
+            if self._settings.get("enable_affective_dialog", False):
+                config.enable_affective_dialog = self._settings["enable_affective_dialog"]
+
+            # Add proactivity configuration to configuration, if provided
+            if self._settings.get("proactivity"):
+                config.proactivity = self._settings["proactivity"]
 
             # Add VAD configuration to configuration, if provided
             if self._settings.get("vad"):
