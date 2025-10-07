@@ -90,7 +90,6 @@ try:
         FunctionResponse,
         GenerationConfig,
         GroundingMetadata,
-        HttpOptions,
         LiveConnectConfig,
         LiveServerMessage,
         Modality,
@@ -99,8 +98,13 @@ try:
         SlidingWindow,
         SpeechConfig,
         StartSensitivity,
-        ThinkingConfig,
         VoiceConfig,
+    )
+    from google.genai.types import (
+        HttpOptions as _HttpOptions,
+    )
+    from google.genai.types import (
+        ThinkingConfig as _ThinkingConfig,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -455,7 +459,8 @@ class ContextWindowCompressionParams(BaseModel):
     )  # None = use default (80% of context window)
 
 
-ThinkingParams = ThinkingConfig
+ThinkingConfig = _ThinkingConfig
+HttpOptions = _HttpOptions
 
 
 class InputParams(BaseModel):
@@ -494,7 +499,7 @@ class InputParams(BaseModel):
     )
     vad: Optional[GeminiVADParams] = Field(default=None)
     context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
-    thinking: Optional[ThinkingParams] = Field(default=None)
+    thinking: Optional[ThinkingConfig] = Field(default=None)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
