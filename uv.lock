@@ -1809,7 +1809,7 @@ wheels = [
 
 [[package]]
 name = "google-cloud-speech"
-version = "2.32.0"
+version = "2.33.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -1817,14 +1817,14 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/dc/fc/7e47328069850f084ee17e26b5572de067e30fdab862e381702222d237b7/google_cloud_speech-2.32.0.tar.gz", hash = "sha256:89c2618b131d310c6c00e7c04d290ffa9a5d68c20191030766a7737850f04e77", size = 387621, upload-time = "2025-04-14T10:16:35.386Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/74/9c5a556f8af19cab461058aa15e1409e7afa453ca2383473a24a12801ef7/google_cloud_speech-2.33.0.tar.gz", hash = "sha256:fd08511b5124fdaa768d71a4054e84a5d8eb02531cb6f84f311c0387ea1314ed", size = 389072, upload-time = "2025-06-11T23:56:37.231Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/85/a4/f41f2737cd0597f2aa5855b0a12f353fad4506868887590671230df81c77/google_cloud_speech-2.32.0-py3-none-any.whl", hash = "sha256:537b279d8697fe5b5bc5f485f2d48a6b343fc76f73385b5776806c37bc5f8ea1", size = 334148, upload-time = "2025-04-14T10:16:33.89Z" },
+    { url = "https://files.pythonhosted.org/packages/12/1d/880342b2541b4bad888ad8ab2ac77d4b5dad25b32a2a1c5f21140c14c8e3/google_cloud_speech-2.33.0-py3-none-any.whl", hash = "sha256:4ba16c8517c24a6abcde877289b0f40b719090504bf06b1adea248198ccd50a5", size = 335681, upload-time = "2025-06-11T23:56:36.026Z" },
 ]
 
 [[package]]
 name = "google-cloud-texttospeech"
-version = "2.26.0"
+version = "2.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -1832,9 +1832,9 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5b/3d/214506e1163138159a3ba172adc0945970843ce9a8c5332db06772806dff/google_cloud_texttospeech-2.26.0.tar.gz", hash = "sha256:43af1b88a6b9becde69a3bbf8aa80cdfa5f12f8999e56bcf9dec374354ed7f6a", size = 181084, upload-time = "2025-04-14T10:16:39.737Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/4b/7ccadbec28ee255a3176c3de0a14705c4b6469777f1c7ddbf4452fa893e3/google_cloud_texttospeech-2.31.0.tar.gz", hash = "sha256:1f0c0c6448f175e1e2f63d96fb13af5d9abee6970bbb22c1e4036f53136a5588", size = 184880, upload-time = "2025-09-25T14:03:22.786Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f0/eb/fb3a2c16f5612c4a131b2bfa242aaf7800ec0cee479759d9de2cc919ba70/google_cloud_texttospeech-2.26.0-py3-none-any.whl", hash = "sha256:837835aadeb261983d139ef1c5e60c99f80199e22330bf4f62e217360b9e07b8", size = 188122, upload-time = "2025-04-14T10:16:38.466Z" },
+    { url = "https://files.pythonhosted.org/packages/18/3e/54ff1a5af26f90c5d76e7e80b9208f8484035b5bd8fb6a06c819fed6a8c9/google_cloud_texttospeech-2.31.0-py3-none-any.whl", hash = "sha256:9442134b4b8e7e3d179dfd3850a5a953a6a6a9cf000a3640caddb85cf97ab69b", size = 191280, upload-time = "2025-09-25T14:03:16.667Z" },
 ]
 
 [[package]]
@@ -1874,7 +1874,7 @@ wheels = [
 
 [[package]]
 name = "google-genai"
-version = "1.24.0"
+version = "1.41.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1886,9 +1886,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8d/cf/37ac8cd4752e28e547b8a52765fe48a2ada2d0d286ea03f46e4d8c69ff4f/google_genai-1.24.0.tar.gz", hash = "sha256:bc896e30ad26d05a2af3d17c2ba10ea214a94f1c0cdb93d5c004dc038774e75a", size = 226740, upload-time = "2025-07-01T22:14:24.365Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/8b/ee20bcf707769b3b0e1106c3b5c811507736af7e8a60f29a70af1750ba19/google_genai-1.41.0.tar.gz", hash = "sha256:134f861bb0ace4e34af0501ecb75ceee15f7662fd8120698cd185e8cb39f2800", size = 245812, upload-time = "2025-10-02T22:30:29.699Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/30/28/a35f64fc02e599808101617a21d447d241dadeba2aac1f4dc2d1179b8218/google_genai-1.24.0-py3-none-any.whl", hash = "sha256:98be8c51632576289ecc33cd84bcdaf4356ef0bef04ac7578660c49175af22b9", size = 226065, upload-time = "2025-07-01T22:14:23.177Z" },
+    { url = "https://files.pythonhosted.org/packages/15/14/e5e8fbca8863fee718208566c4e927b8e9f45fd46ec5cf89e24759da545b/google_genai-1.41.0-py3-none-any.whl", hash = "sha256:111a3ee64c1a0927d3879faddb368234594432479a40c311e5fe4db338ca8778", size = 245931, upload-time = "2025-10-02T22:30:27.885Z" },
 ]
 
 [[package]]
@@ -4558,9 +4558,9 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'runner'", specifier = ">=0.115.6,<0.117.0" },
     { name = "fastapi", marker = "extra == 'websocket'", specifier = ">=0.115.6,<0.117.0" },
     { name = "faster-whisper", marker = "extra == 'whisper'", specifier = "~=1.1.1" },
-    { name = "google-cloud-speech", marker = "extra == 'google'", specifier = "~=2.32.0" },
-    { name = "google-cloud-texttospeech", marker = "extra == 'google'", specifier = "~=2.26.0" },
-    { name = "google-genai", marker = "extra == 'google'", specifier = "~=1.24.0" },
+    { name = "google-cloud-speech", marker = "extra == 'google'", specifier = ">=2.33.0,<3" },
+    { name = "google-cloud-texttospeech", marker = "extra == 'google'", specifier = ">=2.31.0,<3" },
+    { name = "google-genai", marker = "extra == 'google'", specifier = ">=1.41.0,<2" },
     { name = "groq", marker = "extra == 'groq'", specifier = "~=0.23.0" },
     { name = "hume", marker = "extra == 'hume'", specifier = ">=0.11.2" },
     { name = "langchain", marker = "extra == 'langchain'", specifier = "~=0.3.20" },
