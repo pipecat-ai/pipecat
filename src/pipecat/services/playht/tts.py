@@ -14,6 +14,7 @@ import io
 import json
 import struct
 import uuid
+import warnings
 from typing import AsyncGenerator, Optional
 
 import aiohttp
@@ -110,6 +111,11 @@ def language_to_playht_language(language: Language) -> Optional[str]:
 class PlayHTTTSService(InterruptibleTTSService):
     """PlayHT WebSocket-based text-to-speech service.
 
+    .. deprecated:: 0.0.88
+
+        This class is deprecated and will be removed in a future version.
+        PlayHT is shutting down their API on December 31st, 2025.
+
     Provides real-time text-to-speech synthesis using PlayHT's WebSocket API.
     Supports streaming audio generation with configurable voice engines and
     language settings.
@@ -157,6 +163,15 @@ class PlayHTTTSService(InterruptibleTTSService):
             sample_rate=sample_rate,
             **kwargs,
         )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "PlayHT is shutting down their API on December 31st, 2025. "
+                "'PlayHTTTSService' is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         params = params or PlayHTTTSService.InputParams()
 
@@ -401,6 +416,11 @@ class PlayHTTTSService(InterruptibleTTSService):
 class PlayHTHttpTTSService(TTSService):
     """PlayHT HTTP-based text-to-speech service.
 
+    .. deprecated:: 0.0.88
+
+        This class is deprecated and will be removed in a future version.
+        PlayHT is shutting down their API on December 31st, 2025.
+
     Provides text-to-speech synthesis using PlayHT's HTTP API for simpler,
     non-streaming synthesis. Suitable for use cases where streaming is not
     required and simpler integration is preferred.
@@ -454,8 +474,6 @@ class PlayHTHttpTTSService(TTSService):
 
         # Warn about deprecated protocol parameter if explicitly provided
         if protocol:
-            import warnings
-
             with warnings.catch_warnings():
                 warnings.simplefilter("always")
                 warnings.warn(
@@ -463,6 +481,15 @@ class PlayHTHttpTTSService(TTSService):
                     DeprecationWarning,
                     stacklevel=2,
                 )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "PlayHT is shutting down their API on December 31st, 2025. "
+                "'PlayHTHttpTTSService' is deprecated and will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         params = params or PlayHTHttpTTSService.InputParams()
 
