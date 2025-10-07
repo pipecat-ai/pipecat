@@ -5,6 +5,7 @@
 #
 
 import json
+import sys
 import unittest
 from typing import Any
 
@@ -20,6 +21,7 @@ from pipecat.frames.frames import (
     FunctionCallResultFrame,
     FunctionCallResultProperties,
     InterimTranscriptionFrame,
+    InterruptionCompletedFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
     LLMFullResponseEndFrame,
@@ -568,6 +570,7 @@ class BaseTestUserContextAggregator:
             BotStartedSpeakingFrame,
             UserStartedSpeakingFrame,
             InterruptionFrame,
+            InterruptionCompletedFrame,
             UserStoppedSpeakingFrame,
             *self.EXPECTED_CONTEXT_FRAMES,
         ]
