@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added some new configuration options to `GeminiMultimodalLiveLLMService`:
+
+  - `thinking`
+  - `enable_affective_dialog`
+  - `proactivity`
+
+  Note that these new configuration options require using a newer model than
+  the default, like "gemini-2.5-flash-native-audio-preview-09-2025". The last
+  two require specifying `http_options=HttpOptions(api_version="v1alpha")`.
+
 - Added `on_pipeline_error` event to `PipelineTask`. This event will get fired
   when an `ErrorFrame` is pushed (use `FrameProcessor.push_error()`).
 
