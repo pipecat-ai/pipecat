@@ -107,15 +107,13 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     @rtvi.event_handler("on_client_ready")
     async def on_client_ready(rtvi):
-        logger.info("RTVI client ready")
         await rtvi.set_bot_ready()
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
         # Kick off the conversation.
-        messages.append(
-            {"role": "system", "content": "Please introduce yourself to the user."})
+        messages.append({"role": "system", "content": "Please introduce yourself to the user."})
         await task.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
