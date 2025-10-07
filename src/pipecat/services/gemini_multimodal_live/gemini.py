@@ -14,6 +14,7 @@ voice transcription, streaming responses, and tool usage.
 import base64
 import io
 import json
+import random
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -98,6 +99,7 @@ try:
         Part,
         ProactivityConfig,
         RealtimeInputConfig,
+        SessionResumptionConfig,
         SlidingWindow,
         SpeechConfig,
         StartSensitivity,
@@ -618,6 +620,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
         self._vad_params = params.vad
 
+        # Reconnection tracking
+        self._consecutive_failures = 0
+        self._max_consecutive_failures = 3
+        self._connection_established_threshold = 10.0  # seconds
+        self._connection_start_time = None
+
         self._settings = {
             "frequency_penalty": params.frequency_penalty,
             "max_tokens": params.max_tokens,
@@ -644,6 +652,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Grounding metadata tracking
         self._search_result_buffer = ""
         self._accumulated_grounding_metadata = None
+
+        # Session resumption
+        self._session_resumption_handle: Optional[str] = None
 
     def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
         self._client = Client(api_key=api_key, http_options=http_options)
@@ -850,14 +861,19 @@ class GeminiMultimodalLiveLLMService(LLMService):
         else:
             await self.push_frame(frame, direction)
 
-    async def _connect(self):
+    async def _connect(self, session_resumption_handle: Optional[str] = None):
         """Establish client connection to Gemini Live API."""
         if self._session:
             # Here we assume that if we have a client, we are connected. We
             # handle disconnections in the send/recv code paths.
             return
 
-        logger.info("Connecting to Gemini service")
+        if session_resumption_handle:
+            logger.info(
+                f"Connecting to Gemini service with session_resumption_handle: {session_resumption_handle}"
+            )
+        else:
+            logger.info("Connecting to Gemini service")
         try:
             # Assemble basic configuration
             config = LiveConnectConfig(
@@ -879,6 +895,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                 ),
                 input_audio_transcription=AudioTranscriptionConfig(),
                 output_audio_transcription=AudioTranscriptionConfig(),
+                session_resumption=SessionResumptionConfig(handle=session_resumption_handle),
             )
 
             # Add context window compression to configuration, if enabled
@@ -965,12 +982,18 @@ class GeminiMultimodalLiveLLMService(LLMService):
         async with self._client.aio.live.connect(model=self._model_name, config=config) as session:
             logger.info("Connected to Gemini service")
 
+            # Mark connection start time
+            self._connection_start_time = time.time()
+
             await self._handle_session_ready(session)
 
             while True:
                 try:
                     turn = self._session.receive()
                     async for message in turn:
+                        # Reset failure counter if connection has been stable
+                        self._check_and_reset_failure_counter()
+
                         if message.server_content and message.server_content.model_turn:
                             await self._handle_msg_model_turn(message)
                         elif (
@@ -988,12 +1011,66 @@ class GeminiMultimodalLiveLLMService(LLMService):
                             await self._handle_msg_grounding_metadata(message)
                         elif message.tool_call:
                             await self._handle_msg_tool_call(message)
+                        elif message.session_resumption_update:
+                            self._handle_msg_resumption_update(message)
                 except Exception as e:
                     if not self._disconnecting:
-                        await self.push_error(
-                            ErrorFrame(error=f"{self} Error in receive loop: {e}", fatal=True)
-                        )
+                        should_reconnect = await self._handle_connection_error(e)
+                        if should_reconnect:
+                            await self._reconnect()
+                            return  # Exit this connection handler, _reconnect will start a new one
                     break
+
+    def _check_and_reset_failure_counter(self):
+        """Check if connection has been stable long enough to reset the failure counter.
+
+        If the connection has been active for longer than the established threshold
+        and there are accumulated failures, reset the counter to 0.
+        """
+        if (
+            self._connection_start_time
+            and self._consecutive_failures > 0
+            and time.time() - self._connection_start_time >= self._connection_established_threshold
+        ):
+            logger.info(
+                f"Connection stable for {self._connection_established_threshold}s, "
+                f"resetting failure counter from {self._consecutive_failures} to 0"
+            )
+            self._consecutive_failures = 0
+
+    async def _handle_connection_error(self, error: Exception) -> bool:
+        """Handle a connection error and determine if reconnection should be attempted.
+
+        Args:
+            error: The exception that caused the connection error.
+
+        Returns:
+            True if reconnection should be attempted, False if a fatal error should be pushed.
+        """
+        self._consecutive_failures += 1
+        logger.warning(
+            f"Connection error (failure {self._consecutive_failures}/{self._max_consecutive_failures}): {error}"
+        )
+
+        if self._consecutive_failures >= self._max_consecutive_failures:
+            logger.error(
+                f"Max consecutive failures ({self._max_consecutive_failures}) reached, "
+                "treating as fatal error"
+            )
+            await self.push_error(
+                ErrorFrame(error=f"{self} Error in receive loop: {error}", fatal=True)
+            )
+            return False
+        else:
+            logger.info(
+                f"Attempting reconnection ({self._consecutive_failures}/{self._max_consecutive_failures})"
+            )
+            return True
+
+    async def _reconnect(self):
+        """Reconnect to Gemini Live API."""
+        await self._disconnect()
+        await self._connect(session_resumption_handle=self._session_resumption_handle)
 
     async def _disconnect(self):
         """Disconnect from Gemini Live API and clean up resources."""
@@ -1013,10 +1090,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _send_user_audio(self, frame):
         """Send user audio frame to Gemini Live API."""
-        if self._audio_input_paused:
-            return
-
-        if not self._session:
+        if self._audio_input_paused or self._disconnecting or not self._session:
             return
 
         # Send all audio to Gemini
@@ -1051,7 +1125,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         Args:
             text: The text to send as user input.
         """
-        if not self._session:
+        if self._disconnecting or not self._session:
             return
 
         try:
@@ -1061,10 +1135,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _send_user_video(self, frame):
         """Send user video frame to Gemini Live API."""
-        if self._video_input_paused:
-            return
-
-        if not self._session:
+        if self._video_input_paused or self._disconnecting or not self._session:
             return
 
         now = time.time()
@@ -1085,6 +1156,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _create_initial_response(self):
         """Create initial response based on context history."""
+        if self._disconnecting:
+            return
+
         if not self._session:
             self._run_llm_when_session_ready = True
             return
@@ -1112,6 +1186,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
     async def _create_single_response(self, messages_list):
         """Create a single response from a list of messages."""
+        if self._disconnecting or not self._session:
+            return
+
         # Create a throwaway context just for the purpose of getting messages
         # in the right format
         context = GeminiMultimodalLiveContext.upgrade(OpenAILLMContext(messages=messages_list))
@@ -1132,6 +1209,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
     @traced_gemini_live(operation="llm_tool_result")
     async def _tool_result(self, tool_result_message):
         """Send tool result back to the API."""
+        if self._disconnecting or not self._session:
+            return
+
         # For now we're shoving the name into the tool_call_id field, so this
         # will work until we revisit that.
         id = tool_result_message.get("tool_call_id")
@@ -1406,6 +1486,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
         )
 
         await self.start_llm_usage_metrics(tokens)
+
+    def _handle_msg_resumption_update(self, message: LiveServerMessage):
+        update = message.session_resumption_update
+        if update.resumable and update.new_handle:
+            self._session_resumption_handle = update.new_handle
 
     async def _handle_send_error(self, error: Exception):
         # In server-to-server contexts, a WebSocket error should be quite rare.
