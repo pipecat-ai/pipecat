@@ -105,6 +105,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         observers=[RTVIObserver(rtvi)],
     )
 
+    @rtvi.event_handler("on_client_ready")
+    async def on_client_ready(rtvi):
+        logger.info("RTVI client ready")
+        await rtvi.set_bot_ready()
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
