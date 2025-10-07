@@ -410,18 +410,16 @@ wheels = [
 
 [[package]]
 name = "aws-sdk-bedrock-runtime"
-version = "0.0.2"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "smithy-aws-core", marker = "python_full_version >= '3.12'" },
-    { name = "smithy-aws-event-stream", marker = "python_full_version >= '3.12'" },
+    { name = "smithy-aws-core", extra = ["eventstream", "json"], marker = "python_full_version >= '3.12'" },
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
     { name = "smithy-http", extra = ["awscrt"], marker = "python_full_version >= '3.12'" },
-    { name = "smithy-json", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/51/8d/52ba543d5d2dbafbbb762ed7d87afd1b86d0e9abb6309d5956fcc92debf7/aws_sdk_bedrock_runtime-0.0.2.tar.gz", hash = "sha256:7a45752060713fccdc4ae560d34666c225c937e798f90fd1739566431e3c79dc", size = 76377, upload-time = "2025-04-09T20:37:21.192Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/e1/39971b907c83a7525bab112c9b395e1bb6d4bc23bc1712d6d7a050662217/aws_sdk_bedrock_runtime-0.1.0.tar.gz", hash = "sha256:bd062de5a48404f64e1dfe6fb8841fbbf68e8f1798c357d14eb427274cb96a2b", size = 85419, upload-time = "2025-09-29T19:40:01.855Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/1e/cd601cf90c7344dbfaeb6cf4d23c001cfe001ea212e681be16bab134cf50/aws_sdk_bedrock_runtime-0.0.2-py3-none-any.whl", hash = "sha256:4d954d103e8e2d304e1c87ccb8c4c77fae27f4c31b70c0ca50817eb30423f9f7", size = 72205, upload-time = "2025-04-09T20:37:19.956Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/e1/5b36bffe85010cdcd44730d1c2d5244653d57c002f440141d7fc3b9f1347/aws_sdk_bedrock_runtime-0.1.0-py3-none-any.whl", hash = "sha256:aac6ff47069d456ca5e23083d96a01e3e0cbc215414e6753c289d7d9efef3335", size = 78853, upload-time = "2025-09-29T19:40:00.341Z" },
 ]
 
 [[package]]
@@ -4546,7 +4544,7 @@ requires-dist = [
     { name = "aiortc", marker = "extra == 'webrtc'", specifier = ">=1.13.0,<2" },
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = "~=0.49.0" },
     { name = "audioop-lts", marker = "python_full_version >= '3.13'", specifier = "~=0.2.1" },
-    { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.0.2" },
+    { name = "aws-sdk-bedrock-runtime", marker = "python_full_version >= '3.12' and extra == 'aws-nova-sonic'", specifier = "~=0.1.0" },
     { name = "azure-cognitiveservices-speech", marker = "extra == 'azure'", specifier = "~=1.42.0" },
     { name = "cartesia", marker = "extra == 'cartesia'", specifier = "~=2.0.3" },
     { name = "coremltools", marker = "extra == 'local-smart-turn'", specifier = ">=8.0" },
@@ -6562,49 +6560,57 @@ wheels = [
 
 [[package]]
 name = "smithy-aws-core"
-version = "0.0.3"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aws-sdk-signers", marker = "python_full_version >= '3.12'" },
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
     { name = "smithy-http", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9b/20/262da16a1e41ffaa2865ad8bf5c1b98f92a5ecdc19022f2e9016c0acc21d/smithy_aws_core-0.0.3.tar.gz", hash = "sha256:ba891626798eec914a6b73c9cb5e1155f0767cc6b34190be582a49caba06c43d", size = 8370, upload-time = "2025-06-17T18:12:31.359Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/e8/8cef48be92ed09a112c54747a4515313ba96e767e7e0118a769aeb147e07/smithy_aws_core-0.1.0.tar.gz", hash = "sha256:5f197b69ad1380e9118e1e3c9032e0e305525ef56fb4fc97dea6414281065526", size = 11135, upload-time = "2025-09-29T19:37:13.072Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/de/4d9652a3199dbed6f82d6f6a9f4f15f8f88e941a3f84b9479c0cb1009981/smithy_aws_core-0.0.3-py3-none-any.whl", hash = "sha256:cb17d9c0fc4e810c34ea67fcc60f9c72407c176dde9360fa3f2795e63677a75a", size = 15271, upload-time = "2025-06-17T18:12:30.599Z" },
+    { url = "https://files.pythonhosted.org/packages/46/7e/6d05275646bc2cdf7b0749e9bd54958a4e808aafeee4d8ff2fdaa8233dc2/smithy_aws_core-0.1.0-py3-none-any.whl", hash = "sha256:a8cda4011562f45f1fc5957c3a981b6016d736178450e5f2a1586937632af487", size = 18959, upload-time = "2025-09-29T19:37:12.041Z" },
+]
+
+[package.optional-dependencies]
+eventstream = [
+    { name = "smithy-aws-event-stream", marker = "python_full_version >= '3.12'" },
+]
+json = [
+    { name = "smithy-json", marker = "python_full_version >= '3.12'" },
 ]
 
 [[package]]
 name = "smithy-aws-event-stream"
-version = "0.0.1"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/97/0e4ad1cdf92e46502262b507e9d4c28fe3559ff7dcffb7358db1d57ef043/smithy_aws_event_stream-0.0.1.tar.gz", hash = "sha256:4c4369146a0194790d0169cf86ffaa9feefe4f5ffec393ddeae55e86b56c088e", size = 11399, upload-time = "2025-04-07T19:44:39.336Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/26/8ff24194efed60b2df18f610ea05fa2a4c6546858b80a0a51335a4943b9b/smithy_aws_event_stream-0.1.0.tar.gz", hash = "sha256:6634691a3bf5d4801a2c29f0761db2dc4771f3ae43cdee50c10d4b4bb2f86475", size = 12216, upload-time = "2025-09-29T19:37:14.659Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/b4/8237238261927aee8b583fe3bde95c51367725a59213f3f39e3e979207eb/smithy_aws_event_stream-0.0.1-py3-none-any.whl", hash = "sha256:d5c0dd9a117e9dd927bafa857072fd26ccfa208a2768e5600ea628aebc93696b", size = 14992, upload-time = "2025-04-07T19:44:37.877Z" },
+    { url = "https://files.pythonhosted.org/packages/90/c4/2b63d31af58fc359577e5515bf730348a235f2f2fa10e17af8640495c81c/smithy_aws_event_stream-0.1.0-py3-none-any.whl", hash = "sha256:17a7300a85cb90df4c6c23f895ca6343361fa419203c3cf80019edd7d3b5f036", size = 15581, upload-time = "2025-09-29T19:37:13.589Z" },
 ]
 
 [[package]]
 name = "smithy-core"
-version = "0.0.2"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/41/30/cf766866ff5536cea5b4eec71efe97326a54f62a10d9e2615d303e9ff3fe/smithy_core-0.0.2.tar.gz", hash = "sha256:f81bc9a3008bc791dd025ce150802ccf564f2289afd093589b38f506e91327b5", size = 41327, upload-time = "2025-04-09T16:02:09.289Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/8d/16028d03456071d21de7591f1e1e6a1cc81b2389e53ef8663dbf59caf9cd/smithy_core-0.1.0.tar.gz", hash = "sha256:b159b8905264e1e4c613eab9f74cec0b2f5b8119c42fbadddb4da0a8ed8050e9", size = 48415, upload-time = "2025-09-29T19:37:16.873Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/71/2c/cc1c09352df57cc2f0a53e670042fc58902236c72b29ec1eed462695cddf/smithy_core-0.0.2-py3-none-any.whl", hash = "sha256:9f2a929e3c04d581448c5437cf69681c77bbc24656c3c8e30f9c2479963a4941", size = 53860, upload-time = "2025-04-09T16:02:08.101Z" },
+    { url = "https://files.pythonhosted.org/packages/ca/5b/563cb2beadcfa40597b0c3ff3f2d42e21f065b14782c4ba9cb41a44b745f/smithy_core-0.1.0-py3-none-any.whl", hash = "sha256:cb44e9355fb89e89f2c6ba6a1d59c5db4f2f7282c72d31d9307b6202d66cd0fa", size = 62895, upload-time = "2025-09-29T19:37:15.917Z" },
 ]
 
 [[package]]
 name = "smithy-http"
-version = "0.0.1"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/76/29/670680189584f6f282bf97c3d016660a04037119600fa1e1eb438e2a76b7/smithy_http-0.0.1.tar.gz", hash = "sha256:214d0f45a75078654c80ec13d518dcb690dcbec8b11a9a65b4cc2fe108c9bc33", size = 25050, upload-time = "2025-04-07T19:43:59.388Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/62/5ba46c7432fbb0852acf8340402879ba53bb4c009b875e1b5b2e9df844ff/smithy_http-0.1.0.tar.gz", hash = "sha256:ed44552531f594e31101f7186c7b01b508ecd38a860b45390a1cce7da700df4b", size = 28269, upload-time = "2025-09-29T19:37:18.629Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/37/7b/64efb9237630e6ec64f6c6ee6eef1dfbfd1aa5013788ea72edee378cdf39/smithy_http-0.0.1-py3-none-any.whl", hash = "sha256:b25ff39604de6998adc842455138c58411d2adac9b1130d58f115eea2f109f77", size = 35604, upload-time = "2025-04-07T19:43:58.024Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/23/d18076ea45b3000c5e9eb8ebd75a4ea1b65b5c59e5c2080a119e2679dfba/smithy_http-0.1.0-py3-none-any.whl", hash = "sha256:7657aaf4b9e025cb9d317406f417b49cf19fba9d1b2ab4f5e6d9dc5a2dd7cdba", size = 38995, upload-time = "2025-09-29T19:37:17.506Z" },
 ]
 
 [package.optional-dependencies]
@@ -6614,15 +6620,15 @@ awscrt = [
 
 [[package]]
 name = "smithy-json"
-version = "0.0.1"
+version = "0.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ijson", marker = "python_full_version >= '3.12'" },
     { name = "smithy-core", marker = "python_full_version >= '3.12'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/51/a0d795aac06233c93fbf97cfd54c6962e868f5611e5fb20e8a45e4bcc56f/smithy_json-0.0.1.tar.gz", hash = "sha256:97c559e559654892dbcf561a3e5fb73ebffc45ed6329cba08792f2a12e6487ff", size = 6095, upload-time = "2025-04-07T19:44:16.41Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/5b/0ecb10007475e1b8faca3bbff1be2fc6edb3ea12ffc5e939e2249be95325/smithy_json-0.1.0.tar.gz", hash = "sha256:84fb48e445b87d850c240d837702c16b259ea53bad76b655ac1bbd8094d48912", size = 7086, upload-time = "2025-09-29T19:37:20.432Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/b4/c5d207759ad967684a97d6ff2f24835d926a5fe4f96db8ea244e141a71b4/smithy_json-0.0.1-py3-none-any.whl", hash = "sha256:50d3b441c369bc16507f271699ad4f73e3961fec762c0d827a0e17709424948c", size = 8903, upload-time = "2025-04-07T19:44:15.138Z" },
+    { url = "https://files.pythonhosted.org/packages/62/95/e11c04e56aae12b62e38c49000004a1dc598a64dc207018c08448efde322/smithy_json-0.1.0-py3-none-any.whl", hash = "sha256:80ff64734dccdabf1ba6a2908555b97e60f62c07c3a27df48e421ee058413cb9", size = 9914, upload-time = "2025-09-29T19:37:19.459Z" },
 ]
 
 [[package]]
