@@ -35,6 +35,7 @@ from pipecat.frames.frames import (
     LLMMessagesFrame,
     LLMTextFrame,
     LLMUpdateSettingsFrame,
+    OutputImageRawFrame,
     UserImageRawFrame,
 )
 from pipecat.metrics.metrics import LLMTokenUsage
@@ -72,6 +73,9 @@ try:
         HttpOptions,
         Part,
     )
+
+    # Temporary hack to be able to process Nano Banana returned images.
+    genai._api_client.READ_BUFFER_SIZE = 5 * 1024 * 1024
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
@@ -682,7 +686,7 @@ class GoogleLLMService(LLMService):
         self,
         *,
         api_key: str,
-        model: str = "gemini-2.0-flash",
+        model: str = "gemini-2.5-flash",
         params: Optional[InputParams] = None,
         system_instruction: Optional[str] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
@@ -710,6 +714,7 @@ class GoogleLLMService(LLMService):
         self._api_key = api_key
         self._system_instruction = system_instruction
         self._http_options = http_options
+
         self._create_client(api_key, http_options)
         self._settings = {
             "max_tokens": params.max_tokens,
@@ -787,6 +792,9 @@ class GoogleLLMService(LLMService):
             # to check for models that we know default to thinkin on
             # and can be configured to turn it off.
             if not self._model_name.startswith("gemini-2.5-flash"):
+                return
+            # If we have an image model, we don't use a budget either.
+            if "image" in self._model_name:
                 return
             # If thinking_config is already set, don't override it.
             if "thinking_config" in generation_params:
@@ -927,6 +935,12 @@ class GoogleLLMService(LLMService):
                                         arguments=function_call.args or {},
                                     )
                                 )
+                            elif part.inline_data and part.inline_data.data:
+                                image = Image.open(io.BytesIO(part.inline_data.data))
+                                frame = OutputImageRawFrame(
+                                    image=image.tobytes(), size=image.size, format="RGB"
+                                )
+                                await self.push_frame(frame)
 
                     if (
                         candidate.grounding_metadata
