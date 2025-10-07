@@ -84,7 +84,7 @@ from pipecat.runner.types import (
 try:
     import uvicorn
     from dotenv import load_dotenv
-    from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, WebSocket
+    from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import HTMLResponse, RedirectResponse
 except ImportError as e:
@@ -275,6 +275,7 @@ def _setup_whatsapp_routes(app: FastAPI):
     WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
     WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
     WHATSAPP_WEBHOOK_VERIFICATION_TOKEN = os.getenv("WHATSAPP_WEBHOOK_VERIFICATION_TOKEN")
+    WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
 
     if not all(
         [
@@ -325,7 +326,12 @@ def _setup_whatsapp_routes(app: FastAPI):
         summary="Handle WhatsApp webhook events",
         description="Processes incoming WhatsApp messages and call events",
     )
-    async def whatsapp_webhook(body: WhatsAppWebhookRequest, background_tasks: BackgroundTasks):
+    async def whatsapp_webhook(
+        body: WhatsAppWebhookRequest,
+        background_tasks: BackgroundTasks,
+        request: Request,
+        x_hub_signature_256: str = Header(None),
+    ):
         """Handle incoming WhatsApp webhook events.
 
         For call events, establishes WebRTC connections and spawns bot instances
@@ -357,7 +363,10 @@ def _setup_whatsapp_routes(app: FastAPI):
 
         try:
             # Process the webhook request
-            result = await whatsapp_client.handle_webhook_request(body, connection_callback)
+            raw_body = await request.body()
+            result = await whatsapp_client.handle_webhook_request(
+                body, connection_callback, sha256_signature=x_hub_signature_256, raw_body=raw_body
+            )
             logger.debug(f"Webhook processed successfully: {result}")
             return {"status": "success", "message": "Webhook processed successfully"}
         except ValueError as ve:
@@ -376,6 +385,7 @@ def _setup_whatsapp_routes(app: FastAPI):
         async with aiohttp.ClientSession() as session:
             whatsapp_client = WhatsAppClient(
                 whatsapp_token=WHATSAPP_TOKEN,
+                whatsapp_secret=WHATSAPP_APP_SECRET,
                 phone_number_id=WHATSAPP_PHONE_NUMBER_ID,
                 session=session,
             )
