@@ -99,6 +99,7 @@ try:
         SlidingWindow,
         SpeechConfig,
         StartSensitivity,
+        ThinkingConfig,
         VoiceConfig,
     )
 except ModuleNotFoundError as e:
@@ -454,6 +455,9 @@ class ContextWindowCompressionParams(BaseModel):
     )  # None = use default (80% of context window)
 
 
+ThinkingParams = ThinkingConfig
+
+
 class InputParams(BaseModel):
     """Input parameters for Gemini Multimodal Live generation.
 
@@ -469,6 +473,9 @@ class InputParams(BaseModel):
         media_resolution: Media resolution setting. Defaults to UNSPECIFIED.
         vad: Voice activity detection parameters. Defaults to None.
         context_window_compression: Context compression settings. Defaults to None.
+        thinking: Thinking settings. Defaults to None.
+            Note that these settings aren't accepted by all models, including
+            the current default one.
         extra: Additional parameters. Defaults to empty dict.
     """
 
@@ -487,6 +494,7 @@ class InputParams(BaseModel):
     )
     vad: Optional[GeminiVADParams] = Field(default=None)
     context_window_compression: Optional[ContextWindowCompressionParams] = Field(default=None)
+    thinking: Optional[ThinkingParams] = Field(default=None)
     extra: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -613,6 +621,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             "context_window_compression": params.context_window_compression.model_dump()
             if params.context_window_compression
             else {},
+            "thinking": params.thinking or {},
             "extra": params.extra if isinstance(params.extra, dict) else {},
         }
 
@@ -874,6 +883,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     compression_config.trigger_tokens = trigger_tokens
 
                 config.context_window_compression = compression_config
+
+            # Add thinking configuration to configuration, if provided
+            if self._settings.get("thinking"):
+                config.thinking_config = self._settings["thinking"]
 
             # Add VAD configuration to configuration, if provided
             if self._settings.get("vad"):
