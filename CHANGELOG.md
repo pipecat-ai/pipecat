@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       ...
   ```
 
+- Added a `service_tier` `InputParam` to the `BaseOpenAILLMService`. This
+  parameter can influence the latency of the response. For example `"priority"`
+  will result in faster completions, but in exchange for a higher price.
+
 ## [0.0.89] - 2025-10-07
 
 ### Fixed
@@ -36,8 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `HumeTTSService` for text-to-speech synthesis using Hume AI's expressive
   voice models. Provides high-quality, emotionally expressive speech synthesis
   with support for various voice models. Includes example in
-  `examples/foundational/07ad-interruptible-hume.py`. Use with `uv pip install
-  pipecat-ai[hume]`.
+  `examples/foundational/07ad-interruptible-hume.py`. Use with:
+  `uv pip install pipecat-ai[hume]`.
 
 ### Changed
 
