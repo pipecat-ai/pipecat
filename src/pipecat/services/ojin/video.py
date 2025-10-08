@@ -81,7 +81,6 @@ class OjinPersonaSettings:
     cache_idle_sequence: bool = field(
         default=False
     )  # whether to cache the idle sequence loop to avoid doing inference while persona is not speaking
-    idle_sequence_duration: int = field(default=30)  # length of the idle sequence loop in seconds.
     idle_to_speech_seconds: float = field(
         default=0.75
     )  # seconds to wait before starting speech, recommended not less than 0.75 to avoid missing frames. This ensures smooth transition between idle frames and speech frames
@@ -140,7 +139,7 @@ class OjinPersonaFSM:
         self._frame_processor = frame_processor
         self._state = PersonaState.INVALID
         self._num_frames_missed = 0
-        self._playback_loop = PersonaPlaybackLoop(settings.idle_sequence_duration, 25)
+        self._playback_loop = PersonaPlaybackLoop(25)
         self._speech_frames: asyncio.Queue[OutputImageRawFrame] = asyncio.Queue()
         self._transition_time: float = -1
         self._current_frame_idx: int = -1
@@ -196,7 +195,7 @@ class OjinPersonaFSM:
         """
         # While initializing we consider frames as idle frames
         if self._state == PersonaState.INITIALIZING:
-            self._playback_loop.add_frame(image_frame.image)
+            self._playback_loop.add_frame(image_frame.image, image_frame.pts)
 
         # On any other state these would be speech frames
         else:
@@ -477,7 +476,6 @@ class OjinPersonaInteraction:
     start_frame_idx: int | None = None
     frame_idx: int = 0
     filter_amount: float = 0.0
-    num_loop_frames: int = 0
     state: InteractionState = InteractionState.INACTIVE
     ending_extra_time: float = 1.0
     ending_timestamp: float = 0.0
@@ -581,27 +579,26 @@ class OjinPersonaService(FrameProcessor):
         self._receive_task: Optional[asyncio.Task] = None
         self._resampler = create_default_resampler()
         self._server_fps_tracker = FPSTracker("OjinPersonaService")
-        self.should_generate_silence: bool = False
         self._last_frame_timestamp: float | None = None
         self._stopping = False
 
-    async def _generate_and_send_silence(self, duration: float):
-        num_samples = int(duration * OJIN_PERSONA_SAMPLE_RATE)
-        silence_audio = b"\x00\x00" * num_samples
-        logger.debug(f"Sending {duration}s of silence to initialize persona")
+    async def _generate_idle_sequence_frames(self):
+        dummy_audio = b"\x00\x00"
+        logger.debug(f"Generating idle sequence frames")
         assert self._interaction is not None and self._interaction.audio_input_queue is not None
 
         start_frame_idx = self._interaction.start_frame_idx or 0
         await self.push_ojin_message(
             OjinPersonaInteractionInputMessage(
-                audio_int16_bytes=silence_audio,
+                audio_int16_bytes=dummy_audio,
                 interaction_id=self._interaction.interaction_id,
                 params={
                     "start_frame_idx": start_frame_idx,
                     "filter_amount": self._interaction.filter_amount,
                     "mouth_opening_scale": self._interaction.mouth_opening_scale,
                     "source_keyframes_index": self._interaction.source_keyframes_index,
-                    "destination_keyframes_index": self._interaction.destination_keyframes_index,
+                    "destination_keyframes_index": self._interaction.destination_keyframes_index,                    
+                    "stop_on_last_source_frame":True #Tells the server to stop sending frames when it reaches the last frame of the source
                 },
             )
         )
@@ -619,14 +616,13 @@ class OjinPersonaService(FrameProcessor):
         """
         if new_state == PersonaState.INITIALIZING:
             self._server_fps_tracker.start()
-            # Send silence to persona with idle_sequence_duration
             await self._start_interaction(
                 is_speech=False,
                 active_keyframes_slot=IDLE_ANIMATION_KEYFRAMES_SLOT,
                 keyframe_slot_to_update=IDLE_ANIMATION_KEYFRAMES_SLOT,
             )
             assert self._interaction is not None
-            await self._generate_and_send_silence(self._settings.idle_sequence_duration)
+            await self._generate_idle_sequence_frames()
             await self._end_interaction()
 
         if new_state == PersonaState.IDLE_TO_SPEECH:
@@ -1054,7 +1050,6 @@ class OjinPersonaService(FrameProcessor):
         self._interaction = new_interaction or OjinPersonaInteraction(
             persona_id=self._settings.persona_config_id,
         )
-        self._interaction.num_loop_frames = self._settings.idle_sequence_duration * 25  # 25 fps
         self._interaction.set_state(InteractionState.STARTING)
         if is_speech:
             self._interaction.filter_amount = SPEECH_FILTER_AMOUNT
@@ -1269,14 +1264,12 @@ class PersonaPlaybackLoop:
     """Manages a complete idle animation loop with synchronized audio and video."""
 
     id: int = 0
-    duration: int = 0  # seconds
     frames: list[AnimationKeyframe] = []  # Keyframes of the idle animation
     playback_time: float = 0  # Total elapsed playback time in seconds
     is_mirrored_loop: bool = False  # whether to mirror the idle loop
 
     def __init__(
         self,
-        duration: int,
         fps: int = 25,
     ):
         """Initialize the persona idle loop animation.
@@ -1286,13 +1279,12 @@ class PersonaPlaybackLoop:
             fps (int, optional): Frames per second for the animation. Defaults to 25.
 
         """
-        self.duration = duration
         self.fps = fps
 
     def num_frames(self) -> int:
         return len(self.frames)
 
-    def add_frame(self, image: bytes) -> AnimationKeyframe:
+    def add_frame(self, image: bytes, idx:int) -> AnimationKeyframe:
         """Get an existing keyframe or create a new one at the specified frame index.
 
         Args:
@@ -1303,11 +1295,8 @@ class PersonaPlaybackLoop:
 
         """
         frame_idx = len(self.frames)
-        expected_frames = self.duration * self.fps
         keyframe = AnimationKeyframe(
-            mirror_frame_idx=mirror_index(
-                frame_idx, expected_frames, 2 if self.is_mirrored_loop else 1
-            ),
+            idx,
             frame_idx=frame_idx,
             image=image,
         )

@@ -143,7 +143,6 @@ async def main():
         persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),        
         image_size=(1280, 720),
         idle_to_speech_seconds=1.0,
-        idle_sequence_duration=5,
         tts_audio_passthrough=False,
         push_bot_stopped_speaking_frames=False,
     ))    
