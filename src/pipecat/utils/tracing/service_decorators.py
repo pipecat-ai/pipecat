@@ -651,9 +651,9 @@ def traced_gemini_live(operation: str) -> Callable:
 
                         elif operation == "llm_tool_call" and args:
                             # Extract tool call information
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "toolCall") and evt.toolCall.functionCalls:
-                                function_calls = evt.toolCall.functionCalls
+                            msg = args[0] if args else None
+                            if msg and hasattr(msg, "tool_call") and msg.tool_call.function_calls:
+                                function_calls = msg.tool_call.function_calls
                                 if function_calls:
                                     # Add information about the first function call
                                     call = function_calls[0]
@@ -722,19 +722,19 @@ def traced_gemini_live(operation: str) -> Callable:
 
                         elif operation == "llm_response" and args:
                             # Extract usage and response metadata from turn complete event
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
-                                usage = evt.usageMetadata
+                            msg = args[0] if args else None
+                            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                                usage = msg.usage_metadata
 
                                 # Token usage - basic attributes for span visibility
-                                if hasattr(usage, "promptTokenCount"):
-                                    operation_attrs["tokens.prompt"] = usage.promptTokenCount or 0
-                                if hasattr(usage, "responseTokenCount"):
+                                if hasattr(usage, "prompt_token_count"):
+                                    operation_attrs["tokens.prompt"] = usage.prompt_token_count or 0
+                                if hasattr(usage, "response_token_count"):
                                     operation_attrs["tokens.completion"] = (
-                                        usage.responseTokenCount or 0
+                                        usage.response_token_count or 0
                                     )
-                                if hasattr(usage, "totalTokenCount"):
-                                    operation_attrs["tokens.total"] = usage.totalTokenCount or 0
+                                if hasattr(usage, "total_token_count"):
+                                    operation_attrs["tokens.total"] = usage.total_token_count or 0
 
                             # Get output text and modality from service state
                             text = getattr(self, "_bot_text_buffer", "")
@@ -751,9 +751,9 @@ def traced_gemini_live(operation: str) -> Callable:
 
                             # Add turn completion status
                             if (
-                                evt
-                                and hasattr(evt, "serverContent")
-                                and evt.serverContent.turnComplete
+                                msg
+                                and hasattr(msg, "server_content")
+                                and msg.server_content.turn_complete
                             ):
                                 operation_attrs["turn_complete"] = True
 
@@ -772,16 +772,16 @@ def traced_gemini_live(operation: str) -> Callable:
 
                         # For llm_response operation, also handle token usage metrics
                         if operation == "llm_response" and hasattr(self, "start_llm_usage_metrics"):
-                            evt = args[0] if args else None
-                            if evt and hasattr(evt, "usageMetadata") and evt.usageMetadata:
-                                usage = evt.usageMetadata
+                            msg = args[0] if args else None
+                            if msg and hasattr(msg, "usage_metadata") and msg.usage_metadata:
+                                usage = msg.usage_metadata
                                 # Create LLMTokenUsage object
                                 from pipecat.metrics.metrics import LLMTokenUsage
 
                                 tokens = LLMTokenUsage(
-                                    prompt_tokens=usage.promptTokenCount or 0,
-                                    completion_tokens=usage.responseTokenCount or 0,
-                                    total_tokens=usage.totalTokenCount or 0,
+                                    prompt_tokens=usage.prompt_token_count or 0,
+                                    completion_tokens=usage.response_token_count or 0,
+                                    total_tokens=usage.total_token_count or 0,
                                 )
                                 _add_token_usage_to_span(current_span, tokens)
 
