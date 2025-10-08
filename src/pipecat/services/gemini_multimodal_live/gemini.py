@@ -554,7 +554,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             api_key: Google AI API key for authentication.
             base_url: API endpoint base URL. Defaults to the official Gemini Live endpoint.
 
-                .. deprecated:: 0.0.89
+                .. deprecated:: 0.0.90
                     This parameter is deprecated and no longer has any effect.
                     Please use `http_options` to customize requests made by the
                     API client.
