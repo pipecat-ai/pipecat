@@ -21,3 +21,4 @@ daily-python==0.19.9
 aiortc
 opencv-python
 faster-whisper
+pipecat_ai_small_webrtc_prebuilt

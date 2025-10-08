@@ -50,11 +50,11 @@ from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 # from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.kokoro.tts import KokoroTTSService
-from pipecat.services.whisper.stt import WhisperSTTService
+from pipecat.services.whisper.stt import WhisperSTTServiceMLX
 from pipecat.services.google.llm import GoogleLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
-from system_prompt import base_prompt, hindi_prompt
+from system_prompt import base_prompt, hindi_prompt, conversational_prompt
 
 logger.info("✅ All components loaded successfully!")
 
@@ -64,7 +64,10 @@ load_dotenv(override=True)
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    stt = WhisperSTTService(model_path="/Users/abhishek.yadav/.cache/huggingface/hub/models--Systran--faster-whisper-base.en/snapshots/3d3d5dee26484f91867d81cb899cfcf72b96be6c", local_files_only=True, audio_passthrough=False)
+    # Build a path to the whisper-tiny model relative to this script.
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(script_dir, "..", "..", "whisper-tiny")
+    stt = WhisperSTTServiceMLX(model=model_path)
 
     llm = GoogleLLMService(api_key=os.getenv("GOOGLE_API_KEY"))
 
@@ -74,7 +77,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": base_prompt,#hindi_prompt,
+            "content": conversational_prompt,
+            # "content": hindi_prompt,
         },
     ]
 
