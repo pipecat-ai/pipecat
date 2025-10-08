@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `GeminiMultimodalLiveLLMService` to use the `google-genai` library
   rather than use WebSockets directly.
 
+### Fixed
+
+- `GeminiMultimodalLiveLLMService` will now end gracefully (i.e. after the bot
+  has finished) upon receiving an `EndFrame`.
+
+- `GeminiMultimodalLiveLLMService` will try to seamlessly reconnect when it
+  loses its connection.
+
 ## [0.0.89] - 2025-10-07
 
 ### Fixed
@@ -69,9 +77,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed in a future version.
 
 ### Fixed
-
-- `GeminiMultimodalLiveLLMService` will now end gracefully (i.e. after the bot
-  has finished) upon receiving an `EndFrame`.
 
 - Fixed an issue with `AWSNovaSonicLLMService` where the client wouldn't
   connect due to a breaking change in the AWS dependency chain.
