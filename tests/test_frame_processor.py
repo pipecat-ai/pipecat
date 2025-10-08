@@ -10,7 +10,6 @@ import unittest
 from pipecat.frames.frames import (
     EndFrame,
     Frame,
-    InterruptionCompletedFrame,
     InterruptionFrame,
     OutputTransportMessageUrgentFrame,
     TextFrame,
@@ -102,7 +101,6 @@ class TestFrameProcessor(unittest.IsolatedAsyncioTestCase):
         expected_down_frames = [
             InterruptionFrame,
             InterruptionFrame,
-            InterruptionCompletedFrame,
             OutputTransportMessageUrgentFrame,
             EndFrame,
         ]
