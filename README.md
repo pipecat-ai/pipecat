@@ -51,6 +51,10 @@ Looking for help debugging your pipeline and processors? Check out [Whisker](htt
 
 Love terminal applications? Check out [Tail](https://github.com/pipecat-ai/tail), a terminal dashboard for Pipecat.
 
+### 📺️ Pipecat TV Channel
+
+Catch new features, interviews, and how-tos on our [Pipecat TV](https://www.youtube.com/playlist?list=PLzU2zoMTQIHjqC3v4q2XVSR3hGSzwKFwH) channel.
+
 ## 🎬 See it in action
 
 <p float="left">
