@@ -11,6 +11,7 @@ import unittest
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    ErrorFrame,
     Frame,
     HeartbeatFrame,
     InputAudioRawFrame,
@@ -450,3 +451,34 @@ class TestPipelineTask(unittest.IsolatedAsyncioTestCase):
             await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
         except asyncio.CancelledError:
             assert cancelled
+
+    async def test_task_error(self):
+        class ErrorProcessor(FrameProcessor):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+
+            async def process_frame(self, frame: Frame, direction: FrameDirection):
+                await super().process_frame(frame, direction)
+
+                if isinstance(frame, TextFrame):
+                    await self.push_error(ErrorFrame("Boo!"))
+
+                await self.push_frame(frame, direction)
+
+        error_received = False
+
+        pipeline = Pipeline([ErrorProcessor()])
+        task = PipelineTask(pipeline)
+
+        @task.event_handler("on_pipeline_error")
+        async def on_pipeline_error(task: PipelineTask, frame: ErrorFrame):
+            nonlocal error_received
+            error_received = True
+            await task.cancel()
+
+        await task.queue_frame(TextFrame(text="Hello from Pipecat!"))
+
+        try:
+            await task.run(PipelineTaskParams(loop=asyncio.get_event_loop()))
+        except asyncio.CancelledError:
+            assert error_received

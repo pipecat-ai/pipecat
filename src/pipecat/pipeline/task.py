@@ -138,6 +138,8 @@ class PipelineTask(BasePipelineTask):
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
 
+    - on_pipeline_error: Called when an error occurs with ErrorFrame
+
     Example::
 
         @task.event_handler("on_frame_reached_upstream")
@@ -148,8 +150,16 @@ class PipelineTask(BasePipelineTask):
         async def on_pipeline_idle_timeout(task):
             ...
 
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
+            ...
+
         @task.event_handler("on_pipeline_finished")
         async def on_pipeline_finished(task, frame):
+            ...
+
+        @task.event_handler("on_pipeline_error")
+        async def on_pipeline_error(task, frame):
             ...
     """
 
@@ -288,6 +298,7 @@ class PipelineTask(BasePipelineTask):
         self._register_event_handler("on_pipeline_ended")
         self._register_event_handler("on_pipeline_cancelled")
         self._register_event_handler("on_pipeline_finished")
+        self._register_event_handler("on_pipeline_error")
 
     @property
     def params(self) -> PipelineParams:
@@ -694,12 +705,11 @@ class PipelineTask(BasePipelineTask):
             logger.debug(f"{self}: received interruption task frame {frame}")
             await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
+            await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")
                 # Cancel all tasks downstream.
                 await self.queue_frame(CancelFrame())
-                # Tell the task we should stop.
-                await self.queue_frame(StopTaskFrame())
             else:
                 logger.warning(f"{self}: Something went wrong: {frame}")
 
