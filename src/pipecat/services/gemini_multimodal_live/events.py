@@ -4,7 +4,14 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Event models and utilities for Google Gemini Multimodal Live API."""
+"""Event models and utilities for Google Gemini Multimodal Live API.
+
+.. deprecated:: 0.0.90
+    Importing StartSensitivity and EndSensitivity from this module is deprecated.
+    Import them directly from google.genai.types instead.
+"""
+
+import warnings
 
 from loguru import logger
 
@@ -23,5 +30,12 @@ except ModuleNotFoundError as e:
 # These aliases are just here for backward compatibility, since we used to
 # define public-facing StartSensitivity and EndSensitivity enums in this
 # module.
+warnings.warn(
+    "Importing StartSensitivity and EndSensitivity from "
+    "pipecat.services.gemini_multimodal_live.events is deprecated. "
+    "Please import them directly from google.genai.types instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 StartSensitivity = _StartSensitivity
 EndSensitivity = _EndSensitivity
