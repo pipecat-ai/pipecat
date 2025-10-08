@@ -90,22 +90,18 @@ try:
         FunctionResponse,
         GenerationConfig,
         GroundingMetadata,
+        HttpOptions,
         LiveConnectConfig,
         LiveServerMessage,
         Modality,
         Part,
+        ProactivityConfig,
         RealtimeInputConfig,
         SlidingWindow,
         SpeechConfig,
         StartSensitivity,
+        ThinkingConfig,
         VoiceConfig,
-    )
-    from google.genai.types import (
-        HttpOptions as _HttpOptions,
-    )
-    from google.genai.types import ProactivityConfig as _ProactivityConfig
-    from google.genai.types import (
-        ThinkingConfig as _ThinkingConfig,
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -458,11 +454,6 @@ class ContextWindowCompressionParams(BaseModel):
     trigger_tokens: Optional[int] = Field(
         default=None
     )  # None = use default (80% of context window)
-
-
-ThinkingConfig = _ThinkingConfig
-HttpOptions = _HttpOptions
-ProactivityConfig = _ProactivityConfig
 
 
 class InputParams(BaseModel):
