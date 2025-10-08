@@ -849,15 +849,13 @@ class FrameProcessorResumeUrgentFrame(SystemFrame):
 class InterruptionFrame(SystemFrame):
     """Frame indicating user started speaking (interruption detected).
 
-    Usually emitted by the pipeline task to indicate that all frame processors
-    should be interrrupted.
-
-    Parameters:
-        pushed_by_task: Whether this interruption was pushed from the pipeline
-        task.
+    Emitted by the BaseInputTransport to indicate that a user has started
+    speaking (i.e. is interrupting). This is similar to
+    UserStartedSpeakingFrame except that it should be pushed concurrently
+    with other frames (so the order is not guaranteed).
     """
 
-    pushed_by_task: bool = False
+    pass
 
 
 @dataclass
@@ -886,17 +884,6 @@ class StartInterruptionFrame(InterruptionFrame):
                 DeprecationWarning,
                 stacklevel=2,
             )
-
-
-@dataclass
-class InterruptionCompletedFrame(SystemFrame):
-    """Frame indicating that the whole pipeline has been interrupted.
-
-    This is emitted by the pipeline task when an InterruptionFrame has made it
-    all the way to the end of pipeline, interrupting all the frame processors.
-    """
-
-    pass
 
 
 @dataclass
