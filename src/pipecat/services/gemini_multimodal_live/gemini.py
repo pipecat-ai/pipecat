@@ -527,7 +527,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
         self,
         *,
         api_key: str,
-        base_url: str = "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent",
+        base_url: Optional[str] = None,
         model="models/gemini-2.0-flash-live-001",
         voice_id: str = "Charon",
         start_audio_paused: bool = False,
@@ -565,10 +565,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             **kwargs: Additional arguments passed to parent LLMService.
         """
         # Check for deprecated parameter usage
-        if (
-            base_url
-            != "generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-        ):
+        if base_url is not None:
             import warnings
 
             with warnings.catch_warnings():
