@@ -51,12 +51,6 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 ElevenLabsOutputFormat = Literal[
-    "mp3_22050_32",
-    "mp3_44100_32",
-    "mp3_44100_64",
-    "mp3_44100_96",
-    "mp3_44100_128",
-    "mp3_44100_192",
     "pcm_8000",
     "pcm_16000",
     "pcm_22050",
