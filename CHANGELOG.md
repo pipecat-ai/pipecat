@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Reverted a change that was causing pipelines to be frozen when using
-  interruption strategies.
+- Reverted a change introduced in 0.0.88 that was causing pipelines to be frozen
+  when using interruption strategies and processors that block interruption
+  frames (e.g. `STTMuteFilter`).
 
 ## [0.0.88] - 2025-10-07
 
