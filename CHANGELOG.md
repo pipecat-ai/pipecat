@@ -5,6 +5,19 @@ All notable changes to **Pipecat** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added `on_pipeline_error` event to `PipelineTask`. This event will get fired
+  when an `ErrorFrame` is pushed (use `FrameProcessor.push_error()`).
+
+  ```python
+  @task.event_handler("on_pipeline_error")
+  async def on_pipeline_error(task: PipelineTask, frame: ErrorFrame):
+      ...
+  ```
+
 ## [0.0.89] - 2025-10-07
 
 ### Fixed
