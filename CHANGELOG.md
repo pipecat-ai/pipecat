@@ -70,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `GeminiMultimodalLiveLLMService` will now end gracefully (i.e. after the bot
+  has finished) upon receiving an `EndFrame`.
+
 - Fixed an issue with `AWSNovaSonicLLMService` where the client wouldn't
   connect due to a breaking change in the AWS dependency chain.
 
