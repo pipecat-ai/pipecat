@@ -93,6 +93,7 @@ try:
         HttpOptions,
         LiveConnectConfig,
         LiveServerMessage,
+        MediaResolution,
         Modality,
         Part,
         ProactivityConfig,
@@ -877,7 +878,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
                         ),
                         language_code=self._settings["language"],
                     ),
-                    media_resolution=self._settings["media_resolution"].value,
+                    media_resolution=MediaResolution(self._settings["media_resolution"].value),
                 ),
                 input_audio_transcription=AudioTranscriptionConfig(),
                 output_audio_transcription=AudioTranscriptionConfig(),
@@ -923,11 +924,11 @@ class GeminiMultimodalLiveLLMService(LLMService):
                     has_vad_settings = True
 
                 if vad_params.start_sensitivity:
-                    vad_config.start_of_speech_sensitivity = vad_params.start_sensitivity.value
+                    vad_config.start_of_speech_sensitivity = vad_params.start_sensitivity
                     has_vad_settings = True
 
                 if vad_params.end_sensitivity:
-                    vad_config.end_of_speech_sensitivity = vad_params.end_sensitivity.value
+                    vad_config.end_of_speech_sensitivity = vad_params.end_sensitivity
                     has_vad_settings = True
 
                 if vad_params.prefix_padding_ms is not None:
