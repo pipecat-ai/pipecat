@@ -659,6 +659,9 @@ class GeminiMultimodalLiveLLMService(LLMService):
         # Session resumption
         self._session_resumption_handle: Optional[str] = None
 
+        # Bookkeeping for ending gracefully (i.e. after the bot is finished)
+        self._end_frame_pending_bot_turn_finished: Optional[EndFrame] = None
+
     def _create_client(self, api_key: str, http_options: Optional[HttpOptions] = None):
         self._client = Client(api_key=api_key, http_options=http_options)
 
@@ -771,7 +774,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
     #
 
     async def _handle_interruption(self):
-        self._bot_is_speaking = False
+        await self._set_bot_is_speaking(False)
         await self.push_frame(TTSStoppedFrame())
         await self.push_frame(LLMFullResponseEndFrame())
 
@@ -802,6 +805,13 @@ class GeminiMultimodalLiveLLMService(LLMService):
             frame: The frame to process.
             direction: The frame processing direction.
         """
+        # Defer EndFrame handling until after the bot turn is finished
+        if isinstance(frame, EndFrame):
+            if self._bot_is_speaking:
+                logger.debug("Deferring handling EndFrame until bot turn is finished")
+                self._end_frame_pending_bot_turn_finished = frame
+                return
+
         await super().process_frame(frame, direction)
 
         if isinstance(frame, TranscriptionFrame):
@@ -863,6 +873,16 @@ class GeminiMultimodalLiveLLMService(LLMService):
             await self._update_settings()
         else:
             await self.push_frame(frame, direction)
+
+    async def _set_bot_is_speaking(self, speaking: bool):
+        if self._bot_is_speaking == speaking:
+            return
+
+        self._bot_is_speaking = speaking
+
+        if not self._bot_is_speaking and self._end_frame_pending_bot_turn_finished:
+            await self.queue_frame(self._end_frame_pending_bot_turn_finished)
+            self._end_frame_pending_bot_turn_finished = None
 
     async def _connect(self, session_resumption_handle: Optional[str] = None):
         """Establish client connection to Gemini Live API."""
@@ -1271,7 +1291,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             return
 
         if not self._bot_is_speaking:
-            self._bot_is_speaking = True
+            await self._set_bot_is_speaking(True)
             await self.push_frame(TTSStartedFrame())
             await self.push_frame(LLMFullResponseStartFrame())
 
@@ -1307,7 +1327,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
     @traced_gemini_live(operation="llm_response")
     async def _handle_msg_turn_complete(self, message: LiveServerMessage):
         """Handle the turn complete message."""
-        self._bot_is_speaking = False
+        await self._set_bot_is_speaking(False)
         text = self._bot_text_buffer
 
         # Trace the complete LLM response (this will be handled by the decorator)
