@@ -112,6 +112,11 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
+# Connection management constants
+MAX_CONSECUTIVE_FAILURES = 3
+CONNECTION_ESTABLISHED_THRESHOLD = 10.0  # seconds
+
+
 def language_to_gemini_language(language: Language) -> Optional[str]:
     """Maps a Language enum value to a Gemini Live supported language code.
 
@@ -622,8 +627,6 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         # Reconnection tracking
         self._consecutive_failures = 0
-        self._max_consecutive_failures = 3
-        self._connection_established_threshold = 10.0  # seconds
         self._connection_start_time = None
 
         self._settings = {
@@ -1030,10 +1033,10 @@ class GeminiMultimodalLiveLLMService(LLMService):
         if (
             self._connection_start_time
             and self._consecutive_failures > 0
-            and time.time() - self._connection_start_time >= self._connection_established_threshold
+            and time.time() - self._connection_start_time >= CONNECTION_ESTABLISHED_THRESHOLD
         ):
             logger.info(
-                f"Connection stable for {self._connection_established_threshold}s, "
+                f"Connection stable for {CONNECTION_ESTABLISHED_THRESHOLD}s, "
                 f"resetting failure counter from {self._consecutive_failures} to 0"
             )
             self._consecutive_failures = 0
@@ -1049,12 +1052,12 @@ class GeminiMultimodalLiveLLMService(LLMService):
         """
         self._consecutive_failures += 1
         logger.warning(
-            f"Connection error (failure {self._consecutive_failures}/{self._max_consecutive_failures}): {error}"
+            f"Connection error (failure {self._consecutive_failures}/{MAX_CONSECUTIVE_FAILURES}): {error}"
         )
 
-        if self._consecutive_failures >= self._max_consecutive_failures:
+        if self._consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             logger.error(
-                f"Max consecutive failures ({self._max_consecutive_failures}) reached, "
+                f"Max consecutive failures ({MAX_CONSECUTIVE_FAILURES}) reached, "
                 "treating as fatal error"
             )
             await self.push_error(
@@ -1063,7 +1066,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
             return False
         else:
             logger.info(
-                f"Attempting reconnection ({self._consecutive_failures}/{self._max_consecutive_failures})"
+                f"Attempting reconnection ({self._consecutive_failures}/{MAX_CONSECUTIVE_FAILURES})"
             )
             return True
 
