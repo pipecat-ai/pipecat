@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter can influence the latency of the response. For example `"priority"`
   will result in faster completions, but in exchange for a higher price.
 
+### Changed
+
+- Updated `GeminiMultimodalLiveLLMService` to use the `google-genai` library
+  rather than use WebSockets directly.
+
 ## [0.0.89] - 2025-10-07
 
 ### Fixed
