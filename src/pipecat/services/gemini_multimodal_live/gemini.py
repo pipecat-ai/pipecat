@@ -658,7 +658,7 @@ class GeminiMultimodalLiveLLMService(LLMService):
 
         # Session resumption
         self._session_resumption_handle: Optional[str] = None
-        
+
         # Bookkeeping for ending gracefully (i.e. after the bot is finished)
         self._end_frame_pending_bot_turn_finished: Optional[EndFrame] = None
 
