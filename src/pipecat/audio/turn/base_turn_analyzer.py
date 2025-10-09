@@ -14,6 +14,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, Tuple
 
+from pydantic import BaseModel
+
 from pipecat.metrics.metrics import MetricsData
 
 
@@ -27,6 +29,12 @@ class EndOfTurnState(Enum):
 
     COMPLETE = 1
     INCOMPLETE = 2
+
+
+class BaseTurnParams(BaseModel):
+    """Base class for turn analyzer parameters."""
+
+    pass
 
 
 class BaseTurnAnalyzer(ABC):
@@ -78,7 +86,7 @@ class BaseTurnAnalyzer(ABC):
 
     @property
     @abstractmethod
-    def params(self):
+    def params(self) -> BaseTurnParams:
         """Get the current turn analyzer parameters.
 
         Returns:

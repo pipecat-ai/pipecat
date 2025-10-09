@@ -206,6 +206,14 @@ async def bot(runner_args: RunnerArguments):
 
 
 if __name__ == "__main__":
+    if not os.getenv("NASA_API_KEY"):
+        logger.error(
+            f"Please set NASA_API_KEY environment variable for this example. See https://api.nasa.gov"
+        )
+        import sys
+
+        sys.exit(1)
+
     from pipecat.runner.run import main
 
     main()

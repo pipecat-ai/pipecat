@@ -9,6 +9,149 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added some new configuration options to `GeminiMultimodalLiveLLMService`:
+
+  - `thinking`
+  - `enable_affective_dialog`
+  - `proactivity`
+
+  Note that these new configuration options require using a newer model than
+  the default, like "gemini-2.5-flash-native-audio-preview-09-2025". The last
+  two require specifying `http_options=HttpOptions(api_version="v1alpha")`.
+
+- Added `on_pipeline_error` event to `PipelineTask`. This event will get fired
+  when an `ErrorFrame` is pushed (use `FrameProcessor.push_error()`).
+
+  ```python
+  @task.event_handler("on_pipeline_error")
+  async def on_pipeline_error(task: PipelineTask, frame: ErrorFrame):
+      ...
+  ```
+
+- Added a `service_tier` `InputParam` to the `BaseOpenAILLMService`. This
+  parameter can influence the latency of the response. For example `"priority"`
+  will result in faster completions, but in exchange for a higher price.
+
+### Changed
+
+- Updated `GeminiMultimodalLiveLLMService` to use the `google-genai` library
+  rather than use WebSockets directly.
+
+### Fixed
+
+- `GeminiMultimodalLiveLLMService` will now end gracefully (i.e. after the bot
+  has finished) upon receiving an `EndFrame`.
+
+- `GeminiMultimodalLiveLLMService` will try to seamlessly reconnect when it
+  loses its connection.
+
+## [0.0.89] - 2025-10-07
+
+### Fixed
+
+- Reverted a change introduced in 0.0.88 that was causing pipelines to be frozen
+  when using interruption strategies and processors that block interruption
+  frames (e.g. `STTMuteFilter`).
+
+## [0.0.88] - 2025-10-07
+
+### Added
+
+- Added support for Nano Banana models to `GoogleLLMService`. For example, you
+  can now use the `gemini-2.5-flash-image` model to generate images.
+
+- Added `HumeTTSService` for text-to-speech synthesis using Hume AI's expressive
+  voice models. Provides high-quality, emotionally expressive speech synthesis
+  with support for various voice models. Includes example in
+  `examples/foundational/07ad-interruptible-hume.py`. Use with:
+  `uv pip install pipecat-ai[hume]`.
+
+### Changed
+
+- Updated default `GoogleLLMService` model to `gemini-2.5-flash`.
+
+### Deprecated
+
+- PlayHT is shutting down their API on December 31st, 2025. As a result,
+  `PlayHTTTSService` and `PlayHTHttpTTSService` are deprecated and will be
+  removed in a future version.
+
+### Fixed
+
+- Fixed an issue with `AWSNovaSonicLLMService` where the client wouldn't
+  connect due to a breaking change in the AWS dependency chain.
+
+- `PermissionError` is now caught if NLTK's `punkt_tab` can't be downloaded.
+
+- Fixed an issue that would cause wrong user/assistant context ordering when
+  using interruption strategies.
+
+- Fixed RTVI incoming message handling, broken in 0.0.87.
+
+## [0.0.87] - 2025-10-02
+
+### Added
+
+- Added `WebsocketSTTService` base class for websocket-based STT services.
+  Combines STT functionality with websocket connectivity, providing automatic
+  error handling and reconnection capabilities with exponential backoff.
+
+- Added `DeepgramFluxSTTService` for real-time speech recognition using
+  Deepgram's Flux WebSocket API. Flux understands conversational flow and
+  automatically handles turn-taking.
+
+- Added RTVI messages for user/bot audio levels and system logs.
+
+- Include OpenAI-based LLM services cached tokens to `MetricsFrame`.
+
+### Changed
+
+- Updated the default model for `AnthropicLLMService` to
+  `claude-sonnet-4-5-20250929`.
+
+### Deprecated
+
+- `DailyTransportMessageFrame` and `DailyTransportMessageUrgentFrame` are
+  deprecated, use `DailyOutputTransportMessageFrame` and
+  `DailyOutputTransportMessageUrgentFrame` respectively instead.
+
+- `LiveKitTransportMessageFrame` and `LiveKitTransportMessageUrgentFrame` are
+  deprecated, use `LiveKitOutputTransportMessageFrame` and
+  `LiveKitOutputTransportMessageUrgentFrame` respectively instead.
+
+- `TransportMessageFrame` and `TransportMessageUrgentFrame` are deprecated, use
+  `OutputTransportMessageFrame` and `OutputTransportMessageUrgentFrame`
+  respectively instead.
+
+- `InputTransportMessageUrgentFrame` is deprecated, use
+  `InputTransportMessageFrame` instead.
+
+- `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a
+  future version. Instead, create your own custom frame and handle it in the
+  `@transport.output().event_handler("on_after_push_frame")` event handler or a
+  custom processor.
+
+## Fixed
+
+- Fixed an issue in `AWSBedrockLLMService` where timeout exceptions weren't
+  being detected.
+
+- Fixed a `PipelineTask` issue that could prevent the application to exit if
+  `task.cancel()` was called when the task was already finished.
+
+- Fixed an issue where local SmartTurn was not being ran in a separate thread.
+
+## [0.0.86] - 2025-09-24
+
+### Added
+
+- Added `HeyGenTransport`. This is an integration for HeyGen Interactive
+  Avatar. A video service that handles audio streaming and requests HeyGen to
+  generate avatar video responses. (see https://www.heygen.com/). When used, the
+  Pipecat bot joins the same virtual room as the HeyGen Avatar and the user.
+
+- Added support to `TwilioFrameSerializer` for `region` and `edge` settings.
+
 - Added support for using universal `LLMContext` with:
 
   - `LLMLogObserver`
@@ -105,6 +248,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event and making way for future events like `send-image`.
 
 ### Fixed
+
+- Fixed an issue where the pipeline could freeze if a task cancellation never
+  completed because a third-party library swallowed asyncio.CancelledError. We
+  now apply a timeout to task cancellations to prevent these freezes. If the
+  timeout is reached, the system logs warnings and leaves dangling tasks behind,
+  which can help diagnose where cancellation is being blocked.
 
 - Fixed an `AudioBufferProcessor` issues that was causing user audio to be
   missing in stereo recordings causing bot and user overlaps.

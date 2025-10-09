@@ -70,7 +70,7 @@ try:
         BedrockRuntimeClient,
         InvokeModelWithBidirectionalStreamOperationInput,
     )
-    from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
+    from aws_sdk_bedrock_runtime.config import Config
     from aws_sdk_bedrock_runtime.models import (
         BidirectionalInputPayloadPart,
         InvokeModelWithBidirectionalStreamInput,
@@ -78,8 +78,8 @@ try:
         InvokeModelWithBidirectionalStreamOperationOutput,
         InvokeModelWithBidirectionalStreamOutput,
     )
-    from smithy_aws_core.credentials_resolvers.static import StaticCredentialsResolver
-    from smithy_aws_core.identity import AWSCredentialsIdentity
+    from smithy_aws_core.auth.sigv4 import SigV4AuthScheme
+    from smithy_aws_core.identity.static import StaticCredentialsResolver
     from smithy_core.aio.eventstream import DuplexEventStream
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
@@ -429,7 +429,7 @@ class AWSNovaSonicLLMService(LLMService):
             await self._finish_connecting_if_context_available()
         except Exception as e:
             logger.error(f"{self} initialization error: {e}")
-            self._disconnect()
+            await self._disconnect()
 
     async def _finish_connecting_if_context_available(self):
         # We can only finish connecting once we've gotten our initial context and we're ready to
@@ -528,15 +528,11 @@ class AWSNovaSonicLLMService(LLMService):
         config = Config(
             endpoint_uri=f"https://bedrock-runtime.{self._region}.amazonaws.com",
             region=self._region,
-            aws_credentials_identity_resolver=StaticCredentialsResolver(
-                credentials=AWSCredentialsIdentity(
-                    access_key_id=self._access_key_id,
-                    secret_access_key=self._secret_access_key,
-                    session_token=self._session_token,
-                )
-            ),
-            http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
-            http_auth_schemes={"aws.auth#sigv4": SigV4AuthScheme()},
+            aws_access_key_id=self._access_key_id,
+            aws_secret_access_key=self._secret_access_key,
+            aws_session_token=self._session_token,
+            aws_credentials_identity_resolver=StaticCredentialsResolver(),
+            auth_schemes={"aws.auth#sigv4": SigV4AuthScheme(service="bedrock")},
         )
         return BedrockRuntimeClient(config=config)
 

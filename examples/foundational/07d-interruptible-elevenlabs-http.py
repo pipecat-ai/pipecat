@@ -23,7 +23,6 @@ from pipecat.processors.aggregators.llm_context import LLMContext
 from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.elevenlabs.stt import ElevenLabsSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService
 from pipecat.services.openai.llm import OpenAILLMService

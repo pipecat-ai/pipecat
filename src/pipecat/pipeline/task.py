@@ -13,8 +13,7 @@ including heartbeats, idle detection, and observer integration.
 
 import asyncio
 import time
-from collections import deque
-from typing import Any, AsyncIterable, Deque, Dict, Iterable, List, Optional, Tuple, Type
+from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Type
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,7 +30,6 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     HeartbeatFrame,
-    InputAudioRawFrame,
     InterruptionFrame,
     InterruptionTaskFrame,
     MetricsFrame,
@@ -132,11 +130,15 @@ class PipelineTask(BasePipelineTask):
 
     - on_pipeline_finished: Called after the pipeline has reached any terminal state.
           This includes:
+
               - StopFrame: pipeline was stopped (processors keep connections open)
               - EndFrame: pipeline ended normally
               - CancelFrame: pipeline was cancelled
+
           Use this event for cleanup, logging, or post-processing tasks. Users can inspect
           the frame if they need to handle specific cases.
+
+    - on_pipeline_error: Called when an error occurs with ErrorFrame
 
     Example::
 
@@ -148,8 +150,16 @@ class PipelineTask(BasePipelineTask):
         async def on_pipeline_idle_timeout(task):
             ...
 
+        @task.event_handler("on_pipeline_started")
+        async def on_pipeline_started(task, frame):
+            ...
+
         @task.event_handler("on_pipeline_finished")
         async def on_pipeline_finished(task, frame):
+            ...
+
+        @task.event_handler("on_pipeline_error")
+        async def on_pipeline_error(task, frame):
             ...
     """
 
@@ -288,6 +298,7 @@ class PipelineTask(BasePipelineTask):
         self._register_event_handler("on_pipeline_ended")
         self._register_event_handler("on_pipeline_cancelled")
         self._register_event_handler("on_pipeline_finished")
+        self._register_event_handler("on_pipeline_error")
 
     @property
     def params(self) -> PipelineParams:
@@ -395,7 +406,8 @@ class PipelineTask(BasePipelineTask):
         Cancels all running tasks and stops frame processing without
         waiting for completion.
         """
-        await self._cancel()
+        if not self._finished:
+            await self._cancel()
 
     async def run(self, params: PipelineTaskParams):
         """Start and manage the pipeline execution until completion or cancellation.
@@ -693,12 +705,11 @@ class PipelineTask(BasePipelineTask):
             logger.debug(f"{self}: received interruption task frame {frame}")
             await self._pipeline.queue_frame(InterruptionFrame())
         elif isinstance(frame, ErrorFrame):
+            await self._call_event_handler("on_pipeline_error", frame)
             if frame.fatal:
                 logger.error(f"A fatal error occurred: {frame}")
                 # Cancel all tasks downstream.
                 await self.queue_frame(CancelFrame())
-                # Tell the task we should stop.
-                await self.queue_frame(StopTaskFrame())
             else:
                 logger.warning(f"{self}: Something went wrong: {frame}")
 

@@ -30,15 +30,15 @@ from pipecat.frames.frames import (
     ErrorFrame,
     Frame,
     InputAudioRawFrame,
-    InputTransportMessageUrgentFrame,
+    InputTransportMessageFrame,
     InterimTranscriptionFrame,
     OutputAudioRawFrame,
     OutputImageRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
     SpriteFrame,
     StartFrame,
     TranscriptionFrame,
-    TransportMessageFrame,
-    TransportMessageUrgentFrame,
     UserAudioRawFrame,
     UserImageRawFrame,
     UserImageRequestFrame,
@@ -74,7 +74,7 @@ VAD_RESET_PERIOD_MS = 2000
 
 
 @dataclass
-class DailyTransportMessageFrame(TransportMessageFrame):
+class DailyOutputTransportMessageFrame(OutputTransportMessageFrame):
     """Frame for transport messages in Daily calls.
 
     Parameters:
@@ -85,7 +85,7 @@ class DailyTransportMessageFrame(TransportMessageFrame):
 
 
 @dataclass
-class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
+class DailyOutputTransportMessageUrgentFrame(OutputTransportMessageUrgentFrame):
     """Frame for urgent transport messages in Daily calls.
 
     Parameters:
@@ -96,7 +96,59 @@ class DailyTransportMessageUrgentFrame(TransportMessageUrgentFrame):
 
 
 @dataclass
-class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
+class DailyTransportMessageFrame(DailyOutputTransportMessageFrame):
+    """Frame for transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyOutputTransportMessageFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyTransportMessageFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyOutputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class DailyTransportMessageUrgentFrame(DailyOutputTransportMessageUrgentFrame):
+    """Frame for urgent transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyOutputTransportMessageUrgentFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyOutputTransportMessageUrgentFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
+@dataclass
+class DailyInputTransportMessageFrame(InputTransportMessageFrame):
     """Frame for input urgent transport messages in Daily calls.
 
     Parameters:
@@ -106,15 +158,60 @@ class DailyInputTransportMessageUrgentFrame(InputTransportMessageUrgentFrame):
     participant_id: Optional[str] = None
 
 
+class DailyInputTransportMessageUrgentFrame(DailyInputTransportMessageFrame):
+    """Frame for input urgent transport messages in Daily calls.
+
+    .. deprecated:: 0.0.87
+        This frame is deprecated and will be removed in a future version.
+        Instead, use `DailyInputTransportMessageFrame`.
+
+    Parameters:
+        participant_id: Optional ID of the participant this message is for/from.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyInputTransportMessageUrgentFrame is deprecated and will be removed in a future version. "
+                "Instead, use DailyInputTransportMessageFrame.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+
 @dataclass
 class DailyUpdateRemoteParticipantsFrame(ControlFrame):
     """Frame to update remote participants in Daily calls.
+
+    .. deprecated:: 0.0.87
+        `DailyUpdateRemoteParticipantsFrame` is deprecated and will be removed in a future version.
+        Create your own custom frame and use a custom processor to handle it or use, for example,
+        `on_after_push_frame` event instead in the output transport.
 
     Parameters:
         remote_participants: See https://reference-python.daily.co/api_reference.html#daily.CallClient.update_remote_participants.
     """
 
     remote_participants: Mapping[str, Any] = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn(
+                "DailyUpdateRemoteParticipantsFrame is deprecated and will be removed in a future version."
+                "Instead, create your own custom frame and handle it in the "
+                '`@transport.output().event_handler("on_after_push_frame")` event handler or a '
+                "custom processor.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
 
 class WebRTCVADAnalyzer(VADAnalyzer):
@@ -454,7 +551,9 @@ class DailyTransportClient(EventHandler):
         """
         return self._out_sample_rate
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send an application message to participants.
 
         Args:
@@ -464,7 +563,9 @@ class DailyTransportClient(EventHandler):
             return
 
         participant_id = None
-        if isinstance(frame, (DailyTransportMessageFrame, DailyTransportMessageUrgentFrame)):
+        if isinstance(
+            frame, (DailyOutputTransportMessageFrame, DailyOutputTransportMessageUrgentFrame)
+        ):
             participant_id = frame.participant_id
 
         future = self._get_event_loop().create_future()
@@ -1601,7 +1702,7 @@ class DailyInputTransport(BaseInputTransport):
             message: The message data to send.
             sender: ID of the message sender.
         """
-        frame = DailyInputTransportMessageUrgentFrame(message=message, participant_id=sender)
+        frame = DailyInputTransportMessageFrame(message=message, participant_id=sender)
         await self.push_frame(frame)
 
     #
@@ -1823,7 +1924,9 @@ class DailyOutputTransport(BaseOutputTransport):
         if isinstance(frame, DailyUpdateRemoteParticipantsFrame):
             await self._client.update_remote_participants(frame.remote_participants)
 
-    async def send_message(self, frame: TransportMessageFrame | TransportMessageUrgentFrame):
+    async def send_message(
+        self, frame: OutputTransportMessageFrame | OutputTransportMessageUrgentFrame
+    ):
         """Send a transport message to participants.
 
         Args:

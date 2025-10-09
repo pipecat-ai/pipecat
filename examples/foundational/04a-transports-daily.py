@@ -25,7 +25,7 @@ from pipecat.processors.aggregators.llm_response_universal import LLMContextAggr
 from pipecat.runner.daily import configure
 from pipecat.services.cartesia.tts import CartesiaTTSService
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.transports.daily.transport import DailyLogLevel, DailyParams, DailyTransport
+from pipecat.transports.daily.transport import DailyParams, DailyTransport
 
 load_dotenv(override=True)
 
@@ -49,7 +49,6 @@ async def main():
                 turn_analyzer=LocalSmartTurnAnalyzerV3(params=SmartTurnParams()),
             ),
         )
-        transport.set_log_level(DailyLogLevel.Info)
 
         tts = CartesiaTTSService(
             api_key=os.getenv("CARTESIA_API_KEY"),

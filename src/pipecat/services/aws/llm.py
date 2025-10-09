@@ -61,7 +61,6 @@ from pipecat.utils.tracing.service_decorators import traced_llm
 
 try:
     import aioboto3
-    import httpx
     from botocore.config import Config
     from botocore.exceptions import ReadTimeoutError
 except ModuleNotFoundError as e:
@@ -1117,7 +1116,7 @@ class AWSBedrockLLMService(LLMService):
             # also get cancelled.
             use_completion_tokens_estimate = True
             raise
-        except httpx.TimeoutException:
+        except (ReadTimeoutError, asyncio.TimeoutError):
             await self._call_event_handler("on_completion_timeout")
         except Exception as e:
             logger.exception(f"{self} exception: {e}")
