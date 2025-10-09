@@ -137,6 +137,9 @@ class OjinPersonaInteraction:
         logger.debug(
             f"pushing audio samples count: {samples_count}, next expected frames: {self.expected_frames}"
         )
+        logger.debug(
+            f"pushing audio samples count: {samples_count}, next expected frames: {self.expected_frames}"
+        )
 
 
 @dataclass
@@ -266,18 +269,151 @@ class OjinPersonaService(FrameProcessor):
 
                 # If this was the last attempt, don't wait
                 if attempt < self._settings.client_connect_max_retries - 1:
-                    logger.info(
-                        f"Retrying in {self._settings.client_reconnect_delay} seconds..."
-                    )
+                    logger.info(f"Retrying in {self._settings.client_reconnect_delay} seconds...")
                     await asyncio.sleep(self._settings.client_reconnect_delay)
 
         # All retry attempts failed
         logger.error(
             f"Failed to connect after {self._settings.client_connect_max_retries} attempts. Last error: {last_error}"
         )
-        await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
-        await self.push_frame(EndFrame(), FrameDirection.DOWNSTREAM)
-        return False
+        raise Exception("Failed to connect to Ojin")
+
+    # Disabled for now since it was causing issues with the server not processing all audio
+    async def _incomming_frame_task(self):
+        while True:
+            if self._fsm is not None:
+                time_since_transition = (
+                    time.perf_counter() - self._fsm._transition_timestamp
+                )
+
+                if (
+                    self._fsm._state == PersonaState.SPEECH
+                    and self._fsm._waiting_for_image_frames
+                    and self._last_frame_timestamp is not None
+                ):
+                    last_received_frame_time = (
+                        time.perf_counter() - self._last_frame_timestamp
+                    )
+
+                    if last_received_frame_time > 1.5:
+                        logger.info("Ending interaction")
+                        # We send the Cancel interaction message because we don't send the "last_audio" flag
+                        # to the server, therefore the server won't be able to send the last frame and reset the model
+                        # Cancelation message resets the model instead.
+                        await self.push_ojin_message(
+                            OjinPersonaCancelInteractionMessage(
+                                interaction_id=self._interaction.interaction_id,
+                            )
+                        )
+                        await self._fsm.on_conversation_signal(
+                            ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
+                        )
+                        self._last_frame_timestamp = None
+                elif (
+                    self._fsm._state == PersonaState.SPEECH
+                    and self._fsm._waiting_for_image_frames
+                    and time_since_transition > 2.5
+                ):
+                    logger.warning(
+                        "No Frames received from the server, stopping interaction by timeout"
+                    )
+                    # We send the cancel Interaction message to reset the state even when we didn't receive any frame
+                    await self.push_ojin_message(
+                        OjinPersonaCancelInteractionMessage(
+                            interaction_id=self._interaction.interaction_id,
+                        )
+                    )
+                    await self._fsm.on_conversation_signal(
+                        ConversationSignal.NO_MORE_IMAGE_FRAMES_EXPECTED
+                    )
+
+            await asyncio.sleep(0.01)
+
+    async def _stop(self):
+        """Stop the persona service and clean up resources.
+
+        Cancels all running tasks, closes connections, and resets the state.
+        """
+        # Cancel queued audio processing task
+        if self._audio_input_task:
+            await self.cancel_task(self._audio_input_task)
+            self._audio_input_task = None
+
+        if self._receive_task:
+            await self.cancel_task(self._receive_task)
+            self._receive_task = None
+
+        if self._client:
+            await self._client.close()
+            self._client = None
+
+        # Clear all buffers
+        await self._interrupt()
+
+        if self._fsm:
+            await self._fsm.close()
+            self._fsm = None
+
+        logger.debug(f"OjinPersonaService {self._settings.persona_config_id} stopped")
+
+    @property
+    def fsm_fps_tracker(self):
+        return self._fsm.fps_tracker
+
+    @property
+    def server_fps_tracker(self):
+        return self._server_fps_tracker
+
+    def _start_pushing_audio_output(self):
+        logger.warning("Start pushing audio output")
+        self._audio_output_task = self.create_task(self._push_audio_output())
+
+    async def _stop_pushing_audio_output(self):
+        logger.warning("Stop pushing audio output")
+        if self._audio_output_task:
+            await self.cancel_task(self._audio_output_task)
+            self._audio_output_task = None
+
+    async def _push_audio_output(self):
+        """Continuously push audio output to the proxy."""
+        while True:
+            assert (
+                self._interaction is not None
+                and self._interaction.audio_output_queue is not None
+            )
+            try:
+                audio_frame = await self._interaction.audio_output_queue.get()
+                await self.push_frame(audio_frame, direction=FrameDirection.DOWNSTREAM)
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.05)
+
+    async def _receive_messages(self):
+        """Continuously receive and process messages from the proxy.
+
+        This method runs as a background task and handles all incoming messages
+        from the proxy.
+        """
+        while True:
+            assert self._client is not None
+            message = await self._client.receive_message()
+            if message is not None:
+                await self._handle_ojin_message(message)
+            await asyncio.sleep(0.001)
+
+    async def push_ojin_message(self, message: BaseModel):
+        """Send a message to the proxy.
+
+        Args:
+            message: The message to send to the proxy
+
+        """
+        assert self._client is not None
+        if hasattr(message, "interaction_id"):
+            logger.info(
+                f"Sending message type {type(message)} with interaction {message.interaction_id}"
+            )
+
+        await self._client.send_message(message)
 
     async def _handle_ojin_message(self, message: BaseModel):
         """Process incoming messages from the proxy.
@@ -377,9 +513,7 @@ class OjinPersonaService(FrameProcessor):
                 logger.error("Ojin couldn't create a model from supplied persona ID.")
             elif message.payload.code == "INVALID_PERSONA_ID_CONFIGURATION":
                 is_fatal = True
-                logger.error(
-                    "Ojin couldn't load the configuration from the supplied persona ID."
-                )
+                logger.error("Ojin couldn't load the configuration from the supplied persona ID.")
 
             if is_fatal:
                 await self.push_frame(EndFrame(), FrameDirection.UPSTREAM)
@@ -511,61 +645,32 @@ class OjinPersonaService(FrameProcessor):
             # Pass through any other frames
             await self.push_frame(frame, direction)
 
-    async def _handle_input_audio(self, frame: TTSAudioRawFrame):
-        """Process incoming audio frames from the TTS service.
+    async def _interrupt(self):
+        """Interrupt the current interaction.
 
-        Handles audio frames based on the current persona state. If the persona is not
-        ready to receive input, the audio is queued for later processing. Otherwise,
-        it starts or continues an active interaction.
-
-        Resamples the audio to the target sample rate and either sends it directly
-        to the backend if an interaction is running, or queues it for later processing.
-
-        Args:
-            frame: The audio frame to process
-
+        Sends a cancel message to the backend, updates the FSM state, and
+        cleans up the current interaction.
         """
-        resampled_audio = await self._resampler.resample(
-            frame.audio, frame.sample_rate, OJIN_PERSONA_SAMPLE_RATE
-        )
+        if self._interaction is None or self._interaction.interaction_id is None:
+            logger.debug("Trying to interrupt an interaction but none is active")
+            return
 
-        interaction_to_use: OjinPersonaInteraction
-        if (
-            self.is_pending_initialization() or 
-            (self._interaction is not None
-            and self._interaction.state == InteractionState.ALL_AUDIO_PROCESSED)
-        ):
-            self._pending_interaction = OjinPersonaInteraction()
-            self._pending_interaction.set_state(InteractionState.INACTIVE)
-            interaction_to_use = self._pending_interaction
-        else:
-            if self._interaction is None:
-                await self._start_speech_interaction()
+        logger.debug(f"Try interrupt interaction in state {self._interaction.state}")
+        if self._interaction.state != InteractionState.INACTIVE:
+            logger.warning("Sending CancelInteractionMessage")
+            await self.push_ojin_message(
+                OjinPersonaCancelInteractionMessage(
+                    interaction_id=self._interaction.interaction_id,
+                )
+            )
+            if self._fsm is not None:
+                await self._fsm.on_conversation_signal(
+                    ConversationSignal.USER_INTERRUPTED_AI
+                )
 
-            assert self._interaction is not None
-            interaction_to_use = self._interaction
+            self._close_interaction()
 
-        interaction_to_use.pending_audio.extend(
-            resampled_audio
-        )
-
-        interaction_to_use.update_expected_frames(
-            len(resampled_audio), OJIN_PERSONA_SAMPLE_RATE, self.fps
-        )
-
-    def is_pending_initialization(self) -> bool:
-        """Check if the persona is ready to receive TTS input.
-
-        Returns:
-            True if the persona is in a state that can accept TTS input, False otherwise
-
-        """
-        return self.persona_state in [
-            PersonaState.INITIALIZING,
-            PersonaState.INVALID,
-        ]
-
-    async def _start_speech_interaction(
+    async def _start_interaction(
         self,
         new_interaction: Optional[OjinPersonaInteraction] = None,
         active_keyframes_slot: int = IDLE_ANIMATION_KEYFRAMES_SLOT,
@@ -581,7 +686,12 @@ class OjinPersonaService(FrameProcessor):
             is_speech: Whether this interaction is speech-based (True) or idle (False)
 
         """
-        self._interaction = new_interaction or OjinPersonaInteraction()
+        self._interaction = new_interaction or OjinPersonaInteraction(
+            persona_id=self._settings.persona_config_id,
+        )
+        self._interaction.num_loop_frames = (
+            self._settings.idle_sequence_duration * 25
+        )  # 25 fps
         self._interaction.set_state(InteractionState.STARTING)
 
         assert self._client is not None
@@ -641,81 +751,202 @@ class OjinPersonaService(FrameProcessor):
             if len(self._interaction.pending_audio) == 0:
                 await asyncio.sleep(0.005)
                 continue
-            
-            audio_bytes = self._interaction.pending_audio.copy()
-            self._interaction.pending_audio.clear()
-            logger.info(f"sending {len(audio_bytes)} audio bytes to server")
-            await self._client.send_message(
-                OjinPersonaInteractionInputMessage(
-                    audio_int16_bytes=audio_bytes,
-                    interaction_id=self._interaction.interaction_id
+
+            # Get audio from the queue
+            should_finish_task = False
+            try:
+                message: OjinPersonaInteractionInputMessage = (
+                    self._interaction.audio_input_queue.get_nowait()
                 )
-            )
-            self.pending_audio_to_play.extend(audio_bytes)
+                message.interaction_id = self._interaction.interaction_id
+                should_finish_task = True
+            except asyncio.QueueEmpty:
+                should_finish_task = False
+                assert False, "the queue should never be empty here"
 
-    def _get_idle_frame_for_index(self, index: int) -> AnimationKeyframe:
-        mirror_frame_idx = mirror_index(
-            index, len(self.idle_frames), 2 if self.is_mirrored_loop else 1
-        )
-        return self.idle_frames[mirror_frame_idx]
+            message.params = {
+                "start_frame_idx": self._interaction.start_frame_idx,
+                "filter_amount": self._interaction.filter_amount,
+                "mouth_opening_scale": self._interaction.mouth_opening_scale,
+                "source_keyframes_index": self._interaction.source_keyframes_index,
+                "destination_keyframes_index": self._interaction.destination_keyframes_index,
+            }
+            logger.debug(f"Sending audio int16: {len(message.audio_int16_bytes)}")
 
-    def get_next_pending_frame_and_audio(self) -> (AnimationKeyframe, bytes):
-        frame_duration = 1 / self.fps
-        audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
-        frame = self.pending_speech_frames.popleft()
-        audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame ]
-        self.pending_audio_to_play = self.pending_audio_to_play[audio_bytes_length_for_one_frame:]
-        return frame, audio
-        
-    async def _run_loop(self):
-        while self.persona_state == PersonaState.INITIALIZING:
-            await asyncio.sleep(0.1)
+            await self.push_ojin_message(message)
+            await self.enqueue_audio_output(message.audio_int16_bytes)
 
-        silence_duration = 1 / self.fps
-        audio_bytes_length_for_one_frame = 2 * int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
-        silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
+            if should_finish_task:
+                self._interaction.audio_input_queue.task_done()
 
-        start_ts = time.perf_counter()
-        while True:
-            logger.debug(f"current frame: {self.current_frame_index}")
-            audio_to_play = silence_audio_for_one_frame
-            animation_frame = self._get_idle_frame_for_index(self.current_frame_index)
+    async def enqueue_audio_output(self, audio: bytes):
+        """Enqueue audio data to be sent as output frames.
 
-            while len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx < self.current_frame_index:
-                self.num_speech_frames_played += 1
-                missed_frame, missed_audio = self.get_next_pending_frame_and_audio()
-                logger.debug(f"Missed frame: {missed_frame.frame_idx}")
+        This method creates an OutputAudioRawFrame from the raw audio bytes
+        and adds it to the current interaction's audio output queue.
 
-            if len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx == self.current_frame_index:
-                self.num_speech_frames_played += 1
-                animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
-                logger.debug(f"plyaed frame: {animation_frame.frame_idx}")
-            
-            # Remove duplicate frames
-            while len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx == self.current_frame_index:
-                dup_frame = self.pending_speech_frames.popleft()
-                logger.debug(f"Duplicate frame: {dup_frame.frame_idx}")
+        Args:
+            audio: Raw audio bytes to be sent as output
 
-            image_frame = OutputImageRawFrame(
-                image=animation_frame.image,
-                size=self._settings.image_size,
-                format="RGB"
-            )
-            audio_frame = OutputAudioRawFrame(
-                audio=audio_to_play,
+        """
+        assert self._interaction and self._interaction.audio_output_queue is not None
+        await self._interaction.audio_output_queue.put(
+            OutputAudioRawFrame(
+                audio=audio,
                 sample_rate=OJIN_PERSONA_SAMPLE_RATE,
                 num_channels=1,
             )
-            await self.push_frame(image_frame)
-            await self.push_frame(audio_frame)
-            self.current_frame_index += 1
+        )
 
-            # FPS lock
-            elapsed_time = time.perf_counter() - start_ts
-            frame_target_time = 1 / self.fps
-            wait_time = frame_target_time - elapsed_time
-            await async_accurate_sleep(wait_time)
-            start_ts = time.perf_counter()
+
+@dataclass
+class AnimationKeyframe:
+    """Represents a single frame in an animation sequence.
+
+    This class stores information about a specific keyframe in an animation,
+    including its position in the sequence and the image data.
+
+    Attributes:
+        mirror_frame_idx (int): Index used for mirrored animation playback
+        frame_idx (int): The sequential index of this frame in the animation
+        image (bytes): The binary image data for this keyframe
+
+    """
+
+    mirror_frame_idx: int
+    frame_idx: int
+    image: bytes
+
+
+class PersonaPlaybackLoop:
+    """Manages a complete idle animation loop with synchronized audio and video."""
+
+    id: int = 0
+    duration: int = 0  # seconds
+    frames: list[AnimationKeyframe] = []  # Keyframes of the idle animation
+    playback_time: float = 0  # Total elapsed playback time in seconds
+    is_mirrored_loop: bool = False  # whether to mirror the idle loop
+
+    def __init__(
+        self,
+        duration: int,
+        fps: int = 25,
+    ):
+        """Initialize the persona idle loop animation.
+
+        Args:
+            duration (int): The total duration of the animation in seconds
+            fps (int, optional): Frames per second for the animation. Defaults to 25.
+
+        """
+        self.duration = duration
+        self.fps = fps
+
+    def num_frames(self) -> int:
+        return len(self.frames)
+
+    def add_frame(self, image: bytes) -> AnimationKeyframe:
+        """Get an existing keyframe or create a new one at the specified frame index.
+
+        Args:
+            image (bytes): The image data for the frame
+
+        Returns:
+            AnimationKeyframe: The existing or newly created keyframe
+
+        """
+        frame_idx = len(self.frames)
+        expected_frames = self.duration * self.fps
+        keyframe = AnimationKeyframe(
+            mirror_frame_idx=mirror_index(frame_idx, expected_frames, 2 if self.is_mirrored_loop else 1),
+            frame_idx=frame_idx,
+            image=image,
+        )
+        self.frames.append(keyframe)
+        return keyframe
+
+    def get_frame(self, frame_idx: int) -> AnimationKeyframe | None:
+        """Get an existing keyframe or create a new one at the specified frame index.
+
+        Args:
+            frame_idx (int): The frame index to retrieve or create
+
+        Returns:
+            AnimationKeyframe: The existing or newly created keyframe
+
+        """
+        for keyframe in self.frames:
+            if keyframe.frame_idx == frame_idx:
+                return keyframe
+
+        logger.error(f"Couldn't find idle frame frame_idx: {frame_idx}")
+        return None
+
+    def get_frame_at_time(self, playback_time: float) -> AnimationKeyframe:
+        """Retrieve the animation keyframe at a specific playback time.
+
+        Args:
+            playback_time (float): The time in seconds to get the frame for
+
+        Returns:
+            AnimationKeyframe: The keyframe corresponding to the given playback time
+
+        """
+        # Get total frames passed
+        current_frame_idx = math.floor(playback_time * self.fps)
+
+        mirror_frame_idx = mirror_index(current_frame_idx, len(self.frames), 2 if self.is_mirrored_loop else 1)
+
+        return self.frames[mirror_frame_idx]
+
+    def get_current_idle_frame(self) -> AnimationKeyframe | None:
+        """Get the keyframe at the current playback time.
+
+        Returns:
+            AnimationKeyframe | None: The current keyframe or None if no keyframes exist
+
+        """
+        return self.get_frame_at_time(self.playback_time)
+
+    def get_current_frame_idx(self) -> int:
+        """Get the absolute key frame idx at the current playback time
+
+        Returns:
+            int: The current keyframe idx
+
+        """
+        current_frame_idx = math.floor(self.playback_time * self.fps)
+        return current_frame_idx
+
+    def get_playback_time(self) -> float:
+        return self.playback_time
+
+    def seek(self, playback_time: float):
+        """Set the playback time to a specific position.
+
+        Args:
+            playback_time (float): The time in seconds to set as the current playback position
+
+        """
+        self.playback_time = playback_time
+
+    def seek_frame(self, frame_idx: int):
+        """Set the playback position to a specific frame.
+
+        Args:
+            frame_idx (int): The frame index to seek to
+
+        """
+        self.playback_time = frame_idx / self.fps
+
+    def step(self, delta_time: float):
+        """Advance the animation by the specified time delta.
+
+        Args:
+            delta_time (float): The time in seconds to advance the animation
+
+        """
+        self.playback_time += delta_time
 
 
 def mirror_index(index: int, size: int, period: int = 2):
@@ -724,15 +955,16 @@ def mirror_index(index: int, size: int, period: int = 2):
         This method maps a continuously increasing index to a back-and-forth pattern
         within the given size, creating a ping-pong effect for smooth looping animations.
 
-        Args:
+    Args:
             index (int): The original frame index
             size (int): The number of available frames
             period (int): Period of the mirrored indices
 
-        Returns:
+    Returns:
             int: The mirrored index that creates the ping-pong effect
 
-    #"""
+    #
+    """
     turn = index // size
     res = index % size
     if turn % period == 0:
