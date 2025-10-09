@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `GeminiVertexMultimodalLiveLLMService`, for accessing Gemini Live via
-  Google Vertex AI.
+- Added `GeminiLiveVertexLLMService`, for accessing Gemini Live via Google
+  Vertex AI.
 
-- Added some new configuration options to `GeminiMultimodalLiveLLMService`:
+- Added some new configuration options to `GeminiLiveLLMService`:
 
   - `thinking`
   - `enable_affective_dialog`
@@ -37,16 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Updated `GeminiMultimodalLiveLLMService` to use the `google-genai` library
-  rather than use WebSockets directly.
+- Updated `GeminiLiveLLMService` to use the `google-genai` library rather than
+  use WebSockets directly.
+
+### Deprecated
+
+- `GeminiMultimodalLiveLLMService` is now deprecated, use
+  `GeminiLiveLLMService`.
 
 ### Fixed
 
-- `GeminiMultimodalLiveLLMService` will now end gracefully (i.e. after the bot
-  has finished) upon receiving an `EndFrame`.
+- `GeminiLiveLLMService` will now end gracefully (i.e. after the bot has
+  finished) upon receiving an `EndFrame`.
 
-- `GeminiMultimodalLiveLLMService` will try to seamlessly reconnect when it
-  loses its connection.
+- `GeminiLiveLLMService` will try to seamlessly reconnect when it loses its
+  connection.
 
 ## [0.0.89] - 2025-10-07
 

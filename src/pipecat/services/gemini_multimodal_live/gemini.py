@@ -18,10 +18,10 @@ voice transcription, streaming responses, and tool usage.
 
 import warnings
 
-from pipecat.services.gemini_live.gemini import (
+from pipecat.services.google.gemini_live.gemini import (
     ContextWindowCompressionParams as _ContextWindowCompressionParams,
 )
-from pipecat.services.gemini_live.gemini import (
+from pipecat.services.google.gemini_live.gemini import (
     GeminiLiveAssistantContextAggregator,
     GeminiLiveContext,
     GeminiLiveContextAggregatorPair,
@@ -29,9 +29,11 @@ from pipecat.services.gemini_live.gemini import (
     GeminiLiveUserContextAggregator,
     GeminiModalities,
 )
-from pipecat.services.gemini_live.gemini import GeminiMediaResolution as _GeminiMediaResolution
-from pipecat.services.gemini_live.gemini import GeminiVADParams as _GeminiVADParams
-from pipecat.services.gemini_live.gemini import InputParams as _InputParams
+from pipecat.services.google.gemini_live.gemini import (
+    GeminiMediaResolution as _GeminiMediaResolution,
+)
+from pipecat.services.google.gemini_live.gemini import GeminiVADParams as _GeminiVADParams
+from pipecat.services.google.gemini_live.gemini import InputParams as _InputParams
 
 with warnings.catch_warnings():
     warnings.simplefilter("always")

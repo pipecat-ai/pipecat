@@ -18,7 +18,7 @@ from typing import List, Optional, Union
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.services.gemini_live.gemini import (
+from pipecat.services.google.gemini_live.gemini import (
     GeminiLiveLLMService,
     HttpOptions,
     InputParams,

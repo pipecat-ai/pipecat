@@ -20,7 +20,7 @@ import warnings
 from loguru import logger
 
 try:
-    from pipecat.services.gemini_live.file_api import GeminiFileAPI as _GeminiFileAPI
+    from pipecat.services.google.gemini_live.file_api import GeminiFileAPI as _GeminiFileAPI
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
