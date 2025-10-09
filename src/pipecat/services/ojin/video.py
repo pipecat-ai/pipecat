@@ -659,6 +659,14 @@ class OjinPersonaService(FrameProcessor):
         )
         return self.idle_frames[mirror_frame_idx]
 
+    def get_next_pending_frame_and_audio(self) -> (AnimationKeyframe, bytes):
+        frame_duration = 1 / self.fps
+        audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
+        frame = self.pending_speech_frames.popleft()
+        audio = self.pending_audio_to_play[:audio_bytes_length_for_one_frame ]
+        self.pending_audio_to_play = self.pending_audio_to_play[audio_bytes_length_for_one_frame:]
+        return frame, audio
+        
     async def _run_loop(self):
         while self.persona_state == PersonaState.INITIALIZING:
             await asyncio.sleep(0.1)
@@ -675,14 +683,12 @@ class OjinPersonaService(FrameProcessor):
 
             while len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx < self.current_frame_index:
                 self.num_speech_frames_played += 1
-                missed_frame = self.pending_speech_frames.popleft()
+                missed_frame, missed_audio = self.get_next_pending_frame_and_audio()
                 logger.debug(f"Missed frame: {missed_frame.frame_idx}")
 
             if len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx == self.current_frame_index:
                 self.num_speech_frames_played += 1
-                animation_frame = self.pending_speech_frames.popleft()
-                audio_to_play = self.pending_audio_to_play[:audio_bytes_length_for_one_frame ]
-                self.pending_audio_to_play = self.pending_audio_to_play[audio_bytes_length_for_one_frame:]
+                animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
                 logger.debug(f"plyaed frame: {animation_frame.frame_idx}")
             
             # Remove duplicate frames
