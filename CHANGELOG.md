@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `--folder` argument to the runner, allowing files saved in that folder
+  to be downloaded from `http://HOST:PORT/file/FILE`.
+
 - Added `GeminiLiveVertexLLMService`, for accessing Gemini Live via Google
   Vertex AI.
 
