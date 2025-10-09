@@ -51,6 +51,10 @@ class GoogleVertexLLMService(OpenAILLMService):
     class InputParams(OpenAILLMService.InputParams):
         """Input parameters specific to Vertex AI.
 
+        .. deprecated:: 0.0.90
+            Use `OpenAILLMService.InputParams` instead and provide `location` and
+            `project_id` as direct arguments to `GoogleVertexLLMService.__init__()`.
+
         Parameters:
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
@@ -60,12 +64,29 @@ class GoogleVertexLLMService(OpenAILLMService):
         location: str = "us-east4"
         project_id: str
 
+        def __init__(self, **kwargs):
+            """Initializes the InputParams."""
+            import warnings
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                warnings.warn(
+                    "GoogleVertexLLMService.InputParams is deprecated. "
+                    "Please use OpenAILLMService.InputParams instead and provide "
+                    "'location' and 'project_id' as direct arguments to __init__.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+            super().__init__(**kwargs)
+
     def __init__(
         self,
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
         model: str = "google/gemini-2.0-flash-001",
+        location: Optional[str] = None,
+        project_id: Optional[str] = None,
         params: Optional[InputParams] = None,
         **kwargs,
     ):
@@ -75,11 +96,42 @@ class GoogleVertexLLMService(OpenAILLMService):
             credentials: JSON string of service account credentials.
             credentials_path: Path to the service account JSON file.
             model: Model identifier (e.g., "google/gemini-2.0-flash-001").
+            location: GCP region for Vertex AI endpoint (e.g., "us-east4").
+            project_id: Google Cloud project ID.
             params: Vertex AI input parameters including location and project.
+
+                .. deprecated:: 0.0.90
+                    Use `OpenAILLMService.InputParams` instead and provide `location`
+                    and `project_id` as direct arguments to `__init__()`.
+
             **kwargs: Additional arguments passed to OpenAILLMService.
         """
-        params = params or OpenAILLMService.InputParams()
-        base_url = self._get_base_url(params)
+        # Handle deprecated InputParams
+        if params is not None and isinstance(params, GoogleVertexLLMService.InputParams):
+            # Extract location and project_id from params if not provided directly
+            if project_id is None:
+                project_id = params.project_id
+            if location is None:
+                location = params.location
+            # Convert to base InputParams
+            params = OpenAILLMService.InputParams(
+                **params.model_dump(exclude={"location", "project_id"}, exclude_unset=True)
+            )
+        else:
+            params = params or OpenAILLMService.InputParams()
+
+        # Validate parameters
+        # NOTE: once we remove deprecated InputParams, we can update __init__()
+        #       signature with the following:
+        #       - location: str = "us-east4",
+        #       - project_id: str,
+        #       For now, we need them as-is to maintain backward compatibility.
+        if project_id is None:
+            raise ValueError("project_id is required")
+        if location is None:
+            location = "us-east4"  # Default location if not provided
+
+        base_url = self._get_base_url(location, project_id)
         self._api_key = self._get_api_token(credentials, credentials_path)
 
         super().__init__(
@@ -91,17 +143,14 @@ class GoogleVertexLLMService(OpenAILLMService):
         )
 
     @staticmethod
-    def _get_base_url(params: InputParams) -> str:
+    def _get_base_url(location: str, project_id: str) -> str:
         """Construct the base URL for Vertex AI API."""
         # Determine the correct API host based on location
-        if params.location == "global":
+        if location == "global":
             api_host = "aiplatform.googleapis.com"
         else:
-            api_host = f"{params.location}-aiplatform.googleapis.com"
-        return (
-            f"https://{api_host}/v1/"
-            f"projects/{params.project_id}/locations/{params.location}/endpoints/openapi"
-        )
+            api_host = f"{location}-aiplatform.googleapis.com"
+        return f"https://{api_host}/v1/projects/{project_id}/locations/{location}/endpoints/openapi"
 
     @staticmethod
     def _get_api_token(credentials: Optional[str], credentials_path: Optional[str]) -> str:
