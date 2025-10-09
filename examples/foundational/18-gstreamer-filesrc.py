@@ -21,7 +21,7 @@ from pipecat.transports.daily.transport import DailyParams
 load_dotenv(override=True)
 
 parser = argparse.ArgumentParser(description="Pipecat Video Streaming Bot")
-parser.add_argument("-i", "--input", type=str, required=True, help="Input video file")
+parser.add_argument("-i", "--input", type=str, required=False, help="Input video file")
 args = parser.parse_args()
 
 # We store functions so objects (e.g. SileroVADAnalyzer) don't get
@@ -48,8 +48,9 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot with video input: {args.input}")
 
+    location = "rtsp://rtspstream:9bGdZ6NKfRXnMbFAg71al@zephyr.rtsp.stream/people"
     gst = GStreamerPipelineSource(
-        pipeline=f"filesrc location={args.input}",
+        pipeline=(f"rtspsrc location={location} ! decodebin ! autovideosink"),
         out_params=GStreamerPipelineSource.OutputParams(
             video_width=1280,
             video_height=720,
