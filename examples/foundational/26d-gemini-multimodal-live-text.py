@@ -20,7 +20,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.gemini_live.gemini import (
+from pipecat.services.google.gemini_live.gemini import (
     GeminiLiveLLMService,
     GeminiModalities,
     InputParams,
