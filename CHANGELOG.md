@@ -50,6 +50,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a `GoogleVertexLLMService` issue that would generate an error if no
+  token information was returned.
+
 - `GeminiLiveLLMService` will now end gracefully (i.e. after the bot has
   finished) upon receiving an `EndFrame`.
 
