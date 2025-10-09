@@ -87,9 +87,11 @@ class GeminiLLMAdapter(BaseLLMAdapter[GeminiLLMInvocationParams]):
             Includes both converted standard tools and any custom Gemini-specific tools.
         """
         functions_schema = tools_schema.standard_tools
-        formatted_standard_tools = [
-            {"function_declarations": [func.to_default_dict() for func in functions_schema]}
-        ]
+        formatted_standard_tools = (
+            [{"function_declarations": [func.to_default_dict() for func in functions_schema]}]
+            if functions_schema
+            else []
+        )
         custom_gemini_tools = []
         if tools_schema.custom_tools:
             custom_gemini_tools = tools_schema.custom_tools.get(AdapterType.GEMINI, [])
