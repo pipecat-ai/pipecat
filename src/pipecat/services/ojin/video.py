@@ -579,6 +579,7 @@ class OjinPersonaService(FrameProcessor):
             is_speech: Whether this interaction is speech-based (True) or idle (False)
 
         """
+
         self._interaction = new_interaction or OjinPersonaInteraction()
         self._interaction.set_state(InteractionState.STARTING)
 
@@ -603,6 +604,7 @@ class OjinPersonaService(FrameProcessor):
         Sets received_all_interaction_inputs flag to True, which will trigger cleanup
         once all queued audio has been processed.
         """
+        logger.debug("Ending interaction")
         # TODO Handle possible race conditions i.e. when _interaction.state == STARTING
         if self._interaction is None:
             logger.error("_end_interaction but no interaction is set")
@@ -658,6 +660,7 @@ class OjinPersonaService(FrameProcessor):
         return self.idle_frames[mirror_frame_idx]
 
     def get_next_pending_frame_and_audio(self) -> (AnimationKeyframe, bytes):
+        self.num_speech_frames_played += 1
         frame_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
         frame = self.pending_speech_frames.popleft()
@@ -680,14 +683,12 @@ class OjinPersonaService(FrameProcessor):
             animation_frame = self._get_idle_frame_for_index(self.current_frame_index)
 
             while len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx < self.current_frame_index:
-                self.num_speech_frames_played += 1
                 missed_frame, missed_audio = self.get_next_pending_frame_and_audio()
                 logger.debug(f"Missed frame: {missed_frame.frame_idx}")
 
             if len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx == self.current_frame_index:
-                self.num_speech_frames_played += 1
                 animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
-                logger.debug(f"plyaed frame: {animation_frame.frame_idx}")
+                logger.debug(f"played frame: {animation_frame.frame_idx}")
             
             # Remove duplicate frames
             while len(self.pending_speech_frames) != 0 and self.pending_speech_frames[0].frame_idx == self.current_frame_index:
