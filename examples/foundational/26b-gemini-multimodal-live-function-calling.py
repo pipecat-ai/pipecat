@@ -22,7 +22,7 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.gemini_live.gemini import GeminiLiveLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -122,12 +122,15 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         required=["location"],
     )
     search_tool = {"google_search": {}}
+    # KNOWN ISSUE: If using GeminiVertexMultimodalLiveLLMService, it appears
+    # you cannot use the "google_search" tool alongside other tools.
+    # See https://github.com/googleapis/python-genai/issues/941.
     tools = ToolsSchema(
         standard_tools=[weather_function, restaurant_function],
         custom_tools={AdapterType.GEMINI: [search_tool]},
     )
 
-    llm = GeminiMultimodalLiveLLMService(
+    llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         tools=tools,
