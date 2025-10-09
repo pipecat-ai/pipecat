@@ -24,7 +24,7 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gemini_multimodal_live.gemini import GeminiMultimodalLiveLLMService
+from pipecat.services.gemini_live.gemini import GeminiLiveLLMService
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -144,7 +144,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         custom_tools={AdapterType.GEMINI: [search_tool]},
     )
 
-    llm = GeminiMultimodalLiveLLMService(
+    llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         tools=tools,

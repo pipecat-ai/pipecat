@@ -20,9 +20,9 @@ from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
 from pipecat.services.cartesia.tts import CartesiaTTSService
-from pipecat.services.gemini_multimodal_live.gemini import (
-    GeminiMultimodalLiveLLMService,
-    GeminiMultimodalModalities,
+from pipecat.services.gemini_live.gemini import (
+    GeminiLiveLLMService,
+    GeminiModalities,
     InputParams,
 )
 from pipecat.transports.base_transport import BaseTransport, TransportParams
@@ -82,11 +82,11 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
 
     # KNOWN ISSUE: If using GeminiVertexMultimodalLiveLLMService, it appears
     # you cannot specify a modality other than AUDIO.
-    llm = GeminiMultimodalLiveLLMService(
+    llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=SYSTEM_INSTRUCTION,
         tools=[{"google_search": {}}, {"code_execution": {}}],
-        params=InputParams(modalities=GeminiMultimodalModalities.TEXT),
+        params=InputParams(modalities=GeminiModalities.TEXT),
     )
 
     # Optionally, you can set the response modalities via a function

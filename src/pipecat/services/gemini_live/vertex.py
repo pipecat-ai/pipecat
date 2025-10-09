@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""Google Vertex AI Gemini Multimodal Live service.
+"""Service for accessing Gemini Live via Google Vertex AI.
 
-This module provides integration with Google's Gemini Multimodal Live model via
+This module provides integration with Google's Gemini Live model via
 Vertex AI, supporting both text and audio modalities with voice transcription,
 streaming responses, and tool usage.
 """
@@ -18,8 +18,8 @@ from typing import List, Optional, Union
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.services.gemini_multimodal_live.gemini import (
-    GeminiMultimodalLiveLLMService,
+from pipecat.services.gemini_live.gemini import (
+    GeminiLiveLLMService,
     HttpOptions,
     InputParams,
 )
@@ -39,12 +39,12 @@ except ModuleNotFoundError as e:
     raise Exception(f"Missing module: {e}")
 
 
-class GeminiVertexMultimodalLiveLLMService(GeminiMultimodalLiveLLMService):
-    """Google Vertex AI Gemini Multimodal Live service.
+class GeminiLiveVertexLLMService(GeminiLiveLLMService):
+    """Provides access to Google's Gemini Live model via Vertex AI.
 
-    Provides access to Google's Gemini Multimodal Live model via Vertex AI,
-    supporting both text and audio modalities. It handles voice transcription,
-    streaming audio responses, and tool usage.
+    This service enables real-time conversations with Gemini, supporting both
+    text and audio modalities. It handles voice transcription, streaming audio
+    responses, and tool usage.
     """
 
     def __init__(
@@ -66,7 +66,7 @@ class GeminiVertexMultimodalLiveLLMService(GeminiMultimodalLiveLLMService):
         http_options: Optional[HttpOptions] = None,
         **kwargs,
     ):
-        """Initialize the Google Vertex AI Gemini Multimodal Live service.
+        """Initialize the service for accessing Gemini Live via Google Vertex AI.
 
         Args:
             credentials: JSON string of service account credentials.
@@ -85,13 +85,13 @@ class GeminiVertexMultimodalLiveLLMService(GeminiMultimodalLiveLLMService):
                 is first set. Defaults to True.
             file_api_base_url: Base URL for the Gemini File API. Defaults to the official endpoint.
             http_options: HTTP options for the client.
-            **kwargs: Additional arguments passed to parent GeminiMultimodalLiveLLMService.
+            **kwargs: Additional arguments passed to parent GeminiLiveLLMService.
         """
         # Check if user incorrectly passed api_key, which is used by parent
         # class but not here.
         if "api_key" in kwargs:
             logger.error(
-                "GeminiVertexMultimodalLiveLLMService does not accept 'api_key' parameter. "
+                "GeminiLiveVertexLLMService does not accept 'api_key' parameter. "
                 "Use 'credentials' or 'credentials_path' instead for Vertex AI authentication."
             )
             raise ValueError(
