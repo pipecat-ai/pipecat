@@ -305,7 +305,7 @@ class OjinPersonaService(FrameProcessor):
             logger.info("Sending silence to init idle frames")
             # Starting an interaction with "generate_idle_frames" will generate all available frames (depending on video source lengh), we don't need to send audio or end the interaction manually
             # This is equivalent to sending silence for the exact amount of duration of the source video
-            await self._client.start_interaction(
+            interaction_id = await self._client.start_interaction(
                 params={
                     "filter_amount": IDLE_FILTER_AMOUNT,
                     "mouth_opening_scale": IDLE_MOUTH_OPENING_SCALE,
@@ -314,6 +314,11 @@ class OjinPersonaService(FrameProcessor):
                     "generate_idle_frames": True
                 }
             )            
+            await self._client.send_message(
+                OjinPersonaEndInteractionMessage(
+                    interaction_id=interaction_id,
+                )
+            )
            
         elif isinstance(message, OjinPersonaInteractionResponseMessage):
             frame_idx = message.index
