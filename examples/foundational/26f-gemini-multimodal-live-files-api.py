@@ -19,8 +19,8 @@ from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.gemini_multimodal_live.gemini import (
-    GeminiMultimodalLiveLLMService,
+from pipecat.services.gemini_live.gemini import (
+    GeminiLiveLLMService,
 )
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
@@ -110,7 +110,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     """
 
     # Initialize Gemini service with File API support
-    llm = GeminiMultimodalLiveLLMService(
+    llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=system_instruction,
         voice_id="Charon",  # Aoede, Charon, Fenrir, Kore, Puck
