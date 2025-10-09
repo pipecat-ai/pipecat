@@ -152,8 +152,8 @@ async def main():
     fps_server_canvas = create_fps_overlay(tk_root, x=8, y=8, width=1280, height=240)
     fps_canvas = create_fps_overlay(tk_root, x=8, y=248, width=1280, height=240)
     tk_update_task = start_tk_updater(tk_root, interval_ms=10)
-    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona.fsm_fps_tracker, fps_canvas, interval_ms=80)    
-    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona.server_fps_tracker, fps_server_canvas, interval_ms=80)    
+    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona._fsm_fps_tracker, fps_canvas, interval_ms=80)    
+    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona._server_fps_tracker, fps_server_canvas, interval_ms=80)    
 
     # Frame metrics and image format converter
     frame_metrics = FrameMetricsProcessor()

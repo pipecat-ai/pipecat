@@ -303,30 +303,18 @@ class OjinPersonaService(FrameProcessor):
                 )
 
             logger.info("Sending silence to init idle frames")
-            # NOTE(mouad): IDLE frames generation
-            interaction_id = await self._client.start_interaction(
+            # Starting an interaction with "generate_idle_frames" will generate all available frames (depending on video source lengh), we don't need to send audio or end the interaction manually
+            # This is equivalent to sending silence for the exact amount of duration of the source video
+            await self._client.start_interaction(
                 params={
                     "filter_amount": IDLE_FILTER_AMOUNT,
                     "mouth_opening_scale": IDLE_MOUTH_OPENING_SCALE,
                     "source_keyframes_index": IDLE_ANIMATION_KEYFRAMES_SLOT,
                     "destination_keyframes_index": IDLE_ANIMATION_KEYFRAMES_SLOT,
+                    "generate_idle_frames": True
                 }
-            )
-            silence_duration = self._settings.idle_sequence_duration
-            silence_audio = b"\x00\x00" * int(silence_duration * OJIN_PERSONA_SAMPLE_RATE)
-            self.num_speech_frames_played = 0
-            await self._client.send_message(
-                OjinPersonaInteractionInputMessage(
-                    audio_int16_bytes=silence_audio,
-                    interaction_id=interaction_id,
-                )
-            )
-            await self._client.send_message(
-                OjinPersonaEndInteractionMessage(
-                    interaction_id=interaction_id,
-                )
-            )
-
+            )            
+           
         elif isinstance(message, OjinPersonaInteractionResponseMessage):
             frame_idx = message.index
             animation_frame = AnimationKeyframe(
@@ -445,6 +433,10 @@ class OjinPersonaService(FrameProcessor):
         Sends a cancel message to the backend, updates the FSM state, and
         cleans up the current interaction.
         """
+        if self._pending_interaction is not None:
+            self._pending_interaction.close()
+            self._pending_interaction = None
+
         if self._interaction is None or self._interaction.interaction_id is None:
             logger.debug("Trying to interrupt an interaction but none is active")
             return
@@ -461,8 +453,9 @@ class OjinPersonaService(FrameProcessor):
             # TODO(mouad): interpolate towards silence instead of hard stop?
             self.pending_audio_to_play.clear()
             self.pending_speech_frames.clear()
+            self.num_speech_frames_played = 0
 
-            self._interaction.set_state(InteractionState.INACTIVE)
+            self._interaction.set_state(InteractionState.INACTIVE)                    
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         """Process incoming frames from the pipeline.
