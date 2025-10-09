@@ -30,12 +30,15 @@ except ModuleNotFoundError as e:
 # These aliases are just here for backward compatibility, since we used to
 # define public-facing StartSensitivity and EndSensitivity enums in this
 # module.
-warnings.warn(
-    "Importing StartSensitivity and EndSensitivity from "
-    "pipecat.services.gemini_multimodal_live.events is deprecated. "
-    "Please import them directly from google.genai.types instead.",
-    DeprecationWarning,
-    stacklevel=2,
-)
+with warnings.catch_warnings():
+    warnings.simplefilter("always")
+    warnings.warn(
+        "Importing StartSensitivity and EndSensitivity from "
+        "pipecat.services.gemini_multimodal_live.events is deprecated. "
+        "Please import them directly from google.genai.types instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
 StartSensitivity = _StartSensitivity
 EndSensitivity = _EndSensitivity
