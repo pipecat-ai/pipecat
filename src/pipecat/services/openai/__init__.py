@@ -10,6 +10,7 @@ from pipecat.services import DeprecatedModuleProxy
 
 from .image import *
 from .llm import *
+from .realtime import *
 from .stt import *
 from .tts import *
 

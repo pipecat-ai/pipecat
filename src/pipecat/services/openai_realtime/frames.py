@@ -1,37 +1,21 @@
 #
-# Copyright (c) 2024–2025, Daily
+# Copyright (c) 2025, Daily
 #
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
 """Custom frame types for OpenAI Realtime API integration."""
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import warnings
 
-from pipecat.frames.frames import DataFrame, FunctionCallResultFrame
+from pipecat.services.openai.realtime.frames import *
 
-if TYPE_CHECKING:
-    from pipecat.services.openai_realtime.context import OpenAIRealtimeLLMContext
-
-
-@dataclass
-class RealtimeMessagesUpdateFrame(DataFrame):
-    """Frame indicating that the realtime context messages have been updated.
-
-    Parameters:
-        context: The updated OpenAI realtime LLM context.
-    """
-
-    context: "OpenAIRealtimeLLMContext"
-
-
-@dataclass
-class RealtimeFunctionCallResultFrame(DataFrame):
-    """Frame containing function call results for the realtime service.
-
-    Parameters:
-        result_frame: The function call result frame to send to the realtime API.
-    """
-
-    result_frame: FunctionCallResultFrame
+with warnings.catch_warnings():
+    warnings.simplefilter("always")
+    warnings.warn(
+        "Types in pipecat.services.openai_realtime.frames are deprecated. "
+        "Please use the equivalent types from "
+        "pipecat.services.openai.realtime.frames instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
