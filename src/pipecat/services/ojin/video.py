@@ -639,7 +639,7 @@ class OjinPersonaService(FrameProcessor):
         )
         return self.idle_frames[mirror_frame_idx]
 
-    def get_next_pending_frame_and_audio(self) -> (AnimationKeyframe, bytes):
+    def get_next_pending_frame_and_audio(self) -> tuple[AnimationKeyframe, bytes]:
         self.num_speech_frames_played += 1
         frame_duration = 1 / self.fps
         audio_bytes_length_for_one_frame = 2 * int(frame_duration * OJIN_PERSONA_SAMPLE_RATE)
