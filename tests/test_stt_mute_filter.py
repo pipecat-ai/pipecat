@@ -9,8 +9,6 @@ import unittest
 from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
-    FunctionCallInProgressFrame,
-    FunctionCallResultFrame,
     InputAudioRawFrame,
     InterimTranscriptionFrame,
     STTMuteFrame,

@@ -10,7 +10,6 @@ from pipecat.frames.frames import AudioFrame, EndFrame, ImageFrame, LLMContextFr
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.processors.aggregators import SentenceAggregator
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.processors.aggregators.llm_response_universal import LLMContextAggregatorPair
 from pipecat.runner.daily import configure
 from pipecat.services.azure import AzureLLMService, AzureTTSService
 from pipecat.services.elevenlabs import ElevenLabsTTSService

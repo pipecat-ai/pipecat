@@ -181,6 +181,7 @@ line-length = 100
 select = [
     "D", # Docstring rules
     "I", # Import rules
+    "F401"
 ]
 ignore = [
     "D105",  # Missing docstring in magic methods (__str__, __repr__, etc.)

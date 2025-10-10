@@ -6,7 +6,6 @@
 
 """Deepgram speech-to-text service implementation."""
 
-import asyncio
 from typing import AsyncGenerator, Dict, Optional
 
 from loguru import logger

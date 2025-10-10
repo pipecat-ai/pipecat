@@ -5,7 +5,6 @@
 #
 
 import os
-from unittest.mock import AsyncMock
 
 import pytest
 from dotenv import load_dotenv

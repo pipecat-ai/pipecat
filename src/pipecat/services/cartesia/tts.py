@@ -10,7 +10,7 @@ import base64
 import json
 import uuid
 import warnings
-from typing import AsyncGenerator, List, Literal, Optional, Union
+from typing import AsyncGenerator, List, Literal, Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field

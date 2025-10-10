@@ -10,7 +10,7 @@ import base64
 import copy
 import json
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, TypedDict
+from typing import Any, Dict, List, Optional, TypedDict
 
 from loguru import logger
 
