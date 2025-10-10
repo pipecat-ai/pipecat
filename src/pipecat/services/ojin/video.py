@@ -586,6 +586,9 @@ class OjinPersonaService(FrameProcessor):
         once all queued audio has been processed.
         """
         logger.debug("Ending interaction")
+        if self._client is None:
+            return
+
         # TODO Handle possible race conditions i.e. when _interaction.state == STARTING
         if self._interaction is None:
             logger.error("_end_interaction but no interaction is set")
