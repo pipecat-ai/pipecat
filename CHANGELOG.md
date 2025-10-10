@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `pipecat.service.openai_realtime` is now deprecated, use
+  `pipecat.services.openai.realtime` instead or
+  `pipecat.services.azure.realtime` for Azure Realtime.
+
 - `pipecat.service.aws_nova_sonic` is now deprecated, use
   `pipecat.services.aws.nova_sonic` instead.
 
