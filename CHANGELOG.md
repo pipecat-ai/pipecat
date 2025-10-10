@@ -1487,7 +1487,7 @@ quality and critical bugs impacting `ParallelPipelines` functionality.**
 - Added `session_token` parameter to `AWSNovaSonicLLMService`.
 
 - Added Gemini Multimodal Live File API for uploading, fetching, listing, and
-  deleting files. See `26f-gemini-multimodal-live-files-api.py` for example usage.
+  deleting files. See `26f-gemini-live-files-api.py` for example usage.
 
 ### Changed
 
@@ -3493,7 +3493,7 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 - Added the new modalities option and helper function to set Gemini output
   modalities.
 
-- Added `examples/foundational/26d-gemini-multimodal-live-text.py` which is
+- Added `examples/foundational/26d-gemini-live-text.py` which is
   using Gemini as TEXT modality and using another TTS provider for TTS process.
 
 ### Changed
@@ -3680,9 +3680,9 @@ stt = DeepgramSTTService(..., live_options=LiveOptions(model="nova-2-general"))
 - Added new foundational examples for `GeminiMultimodalLiveLLMService`:
 
   - `26-gemini-multimodal-live.py`
-  - `26a-gemini-multimodal-live-transcription.py`
-  - `26b-gemini-multimodal-live-video.py`
-  - `26c-gemini-multimodal-live-video.py`
+  - `26a-gemini-live-transcription.py`
+  - `26b-gemini-live-video.py`
+  - `26c-gemini-live-video.py`
 
 - Added `SimliVideoService`. This is an integration for Simli AI avatars.
   (see https://www.simli.com)
