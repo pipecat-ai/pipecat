@@ -12,7 +12,7 @@ this API can be referenced in Gemini generative model calls.
 
 .. deprecated:: 0.0.90
     Importing GeminiFileAPI from this module is deprecated.
-    Import it from pipecat.services.gemini_live.file_api instead.
+    Import it from pipecat.services.google.gemini_live.file_api instead.
 """
 
 import warnings
@@ -32,7 +32,7 @@ except ModuleNotFoundError as e:
 warnings.warn(
     "Importing GeminiFileAPI from "
     "pipecat.services.gemini_multimodal_live.file_api is deprecated. "
-    "Please import it from pipecat.services.gemini_live.file_api instead.",
+    "Please import it from pipecat.services.google.gemini_live.file_api instead.",
     DeprecationWarning,
     stacklevel=2,
 )
