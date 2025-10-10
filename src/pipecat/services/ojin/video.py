@@ -101,6 +101,7 @@ class OjinPersonaInteraction:
 
     state: InteractionState = InteractionState.INACTIVE
     expected_frames: float = 0
+    num_received_frames: int = 0
 
     def __post_init__(self):
         self.pending_audio = bytearray()
@@ -242,7 +243,7 @@ class OjinPersonaService(FrameProcessor):
         self.num_speech_frames_played: int = 0
         self.is_mirrored_loop: bool = True
         self.fps = 25
-        self.current_frame_index = 0
+        self.current_frame_index = -1
 
         self.pending_audio_to_play = bytearray()
         self.extra_frames_lat = settings.extra_frames_lat
@@ -327,6 +328,7 @@ class OjinPersonaService(FrameProcessor):
                 # IDLE frame
                 self.idle_frames.append(animation_frame)
             else:
+                self._interaction.num_received_frames += 1
                 self.pending_speech_frames.append(animation_frame)
 
             if message.is_final_response:
@@ -581,6 +583,7 @@ class OjinPersonaService(FrameProcessor):
             }
         )
         logger.debug(f"Started interaction with id: {interaction_id}")
+        self._interaction.num_received_frames = 0
         self._interaction.interaction_id = interaction_id
 
     async def _end_interaction(self):
@@ -664,32 +667,43 @@ class OjinPersonaService(FrameProcessor):
         silence_audio_for_one_frame = b"\x00" * audio_bytes_length_for_one_frame
 
         start_ts = time.perf_counter()
+        self.played_frame_idx = -1
         while True:
+            elapsed_time = time.perf_counter() - start_ts
+            next_frame_idx = int(elapsed_time * self.fps)
+            if next_frame_idx <= self.current_frame_index:
+                await asyncio.sleep(0.001)
+                continue
+
             audio_to_play = silence_audio_for_one_frame
-            animation_frame = self._get_idle_frame_for_index(self.current_frame_index)
-
+            self.current_frame_index = next_frame_idx
             if (
                 len(self.pending_speech_frames) != 0
-                and self.pending_speech_frames[0].frame_idx < self.current_frame_index
+                and self.pending_speech_frames[0].frame_idx <= self.current_frame_index
             ):
-                logger.debug(f"Frame mismatch: {self.current_frame_index}")
-                self.current_frame_index = self.pending_speech_frames[0].frame_idx
-                # missed_frame, missed_audio = self.get_next_pending_frame_and_audio()
-
-            if (
-                len(self.pending_speech_frames) != 0
-                and self.pending_speech_frames[0].frame_idx == self.current_frame_index
-            ):
+                logger.debug(
+                    f"played frame {self.pending_speech_frames[0].frame_idx} ==? {self.current_frame_index}"
+                )
                 animation_frame, audio_to_play = self.get_next_pending_frame_and_audio()
-                logger.debug(f"played frame: {animation_frame.frame_idx}")
+                self.played_frame_idx = animation_frame.frame_idx
+            else:
+                if self._interaction is not None and self._interaction.num_received_frames > 0:
+                    logger.debug(f"frame missed: {self.current_frame_index}")
+                    self.current_frame_index -= 1
 
-            # Remove frames in the past
-            while (
-                len(self.pending_speech_frames) != 0
-                and self.pending_speech_frames[0].frame_idx == self.current_frame_index
-            ):
-                dup_frame = self.pending_speech_frames.popleft()
-                logger.debug(f"Duplicate frame: {dup_frame.frame_idx}")
+                    silence_5ms = b"\x00\x00" * int(0.005 * OJIN_PERSONA_SAMPLE_RATE)
+                    audio_frame = OutputAudioRawFrame(
+                        audio=silence_5ms,
+                        sample_rate=OJIN_PERSONA_SAMPLE_RATE,
+                        num_channels=1,
+                    )
+                    await self.push_frame(audio_frame)
+                    await asyncio.sleep(0.005)
+                    continue
+
+                self.played_frame_idx += 1
+                animation_frame = self._get_idle_frame_for_index(self.played_frame_idx)
+                logger.debug(f"played idle frame: {self.played_frame_idx}")
 
             image_frame = OutputImageRawFrame(
                 image=animation_frame.image, size=self._settings.image_size, format="RGB"
@@ -701,14 +715,6 @@ class OjinPersonaService(FrameProcessor):
             )
             await self.push_frame(image_frame)
             await self.push_frame(audio_frame)
-            self.current_frame_index += 1
-
-            # FPS lock
-            elapsed_time = time.perf_counter() - start_ts
-            frame_target_time = 1 / self.fps
-            wait_time = frame_target_time - elapsed_time
-            await async_accurate_sleep(wait_time)
-            start_ts = time.perf_counter()
 
 
 def mirror_index(index: int, size: int, period: int = 2):
