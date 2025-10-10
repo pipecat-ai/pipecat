@@ -174,6 +174,10 @@ class OjinPersonaSettings:
         default=35
     )  # If the number of frames in the loopback is less than or equal to this value then end the interaction to avoid frame misses.
 
+    extra_frames_lat: int = field(
+        default=15,
+    ) # round trip latency between server and client, make sure to specify extra room for error
+
 
 @dataclass
 class AnimationKeyframe:
@@ -241,6 +245,7 @@ class OjinPersonaService(FrameProcessor):
         self.current_frame_index = 0
 
         self.pending_audio_to_play = bytearray()
+        self.extra_frames_lat = settings.extra_frames_lat
 
     async def connect_with_retry(self) -> bool:
         """Attempt to connect with configurable retry mechanism."""
@@ -563,13 +568,12 @@ class OjinPersonaService(FrameProcessor):
         self._interaction.set_state(InteractionState.STARTING)
 
         assert self._client is not None
-        extra_frames_lat = 10  # TODO(mouad): compute the appropriate index
         logger.info(
-            f"Starting interaction at frame index: {self.current_frame_index + extra_frames_lat}"
+            f"Starting interaction at frame index: {self.current_frame_index + self.extra_frames_lat}"
         )
         interaction_id = await self._client.start_interaction(
             params={
-                "client_frame_index": self.current_frame_index + extra_frames_lat,
+                "client_frame_index": self.current_frame_index + self.extra_frames_lat,
                 "filter_amount": SPEECH_FILTER_AMOUNT,
                 "mouth_opening_scale": SPEECH_MOUTH_OPENING_SCALE,
                 "source_keyframes_index": active_keyframes_slot,
