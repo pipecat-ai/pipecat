@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added audio filter `KrispVivaFilter` using the Krisp VIVA SDK.
+
 - Added `--folder` argument to the runner, allowing files saved in that folder
   to be downloaded from `http://HOST:PORT/file/FILE`.
 
