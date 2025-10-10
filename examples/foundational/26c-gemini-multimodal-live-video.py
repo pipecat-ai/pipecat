@@ -24,7 +24,7 @@ from pipecat.runner.utils import (
     maybe_capture_participant_camera,
     maybe_capture_participant_screen,
 )
-from pipecat.services.google.gemini_live.gemini import GeminiLiveLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 
