@@ -176,7 +176,7 @@ class OjinPersonaSettings:
 
     extra_frames_lat: int = field(
         default=15,
-    ) # round trip latency between server and client, make sure to specify extra room for error
+    )  # round trip latency between server and client, make sure to specify extra room for error
 
 
 @dataclass
@@ -674,7 +674,7 @@ class OjinPersonaService(FrameProcessor):
             ):
                 logger.debug(f"Frame mismatch: {self.current_frame_index}")
                 self.current_frame_index = self.pending_speech_frames[0].frame_idx
-                #missed_frame, missed_audio = self.get_next_pending_frame_and_audio()                
+                # missed_frame, missed_audio = self.get_next_pending_frame_and_audio()
 
             if (
                 len(self.pending_speech_frames) != 0
