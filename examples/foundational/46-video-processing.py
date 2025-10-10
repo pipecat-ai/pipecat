@@ -20,7 +20,7 @@ from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
-from pipecat.services.google.gemini_live import GeminiLiveLLMService
+from pipecat.services.google.gemini_live.llm import GeminiLiveLLMService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.daily.transport import DailyParams, DailyTransport
 

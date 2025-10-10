@@ -12,13 +12,12 @@ streaming responses, and tool usage.
 """
 
 import json
-import os
 from typing import List, Optional, Union
 
 from loguru import logger
 
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.services.google.gemini_live.gemini import (
+from pipecat.services.google.gemini_live.llm import (
     GeminiLiveLLMService,
     HttpOptions,
     InputParams,
@@ -33,9 +32,7 @@ try:
 
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error(
-        "In order to use Google Vertex AI, you need to `pip install pipecat-ai[google]`. Also, set up your Google credentials properly."
-    )
+    logger.error("In order to use Google Vertex AI, you need to `pip install pipecat-ai[google]`.")
     raise Exception(f"Missing module: {e}")
 
 
