@@ -553,15 +553,13 @@ class RimeHttpTTSService(TTSService):
 
                 CHUNK_SIZE = self.chunk_size
 
-                async for chunk in response.content.iter_chunked(CHUNK_SIZE):
-                    if need_to_strip_wav_header and chunk.startswith(b"RIFF"):
-                        chunk = chunk[44:]
-                        need_to_strip_wav_header = False
+                async for frame in self._stream_audio_frames_from_iterator(
+                    response.content.iter_chunked(CHUNK_SIZE),
+                    strip_wav_header=need_to_strip_wav_header,
+                ):
+                    await self.stop_ttfb_metrics()
+                    yield frame
 
-                    if len(chunk) > 0:
-                        await self.stop_ttfb_metrics()
-                        frame = TTSAudioRawFrame(chunk, self.sample_rate, 1)
-                        yield frame
         except Exception as e:
             logger.exception(f"Error generating TTS: {e}")
             yield ErrorFrame(error=f"Rime TTS error: {str(e)}")
