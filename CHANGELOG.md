@@ -47,6 +47,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `LivekitFrameSerializer` is now deprecated. Use `LiveKitTransport` instead.
+
 - `pipecat.service.openai_realtime` is now deprecated, use
   `pipecat.services.openai.realtime` instead or
   `pipecat.services.azure.realtime` for Azure Realtime.
