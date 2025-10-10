@@ -51,32 +51,45 @@ class GoogleVertexLLMService(OpenAILLMService):
     class InputParams(OpenAILLMService.InputParams):
         """Input parameters specific to Vertex AI.
 
-        .. deprecated:: 0.0.90
-            Use `OpenAILLMService.InputParams` instead and provide `location` and
-            `project_id` as direct arguments to `GoogleVertexLLMService.__init__()`.
-
         Parameters:
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
+
+                .. deprecated:: 0.0.90
+                    Use `location` as a direct argument to
+                    `GoogleVertexLLMService.__init__()` instead.
+
             project_id: Google Cloud project ID.
+
+                .. deprecated:: 0.0.90
+                    Use `project_id` as a direct argument to
+                    `GoogleVertexLLMService.__init__()` instead.
         """
 
         # https://cloud.google.com/vertex-ai/generative-ai/docs/learn/locations
-        location: str = "us-east4"
-        project_id: str
+        location: Optional[str] = None
+        project_id: Optional[str] = None
 
         def __init__(self, **kwargs):
             """Initializes the InputParams."""
             import warnings
 
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                warnings.warn(
-                    "GoogleVertexLLMService.InputParams is deprecated. "
-                    "Please use OpenAILLMService.InputParams instead and provide "
-                    "'location' and 'project_id' as direct arguments to __init__.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
+                warnings.simplefilter("always")
+                if "location" in kwargs and kwargs["location"] is not None:
+                    warnings.warn(
+                        "GoogleVertexLLMService.InputParams.location is deprecated. "
+                        "Please provide 'location' as a direct argument to GoogleVertexLLMService.__init__() instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
+
+                if "project_id" in kwargs and kwargs["project_id"] is not None:
+                    warnings.warn(
+                        "GoogleVertexLLMService.InputParams.project_id is deprecated. "
+                        "Please provide 'project_id' as a direct argument to GoogleVertexLLMService.__init__() instead.",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
             super().__init__(**kwargs)
 
     def __init__(
@@ -87,7 +100,6 @@ class GoogleVertexLLMService(OpenAILLMService):
         model: str = "google/gemini-2.0-flash-001",
         location: Optional[str] = None,
         project_id: Optional[str] = None,
-        params: Optional[InputParams] = None,
         **kwargs,
     ):
         """Initializes the VertexLLMService.
@@ -98,17 +110,13 @@ class GoogleVertexLLMService(OpenAILLMService):
             model: Model identifier (e.g., "google/gemini-2.0-flash-001").
             location: GCP region for Vertex AI endpoint (e.g., "us-east4").
             project_id: Google Cloud project ID.
-            params: Vertex AI input parameters including location and project.
-
-                .. deprecated:: 0.0.90
-                    Use `OpenAILLMService.InputParams` instead and provide `location`
-                    and `project_id` as direct arguments to `__init__()`.
-
             **kwargs: Additional arguments passed to OpenAILLMService.
         """
-        # Handle deprecated InputParams
-        if params is not None and isinstance(params, GoogleVertexLLMService.InputParams):
-            # Extract location and project_id from params if not provided directly
+        # Handle deprecated InputParams fields
+        if "params" in kwargs and isinstance(kwargs["params"], GoogleVertexLLMService.InputParams):
+            params = kwargs["params"]
+            # Extract location and project_id from params if not provided
+            # directly, for backward compatibility
             if project_id is None:
                 project_id = params.project_id
             if location is None:
@@ -117,15 +125,15 @@ class GoogleVertexLLMService(OpenAILLMService):
             params = OpenAILLMService.InputParams(
                 **params.model_dump(exclude={"location", "project_id"}, exclude_unset=True)
             )
-        else:
-            params = params or OpenAILLMService.InputParams()
+            kwargs["params"] = params
 
-        # Validate parameters
-        # NOTE: once we remove deprecated InputParams, we can update __init__()
-        #       signature with the following:
+        # Validate project_id and location parameters
+        # NOTE: once we remove Vertex-spcific InputParams class, we can update
+        #       __init__() signature as follows:
         #       - location: str = "us-east4",
         #       - project_id: str,
-        #       For now, we need them as-is to maintain backward compatibility.
+        #       But for now, we need them as-is to maintain proper backward
+        #       compatibility.
         if project_id is None:
             raise ValueError("project_id is required")
         if location is None:
@@ -138,7 +146,6 @@ class GoogleVertexLLMService(OpenAILLMService):
             api_key=self._api_key,
             base_url=base_url,
             model=model,
-            params=params,
             **kwargs,
         )
 
