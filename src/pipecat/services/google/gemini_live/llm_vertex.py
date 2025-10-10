@@ -49,7 +49,7 @@ class GeminiLiveVertexLLMService(GeminiLiveLLMService):
         *,
         credentials: Optional[str] = None,
         credentials_path: Optional[str] = None,
-        location: str = "us-east4",
+        location: str,
         project_id: str,
         model="google/gemini-2.0-flash-live-preview-04-09",
         voice_id: str = "Charon",
