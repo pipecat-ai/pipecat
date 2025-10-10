@@ -122,7 +122,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         required=["location"],
     )
     search_tool = {"google_search": {}}
-    # KNOWN ISSUE: If using GeminiVertexMultimodalLiveLLMService, it appears
+    # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
     # you cannot use the "google_search" tool alongside other tools.
     # See https://github.com/googleapis/python-genai/issues/941.
     tools = ToolsSchema(
