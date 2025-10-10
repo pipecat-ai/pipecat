@@ -80,8 +80,10 @@ transport_params = {
 async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     logger.info(f"Starting bot")
 
-    # KNOWN ISSUE: If using GeminiVertexLiveLLMService, it appears
-    # you cannot specify a modality other than AUDIO.
+    # KNOWN ISSUE: If using GeminiLiveVertexLLMService, you cannot specify a
+    # modality other than AUDIO (at least not if using the service's default
+    # model, which is a native audio model:
+    # https://cloud.google.com/vertex-ai/generative-ai/docs/live-api/tools#native-audio).
     llm = GeminiLiveLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         system_instruction=SYSTEM_INSTRUCTION,
