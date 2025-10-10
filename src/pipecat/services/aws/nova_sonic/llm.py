@@ -573,7 +573,7 @@ class AWSNovaSonicLLMService(LLMService):
             else ""
         )
 
-        prompt_start = f'''
+        prompt_start = f"""
         {{
           "event": {{
             "promptStart": {{
@@ -593,14 +593,14 @@ class AWSNovaSonicLLMService(LLMService):
             }}
           }}
         }}
-        '''
+        """
         await self._send_client_event(prompt_start)
 
     async def _send_audio_input_start_event(self):
         if not self._prompt_name:
             return
 
-        audio_content_start = f'''
+        audio_content_start = f"""
         {{
             "event": {{
                 "contentStart": {{
@@ -620,7 +620,7 @@ class AWSNovaSonicLLMService(LLMService):
                 }}
             }}
         }}
-        '''
+        """
         await self._send_client_event(audio_content_start)
 
     async def _send_text_event(self, text: str, role: Role):
@@ -629,7 +629,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         content_name = str(uuid.uuid4())
 
-        text_content_start = f'''
+        text_content_start = f"""
         {{
             "event": {{
                 "contentStart": {{
@@ -644,11 +644,11 @@ class AWSNovaSonicLLMService(LLMService):
                 }}
             }}
         }}
-        '''
+        """
         await self._send_client_event(text_content_start)
 
         escaped_text = json.dumps(text)  # includes quotes
-        text_input = f'''
+        text_input = f"""
         {{
             "event": {{
                 "textInput": {{
@@ -658,10 +658,10 @@ class AWSNovaSonicLLMService(LLMService):
                 }}
             }}
         }}
-        '''
+        """
         await self._send_client_event(text_input)
 
-        text_content_end = f'''
+        text_content_end = f"""
         {{
             "event": {{
                 "contentEnd": {{
@@ -670,7 +670,7 @@ class AWSNovaSonicLLMService(LLMService):
                 }}
             }}
         }}
-        '''
+        """
         await self._send_client_event(text_content_end)
 
     async def _send_user_audio_event(self, audio: bytes):
@@ -678,7 +678,7 @@ class AWSNovaSonicLLMService(LLMService):
             return
 
         blob = base64.b64encode(audio)
-        audio_event = f'''
+        audio_event = f"""
         {{
             "event": {{
                 "audioInput": {{
@@ -688,14 +688,14 @@ class AWSNovaSonicLLMService(LLMService):
                 }}
             }}
         }}
-        '''
+        """
         await self._send_client_event(audio_event)
 
     async def _send_session_end_events(self):
         if not self._stream or not self._prompt_name:
             return
 
-        prompt_end = f'''
+        prompt_end = f"""
         {{
             "event": {{
                 "promptEnd": {{
@@ -703,7 +703,7 @@ class AWSNovaSonicLLMService(LLMService):
                 }}
             }}
         }}
-        '''
+        """
         await self._send_client_event(prompt_end)
 
         session_end = """
@@ -721,7 +721,7 @@ class AWSNovaSonicLLMService(LLMService):
 
         content_name = str(uuid.uuid4())
 
-        result_content_start = f'''
+        result_content_start = f"""
         {{
             "event": {{
                 "contentStart": {{
@@ -740,7 +740,7 @@ class AWSNovaSonicLLMService(LLMService):
                 }}
             }}
         }}
-        '''
+        """
         await self._send_client_event(result_content_start)
 
         result_content = json.dumps(
