@@ -12,7 +12,7 @@ voice transcription, streaming responses, and tool usage.
 
 .. deprecated:: 0.0.90
     This module is deprecated. Please use the equivalent types from
-    pipecat.services.gemini_live.gemini instead. Note that the new type names
+    pipecat.services.google.gemini_live.llm instead. Note that the new type names
     do not include 'Multimodal'.
 """
 
@@ -38,7 +38,7 @@ with warnings.catch_warnings():
     warnings.warn(
         "Types in pipecat.services.gemini_multimodal_live.gemini are deprecated. "
         "Please use the equivalent types from "
-        "pipecat.services.gemini_live.gemini instead. Note that the new type "
+        "pipecat.services.google.gemini_live.llm instead. Note that the new type "
         "names do not include 'Multimodal' "
         "(e.g. `GeminiMultimodalLiveLLMService` is now `GeminiLiveLLMService`).",
         DeprecationWarning,
