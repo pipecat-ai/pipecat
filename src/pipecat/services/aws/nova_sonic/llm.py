@@ -54,14 +54,14 @@ from pipecat.processors.aggregators.openai_llm_context import (
     OpenAILLMContextFrame,
 )
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.aws_nova_sonic.context import (
+from pipecat.services.aws.nova_sonic.context import (
     AWSNovaSonicAssistantContextAggregator,
     AWSNovaSonicContextAggregatorPair,
     AWSNovaSonicLLMContext,
     AWSNovaSonicUserContextAggregator,
     Role,
 )
-from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
+from pipecat.services.aws.nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.llm_service import LLMService
 from pipecat.utils.time import time_now_iso8601
 
@@ -251,7 +251,7 @@ class AWSNovaSonicLLMService(LLMService):
         self._connected_time: Optional[float] = None
         self._wants_connection = False
 
-        file_path = files("pipecat.services.aws_nova_sonic").joinpath("ready.wav")
+        file_path = files("pipecat.services.aws.nova_sonic").joinpath("ready.wav")
         with wave.open(file_path.open("rb"), "rb") as wav_file:
             self._assistant_response_trigger_audio = wav_file.readframes(wav_file.getnframes())
 
