@@ -32,7 +32,7 @@ from pipecat.services.openai.realtime.events import (
     SessionProperties,
     TurnDetection,
 )
-from pipecat.services.openai.realtime.openai import OpenAIRealtimeLLMService
+from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
