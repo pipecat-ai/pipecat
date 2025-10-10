@@ -8,7 +8,17 @@
 
 import asyncio
 from abc import abstractmethod
-from typing import Any, AsyncGenerator, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
 from loguru import logger
 
@@ -373,6 +383,36 @@ class TTSService(AIService):
             or isinstance(frame, TTSStoppedFrame)
         ):
             await self._stop_frame_queue.put(frame)
+
+    async def _stream_audio_frames_from_iterator(
+        self, iterator: AsyncIterator[bytes], *, strip_wav_header: bool
+    ) -> AsyncGenerator[Frame, None]:
+        buffer = bytearray()
+        need_to_strip_wav_header = strip_wav_header
+        async for chunk in iterator:
+            if need_to_strip_wav_header and chunk.startswith(b"RIFF"):
+                chunk = chunk[44:]
+                need_to_strip_wav_header = False
+
+            # Append to current buffer.
+            buffer.extend(chunk)
+
+            # Round to nearest even number.
+            aligned_length = len(buffer) & ~1  # 111111111...11110
+            if aligned_length > 0:
+                aligned_chunk = buffer[:aligned_length]
+                buffer = buffer[aligned_length:]  # keep any leftover byte
+
+                if len(aligned_chunk) > 0:
+                    frame = TTSAudioRawFrame(bytes(aligned_chunk), self.sample_rate, 1)
+                    yield frame
+
+        if len(buffer) > 0:
+            # Make sure we don't need an extra padding byte.
+            if len(buffer) % 2 == 1:
+                buffer.extend(b"\x00")
+            frame = TTSAudioRawFrame(bytes(buffer), self.sample_rate, 1)
+            yield frame
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
         self._processing_text = False
