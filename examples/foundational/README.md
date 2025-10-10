@@ -93,6 +93,7 @@ uv run 07-interruptible.py -t twilio -x NGROK_HOST_NAME
 - **[32-gemini-grounding-metadata.py](./32-gemini-grounding-metadata.py)**: Web search capabilities (Google search integration)
 - **[33-gemini-rag.py](./33-gemini-rag.py)**: Retrieval-augmented generation (Data sources, Grounding)
 - **[37-mem0.py](./37-mem0.py)**: Long-term agent memory (Mem0 service integration)
+- **[47-moss.py](./47-moss.py)**: Agent with realtime semantic search (Moss integration, Knowledge base retrieval)
 
 ### Media Handling
 
