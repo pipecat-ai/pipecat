@@ -45,6 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- `pipecat.service.aws_nova_sonic` is now deprecated, use
+  `pipecat.services.aws.nova_sonic` instead.
+
 - `GeminiMultimodalLiveLLMService` is now deprecated, use
   `GeminiLiveLLMService`.
 
