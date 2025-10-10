@@ -137,6 +137,10 @@ class GoogleVertexLLMService(OpenAILLMService):
         if project_id is None:
             raise ValueError("project_id is required")
         if location is None:
+            # If location is not provided, default to "us-east4".
+            # Note: this is legacy behavior; ideally location would be
+            # required.
+            logger.warning("location is not provided. Defaulting to 'us-east4'.")
             location = "us-east4"  # Default location if not provided
 
         base_url = self._get_base_url(location, project_id)
