@@ -33,7 +33,7 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
 from pipecat.processors.frame_processor import FrameDirection
-from pipecat.services.aws_nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
+from pipecat.services.aws.nova_sonic.frames import AWSNovaSonicFunctionCallResultFrame
 from pipecat.services.openai.llm import (
     OpenAIAssistantContextAggregator,
     OpenAIUserContextAggregator,
