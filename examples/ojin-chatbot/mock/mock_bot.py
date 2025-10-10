@@ -143,6 +143,7 @@ async def main():
         persona_config_id=os.getenv("OJIN_PERSONA_ID", ""),        
         image_size=(1280, 720),
         idle_to_speech_seconds=1.0,
+        idle_sequence_duration=5,
         tts_audio_passthrough=False,
         push_bot_stopped_speaking_frames=False,
     ))    
@@ -151,8 +152,8 @@ async def main():
     fps_server_canvas = create_fps_overlay(tk_root, x=8, y=8, width=1280, height=240)
     fps_canvas = create_fps_overlay(tk_root, x=8, y=248, width=1280, height=240)
     tk_update_task = start_tk_updater(tk_root, interval_ms=10)
-    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona.fsm_fps_tracker, fps_canvas, interval_ms=80)    
-    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona.server_fps_tracker, fps_server_canvas, interval_ms=80)    
+    tk_fps_update_task = start_tk_fps_udpater(tk_root, persona._fsm_fps_tracker, fps_canvas, interval_ms=80)    
+    tk_fps_server_update_task = start_tk_fps_udpater(tk_root, persona._server_fps_tracker, fps_server_canvas, interval_ms=80)    
 
     # Frame metrics and image format converter
     frame_metrics = FrameMetricsProcessor()
