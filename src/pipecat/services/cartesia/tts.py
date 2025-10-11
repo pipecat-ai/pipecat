@@ -168,6 +168,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         params: Optional[InputParams] = None,
         text_aggregator: Optional[BaseTextAggregator] = None,
         aggregate_sentences: Optional[bool] = True,
+        pronunciation_dictionary: Optional[dict[str, str]] = None,
         **kwargs,
     ):
         """Initialize the Cartesia TTS service.
@@ -230,7 +231,7 @@ class CartesiaTTSService(AudioContextWordTTSService):
         self._receive_task = None
 
         # Text preprocessor for better pronunciation
-        self._text_transformer = TTSTextTransformer()
+        self._text_transformer = TTSTextTransformer(pronunciation_dictionary=pronunciation_dictionary)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

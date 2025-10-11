@@ -277,6 +277,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         sample_rate: Optional[int] = None,
         params: Optional[InputParams] = None,
         aggregate_sentences: Optional[bool] = True,
+        pronunciation_dictionary: Optional[dict[str, str]] = None,
         **kwargs,
     ):
         """Initialize the ElevenLabs TTS service.
@@ -352,7 +353,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         self._keepalive_task = None
 
         # Text preprocessor for better pronunciation
-        self._text_transformer = TTSTextTransformer()
+        self._text_transformer = TTSTextTransformer(pronunciation_dictionary=pronunciation_dictionary)
 
     def can_generate_metrics(self) -> bool:
         """Check if this service can generate processing metrics.

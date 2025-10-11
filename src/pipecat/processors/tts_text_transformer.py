@@ -7,16 +7,7 @@ import re
 from typing import List
 
 import re
-from typing import List
-
-PRONUNCIATION_DICTIONARY = {
-    "Paschal": "'pæskul",
-    "Paschal's": "'pæskulz",
-    "HVAC": "ˈeɪt͡ʃˌvæk",
-    "fifth": "fɪfθ",
-    "twelfth": "twɛlfθ",
-    "sixth": "sɪksθ"
-}
+from typing import List, Optional
 
 class TTSTextTransformer:
     """
@@ -75,8 +66,8 @@ class TTSTextTransformer:
     COMMA_SEPARATED_NUMBER_PATTERN = r'\b[0-9]{1,3}(,[0-9]{2,3})+\b'
     STANDALONE_NUMBER_PATTERN = r'\b[0-9]+\b'
 
-    def __init__(self):
-        pass
+    def __init__(self, pronunciation_dictionary: Optional[dict[str, str]] = None):
+        self._pronunciation_dictionary = pronunciation_dictionary or {}
 
     def time_transformer(self, text: str) -> str:
         """
