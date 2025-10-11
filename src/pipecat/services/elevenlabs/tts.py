@@ -266,6 +266,7 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         enable_logging: Optional[bool] = None
         apply_text_normalization: Optional[Literal["auto", "on", "off"]] = None
         pronunciation_dictionary_locators: Optional[List[PronunciationDictionaryLocator]] = None
+        pronunciation_dictionary: Optional[dict[str, str]] = None # Netic: TODO: Move to pronunciation_dictionary_locators
 
     def __init__(
         self,
