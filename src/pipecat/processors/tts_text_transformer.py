@@ -371,7 +371,7 @@ class TTSTextTransformer:
         """
         result = text
         
-        for word, ipa_pronunciation in PRONUNCIATION_DICTIONARY.items():
+        for word, ipa_pronunciation in self._pronunciation_dictionary.items():
             pattern = r'\b' + re.escape(word) + r'\b'
             phoneme_tag = f'<phoneme alphabet="ipa" ph="{ipa_pronunciation}">{word}</phoneme>'
             result = re.sub(pattern, phoneme_tag, result, flags=re.IGNORECASE)
