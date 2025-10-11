@@ -53,6 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed an issue that would cause wrong user/assistant context ordering when
+  using interruption strategies.
+
 - Fixed an issue where the `SmallWebRTCRequest` dataclass in runner would scrub
   arbitrary request data from client due to camelCase typing. This fixes data
   passthrough for JS clients where `APIRequest` is used.
