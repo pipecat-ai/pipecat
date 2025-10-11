@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an asyncio event `finished_event` field to `InterruptionFrame`. When
+  assigned, the asyncio event will be set when the frame reaches the end of the
+  pipeline. You can use this field to know when an interruption made it all the
+  way to the end of a pipeline. The field has been also added to
+  `InterruptionTaskFrame`.
+
 - Added support for loading external observers. You can now register custom
   pipeline observers by setting the `PIPECAT_OBSERVER_FILES` environment
   variable. This variable should contain a colon-separated list of Python files
@@ -28,8 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `CancelFrame` and `CancelTaskFrame` have an optional `reason` field to
   indicate why the pipeline is being canceled. This can be also specified when
-  you cancel a task with `PipelineTask.cancel(reason="cancellation your
-reason")`.
+  you cancel a task with `PipelineTask.cancel(reason="cancellation reason")`.
 
 - Added `include_prob_metrics` parameter to Whisper STT services to enable access
   to probability metrics from transcription results.

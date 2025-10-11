@@ -862,7 +862,7 @@ class InterruptionFrame(SystemFrame):
     with other frames (so the order is not guaranteed).
 
     Parameters:
-        wait_event: If not None, the event will be set when the frame
+        finished_event: If not None, the event will be set when the frame
         reaches the end of the pipeline.
     """
 
