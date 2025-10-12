@@ -168,16 +168,24 @@ def build_elevenlabs_voice_settings(
 
 
 def calculate_word_times(
-    alignment_info: Mapping[str, Any], cumulative_time: float
-) -> List[Tuple[str, float]]:
+    alignment_info: Mapping[str, Any],
+    cumulative_time: float,
+    partial_word: str = "",
+    partial_word_start_time: float = 0.0,
+) -> tuple[List[Tuple[str, float]], str, float]:
     """Calculate word timestamps from character alignment information.
 
     Args:
         alignment_info: Character alignment data from ElevenLabs API.
         cumulative_time: Base time offset for this chunk.
+        partial_word: Partial word carried over from previous chunk.
+        partial_word_start_time: Start time of the partial word.
 
     Returns:
-        List of (word, timestamp) tuples.
+        Tuple of (word_times, new_partial_word, new_partial_word_start_time):
+        - word_times: List of (word, timestamp) tuples for complete words
+        - new_partial_word: Incomplete word at end of chunk (empty if chunk ends with space)
+        - new_partial_word_start_time: Start time of the incomplete word
     """
     chars = alignment_info["chars"]
     char_start_times_ms = alignment_info["charStartTimesMs"]
@@ -186,41 +194,37 @@ def calculate_word_times(
         logger.error(
             f"calculate_word_times: length mismatch - chars={len(chars)}, times={len(char_start_times_ms)}"
         )
-        return []
+        return ([], partial_word, partial_word_start_time)
 
     # Build words and track their start positions
     words = []
-    word_start_indices = []
-    current_word = ""
-    word_start_index = None
+    word_start_times = []
+    current_word = partial_word  # Start with any partial word from previous chunk
+    word_start_time = partial_word_start_time if partial_word else None
 
     for i, char in enumerate(chars):
         if char == " ":
             # End of current word
             if current_word:  # Only add non-empty words
                 words.append(current_word)
-                word_start_indices.append(word_start_index)
+                word_start_times.append(word_start_time)
                 current_word = ""
-                word_start_index = None
+                word_start_time = None
         else:
             # Building a word
-            if word_start_index is None:  # First character of new word
-                word_start_index = i
+            if word_start_time is None:  # First character of new word
+                # Convert from milliseconds to seconds and add cumulative offset
+                word_start_time = cumulative_time + (char_start_times_ms[i] / 1000.0)
             current_word += char
 
-    # Handle the last word if there's no trailing space
-    if current_word and word_start_index is not None:
-        words.append(current_word)
-        word_start_indices.append(word_start_index)
+    # Build result for complete words
+    word_times = list(zip(words, word_start_times))
 
-    # Calculate timestamps for each word
-    word_times = []
-    for word, start_idx in zip(words, word_start_indices):
-        # Convert from milliseconds to seconds and add cumulative offset
-        start_time_seconds = cumulative_time + (char_start_times_ms[start_idx] / 1000.0)
-        word_times.append((word, start_time_seconds))
+    # Return any incomplete word at the end of this chunk
+    new_partial_word = current_word if current_word else ""
+    new_partial_word_start_time = word_start_time if word_start_time is not None else 0.0
 
-    return word_times
+    return (word_times, new_partial_word, new_partial_word_start_time)
 
 
 class ElevenLabsTTSService(AudioContextWordTTSService):
@@ -332,6 +336,9 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
         # there's an interruption or TTSStoppedFrame.
         self._started = False
         self._cumulative_time = 0
+        # Track partial words that span across alignment chunks
+        self._partial_word = ""
+        self._partial_word_start_time = 0.0
 
         # Context management for v1 multi API
         self._context_id = None
@@ -609,7 +616,12 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
 
             if msg.get("alignment"):
                 alignment = msg["alignment"]
-                word_times = calculate_word_times(alignment, self._cumulative_time)
+                word_times, self._partial_word, self._partial_word_start_time = calculate_word_times(
+                    alignment,
+                    self._cumulative_time,
+                    self._partial_word,
+                    self._partial_word_start_time,
+                )
 
                 if word_times:
                     await self.add_word_timestamps(word_times)
@@ -683,6 +695,8 @@ class ElevenLabsTTSService(AudioContextWordTTSService):
                     yield TTSStartedFrame()
                     self._started = True
                     self._cumulative_time = 0
+                    self._partial_word = ""
+                    self._partial_word_start_time = 0.0
                     # If a context ID does not exist, create a new one and
                     # register it. If an ID exists, that means the Pipeline is
                     # configured for allow_interruptions=False, so continue
