@@ -656,11 +656,15 @@ class LLMAssistantAggregator(LLMContextAggregator):
 
     async def _handle_function_calls_started(self, frame: FunctionCallsStartedFrame):
         function_names = [f"{f.function_name}:{f.tool_call_id}" for f in frame.function_calls]
+        print(
+            f"🚀 [UNIVERSAL AGGREGATOR] Function calls STARTED: {[f.function_name for f in frame.function_calls]}"
+        )
         logger.debug(f"{self} FunctionCallsStartedFrame: {function_names}")
         for function_call in frame.function_calls:
             self._function_calls_in_progress[function_call.tool_call_id] = None
 
     async def _handle_function_call_in_progress(self, frame: FunctionCallInProgressFrame):
+        print(f"🔧 [UNIVERSAL AGGREGATOR] Function call IN PROGRESS: {frame.function_name}")
         logger.debug(
             f"{self} FunctionCallInProgressFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
@@ -681,10 +685,13 @@ class LLMAssistantAggregator(LLMContextAggregator):
                 ],
             }
         )
+        print(
+            f"📝 [UNIVERSAL AGGREGATOR] Adding IN_PROGRESS message for tool_call_id: {frame.tool_call_id}"
+        )
         self._context.add_message(
             {
                 "role": "tool",
-                "content": "IN_PROGRESS",
+                "content": '<tool_ack id="' + frame.tool_call_id + '">',
                 "tool_call_id": frame.tool_call_id,
             }
         )
@@ -692,6 +699,7 @@ class LLMAssistantAggregator(LLMContextAggregator):
         self._function_calls_in_progress[frame.tool_call_id] = frame
 
     async def _handle_function_call_result(self, frame: FunctionCallResultFrame):
+        print(f"✅ [UNIVERSAL AGGREGATOR] Function call RESULT: {frame.function_name}")
         logger.debug(
             f"{self} FunctionCallResultFrame: [{frame.function_name}:{frame.tool_call_id}]"
         )
@@ -708,10 +716,23 @@ class LLMAssistantAggregator(LLMContextAggregator):
         # Update context with the function call result
         if frame.result:
             result = json.dumps(frame.result)
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+            print(f"📦 [UNIVERSAL AGGREGATOR] Updating with result: {result[:100]}...")
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": result,
+                    "tool_call_id": frame.tool_call_id,
+                }
+            )
         else:
-            self._update_function_call_result(frame.function_name, frame.tool_call_id, "COMPLETED")
-
+            print(f"📦 [UNIVERSAL AGGREGATOR] Updating with COMPLETED status")
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": "COMPLETED",
+                    "tool_call_id": frame.tool_call_id,
+                }
+            )
         run_llm = False
 
         # Run inference if the function call result requires it.

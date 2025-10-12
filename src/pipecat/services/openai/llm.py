@@ -102,6 +102,7 @@ class OpenAILLMService(BaseOpenAILLMService):
             OpenAIContextAggregatorPair.
 
         """
+        print("🚀 Using LOCAL OpenAI LLM service from source CREATE CONTEXT AGGREGATOR!")
         context.set_llm_adapter(self.get_llm_adapter())
         user = OpenAIUserContextAggregator(context, params=user_params)
         assistant = OpenAIAssistantContextAggregator(context, params=assistant_params)
@@ -153,7 +154,7 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         self._context.add_message(
             {
                 "role": "tool",
-                "content": "IN_PROGRESS",
+                "content": '<tool_ack id="' + frame.tool_call_id + '">',
                 "tool_call_id": frame.tool_call_id,
             }
         )
@@ -169,10 +170,20 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         """
         if frame.result:
             result = json.dumps(frame.result)
-            await self._update_function_call_result(frame.function_name, frame.tool_call_id, result)
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": result,
+                    "tool_call_id": frame.tool_call_id,
+                }
+            )
         else:
-            await self._update_function_call_result(
-                frame.function_name, frame.tool_call_id, "COMPLETED"
+            self._context.add_message(
+                {
+                    "role": "tool",
+                    "content": "COMPLETED",
+                    "tool_call_id": frame.tool_call_id,
+                }
             )
 
     async def handle_function_call_cancel(self, frame: FunctionCallCancelFrame):
@@ -183,8 +194,12 @@ class OpenAIAssistantContextAggregator(LLMAssistantContextAggregator):
         Args:
             frame: Frame containing the function call cancellation information.
         """
-        await self._update_function_call_result(
-            frame.function_name, frame.tool_call_id, "CANCELLED"
+        self._context.add_message(
+            {
+                "role": "tool",
+                "content": "CANCELLED",
+                "tool_call_id": frame.tool_call_id,
+            }
         )
 
     async def _update_function_call_result(

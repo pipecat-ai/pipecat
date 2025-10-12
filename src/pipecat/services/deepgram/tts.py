@@ -70,6 +70,10 @@ class DeepgramTTSService(TTSService):
         client_options = DeepgramClientOptions(url=base_url)
         self._deepgram_client = DeepgramClient(api_key, config=client_options)
 
+        # State tracking for <think> tag filtering
+        self._think_buffer = ""
+        self._inside_think = False
+
     def can_generate_metrics(self) -> bool:
         """Check if the service can generate metrics.
 
@@ -77,6 +81,58 @@ class DeepgramTTSService(TTSService):
             True, as Deepgram TTS service supports metrics generation.
         """
         return True
+
+    # Removing think tags for now
+    def _filter_think_tags(self, text: str) -> str:
+        """Filter out content between <think> and </think> tags.
+
+        This method handles streaming text and maintains state across calls.
+        Content between <think> tags is not spoken.
+
+        Args:
+            text: Input text that may contain <think> tags.
+
+        Returns:
+            str: Text with <think> blocks removed, ready for TTS.
+        """
+        # Add incoming text to buffer
+        self._think_buffer += text
+        result = ""
+
+        while self._think_buffer:
+            if self._inside_think:
+                # Look for closing tag
+                close_pos = self._think_buffer.find("</think>")
+                if close_pos >= 0:
+                    # Found closing tag - skip everything up to and including it
+                    print(
+                        f"🧠 [TTS] Skipping thinking content: {self._think_buffer[:close_pos][:50]}..."
+                    )
+                    self._think_buffer = self._think_buffer[close_pos + 8 :]  # len("</think>") = 8
+                    self._inside_think = False
+                else:
+                    # Still inside think block, buffer everything
+                    print(f"🧠 [TTS] Still thinking... (buffered {len(self._think_buffer)} chars)")
+                    break
+            else:
+                # Look for opening tag
+                open_pos = self._think_buffer.find("<think>")
+                if open_pos >= 0:
+                    # Found opening tag - output everything before it
+                    result += self._think_buffer[:open_pos]
+                    self._think_buffer = self._think_buffer[open_pos + 7 :]  # len("<think>") = 7
+                    self._inside_think = True
+                    print(f"🧠 [TTS] Entering think mode")
+                else:
+                    # No tags found - output everything and clear buffer
+                    result += self._think_buffer
+                    self._think_buffer = ""
+                    break
+
+        if result:
+            print(f"💬 [TTS] Outputting text: {result[:100]}...")
+
+        return result
 
     @traced_tts
     async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
@@ -90,6 +146,14 @@ class DeepgramTTSService(TTSService):
         """
         logger.debug(f"{self}: Generating TTS [{text}]")
 
+        # Filter out <think> tags and their content
+        filtered_text = self._filter_think_tags(text)
+
+        # If all text was filtered out (inside think block), don't generate audio
+        if not filtered_text or not filtered_text.strip():
+            logger.debug(f"{self}: No speakable text after filtering <think> tags")
+            return
+
         options = SpeakOptions(
             model=self._voice_id,
             encoding=self._settings["encoding"],
@@ -99,12 +163,13 @@ class DeepgramTTSService(TTSService):
 
         try:
             await self.start_ttfb_metrics()
+            print(f"🔊 [TTS] Sending to Deepgram: {filtered_text}")
 
             response = await self._deepgram_client.speak.asyncrest.v("1").stream_raw(
-                {"text": text}, options
+                {"text": filtered_text}, options
             )
 
-            await self.start_tts_usage_metrics(text)
+            await self.start_tts_usage_metrics(filtered_text)
             yield TTSStartedFrame()
 
             async for data in response.aiter_bytes():
