@@ -181,9 +181,9 @@ class STTService(AIService):
 
         if not frame.audio:
             # Ignoring in case we don't have audio to transcribe.
-            logger.warning(
-                f"Empty audio frame received for STT service: {self.name} {frame.num_frames}"
-            )
+            # logger.warning(
+            #     f"Empty audio frame received for STT service: {self.name} {frame.num_frames}"
+            # )
             return
 
         await self.process_generator(self.run_stt(frame.audio))
