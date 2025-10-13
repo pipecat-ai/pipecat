@@ -1,11 +1,10 @@
-"""
-Hume Speech-to-Speech (STS) service based on LLMService.
-"""
+"""Hume Speech-to-Speech (STS) service based on LLMService."""
 
 import base64
 import io
 import wave
 
+from hume import AsyncHumeClient
 from hume.empathic_voice import (
     AudioConfiguration,
     AudioInput,
@@ -18,6 +17,8 @@ from hume.empathic_voice.chat.socket_client import (
     ChatWebsocketConnection,
 )
 from loguru import logger
+from websockets import ConnectionClosed
+
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
@@ -50,9 +51,6 @@ from pipecat.services.openai_realtime_beta.context import (
     OpenAIRealtimeUserContextAggregator,
 )
 from pipecat.utils.time import time_now_iso8601
-
-from hume import AsyncHumeClient
-from websockets import ConnectionClosed
 
 
 class HumeSTSService(LLMService):
@@ -105,7 +103,7 @@ class HumeSTSService(LLMService):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, InputAudioRawFrame):
-            if self._connection:                
+            if self._connection:
                 encoded_audio = base64.b64encode(frame.audio).decode("utf-8")
                 input = AudioInput(data=encoded_audio)
                 while True:
@@ -117,8 +115,8 @@ class HumeSTSService(LLMService):
 
         elif isinstance(frame, OpenAILLMContextFrame):
             logger.info("OpenAILLMContextFrame frame received")
-            context: OpenAIRealtimeLLMContext = (
-                OpenAIRealtimeLLMContext.upgrade_to_realtime(frame.context)
+            context: OpenAIRealtimeLLMContext = OpenAIRealtimeLLMContext.upgrade_to_realtime(
+                frame.context
             )
             if not self._context:
                 self._context = context
@@ -244,7 +242,5 @@ class HumeSTSService(LLMService):
         user = OpenAIRealtimeUserContextAggregator(context, params=user_params)
 
         assistant_params.expect_stripped_words = False
-        assistant = OpenAIRealtimeAssistantContextAggregator(
-            context, params=assistant_params
-        )
+        assistant = OpenAIRealtimeAssistantContextAggregator(context, params=assistant_params)
         return OpenAIContextAggregatorPair(_user=user, _assistant=assistant)
